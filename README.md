@@ -1,1 +1,571 @@
-# youtility-tools
+<!DOCTYPE html>
+<!--
+  ============================================================================
+  PLAYER HIGHLIGHT PAGE — GameChanger Athlete Spotlight
+  ============================================================================
+  Shareable single-page player profile with social media copy tools.
+
+  INTEGRATION NOTES:
+  - Single self-contained HTML file
+  - No external dependencies except Google Fonts (graceful fallback if blocked)
+  - No tracking, analytics, or third-party scripts
+  - Responsive: works on desktop and mobile
+  - Can be served standalone or embedded in an <iframe>
+
+  CUSTOMIZATION:
+  - Player data lives in the PLAYER const near the bottom of the <script>
+  - Color palette in :root CSS vars at the top
+  - Social post templates in the POSTS array inside the PLAYER config
+  ============================================================================
+-->
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Player Highlight — Brocky05</title>
+<meta name="description" content="Athlete spotlight page for Brocky05 — elite performance, team leadership, and championship mindset." />
+<meta property="og:title" content="Brocky05 — Player Highlight" />
+<meta property="og:description" content="Check out this rising star athlete's profile and career highlights." />
+<meta name="theme-color" content="#FF6B35" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Antonio:wght@700&family=Work+Sans:wght@400;500;600;700&display=swap" rel="stylesheet" />
+<style>
+/* ─── Design Tokens ─────────────────────────────────────────────────────── */
+:root {
+  --orange:   #FF6B35;
+  --gold:     #FFD23F;
+  --navy:     #004E89;
+  --ink:      #0F0F1A;
+  --ink-mid:  #1A1A2E;
+  --ink-deep: #0D2547;
+  --ash:      #EAEAEA;
+  --glass:    rgba(255,255,255,0.05);
+  --glass-hi: rgba(255,255,255,0.09);
+  --border:   rgba(255,107,53,0.25);
+  --border-hi:rgba(255,107,53,0.7);
+  --gold-border: rgba(255,210,63,0.3);
+  --shadow-orange: 0 20px 50px rgba(255,107,53,0.25);
+  --shadow-gold:   0 15px 35px rgba(255,210,63,0.2);
+  --radius-lg: 20px;
+  --radius-xl: 30px;
+  --radius-pill: 50px;
+}
+
+/* ─── Reset ─────────────────────────────────────────────────────────────── */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+html { scroll-behavior: smooth; }
+body {
+  font-family: 'Work Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  background: linear-gradient(155deg, var(--ink-mid) 0%, var(--ink-deep) 55%, #0A0A1A 100%);
+  color: var(--ash);
+  min-height: 100vh;
+  overflow-x: hidden;
+}
+
+/* ─── Grain overlay ──────────────────────────────────────────────────────── */
+.grain {
+  position: fixed; inset: 0; pointer-events: none; z-index: 999;
+  opacity: 0.028; mix-blend-mode: overlay;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 400 400' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+
+/* ─── Layout ─────────────────────────────────────────────────────────────── */
+.page { max-width: 1320px; margin: 0 auto; padding: 0 24px 80px; }
+
+/* ─── Hero ───────────────────────────────────────────────────────────────── */
+.hero {
+  position: relative;
+  text-align: center;
+  padding: 100px 20px 80px;
+  overflow: hidden;
+}
+
+/* ambient glow behind hero */
+.hero::before {
+  content: '';
+  position: absolute;
+  top: 50%; left: 50%;
+  width: 700px; height: 700px;
+  background: radial-gradient(circle, rgba(255,107,53,0.12) 0%, transparent 65%);
+  transform: translate(-50%, -55%);
+  pointer-events: none;
+  animation: breathe 9s ease-in-out infinite;
+}
+@keyframes breathe {
+  0%, 100% { transform: translate(-50%,-55%) scale(1);   opacity: 0.6; }
+  50%       { transform: translate(-50%,-55%) scale(1.15); opacity: 1;   }
+}
+
+/* top eyebrow */
+.hero-eyebrow {
+  font-family: 'Bebas Neue', sans-serif;
+  font-size: 1rem;
+  letter-spacing: 0.35em;
+  color: var(--orange);
+  opacity: 0.85;
+  position: relative;
+  z-index: 1;
+  animation: fadeUp 0.6s ease-out both;
+}
+
+/* player name */
+.player-name {
+  font-family: 'Antonio', sans-serif;
+  font-size: clamp(3.5rem, 11vw, 9rem);
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  line-height: 0.92;
+  background: linear-gradient(135deg, var(--orange) 0%, var(--gold) 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  position: relative;
+  z-index: 1;
+  margin: 18px 0 16px;
+  animation: fadeUp 0.7s ease-out 0.1s both;
+}
+
+/* tagline */
+.tagline {
+  font-family: 'Bebas Neue', sans-serif;
+  font-size: clamp(1.2rem, 3vw, 1.9rem);
+  letter-spacing: 0.18em;
+  color: var(--ash);
+  opacity: 0.75;
+  position: relative;
+  z-index: 1;
+  animation: fadeUp 0.7s ease-out 0.2s both;
+}
+
+/* divider */
+.hero-divider {
+  width: 80px; height: 3px;
+  background: linear-gradient(90deg, var(--orange), var(--gold));
+  border-radius: 2px;
+  margin: 30px auto 36px;
+  position: relative; z-index: 1;
+  animation: fadeUp 0.7s ease-out 0.3s both;
+}
+
+/* CTA button */
+.profile-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 16px 44px;
+  background: var(--orange);
+  color: #fff;
+  text-decoration: none;
+  font-family: 'Bebas Neue', sans-serif;
+  font-size: 1.3rem;
+  letter-spacing: 0.12em;
+  border-radius: var(--radius-pill);
+  position: relative;
+  z-index: 1;
+  overflow: hidden;
+  transition: transform 0.3s ease, box-shadow 0.3s ease;
+  animation: fadeUp 0.7s ease-out 0.4s both;
+}
+.profile-btn::after {
+  content: '';
+  position: absolute; inset: 0;
+  background: linear-gradient(135deg, rgba(255,255,255,0.15), transparent);
+  opacity: 0;
+  transition: opacity 0.3s;
+}
+.profile-btn:hover { transform: translateY(-4px); box-shadow: var(--shadow-orange); }
+.profile-btn:hover::after { opacity: 1; }
+.profile-btn svg { width: 18px; height: 18px; flex-shrink: 0; }
+
+/* ─── Stat cards ─────────────────────────────────────────────────────────── */
+.stats-row {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 20px;
+  margin: 0 0 80px;
+  animation: fadeUp 0.8s ease-out 0.5s both;
+}
+
+.stat-card {
+  background: var(--glass);
+  backdrop-filter: blur(12px);
+  border: 1.5px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 36px 24px 32px;
+  text-align: center;
+  position: relative;
+  overflow: hidden;
+  transition: transform 0.35s ease, border-color 0.35s ease, box-shadow 0.35s ease;
+}
+.stat-card::before {
+  content: '';
+  position: absolute; inset: 0;
+  background: linear-gradient(135deg, rgba(255,107,53,0.08) 0%, transparent 60%);
+  opacity: 0;
+  transition: opacity 0.4s;
+}
+.stat-card:hover { transform: translateY(-8px); border-color: var(--border-hi); box-shadow: var(--shadow-orange); }
+.stat-card:hover::before { opacity: 1; }
+
+.stat-icon {
+  font-size: 2.6rem;
+  line-height: 1;
+  margin-bottom: 14px;
+  display: block;
+}
+.stat-label {
+  font-family: 'Bebas Neue', sans-serif;
+  font-size: 1.05rem;
+  letter-spacing: 0.12em;
+  color: var(--ash);
+  opacity: 0.8;
+}
+
+/* ─── Section headings ───────────────────────────────────────────────────── */
+.section-header {
+  text-align: center;
+  margin-bottom: 44px;
+}
+.section-header h2 {
+  font-family: 'Antonio', sans-serif;
+  font-size: clamp(2rem, 5vw, 3.2rem);
+  font-weight: 700;
+  color: var(--orange);
+  display: inline-block;
+  position: relative;
+}
+.section-header h2::after {
+  content: '';
+  position: absolute;
+  bottom: -10px; left: 0; right: 0;
+  height: 4px;
+  background: linear-gradient(90deg, var(--orange), var(--gold));
+  border-radius: 2px;
+}
+.section-header p {
+  margin-top: 20px;
+  color: var(--ash);
+  opacity: 0.65;
+  font-size: 1rem;
+}
+
+/* ─── Highlights list ────────────────────────────────────────────────────── */
+.highlights { margin-bottom: 90px; }
+
+.highlights-list {
+  list-style: none;
+  max-width: 760px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.highlight-item {
+  background: var(--glass);
+  border-left: 5px solid var(--orange);
+  border-radius: 10px;
+  padding: 22px 28px;
+  font-size: 1.1rem;
+  line-height: 1.5;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  transition: background 0.25s, transform 0.25s, border-left-color 0.25s;
+}
+.highlight-item:hover {
+  background: var(--glass-hi);
+  transform: translateX(8px);
+  border-left-color: var(--gold);
+}
+.highlight-star {
+  color: var(--gold);
+  font-size: 1.3rem;
+  flex-shrink: 0;
+}
+
+/* ─── Social posts ───────────────────────────────────────────────────────── */
+.social { margin-bottom: 90px; }
+
+.social-shell {
+  background: rgba(255,107,53,0.07);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xl);
+  padding: 56px 40px;
+}
+
+.posts-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 24px;
+  margin-top: 10px;
+}
+
+.post-card {
+  background: var(--glass);
+  backdrop-filter: blur(10px);
+  border: 1.5px solid var(--gold-border);
+  border-radius: var(--radius-lg);
+  padding: 28px;
+  display: flex;
+  flex-direction: column;
+  transition: border-color 0.3s, transform 0.3s, box-shadow 0.3s;
+}
+.post-card:hover { border-color: var(--gold); transform: translateY(-6px); box-shadow: var(--shadow-gold); }
+
+.platform-pill {
+  font-family: 'Bebas Neue', sans-serif;
+  display: inline-block;
+  background: var(--navy);
+  color: #fff;
+  padding: 5px 16px;
+  border-radius: 20px;
+  font-size: 0.85rem;
+  letter-spacing: 0.12em;
+  margin-bottom: 18px;
+  align-self: flex-start;
+}
+
+.post-body {
+  flex: 1;
+  font-size: 0.95rem;
+  line-height: 1.7;
+  color: var(--ash);
+  white-space: pre-wrap;
+  margin-bottom: 18px;
+}
+.post-body .hashtags { color: var(--gold); font-weight: 500; }
+.post-body a { color: var(--gold); text-decoration: none; }
+
+.copy-btn {
+  background: var(--orange);
+  color: #fff;
+  border: none;
+  padding: 11px 20px;
+  border-radius: 25px;
+  font-family: 'Work Sans', sans-serif;
+  font-size: 0.9rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.25s, color 0.25s, transform 0.2s;
+  width: 100%;
+  letter-spacing: 0.03em;
+}
+.copy-btn:hover { background: var(--gold); color: var(--ink); transform: translateY(-2px); }
+.copy-btn.copied { background: #3db07a; }
+.copy-btn.copied:hover { background: #3db07a; color: #fff; }
+
+/* ─── Footer ─────────────────────────────────────────────────────────────── */
+.footer {
+  text-align: center;
+  padding: 40px 20px 20px;
+  border-top: 1px solid rgba(255,255,255,0.08);
+}
+.footer p { opacity: 0.45; font-size: 0.85rem; }
+.footer a { color: var(--orange); text-decoration: none; }
+.footer a:hover { text-decoration: underline; }
+
+/* ─── Animations ─────────────────────────────────────────────────────────── */
+@keyframes fadeUp {
+  from { opacity: 0; transform: translateY(24px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.reveal { opacity: 0; transform: translateY(22px); transition: opacity 0.55s ease, transform 0.55s ease; }
+.reveal.visible { opacity: 1; transform: translateY(0); }
+
+/* ─── Responsive ─────────────────────────────────────────────────────────── */
+@media (max-width: 900px) {
+  .stats-row { grid-template-columns: repeat(2, 1fr); }
+}
+@media (max-width: 640px) {
+  .social-shell { padding: 36px 20px; }
+  .posts-grid { grid-template-columns: 1fr; }
+  .stats-row { grid-template-columns: repeat(2, 1fr); gap: 14px; }
+  .stat-card { padding: 24px 16px; }
+}
+</style>
+</head>
+<body>
+
+<div class="grain"></div>
+
+<div class="page">
+
+  <!-- ── Hero ─────────────────────────────────────────────────────────── -->
+  <section class="hero">
+    <p class="hero-eyebrow">GameChanger Athlete Spotlight</p>
+    <h1 class="player-name" id="playerName">BROCKY05</h1>
+    <p class="tagline" id="playerTagline">Rising Star &nbsp;·&nbsp; Game Changer</p>
+    <div class="hero-divider"></div>
+    <a href="https://web.gc.com/athlete/brocky05" target="_blank" rel="noopener" class="profile-btn" id="profileLink">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/></svg>
+      View Full Profile
+    </a>
+  </section>
+
+  <!-- ── Stat cards ────────────────────────────────────────────────────── -->
+  <div class="stats-row" id="statsRow">
+    <!-- populated by JS -->
+  </div>
+
+  <!-- ── Career highlights ─────────────────────────────────────────────── -->
+  <section class="highlights reveal" id="highlightsSection">
+    <div class="section-header">
+      <h2>Career Highlights</h2>
+    </div>
+    <ul class="highlights-list" id="highlightsList">
+      <!-- populated by JS -->
+    </ul>
+  </section>
+
+  <!-- ── Social media posts ─────────────────────────────────────────────── -->
+  <section class="social reveal" id="socialSection">
+    <div class="social-shell">
+      <div class="section-header">
+        <h2>Social Media Posts</h2>
+        <p>Ready-to-share promotional content for your favourite platforms</p>
+      </div>
+      <div class="posts-grid" id="postsGrid">
+        <!-- populated by JS -->
+      </div>
+    </div>
+  </section>
+
+  <!-- ── Footer ─────────────────────────────────────────────────────────── -->
+  <footer class="footer">
+    <p>Player profile powered by <a href="https://www.gcapp.com" target="_blank" rel="noopener">GameChanger</a> &nbsp;·&nbsp; Share this page to spread the word!</p>
+  </footer>
+
+</div><!-- /page -->
+
+<script>
+const PLAYER = {
+  handle:   "BROCKY05",
+  tagline:  "Rising Star · Game Changer",
+  profileUrl: "https://web.gc.com/athlete/brocky05",
+
+  stats: [
+    { icon: "⭐", label: "Elite Performance" },
+    { icon: "🏆", label: "Championship Ready" },
+    { icon: "📈", label: "Constantly Improving" },
+    { icon: "💪", label: "Team Leader" },
+  ],
+
+  highlights: [
+    "Exceptional on-field performance and game awareness",
+    "Dedicated work ethic and commitment to continuous improvement",
+    "Strong leadership qualities and team-first mentality",
+    "Consistent high-level performance across multiple seasons",
+    "Proven ability to perform and deliver under pressure",
+    "Outstanding sportsmanship and character on and off the field",
+  ],
+
+  posts: [
+    {
+      platform: "Instagram",
+      body: `🔥 SPOTLIGHT ON EXCELLENCE 🔥\n\nMeet @brocky05 — a true game changer making waves on the field! 🏆\n\n⭐ Elite Performance\n💪 Team Leader\n📈 Constantly Evolving\n\nThis athlete's dedication, skill, and heart make them one to watch. Check out the full profile and highlights! 👇`,
+      hashtags: "#GameChanger #RisingStar #AthleteSpotlight #YouthSports #EliteAthlete #FutureChampion #SportsExcellence #TeamPlayer #Dedication #AthleteLife #SportsHighlights",
+    },
+    {
+      platform: "Twitter / X",
+      body: `🏆 ATHLETE SPOTLIGHT 🏆\n\nBrocky05 is redefining excellence on the field!\n\n⭐ Elite performance\n💪 Natural leader\n📈 Always improving\n\nWatch this rising star shine ⤵️\nhttps://web.gc.com/athlete/brocky05`,
+      hashtags: "#GameChanger #RisingStar #AthleteSpotlight",
+    },
+    {
+      platform: "LinkedIn",
+      body: `I'm excited to highlight an exceptional young athlete who exemplifies what it means to be a game changer.\n\nBrocky05 consistently demonstrates:\n✓ Elite on-field performance\n✓ Strong leadership capabilities\n✓ Unwavering dedication to improvement\n✓ Outstanding sportsmanship\n\nThis athlete's commitment to excellence and team-first mentality make them a standout performer and role model for aspiring athletes.\n\nView their complete profile and career highlights: https://web.gc.com/athlete/brocky05`,
+      hashtags: "#YouthSports #AthleteSpotlight #Leadership #Excellence #GameChanger",
+    },
+    {
+      platform: "TikTok",
+      body: `This athlete is built different 💯🔥\n\nWatch Brocky05 dominate the game with:\n⚡ Elite skills\n💪 Leadership\n🎯 Pure dedication\n\nLink in bio for full highlights 👆`,
+      hashtags: "#GameChanger #RisingStar #YouthSports #AthleteLife #SportsHighlights #EliteAthlete #Dedication #TeamPlayer #SportsMotivation #FutureChampion #SportsTok",
+    },
+  ],
+};
+
+(function render() {
+  document.getElementById("playerName").textContent    = PLAYER.handle;
+  document.getElementById("playerTagline").textContent = PLAYER.tagline;
+  document.getElementById("profileLink").href          = PLAYER.profileUrl;
+
+  const statsRow = document.getElementById("statsRow");
+  PLAYER.stats.forEach(s => {
+    const card = document.createElement("div");
+    card.className = "stat-card";
+    card.innerHTML = `<span class="stat-icon">${s.icon}</span><div class="stat-label">${s.label}</div>`;
+    statsRow.appendChild(card);
+  });
+
+  const list = document.getElementById("highlightsList");
+  PLAYER.highlights.forEach(h => {
+    const li = document.createElement("li");
+    li.className = "highlight-item";
+    li.innerHTML = `<span class="highlight-star">★</span><span>${h}</span>`;
+    list.appendChild(li);
+  });
+
+  const grid = document.getElementById("postsGrid");
+  PLAYER.posts.forEach(post => {
+    const card = document.createElement("div");
+    card.className = "post-card";
+    const fullText = post.hashtags ? `${post.body}\n\n${post.hashtags}` : post.body;
+    card.innerHTML = `
+      <span class="platform-pill">${post.platform}</span>
+      <div class="post-body">${escapeHtml(post.body)}<br><br><span class="hashtags">${escapeHtml(post.hashtags || "")}</span></div>
+      <button class="copy-btn" data-text="${encodeURIComponent(fullText)}">Copy Post</button>
+    `;
+    grid.appendChild(card);
+  });
+
+  document.querySelectorAll(".copy-btn").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const text = decodeURIComponent(btn.dataset.text);
+      navigator.clipboard.writeText(text).then(() => {
+        btn.textContent = "✓ Copied!";
+        btn.classList.add("copied");
+        setTimeout(() => { btn.textContent = "Copy Post"; btn.classList.remove("copied"); }, 2200);
+      }).catch(() => {
+        const ta = document.createElement("textarea");
+        ta.value = text;
+        ta.style.cssText = "position:fixed;top:-9999px;left:-9999px;opacity:0";
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand("copy");
+        document.body.removeChild(ta);
+        btn.textContent = "✓ Copied!";
+        btn.classList.add("copied");
+        setTimeout(() => { btn.textContent = "Copy Post"; btn.classList.remove("copied"); }, 2200);
+      });
+    });
+  });
+})();
+
+const revealObserver = new IntersectionObserver((entries) => {
+  entries.forEach(e => {
+    if (e.isIntersecting) { e.target.classList.add("visible"); revealObserver.unobserve(e.target); }
+  });
+}, { threshold: 0.08, rootMargin: "0px 0px -40px 0px" });
+document.querySelectorAll(".reveal").forEach(el => revealObserver.observe(el));
+
+const cardObserver = new IntersectionObserver((entries) => {
+  entries.forEach((e, i) => {
+    if (e.isIntersecting) {
+      setTimeout(() => { e.target.style.opacity = "1"; e.target.style.transform = "translateY(0)"; }, i * 80);
+      cardObserver.unobserve(e.target);
+    }
+  });
+}, { threshold: 0.05 });
+document.querySelectorAll(".stat-card, .highlight-item, .post-card").forEach(el => {
+  el.style.opacity = "0";
+  el.style.transform = "translateY(18px)";
+  el.style.transition = "opacity 0.5s ease, transform 0.5s ease";
+  cardObserver.observe(el);
+});
+
+function escapeHtml(str) {
+  return str.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+}
+</script>
+</body>
+</html>
