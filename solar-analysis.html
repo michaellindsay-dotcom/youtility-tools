@@ -1,810 +1,818 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <meta name="theme-color" content="#667eea">
-    <meta name="apple-mobile-web-app-capable" content="yes">
-    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-
-    <!-- Open Graph / Meta Ads -->
-    <meta property="og:type" content="website">
-    <meta property="og:title" content="Free Solar Analysis - See Your Home's Solar Potential">
-    <meta property="og:description" content="No sales reps. No commissions. See your home's actual solar potential with real numbers.">
-    <meta property="og:image" content="https://YOUR_DOMAIN/solar-preview.jpg">
-
-    <title>Free Solar Analysis - See Your Home's Solar Potential</title>
-    <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-            -webkit-tap-highlight-color: transparent;
-        }
-
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            min-height: 100vh;
-            min-height: -webkit-fill-available;
-            padding: 20px;
-            overscroll-behavior: none;
-        }
-
-        .container {
-            max-width: 800px;
-            margin: 0 auto;
-        }
-
-        .screen {
-            display: none;
-            background: white;
-            border-radius: 20px;
-            padding: 40px;
-            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
-            animation: fadeIn 0.4s ease;
-        }
-
-        .screen.active {
-            display: block;
-        }
-
-        @keyframes fadeIn {
-            from { opacity: 0; transform: translateY(20px); }
-            to { opacity: 1; transform: translateY(0); }
-        }
-
-        /* Back button */
-        .back-btn {
-            display: inline-flex;
-            align-items: center;
-            gap: 6px;
-            background: none;
-            border: none;
-            color: #667eea;
-            font-size: 0.95rem;
-            font-weight: 600;
-            cursor: pointer;
-            padding: 8px 0;
-            margin-bottom: 20px;
-        }
-
-        .back-btn svg {
-            width: 18px;
-            height: 18px;
-        }
-
-        h1 {
-            color: #1a202c;
-            font-size: 2.2rem;
-            margin-bottom: 16px;
-            text-align: center;
-            line-height: 1.2;
-        }
-
-        h2 {
-            color: #2d3748;
-            font-size: 1.7rem;
-            margin-bottom: 12px;
-            text-align: center;
-            line-height: 1.2;
-        }
-
-        p {
-            color: #4a5568;
-            font-size: 1.05rem;
-            line-height: 1.6;
-            margin-bottom: 20px;
-            text-align: center;
-        }
-
-        .video-container {
-            position: relative;
-            padding-bottom: 56.25%;
-            height: 0;
-            overflow: hidden;
-            border-radius: 12px;
-            margin-bottom: 30px;
-            background: #000;
-        }
-
-        .video-container iframe,
-        .video-container video {
-            position: absolute;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-        }
-
-        .video-placeholder {
-            position: absolute;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            color: white;
-            font-size: 1rem;
-            text-align: center;
-            padding: 20px;
-        }
-
-        .form-group {
-            margin-bottom: 20px;
-        }
-
-        label {
-            display: block;
-            color: #2d3748;
-            font-weight: 600;
-            margin-bottom: 8px;
-            font-size: 0.95rem;
-        }
-
-        input[type="text"],
-        input[type="email"],
-        input[type="tel"] {
-            width: 100%;
-            padding: 15px;
-            border: 2px solid #e2e8f0;
-            border-radius: 10px;
-            font-size: 1rem;
-            transition: border-color 0.3s;
-            -webkit-appearance: none;
-        }
-
-        input:focus {
-            outline: none;
-            border-color: #667eea;
-            box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
-        }
-
-        .btn {
-            width: 100%;
-            padding: 18px;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: white;
-            border: none;
-            border-radius: 10px;
-            font-size: 1.1rem;
-            font-weight: 700;
-            cursor: pointer;
-            transition: transform 0.15s, box-shadow 0.15s;
-            margin-top: 10px;
-            letter-spacing: 0.3px;
-        }
-
-        .btn:active {
-            transform: scale(0.98);
-        }
-
-        .btn-secondary {
-            background: white;
-            color: #667eea;
-            border: 2px solid #667eea;
-        }
-
-        .aerial-view {
-            width: 100%;
-            height: 420px;
-            border-radius: 12px;
-            margin: 20px 0;
-            background: #f7fafc;
-            overflow: hidden;
-        }
-
-        .aerial-view iframe {
-            width: 100%;
-            height: 100%;
-            border: none;
-        }
-
-        .info-box {
-            background: #edf2f7;
-            border-left: 4px solid #667eea;
-            padding: 18px 20px;
-            border-radius: 8px;
-            margin: 20px 0;
-        }
-
-        .info-box h3 {
-            color: #2d3748;
-            margin-bottom: 8px;
-            font-size: 1rem;
-        }
-
-        .info-box p {
-            color: #4a5568;
-            margin: 0;
-            text-align: left;
-            font-size: 0.95rem;
-        }
-
-        .button-group {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 12px;
-            margin-top: 20px;
-        }
-
-        .features {
-            display: grid;
-            grid-template-columns: repeat(3, 1fr);
-            gap: 16px;
-            margin: 24px 0;
-        }
-
-        .feature {
-            text-align: center;
-            padding: 16px 8px;
-        }
-
-        .feature-icon {
-            font-size: 2.4rem;
-            margin-bottom: 8px;
-        }
-
-        .feature h3 {
-            color: #2d3748;
-            font-size: 1rem;
-            margin-bottom: 6px;
-        }
-
-        .feature p {
-            color: #4a5568;
-            font-size: 0.85rem;
-            margin: 0;
-        }
-
-        .loading {
-            text-align: center;
-            padding: 50px 20px;
-        }
-
-        .spinner {
-            border: 4px solid #f3f4f6;
-            border-top: 4px solid #667eea;
-            border-radius: 50%;
-            width: 50px;
-            height: 50px;
-            animation: spin 1s linear infinite;
-            margin: 0 auto 24px;
-        }
-
-        @keyframes spin {
-            0% { transform: rotate(0deg); }
-            100% { transform: rotate(360deg); }
-        }
-
-        /* Thank you screen */
-        .thankyou-icon {
-            font-size: 5rem;
-            text-align: center;
-            margin-bottom: 20px;
-        }
-
-        .thankyou-list {
-            list-style: none;
-            margin: 20px 0;
-            text-align: left;
-        }
-
-        .thankyou-list li {
-            padding: 10px 0;
-            border-bottom: 1px solid #e2e8f0;
-            color: #4a5568;
-            font-size: 1rem;
-            display: flex;
-            align-items: center;
-            gap: 10px;
-        }
-
-        .thankyou-list li:last-child {
-            border-bottom: none;
-        }
-
-        .thankyou-list .check {
-            color: #48bb78;
-            font-size: 1.2rem;
-            flex-shrink: 0;
-        }
-
-        /* Exit intent popup */
-        .exit-popup {
-            display: none;
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            background: rgba(0, 0, 0, 0.8);
-            z-index: 9999;
-            align-items: center;
-            justify-content: center;
-        }
-
-        .exit-popup.active {
-            display: flex;
-        }
-
-        .exit-popup-content {
-            background: white;
-            border-radius: 20px;
-            padding: 36px;
-            max-width: 500px;
-            width: calc(100% - 32px);
-            position: relative;
-            animation: slideUp 0.35s ease;
-        }
-
-        @keyframes slideUp {
-            from { opacity: 0; transform: translateY(40px); }
-            to { opacity: 1; transform: translateY(0); }
-        }
-
-        .exit-popup-close {
-            position: absolute;
-            top: 12px;
-            right: 12px;
-            background: none;
-            border: none;
-            font-size: 1.8rem;
-            cursor: pointer;
-            color: #718096;
-            width: 40px;
-            height: 40px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            border-radius: 50%;
-        }
-
-        .exit-popup h2 {
-            color: #1a202c;
-            font-size: 1.7rem;
-            margin-bottom: 12px;
-        }
-
-        .exit-popup p {
-            color: #4a5568;
-            font-size: 1rem;
-            margin-bottom: 16px;
-        }
-
-        .price-input-group {
-            margin: 24px 0;
-            background: #f7fafc;
-            padding: 20px;
-            border-radius: 12px;
-        }
-
-        .price-input-group label {
-            font-size: 1rem;
-            color: #2d3748;
-            margin-bottom: 10px;
-        }
-
-        .price-input {
-            width: 100%;
-            padding: 18px;
-            font-size: 2rem;
-            border: 3px solid #667eea;
-            border-radius: 10px;
-            text-align: center;
-            font-weight: bold;
-            color: #1a202c;
-            -webkit-appearance: none;
-        }
-
-        /* Google Places */
-        .pac-container {
-            z-index: 10000;
-            border-radius: 8px;
-            margin-top: 5px;
-            box-shadow: 0 10px 30px rgba(0,0,0,0.2);
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-        }
-
-        .pac-item {
-            padding: 12px 15px;
-            cursor: pointer;
-            font-size: 1rem;
-            border-bottom: 1px solid #e2e8f0;
-        }
-
-        .pac-item:hover { background-color: #f7fafc; }
-        .pac-item-query { font-size: 1rem; color: #2d3748; }
-        .pac-matched { font-weight: 600; color: #667eea; }
-
-        @media (max-width: 600px) {
-            h1 { font-size: 1.7rem; }
-            h2 { font-size: 1.4rem; }
-            .screen { padding: 24px 20px; }
-            .button-group { grid-template-columns: 1fr; }
-            .features { grid-template-columns: repeat(3, 1fr); gap: 8px; }
-            .feature { padding: 12px 4px; }
-            .feature-icon { font-size: 2rem; }
-            .feature h3 { font-size: 0.85rem; }
-            .aerial-view { height: 300px; }
-            body { padding: 12px; }
-        }
-    </style>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta name="theme-color" content="#6366f1">
+  <meta property="og:title" content="Free Solar Analysis — See Your Home's Solar Potential">
+  <meta property="og:description" content="No sales reps. No commissions. Real numbers in under 2 minutes.">
+  <title>Free Solar Analysis — See Your Home's Potential</title>
+  <style>
+    :root {
+      --primary: #6366f1;
+      --secondary: #a855f7;
+      --accent: #f59e0b;
+      --success: #10b981;
+      --danger: #ef4444;
+      --text-dark: #0f172a;
+      --text-mid: #475569;
+      --text-light: #94a3b8;
+      --border: #e2e8f0;
+    }
+    *, *::before, *::after {
+      margin: 0; padding: 0; box-sizing: border-box;
+      -webkit-tap-highlight-color: transparent;
+    }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      min-height: 100vh;
+      padding: 16px 16px 40px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      overflow-x: hidden;
+      position: relative;
+      background: #060612;
+    }
+    body::before {
+      content: '';
+      position: fixed;
+      inset: 0;
+      background: radial-gradient(ellipse 60% 50% at 15% 50%, rgba(99,102,241,0.18) 0%, transparent 100%), radial-gradient(ellipse 50% 40% at 85% 20%, rgba(168,85,247,0.14) 0%, transparent 100%), radial-gradient(ellipse 40% 40% at 50% 85%, rgba(6,182,212,0.08) 0%, transparent 100%);
+      pointer-events: none;
+      z-index: 0;
+    }
+    .particles {
+      position: fixed; inset: 0; pointer-events: none; z-index: 0; overflow: hidden;
+    }
+    .particle {
+      position: absolute;
+      border-radius: 50%;
+      animation: floatUp linear infinite;
+    }
+    @keyframes floatUp {
+      0% { transform: translateY(110vh) rotate(0deg); opacity: 0; }
+      8% { opacity: 1; }
+      92% { opacity: 1; }
+      100% { transform: translateY(-8vh) rotate(540deg); opacity: 0; }
+    }
+    .wrapper {
+      width: 100%;
+      max-width: 540px;
+      position: relative;
+      z-index: 1;
+    }
+    .progress-wrap { margin-bottom: 14px; }
+    .progress-track {
+      height: 4px;
+      background: rgba(255,255,255,0.08);
+      border-radius: 99px;
+      overflow: hidden;
+      margin-bottom: 9px;
+    }
+    .progress-fill {
+      height: 100%;
+      background: linear-gradient(90deg, var(--primary), var(--secondary));
+      border-radius: 99px;
+      transition: width 0.55s cubic-bezier(0.4,0,0.2,1);
+      box-shadow: 0 0 14px rgba(99,102,241,0.25);
+      width: 0%;
+    }
+    .progress-labels {
+      display: flex;
+      justify-content: space-between;
+    }
+    .progress-label {
+      font-size: 0.68rem;
+      font-weight: 700;
+      color: rgba(255,255,255,0.25);
+      text-transform: uppercase;
+      letter-spacing: 0.07em;
+      transition: color 0.35s;
+    }
+    .progress-label.on { color: rgba(255,255,255,0.8); }
+    .card {
+      background: rgba(255,255,255,0.985);
+      border-radius: 24px;
+      padding: 36px 32px 40px;
+      box-shadow: 0 32px 80px rgba(0,0,0,0.4), 0 0 0 1px rgba(255,255,255,0.04);
+      position: relative;
+      overflow: hidden;
+    }
+    .card::before {
+      content: '';
+      position: absolute;
+      top: 0; left: 0; right: 0;
+      height: 3px;
+      background: linear-gradient(90deg, #6366f1, #a855f7, #06b6d4, #10b981);
+    }
+    .screen { display: none; }
+    .screen.active {
+      display: block;
+      animation: fadeUp 0.42s cubic-bezier(0.22,1,0.36,1);
+    }
+    @keyframes fadeUp {
+      from { opacity: 0; transform: translateY(22px) scale(0.985); }
+      to { opacity: 1; transform: translateY(0) scale(1); }
+    }
+    .back-btn {
+      display: inline-flex; align-items: center; gap: 4px;
+      background: none; border: none;
+      color: var(--text-light); font-size: 0.83rem; font-weight: 600;
+      cursor: pointer; padding: 0 0 18px;
+      transition: color 0.2s;
+    }
+    .back-btn:hover { color: var(--primary); }
+    .back-btn svg { width: 15px; height: 15px; }
+    .social-pill {
+      display: flex; align-items: center; gap: 7px;
+      background: rgba(16,185,129,0.09);
+      border: 1px solid rgba(16,185,129,0.22);
+      border-radius: 99px;
+      padding: 5px 13px;
+      margin: 0 auto 22px;
+      width: fit-content;
+      justify-content: center;
+    }
+    .social-dot {
+      width: 7px; height: 7px;
+      background: var(--success);
+      border-radius: 50%;
+      animation: glow 2s ease-in-out infinite;
+      flex-shrink: 0;
+    }
+    @keyframes glow {
+      0%,100% { box-shadow: 0 0 0 0 rgba(16,185,129,0.5); }
+      50% { box-shadow: 0 0 0 5px rgba(16,185,129,0); }
+    }
+    .social-pill span { font-size: 0.78rem; font-weight: 700; color: #065f46; }
+    h1 {
+      font-size: 2rem; font-weight: 900;
+      color: var(--text-dark);
+      line-height: 1.12;
+      margin-bottom: 11px;
+      text-align: center;
+      letter-spacing: -0.035em;
+    }
+    .grad {
+      background: linear-gradient(135deg, var(--primary) 0%, var(--secondary) 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+    h2 {
+      font-size: 1.5rem; font-weight: 800;
+      color: var(--text-dark);
+      line-height: 1.18;
+      margin-bottom: 8px;
+      text-align: center;
+      letter-spacing: -0.025em;
+    }
+    .sub {
+      font-size: 0.98rem; color: var(--text-mid);
+      line-height: 1.55; margin-bottom: 22px;
+      text-align: center;
+    }
+    .video-wrap {
+      position: relative;
+      padding-bottom: 56.25%;
+      height: 0;
+      border-radius: 13px;
+      overflow: hidden;
+      margin-bottom: 26px;
+      background: #0f172a;
+    }
+    .video-wrap iframe, .video-wrap video {
+      position: absolute; inset: 0; width: 100%; height: 100%;
+    }
+    .video-ph {
+      position: absolute; inset: 0;
+      background: linear-gradient(145deg, #1e1b4b 0%, #2e1065 100%);
+      display: flex; flex-direction: column;
+      align-items: center; justify-content: center;
+      gap: 5px; padding: 20px; text-align: center;
+    }
+    .video-ph .vp-eyebrow { color: #a5b4fc; font-size: 0.72rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 10px; }
+    .video-ph .vp-line { color: #e0e7ff; font-size: 0.9rem; line-height: 1.5; }
+    .trust-row {
+      display: flex; justify-content: center;
+      gap: 18px; flex-wrap: wrap;
+      margin-bottom: 22px;
+    }
+    .trust-badge {
+      display: flex; align-items: center; gap: 5px;
+      font-size: 0.75rem; font-weight: 700; color: var(--text-mid);
+    }
+    .btn {
+      display: block; width: 100%;
+      padding: 15px 22px;
+      background: linear-gradient(135deg, var(--primary) 0%, #7c3aed 100%);
+      color: white; border: none; border-radius: 12px;
+      font-size: 1.02rem; font-weight: 700;
+      cursor: pointer; letter-spacing: 0.01em;
+      transition: box-shadow 0.2s, filter 0.2s, transform 0.12s;
+      position: relative; overflow: hidden; margin-top: 6px;
+    }
+    .btn::after {
+      content: '';
+      position: absolute; inset: 0;
+      background: linear-gradient(135deg, rgba(255,255,255,0.12) 0%, transparent 100%);
+      opacity: 0; transition: opacity 0.2s;
+    }
+    .btn:hover { box-shadow: 0 8px 28px rgba(99,102,241,0.45); filter: brightness(1.06); }
+    .btn:hover::after { opacity: 1; }
+    .btn:active { transform: scale(0.975); }
+    .btn:disabled { opacity: 0.45; cursor: not-allowed; }
+    .btn-ghost {
+      background: transparent;
+      color: var(--primary);
+      border: 2px solid var(--primary);
+      box-shadow: none;
+    }
+    .btn-ghost:hover { background: rgba(99,102,241,0.06); }
+    .btn-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 14px; }
+    .q-label { font-size: 0.93rem; font-weight: 800; color: var(--text-dark); margin-bottom: 11px; }
+    .q-block { margin-bottom: 26px; }
+    .pills { display: flex; gap: 9px; flex-wrap: wrap; }
+    .pills.cols-2 .pill, .pills.cols-4 .pill { flex: 1 1 calc(50% - 5px); }
+    .pill {
+      padding: 13px 10px;
+      border: 2px solid var(--border);
+      border-radius: 12px;
+      background: #fafafa; color: var(--text-mid);
+      font-size: 0.9rem; font-weight: 700;
+      cursor: pointer; text-align: center;
+      transition: border-color 0.18s, background 0.18s, color 0.18s;
+      line-height: 1.3;
+    }
+    .pill:hover { border-color: var(--primary); color: var(--primary); background: rgba(99,102,241,0.04); }
+    .pill.on {
+      border-color: var(--primary);
+      background: linear-gradient(135deg, rgba(99,102,241,0.09) 0%, rgba(124,58,237,0.09) 100%);
+      color: #4f46e5;
+    }
+    .pill-icon { font-size: 1.25rem; display: block; margin-bottom: 3px; }
+    .f-row { margin-bottom: 16px; }
+    .f-row label { display: block; font-size: 0.82rem; font-weight: 800; color: var(--text-dark); margin-bottom: 6px; letter-spacing: 0.02em; }
+    .f-row input {
+      width: 100%; padding: 12px 14px;
+      border: 2px solid var(--border);
+      border-radius: 10px;
+      font-size: 0.97rem; color: var(--text-dark);
+      background: #f8fafc;
+      transition: border-color 0.2s, box-shadow 0.2s, background 0.2s;
+      -webkit-appearance: none;
+    }
+    .f-row input:focus { outline: none; border-color: var(--primary); background: white; box-shadow: 0 0 0 3px rgba(99,102,241,0.25); }
+    .f-row input.err { border-color: var(--danger); box-shadow: 0 0 0 3px rgba(239,68,68,0.15); animation: shake 0.35s ease; }
+    @keyframes shake {
+      0%,100% { transform: translateX(0); }
+      25% { transform: translateX(-7px); }
+      75% { transform: translateX(7px); }
+    }
+    .err-msg { font-size: 0.75rem; color: var(--danger); font-weight: 700; margin-top: 4px; display: none; }
+    .f-row.bad .err-msg { display: block; }
+    .f-grid { display: grid; grid-template-columns: 3fr 2fr; gap: 10px; }
+    .a-steps { margin: 20px 0; }
+    .a-step {
+      display: flex; align-items: center; gap: 13px;
+      padding: 12px 0;
+      border-bottom: 1px solid var(--border);
+      font-size: 0.92rem; color: var(--text-light);
+      transition: color 0.3s;
+    }
+    .a-step:last-child { border-bottom: none; }
+    .a-step.done { color: var(--text-dark); }
+    .a-step.live { color: var(--primary); font-weight: 700; }
+    .a-dot {
+      width: 28px; height: 28px; border-radius: 50%;
+      display: flex; align-items: center; justify-content: center;
+      flex-shrink: 0; font-size: 0.78rem; font-weight: 800;
+      background: var(--border); color: var(--text-light);
+      transition: background 0.3s, color 0.3s;
+    }
+    .a-step.live .a-dot { background: var(--primary); color: white; animation: beat 0.9s ease-in-out infinite; }
+    .a-step.done .a-dot { background: var(--success); color: white; }
+    @keyframes beat { 0%,100% { transform: scale(1); } 50% { transform: scale(1.18); } }
+    .map-box {
+      border-radius: 13px; overflow: hidden;
+      height: 320px; margin: 14px 0;
+      border: 2px solid var(--border);
+    }
+    .map-box iframe { width: 100%; height: 100%; border: none; display: block; }
+    .est-card {
+      background: linear-gradient(135deg, #0f172a 0%, #1e1b4b 100%);
+      border-radius: 16px; padding: 22px 20px;
+      margin: 14px 0; position: relative; overflow: hidden;
+    }
+    .est-card::after {
+      content: '';
+      position: absolute; top: -50px; right: -50px;
+      width: 150px; height: 150px;
+      background: radial-gradient(circle, rgba(99,102,241,0.35) 0%, transparent 70%);
+      pointer-events: none;
+    }
+    .est-eyebrow { font-size: 0.68rem; font-weight: 800; text-transform: uppercase; letter-spacing: 0.1em; color: #818cf8; margin-bottom: 14px; }
+    .est-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+    .est-val { font-size: 1.6rem; font-weight: 900; color: white; letter-spacing: -0.03em; line-height: 1; margin-bottom: 3px; }
+    .est-val.amber { color: #fbbf24; }
+    .est-lbl { font-size: 0.68rem; font-weight: 700; color: #64748b; text-transform: uppercase; letter-spacing: 0.07em; }
+    .est-note { margin-top: 14px; padding-top: 12px; border-top: 1px solid rgba(255,255,255,0.07); font-size: 0.75rem; color: #475569; text-align: center; }
+    .info-box {
+      background: rgba(99,102,241,0.06);
+      border: 1px solid rgba(99,102,241,0.18);
+      border-radius: 11px; padding: 14px 16px; margin: 12px 0;
+    }
+    .info-box p { font-size: 0.87rem; color: var(--text-mid); line-height: 1.5; text-align: left; }
+    .spin-wrap { text-align: center; padding: 44px 20px; }
+    .spinner {
+      width: 46px; height: 46px;
+      border: 3px solid rgba(99,102,241,0.15);
+      border-top-color: var(--primary);
+      border-radius: 50%;
+      animation: spin 0.75s linear infinite;
+      margin: 0 auto 20px;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .ty-sun { font-size: 4rem; text-align: center; display: block; margin-bottom: 10px; animation: pop 0.7s cubic-bezier(0.34,1.56,0.64,1); }
+    @keyframes pop { from { transform: scale(0) rotate(-25deg); opacity: 0; } to { transform: scale(1) rotate(0); opacity: 1; } }
+    .timeline { margin: 18px 0; }
+    .tl-item { display: flex; gap: 13px; align-items: flex-start; padding: 11px 0; border-bottom: 1px solid var(--border); }
+    .tl-item:last-child { border-bottom: none; }
+    .tl-dot { width: 30px; height: 30px; border-radius: 50%; flex-shrink: 0; display: flex; align-items: center; justify-content: center; font-size: 0.85rem; font-weight: 800; color: white; }
+    .tl-dot.g { background: var(--success); }
+    .tl-dot.b { background: var(--primary); }
+    .tl-dot.a { background: var(--accent); }
+    .tl-title { font-size: 0.88rem; font-weight: 800; color: var(--text-dark); margin-bottom: 2px; }
+    .tl-desc { font-size: 0.8rem; color: var(--text-mid); line-height: 1.4; }
+    .conf {
+      position: fixed; top: -15px;
+      animation: fall linear forwards;
+      pointer-events: none; z-index: 9999;
+    }
+    @keyframes fall { to { transform: translateY(110vh) rotate(720deg); opacity: 0; } }
+    .overlay {
+      display: none; position: fixed; inset: 0;
+      background: rgba(0,0,0,0.72);
+      z-index: 9000; align-items: center; justify-content: center;
+      padding: 16px; backdrop-filter: blur(5px);
+    }
+    .overlay.on { display: flex; }
+    .popup {
+      background: white; border-radius: 22px;
+      padding: 34px 28px; max-width: 430px; width: 100%;
+      position: relative; animation: fadeUp 0.35s cubic-bezier(0.22,1,0.36,1);
+    }
+    .pop-close {
+      position: absolute; top: 13px; right: 13px;
+      background: #f1f5f9; border: none; border-radius: 50%;
+      width: 34px; height: 34px; font-size: 1.15rem;
+      cursor: pointer; display: flex; align-items: center; justify-content: center; color: var(--text-mid);
+      transition: background 0.15s;
+    }
+    .pop-close:hover { background: #e2e8f0; }
+    .price-box { background: #f8fafc; border-radius: 11px; padding: 18px; margin: 18px 0; }
+    .price-box label { font-size: 0.82rem; font-weight: 800; color: var(--text-dark); display: block; margin-bottom: 9px; }
+    .price-input {
+      width: 100%; padding: 14px;
+      font-size: 1.9rem; font-weight: 900;
+      border: 2.5px solid var(--primary); border-radius: 10px;
+      text-align: center; color: var(--text-dark);
+      background: white; -webkit-appearance: none;
+    }
+    .price-input:focus { outline: none; box-shadow: 0 0 0 3px rgba(99,102,241,0.25); }
+    .mkt-note { font-size: 0.77rem; color: var(--text-light); text-align: center; margin-bottom: 14px; }
+    @media (max-width: 480px) {
+      .card { padding: 26px 18px 32px; }
+      h1 { font-size: 1.65rem; }
+      h2 { font-size: 1.3rem; }
+      .est-val { font-size: 1.35rem; }
+      .f-grid { grid-template-columns: 1fr; }
+      .btn-row { grid-template-columns: 1fr; }
+    }
+  </style>
 </head>
 <body>
-    <div class="container">
 
-        <!-- Screen 1: Video Introduction -->
-        <div class="screen active" id="videoScreen">
-            <h1>See Your Home's Solar Potential</h1>
-            <p>No sales reps. No commissions. No hassle.<br>Just the facts, on your time.</p>
+<div class="particles" id="particles"></div>
 
-            <div class="video-container">
-                <!--
-                    Replace this placeholder with your video embed:
-                    YouTube:  <iframe src="https://www.youtube.com/embed/VIDEO_ID" frameborder="0" allowfullscreen></iframe>
-                    Direct:   <video controls><source src="video.mp4" type="video/mp4"></video>
-                -->
-                <div class="video-placeholder">
-                    <div>
-                        <p style="margin-bottom:14px;font-size:1.05rem;font-weight:700;color:white;">We explain:</p>
-                        <p style="margin-bottom:8px;font-size:0.95rem;color:white;">&#10003; No pushy sales tactics</p>
-                        <p style="margin-bottom:8px;font-size:0.95rem;color:white;">&#10003; Transparent pricing</p>
-                        <p style="margin-bottom:8px;font-size:0.95rem;color:white;">&#10003; Your home's actual potential</p>
-                        <p style="margin-bottom:0;font-size:0.95rem;color:white;">&#10003; Make informed decisions</p>
-                    </div>
-                </div>
-            </div>
-
-            <div class="features">
-                <div class="feature">
-                    <div class="feature-icon">&#127968;</div>
-                    <h3>Your Home</h3>
-                    <p>Aerial imagery of your property</p>
-                </div>
-                <div class="feature">
-                    <div class="feature-icon">&#9728;&#65039;</div>
-                    <h3>Solar Analysis</h3>
-                    <p>Instant solar potential estimate</p>
-                </div>
-                <div class="feature">
-                    <div class="feature-icon">&#128176;</div>
-                    <h3>Real Numbers</h3>
-                    <p>Accurate costs and savings</p>
-                </div>
-            </div>
-
-            <button class="btn" onclick="nextScreen('addressScreen')">Start Your Free Analysis</button>
-        </div>
-
-        <!-- Screen 2: Address Input -->
-        <div class="screen" id="addressScreen">
-            <button class="back-btn" onclick="nextScreen('videoScreen')">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="15 18 9 12 15 6"></polyline></svg>
-                Back
-            </button>
-            <h2>Enter Your Address</h2>
-            <p>We'll pull up your home's aerial view to show your roof's solar potential.</p>
-
-            <form onsubmit="loadAerialView(event)">
-                <div class="form-group">
-                    <label for="address">Street Address</label>
-                    <input type="text" id="address" required placeholder="Start typing your address..." autocomplete="address-line1">
-                </div>
-                <div class="form-group">
-                    <label for="city">City</label>
-                    <input type="text" id="city" required placeholder="Salt Lake City">
-                </div>
-                <div class="form-group">
-                    <label for="state">State</label>
-                    <input type="text" id="state" required placeholder="UT" maxlength="2">
-                </div>
-                <div class="form-group">
-                    <label for="zip">ZIP Code</label>
-                    <input type="text" id="zip" required placeholder="84101" pattern="[0-9]{5}" inputmode="numeric">
-                </div>
-                <button type="submit" class="btn">View My Home</button>
-            </form>
-        </div>
-
-        <!-- Screen 3: Loading -->
-        <div class="screen" id="loadingScreen">
-            <div class="loading">
-                <div class="spinner"></div>
-                <h2>Loading Your Home...</h2>
-                <p>Pulling up aerial imagery of your property</p>
-            </div>
-        </div>
-
-        <!-- Screen 4: Aerial View -->
-        <div class="screen" id="aerialScreen">
-            <button class="back-btn" onclick="nextScreen('addressScreen')">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="15 18 9 12 15 6"></polyline></svg>
-                Back
-            </button>
-            <h2>Your Home</h2>
-            <p id="displayAddress"></p>
-
-            <div class="aerial-view">
-                <iframe id="mapFrame" title="Aerial view of your home"></iframe>
-            </div>
-
-            <div class="info-box">
-                <h3>Ready to Learn More?</h3>
-                <p>Schedule a consultation or get a direct offer based on your home's specifications — no commitment required.</p>
-            </div>
-
-            <div class="button-group">
-                <button class="btn" onclick="nextScreen('contactScreen', 'appointment')">Schedule Appointment</button>
-                <button class="btn btn-secondary" onclick="nextScreen('contactScreen', 'offer')">Get Direct Offer</button>
-            </div>
-        </div>
-
-        <!-- Screen 5: Contact Information -->
-        <div class="screen" id="contactScreen">
-            <button class="back-btn" onclick="nextScreen('aerialScreen')">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="15 18 9 12 15 6"></polyline></svg>
-                Back
-            </button>
-            <h2 id="contactTitle">Just a Few More Details</h2>
-            <p id="contactSubtitle">We'll reach out right away.</p>
-
-            <form onsubmit="submitForm(event)">
-                <div class="form-group">
-                    <label for="name">Full Name</label>
-                    <input type="text" id="name" required placeholder="John Smith" autocomplete="name">
-                </div>
-                <div class="form-group">
-                    <label for="phone">Phone Number</label>
-                    <input type="tel" id="phone" required placeholder="(555) 123-4567" inputmode="tel" autocomplete="tel">
-                </div>
-                <div class="form-group">
-                    <label for="email">Email Address</label>
-                    <input type="email" id="email" required placeholder="john@example.com" autocomplete="email" inputmode="email">
-                </div>
-                <button type="submit" class="btn" id="submitBtn">Continue</button>
-            </form>
-        </div>
-
-        <!-- Screen 6: Submitting -->
-        <div class="screen" id="submittingScreen">
-            <div class="loading">
-                <div class="spinner"></div>
-                <h2>Sending Your Info...</h2>
-                <p>Just a moment</p>
-            </div>
-        </div>
-
-        <!-- Screen 7: Thank You -->
-        <div class="screen" id="thankYouScreen">
-            <div class="thankyou-icon">&#127774;</div>
-            <h2>You're All Set!</h2>
-            <p>We've received your information and will be in touch shortly.</p>
-
-            <ul class="thankyou-list">
-                <li><span class="check">&#10003;</span> Your solar analysis is being prepared</li>
-                <li><span class="check">&#10003;</span> A specialist will contact you within 24 hours</li>
-                <li><span class="check">&#10003;</span> No obligation — just real numbers for your home</li>
-            </ul>
-
-            <p style="font-size: 0.9rem; color: #718096; margin-top: 8px;">Check your email for confirmation details.</p>
-        </div>
-
+<div class="wrapper">
+  <div class="progress-wrap" id="progressWrap" style="display:none">
+    <div class="progress-track"><div class="progress-fill" id="progressFill"></div></div>
+    <div class="progress-labels">
+      <span class="progress-label" id="pl0">Start</span>
+      <span class="progress-label" id="pl1">Your Home</span>
+      <span class="progress-label" id="pl2">Estimate</span>
+      <span class="progress-label" id="pl3">Results</span>
     </div>
+  </div>
 
-    <!-- Exit Intent Popup -->
-    <div class="exit-popup" id="exitPopup">
-        <div class="exit-popup-content">
-            <button class="exit-popup-close" onclick="closeExitPopup()" aria-label="Close">&times;</button>
-            <h2>Wait! Name Your Price</h2>
-            <p>Before you go, tell us what price would make solar worth it for you today.</p>
-
-            <div class="price-input-group">
-                <label for="nameYourPrice">Your Target Price Per Watt ($)</label>
-                <input
-                    type="number"
-                    id="nameYourPrice"
-                    class="price-input"
-                    placeholder="2.50"
-                    step="0.01"
-                    min="0.50"
-                    max="5.00"
-                    value="2.50"
-                    inputmode="decimal"
-                >
-            </div>
-
-            <p style="font-size:0.9rem;color:#718096;">Market average: $3.00/W &bull; Our standard: $3.00/W</p>
-
-            <button class="btn" onclick="submitCustomPrice()">Submit My Price</button>
-            <button class="btn btn-secondary" onclick="closeExitPopup()" style="margin-top:10px;">Continue Browsing</button>
+  <div class="screen active" id="heroScreen">
+    <div class="card">
+      <div class="social-pill"><div class="social-dot"></div><span><span id="liveCount">143</span> homes analyzed today</span></div>
+      <h1>See Your Home's<br><span class="grad">Solar Potential</span></h1>
+      <p class="sub">No sales reps. No commissions. Real numbers — in under 2 minutes.</p>
+      <div class="video-wrap">
+        <div class="video-ph">
+          <div class="vp-eyebrow">In this short video we explain:</div>
+          <div class="vp-line">✓ Why we charge zero commissions</div>
+          <div class="vp-line">✓ How we calculate your exact savings</div>
+          <div class="vp-line">✓ What makes our pricing transparent</div>
+          <div class="vp-line">✓ How to claim your free analysis today</div>
         </div>
+      </div>
+      <div class="trust-row">
+        <div class="trust-badge">🔒 Private & Secure</div>
+        <div class="trust-badge">⚡ 2-Min Analysis</div>
+        <div class="trust-badge">🎁 No Obligation</div>
+      </div>
+      <button class="btn" onclick="startFlow()">⚡ Start My Free Analysis</button>
     </div>
+  </div>
 
-    <!-- Google Places Autocomplete — replace YOUR_GOOGLE_PLACES_API_KEY -->
-    <script src="https://maps.googleapis.com/maps/api/js?key=YOUR_GOOGLE_PLACES_API_KEY&libraries=places" async defer></script>
+  <div class="screen" id="qualifyScreen">
+    <div class="card">
+      <button class="back-btn" onclick="showScreen('heroScreen')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><polyline points="15 18 9 12 15 6"/></svg> Back</button>
+      <h2>Quick Questions</h2>
+      <p class="sub">2 questions to personalize your savings estimate.</p>
+      <div class="q-block">
+        <div class="q-label">Do you own your home?</div>
+        <div class="pills cols-2" id="ownGroup">
+          <button class="pill" onclick="pickPill('ownGroup',this,'yes')"><span class="pill-icon">🏠</span>Yes, I Own It</button>
+          <button class="pill" onclick="pickPill('ownGroup',this,'no')"><span class="pill-icon">🔑</span>No, I Rent</button>
+        </div>
+      </div>
+      <div class="q-block">
+        <div class="q-label">Average monthly electric bill?</div>
+        <div class="pills cols-4" id="billGroup">
+          <button class="pill" onclick="pickPill('billGroup',this,75)"><span class="pill-icon">💡</span>Under $100</button>
+          <button class="pill" onclick="pickPill('billGroup',this,150)"><span class="pill-icon">⚡</span>$100–$200</button>
+          <button class="pill" onclick="pickPill('billGroup',this,250)"><span class="pill-icon">🔥</span>$200–$300</button>
+          <button class="pill" onclick="pickPill('billGroup',this,350)"><span class="pill-icon">🔴</span>Over $300</button>
+        </div>
+      </div>
+      <button class="btn" id="qualifyBtn" onclick="proceedFromQualify()" disabled>See My Estimate →</button>
+    </div>
+  </div>
 
-    <script>
-        let userChoice = '';
-        let formData = { address: '', city: '', state: '', zip: '', name: '', phone: '', email: '' };
+  <div class="screen" id="addressScreen">
+    <div class="card">
+      <button class="back-btn" onclick="showScreen('qualifyScreen')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><polyline points="15 18 9 12 15 6"/></svg> Back</button>
+      <h2>Your Home's Address</h2>
+      <p class="sub">We'll pull up satellite imagery of your property.</p>
+      <form onsubmit="startAerial(event)">
+        <div class="f-row"><label for="address">Street Address</label><input type="text" id="address" placeholder="123 Main St" autocomplete="address-line1" required></div>
+        <div class="f-grid">
+          <div class="f-row"><label for="city">City</label><input type="text" id="city" placeholder="Salt Lake City" required></div>
+          <div class="f-row"><label for="st">State</label><input type="text" id="st" placeholder="UT" maxlength="2" style="text-transform:uppercase" required></div>
+        </div>
+        <div class="f-row" id="zipRow"><label for="zip">ZIP Code</label><input type="text" id="zip" placeholder="84101" inputmode="numeric" maxlength="5" pattern="[0-9]{5}" required><div class="err-msg">Please enter a valid 5-digit ZIP</div></div>
+        <button type="submit" class="btn">🏠 View My Home</button>
+      </form>
+    </div>
+  </div>
 
-        let autocomplete;
-        let autocompleteInitialized = false;
+  <div class="screen" id="analyzingScreen">
+    <div class="card">
+      <div class="spin-wrap" style="padding-bottom:8px">
+        <div class="spinner"></div>
+        <h2>Analyzing Your Property</h2>
+        <p class="sub" style="margin-bottom:0">Running your personalized solar model…</p>
+      </div>
+      <div class="a-steps" id="aSteps">
+        <div class="a-step" id="as0"><div class="a-dot" id="ad0">1</div><span>Locating your property</span></div>
+        <div class="a-step" id="as1"><div class="a-dot" id="ad1">2</div><span>Analyzing roof orientation & pitch</span></div>
+        <div class="a-step" id="as2"><div class="a-dot" id="ad2">3</div><span>Calculating sun hours & shading</span></div>
+        <div class="a-step" id="as3"><div class="a-dot" id="ad3">4</div><span>Sizing your optimal system</span></div>
+        <div class="a-step" id="as4"><div class="a-dot" id="ad4">5</div><span>Modeling 25-year savings</span></div>
+      </div>
+    </div>
+  </div>
 
-        function initAutocomplete() {
-            if (autocompleteInitialized || typeof google === 'undefined') return;
-            const input = document.getElementById('address');
-            if (!input) return;
-            autocomplete = new google.maps.places.Autocomplete(input, {
-                types: ['address'],
-                componentRestrictions: { country: 'us' }
-            });
-            autocomplete.addListener('place_changed', fillInAddress);
-            autocompleteInitialized = true;
-        }
+  <div class="screen" id="aerialScreen">
+    <div class="card">
+      <button class="back-btn" onclick="showScreen('addressScreen')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><polyline points="15 18 9 12 15 6"/></svg> Back</button>
+      <h2>Your Property</h2>
+      <p class="sub" id="dispAddr" style="margin-bottom:8px"></p>
+      <div class="map-box"><iframe id="mapFrame" title="Satellite view of your home"></iframe></div>
+      <div class="est-card">
+        <div class="est-eyebrow">☀️ Your Solar Estimate</div>
+        <div class="est-grid">
+          <div><div class="est-val amber" id="e25">$0</div><div class="est-lbl">25-Year Savings</div></div>
+          <div><div class="est-val" id="eKw">0 kW</div><div class="est-lbl">Est. System Size</div></div>
+          <div><div class="est-val" id="eNet">$0</div><div class="est-lbl">After Tax Credit</div></div>
+          <div><div class="est-val" id="ePay">0 yrs</div><div class="est-lbl">Payback Period</div></div>
+        </div>
+        <div class="est-note">Based on your $<span id="eBill">—</span>/mo bill · 30% federal tax credit applied</div>
+      </div>
+      <div class="info-box"><p>Ready to lock in these numbers? Schedule a free consultation or get a written direct offer — no commitment required.</p></div>
+      <div class="btn-row">
+        <button class="btn" onclick="goContact('appointment')">📅 Schedule Consult</button>
+        <button class="btn btn-ghost" onclick="goContact('offer')">Get Direct Offer</button>
+      </div>
+    </div>
+  </div>
 
-        function fillInAddress() {
-            const place = autocomplete.getPlace();
-            if (!place.address_components) return;
+  <div class="screen" id="contactScreen">
+    <div class="card">
+      <button class="back-btn" onclick="showScreen('aerialScreen')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><polyline points="15 18 9 12 15 6"/></svg> Back</button>
+      <h2 id="cTitle">Schedule Your Appointment</h2>
+      <p class="sub" id="cSub">Enter your details and we'll confirm within hours.</p>
+      <form onsubmit="submitLead(event)">
+        <div class="f-row" id="nameRow"><label for="name">Full Name</label><input type="text" id="name" placeholder="John Smith" autocomplete="name" required><div class="err-msg">Please enter your full name</div></div>
+        <div class="f-row" id="phoneRow"><label for="phone">Phone Number</label><input type="tel" id="phone" placeholder="(555) 123-4567" inputmode="tel" autocomplete="tel" required><div class="err-msg">Please enter a valid 10-digit number</div></div>
+        <div class="f-row" id="emailRow"><label for="email">Email Address</label><input type="email" id="email" placeholder="john@example.com" inputmode="email" autocomplete="email" required><div class="err-msg">Please enter a valid email address</div></div>
+        <button type="submit" class="btn" id="submitBtn">Get My Solar Report →</button>
+      </form>
+    </div>
+  </div>
 
-            document.getElementById('address').value = '';
-            document.getElementById('city').value = '';
-            document.getElementById('state').value = '';
-            document.getElementById('zip').value = '';
+  <div class="screen" id="submittingScreen">
+    <div class="card">
+      <div class="spin-wrap"><div class="spinner"></div><h2>Sending Your Report…</h2><p class="sub">Preparing your personalized solar analysis</p></div>
+    </div>
+  </div>
 
-            let streetNumber = '', route = '';
-            for (const c of place.address_components) {
-                switch (c.types[0]) {
-                    case 'street_number':   streetNumber = c.long_name; break;
-                    case 'route':           route = c.short_name; break;
-                    case 'locality':        document.getElementById('city').value = c.long_name; break;
-                    case 'administrative_area_level_1': document.getElementById('state').value = c.short_name; break;
-                    case 'postal_code':     document.getElementById('zip').value = c.short_name; break;
-                }
-            }
-            document.getElementById('address').value = `${streetNumber} ${route}`.trim();
-        }
+  <div class="screen" id="thankYouScreen">
+    <div class="card">
+      <span class="ty-sun">☀️</span>
+      <h2>You're All Set!</h2>
+      <p class="sub">Your solar analysis is on its way.</p>
+      <div class="timeline">
+        <div class="tl-item"><div class="tl-dot g">✓</div><div><div class="tl-title">Analysis submitted</div><div class="tl-desc">Your property details and estimate are saved</div></div></div>
+        <div class="tl-item"><div class="tl-dot b">1</div><div><div class="tl-title">Within 1 hour</div><div class="tl-desc">Check your email — your full solar report will be there</div></div></div>
+        <div class="tl-item"><div class="tl-dot a">2</div><div><div class="tl-title">Within 24 hours</div><div class="tl-desc">A solar specialist will reach out to review your numbers</div></div></div>
+      </div>
+      <p style="font-size:0.78rem;color:var(--text-light);text-align:center;margin-top:10px">No commitment required · No pushy sales calls</p>
+    </div>
+  </div>
+</div>
 
-        window.addEventListener('load', () => setTimeout(initAutocomplete, 800));
+<div class="overlay" id="exitOverlay">
+  <div class="popup">
+    <button class="pop-close" onclick="closeExit()">&times;</button>
+    <h2 style="font-size:1.45rem;margin-bottom:8px">Wait — Name Your Price</h2>
+    <p class="sub" style="font-size:0.88rem;margin-bottom:0">Tell us the price per watt that makes solar a no-brainer for you.</p>
+    <div class="price-box"><label for="custPrice">Your target price per watt ($)</label><input type="number" id="custPrice" class="price-input" value="2.50" step="0.25" min="0.50" max="5.00" inputmode="decimal"></div>
+    <p class="mkt-note">Market average: $3.00/W · Our standard: $3.00/W</p>
+    <button class="btn" onclick="submitCustomPrice()">Submit My Price</button>
+    <button class="btn btn-ghost" onclick="closeExit()" style="margin-top:8px">Continue Browsing</button>
+  </div>
+</div>
 
-        function nextScreen(screenId, choice = null) {
-            if (choice) userChoice = choice;
+<script src="https://maps.googleapis.com/maps/api/js?key=YOUR_GOOGLE_PLACES_API_KEY&libraries=places" async defer></script>
 
-            document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
-            document.getElementById(screenId).classList.add('active');
+<script>
+const state = { userChoice: '', ownsHome: null, monthlyBill: null, address: '', city: '', stateAbbr: '', zip: '', name: '', phone: '', email: '', customPrice: null, estimate: { savings25yr: 0, systemKw: 0, netCost: 0, paybackYears: 0 } };
+const SCREENS = ['heroScreen','qualifyScreen','addressScreen','analyzingScreen','aerialScreen','contactScreen','submittingScreen','thankYouScreen'];
+const PROGRESS = { heroScreen: 0, qualifyScreen: 25, addressScreen: 50, analyzingScreen: 50, aerialScreen: 75, contactScreen: 100, submittingScreen: 100, thankYouScreen: 100 };
 
-            if (screenId === 'addressScreen') setTimeout(initAutocomplete, 100);
+(function() {
+  const wrap = document.getElementById('particles');
+  const colors = ['#6366f1','#a855f7','#06b6d4','#f59e0b','#10b981','#f472b6'];
+  for (let i = 0; i < 18; i++) {
+    const d = document.createElement('div');
+    d.className = 'particle';
+    const s = Math.random() * 5 + 3;
+    d.style.cssText = `width:${s}px;height:${s}px;left:${Math.random()*100}%;background:${colors[i%colors.length]};animation-duration:${Math.random()*18+14}s;animation-delay:${Math.random()*14}s;opacity:0.14;`;
+    wrap.appendChild(d);
+  }
+})();
 
-            if (screenId === 'contactScreen') {
-                if (userChoice === 'appointment') {
-                    document.getElementById('contactTitle').textContent = 'Schedule Your Appointment';
-                    document.getElementById('contactSubtitle').textContent = 'Enter your info to book your free consultation.';
-                    document.getElementById('submitBtn').textContent = 'Schedule Appointment';
-                } else {
-                    document.getElementById('contactTitle').textContent = 'Get Your Direct Offer';
-                    document.getElementById('contactSubtitle').textContent = 'Enter your info to receive your customized offer.';
-                    document.getElementById('submitBtn').textContent = 'Get My Offer';
-                }
-            }
+(function() {
+  const el = document.getElementById('liveCount');
+  let n = 125 + Math.floor(Math.random() * 35);
+  el.textContent = n;
+  setInterval(() => { if (Math.random() < 0.28) el.textContent = ++n; }, 4200);
+})();
 
-            window.scrollTo({ top: 0, behavior: 'smooth' });
-        }
+function setProgress(pct) {
+  document.getElementById('progressFill').style.width = pct + '%';
+  const thresholds = [25, 50, 75, 100];
+  thresholds.forEach((t, i) => document.getElementById('pl'+i).classList.toggle('on', pct >= t));
+}
 
-        function loadAerialView(event) {
-            event.preventDefault();
+function showScreen(id) {
+  SCREENS.forEach(s => document.getElementById(s).classList.remove('active'));
+  document.getElementById(id).classList.add('active');
+  const pct = PROGRESS[id] || 0;
+  const pw = document.getElementById('progressWrap');
+  if (id === 'heroScreen') { pw.style.display = 'none'; } else { pw.style.display = 'block'; setProgress(pct); }
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+  if (id === 'addressScreen') setTimeout(initAC, 120);
+}
 
-            formData.address = document.getElementById('address').value;
-            formData.city    = document.getElementById('city').value;
-            formData.state   = document.getElementById('state').value;
-            formData.zip     = document.getElementById('zip').value;
+function startFlow() { showScreen('qualifyScreen'); }
 
-            const fullAddress = `${formData.address}, ${formData.city}, ${formData.state} ${formData.zip}`;
-            nextScreen('loadingScreen');
+function pickPill(groupId, el, value) {
+  document.querySelectorAll('#' + groupId + ' .pill').forEach(p => p.classList.remove('on'));
+  el.classList.add('on');
+  if (groupId === 'ownGroup') state.ownsHome = value;
+  if (groupId === 'billGroup') state.monthlyBill = value;
+  const btn = document.getElementById('qualifyBtn');
+  const ready = state.ownsHome !== null && state.monthlyBill !== null;
+  btn.disabled = !ready;
+}
 
-            const encoded = encodeURIComponent(fullAddress);
-            document.getElementById('mapFrame').src = `https://maps.google.com/maps?q=${encoded}&t=k&z=19&output=embed`;
-            document.getElementById('displayAddress').textContent = fullAddress;
+function proceedFromQualify() {
+  if (!state.ownsHome || !state.monthlyBill) return;
+  calcEstimate(state.monthlyBill);
+  showScreen('addressScreen');
+}
 
-            setTimeout(() => nextScreen('aerialScreen'), 2000);
-        }
+function calcEstimate(bill) {
+  const rate = 0.16;
+  const annualKwh = (bill / rate) * 12;
+  const systemKw = Math.round(annualKwh / (1460 * 0.8) * 10) / 10;
+  const netCost = Math.round(systemKw * 3000 * 0.70);
+  const annualSav = annualKwh * rate;
+  let savings25 = 0;
+  for (let y = 1; y <= 25; y++) savings25 += annualSav * Math.pow(1.03, y);
+  const payback = Math.round(netCost / annualSav * 10) / 10;
+  state.estimate = { savings25yr: Math.round(savings25), systemKw, netCost, paybackYears: payback };
+}
 
-        function submitForm(event) {
-            event.preventDefault();
+document.getElementById('zip').addEventListener('input', function() {
+  this.value = this.value.replace(/\D/g, '').slice(0, 5);
+  if (this.value.length === 5) {
+    fetch('https://api.zippopotam.us/us/' + this.value).then(r => r.ok ? r.json() : null).then(d => {
+      if (!d) return;
+      document.getElementById('city').value = d.places[0]['place name'];
+      document.getElementById('st').value = d.places[0]['state abbreviation'];
+    }).catch(() => {});
+  }
+});
 
-            formData.name  = document.getElementById('name').value;
-            formData.phone = document.getElementById('phone').value;
-            formData.email = document.getElementById('email').value;
+let acInited = false, ac;
+function initAC() {
+  if (acInited || typeof google === 'undefined') return;
+  ac = new google.maps.places.Autocomplete(document.getElementById('address'), { types: ['address'], componentRestrictions: { country: 'us' } });
+  ac.addListener('place_changed', () => {
+    const p = ac.getPlace();
+    if (!p.address_components) return;
+    let num = '', route = '';
+    ['city','st','zip'].forEach(id => document.getElementById(id).value = '');
+    for (const c of p.address_components) {
+      switch (c.types[0]) {
+        case 'street_number': num = c.long_name; break;
+        case 'route': route = c.short_name; break;
+        case 'locality': document.getElementById('city').value = c.long_name; break;
+        case 'administrative_area_level_1': document.getElementById('st').value = c.short_name; break;
+        case 'postal_code': document.getElementById('zip').value = c.short_name; break;
+      }
+    }
+    document.getElementById('address').value = (num + ' ' + route).trim();
+  });
+  acInited = true;
+}
+window.addEventListener('load', () => setTimeout(initAC, 900));
 
-            if (!formData.address || !formData.city || !formData.state || !formData.zip) {
-                alert('Address information is missing. Please go back and enter your address.');
-                return;
-            }
+function startAerial(e) {
+  e.preventDefault();
+  state.address = document.getElementById('address').value.trim();
+  state.city = document.getElementById('city').value.trim();
+  state.stateAbbr = document.getElementById('st').value.trim().toUpperCase();
+  state.zip = document.getElementById('zip').value.trim();
+  showScreen('analyzingScreen');
+  runAnalysis();
+}
 
-            nextScreen('submittingScreen');
+function runAnalysis() {
+  for (let i = 0; i < 5; i++) {
+    document.getElementById('as'+i).className = 'a-step';
+    document.getElementById('ad'+i).textContent = i+1;
+  }
+  const activeTimes = [0, 600, 1100, 1700, 2300];
+  const doneTimes = [600, 1100, 1700, 2300, 2900];
+  activeTimes.forEach((t, i) => setTimeout(() => {
+    document.getElementById('as'+i).classList.add('live');
+    document.getElementById('ad'+i).textContent = '·';
+  }, t));
+  doneTimes.forEach((t, i) => setTimeout(() => {
+    document.getElementById('as'+i).classList.remove('live');
+    document.getElementById('as'+i).classList.add('done');
+    document.getElementById('ad'+i).textContent = '✓';
+  }, t));
+  setTimeout(() => {
+    const full = `${state.address}, ${state.city}, ${state.stateAbbr} ${state.zip}`;
+    document.getElementById('dispAddr').textContent = full;
+    document.getElementById('mapFrame').src = `https://maps.google.com/maps?q=${encodeURIComponent(full)}&t=k&z=19&output=embed`;
+    document.getElementById('eBill').textContent = state.monthlyBill;
+    showScreen('aerialScreen');
+    animateEstimate();
+  }, 3700);
+}
 
-            const fullAddress = `${formData.address}, ${formData.city}, ${formData.state} ${formData.zip}`;
-            const params = new URLSearchParams({
-                name:    formData.name,
-                email:   formData.email,
-                phone:   formData.phone,
-                address: fullAddress
-            });
+function countUp(el, target, pre, suf, ms) {
+  const t0 = performance.now();
+  const flt = !Number.isInteger(target);
+  (function frame(now) {
+    const p = Math.min((now - t0) / ms, 1);
+    const e = 1 - Math.pow(1 - p, 3);
+    const v = target * e;
+    el.textContent = pre + (flt ? v.toFixed(1) : Math.round(v).toLocaleString()) + suf;
+    if (p < 1) requestAnimationFrame(frame);
+  })(performance.now());
+}
 
-            if (formData.customPricePerWatt) {
-                params.append('pricePerWatt', formData.customPricePerWatt);
-            }
+function animateEstimate() {
+  const { savings25yr, systemKw, netCost, paybackYears } = state.estimate;
+  countUp(document.getElementById('e25'), savings25yr, '$', '', 1800);
+  countUp(document.getElementById('eKw'), systemKw, '', ' kW', 1300);
+  countUp(document.getElementById('eNet'), netCost, '$', '', 1600);
+  countUp(document.getElementById('ePay'), paybackYears, '', ' yrs', 1100);
+}
 
-            const templateId = '69efb1c9049dc35ecf2c701d';
-            const leadSource = '0';
-            const url = `https://www.youtilitycrm.us/api/solar-leads/estimate/${templateId}/${leadSource}?${params.toString()}`;
+function goContact(choice) {
+  state.userChoice = choice;
+  if (choice === 'appointment') {
+    document.getElementById('cTitle').textContent = 'Schedule Your Appointment';
+    document.getElementById('cSub').textContent = 'Book your free consultation — we confirm within hours.';
+    document.getElementById('submitBtn').textContent = 'Schedule Appointment →';
+  } else {
+    document.getElementById('cTitle').textContent = 'Get Your Direct Offer';
+    document.getElementById('cSub').textContent = "Receive a written offer based on your home's exact specs.";
+    document.getElementById('submitBtn').textContent = 'Get My Offer →';
+  }
+  showScreen('contactScreen');
+}
 
-            // Submit in background; keep user inside the ad experience
-            fetch(url, { method: 'GET', mode: 'no-cors' })
-                .catch(() => {}) // CORS response hidden in no-cors mode — request still fires
-                .finally(() => nextScreen('thankYouScreen'));
+document.getElementById('phone').addEventListener('input', function() {
+  let v = this.value.replace(/\D/g, '').slice(0, 10);
+  if (v.length >= 7) v = `(${v.slice(0,3)}) ${v.slice(3,6)}-${v.slice(6)}`;
+  else if (v.length >= 4) v = `(${v.slice(0,3)}) ${v.slice(3)}`;
+  else if (v.length > 0) v = `(${v}`;
+  this.value = v;
+});
 
-            if (typeof fbq !== 'undefined') {
-                fbq('track', 'Lead', { content_name: userChoice === 'appointment' ? 'Appointment' : 'Direct Offer' });
-            }
-        }
+function checkField(id) {
+  const inp = document.getElementById(id);
+  const row = document.getElementById(id + 'Row');
+  let bad = !inp.value.trim();
+  if (id === 'email') bad = bad || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(inp.value);
+  if (id === 'phone') bad = bad || inp.value.replace(/\D/g,'').length < 10;
+  row.classList.toggle('bad', bad);
+  if (bad) { inp.classList.add('err'); setTimeout(() => inp.classList.remove('err'), 400); }
+  return !bad;
+}
 
-        // Exit intent — desktop only (not shown on mobile/WebView)
-        let exitIntentShown = false;
+function submitLead(e) {
+  e.preventDefault();
+  const ok = ['name','phone','email'].map(checkField).every(Boolean);
+  if (!ok) return;
+  state.name = document.getElementById('name').value;
+  state.phone = document.getElementById('phone').value;
+  state.email = document.getElementById('email').value;
+  showScreen('submittingScreen');
+  const addr = `${state.address}, ${state.city}, ${state.stateAbbr} ${state.zip}`;
+  const p = new URLSearchParams({ name: state.name, email: state.email, phone: state.phone, address: addr });
+  if (state.customPrice) p.append('pricePerWatt', state.customPrice);
+  const url = `https://www.youtilitycrm.us/api/solar-leads/estimate/69efb1c9049dc35ecf2c701d/0?${p}`;
+  fetch(url, { method: 'GET', mode: 'no-cors' }).catch(() => {}).finally(() => {
+    showScreen('thankYouScreen');
+    launchConfetti();
+  });
+  if (typeof fbq !== 'undefined') fbq('track', 'Lead', { content_name: state.userChoice });
+}
 
-        document.addEventListener('mouseout', (e) => {
-            if (window.innerWidth < 768) return;
-            const current = document.querySelector('.screen.active').id;
-            if ((current === 'aerialScreen' || current === 'contactScreen') && !exitIntentShown && e.clientY <= 0) {
-                showExitPopup();
-            }
-        });
+function launchConfetti() {
+  const colors = ['#6366f1','#a855f7','#f59e0b','#10b981','#ef4444','#06b6d4','#f472b6'];
+  for (let i = 0; i < 88; i++) {
+    const el = document.createElement('div');
+    el.className = 'conf';
+    const w = Math.random() * 8 + 5;
+    el.style.cssText = `left:${Math.random()*100}vw;width:${w}px;height:${w*(Math.random()*1.4+0.7)}px;background:${colors[Math.floor(Math.random()*colors.length)]};border-radius:${Math.random()>.5?'50%':'2px'};animation-duration:${Math.random()*2.2+2.4}s;animation-delay:${Math.random()*1.1}s;transform:rotate(${Math.random()*360}deg);opacity:1;`;
+    document.body.appendChild(el);
+    setTimeout(() => el.remove(), 4800);
+  }
+}
 
-        // Mobile exit intent: swipe down from top edge
-        let touchStartY = 0;
-        document.addEventListener('touchstart', (e) => { touchStartY = e.touches[0].clientY; }, { passive: true });
-        document.addEventListener('touchmove', (e) => {
-            const current = document.querySelector('.screen.active').id;
-            if ((current === 'aerialScreen' || current === 'contactScreen') &&
-                !exitIntentShown && touchStartY < 50 && e.touches[0].clientY > touchStartY + 100) {
-                showExitPopup();
-            }
-        }, { passive: true });
-
-        function showExitPopup() {
-            exitIntentShown = true;
-            document.getElementById('exitPopup').classList.add('active');
-            if (typeof fbq !== 'undefined') fbq('track', 'ViewContent', { content_name: 'Exit Intent - Name Your Price' });
-        }
-
-        function closeExitPopup() {
-            document.getElementById('exitPopup').classList.remove('active');
-        }
-
-        function submitCustomPrice() {
-            const val = parseFloat(document.getElementById('nameYourPrice').value);
-            if (!val || val < 0.50) { alert('Please enter a valid price per watt.'); return; }
-            formData.customPricePerWatt = val;
-            closeExitPopup();
-            if (document.querySelector('.screen.active').id === 'aerialScreen') {
-                userChoice = 'offer';
-                nextScreen('contactScreen');
-            }
-        }
-
-        /*
-         * Meta Pixel — replace YOUR_PIXEL_ID and uncomment:
-         *
-         * !function(f,b,e,v,n,t,s){if(f.fbq)return;n=f.fbq=function(){n.callMethod?
-         * n.callMethod.apply(n,arguments):n.queue.push(arguments)};if(!f._fbq)f._fbq=n;
-         * n.push=n;n.loaded=!0;n.version='2.0';n.queue=[];t=b.createElement(e);t.async=!0;
-         * t.src=v;s=b.getElementsByTagName(e)[0];s.parentNode.insertBefore(t,s)}
-         * (window,document,'script','https://connect.facebook.net/en_US/fbevents.js');
-         * fbq('init','YOUR_PIXEL_ID');
-         * fbq('track','PageView');
-         */
-    </script>
+let exitShown = false;
+const exitSet = new Set(['aerialScreen','contactScreen']);
+document.addEventListener('mouseout', e => {
+  if (window.innerWidth < 700 || exitShown) return;
+  const cur = document.querySelector('.screen.active')?.id;
+  if (exitSet.has(cur) && e.clientY <= 0) openExit();
+});
+let ty0 = 0;
+document.addEventListener('touchstart', e => { ty0 = e.touches[0].clientY; }, { passive: true });
+document.addEventListener('touchmove', e => {
+  const cur = document.querySelector('.screen.active')?.id;
+  if (exitSet.has(cur) && !exitShown && ty0 < 60 && e.touches[0].clientY > ty0 + 90) openExit();
+}, { passive: true });
+function openExit() {
+  exitShown = true;
+  document.getElementById('exitOverlay').classList.add('on');
+  if (typeof fbq !== 'undefined') fbq('track', 'ViewContent', { content_name: 'Exit Intent' });
+}
+function closeExit() { document.getElementById('exitOverlay').classList.remove('on'); }
+function submitCustomPrice() {
+  const v = parseFloat(document.getElementById('custPrice').value);
+  if (!v || v < 0.50) { alert('Please enter a valid price per watt (min $0.50).'); return; }
+  state.customPrice = v;
+  closeExit();
+  if (document.querySelector('.screen.active')?.id === 'aerialScreen') goContact('offer');
+}
+</script>
 </body>
 </html>
