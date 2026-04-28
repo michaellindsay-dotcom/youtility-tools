@@ -1,0 +1,810 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="theme-color" content="#667eea">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+
+    <!-- Open Graph / Meta Ads -->
+    <meta property="og:type" content="website">
+    <meta property="og:title" content="Free Solar Analysis - See Your Home's Solar Potential">
+    <meta property="og:description" content="No sales reps. No commissions. See your home's actual solar potential with real numbers.">
+    <meta property="og:image" content="https://YOUR_DOMAIN/solar-preview.jpg">
+
+    <title>Free Solar Analysis - See Your Home's Solar Potential</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            -webkit-tap-highlight-color: transparent;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            min-height: -webkit-fill-available;
+            padding: 20px;
+            overscroll-behavior: none;
+        }
+
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+        }
+
+        .screen {
+            display: none;
+            background: white;
+            border-radius: 20px;
+            padding: 40px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            animation: fadeIn 0.4s ease;
+        }
+
+        .screen.active {
+            display: block;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(20px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        /* Back button */
+        .back-btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            background: none;
+            border: none;
+            color: #667eea;
+            font-size: 0.95rem;
+            font-weight: 600;
+            cursor: pointer;
+            padding: 8px 0;
+            margin-bottom: 20px;
+        }
+
+        .back-btn svg {
+            width: 18px;
+            height: 18px;
+        }
+
+        h1 {
+            color: #1a202c;
+            font-size: 2.2rem;
+            margin-bottom: 16px;
+            text-align: center;
+            line-height: 1.2;
+        }
+
+        h2 {
+            color: #2d3748;
+            font-size: 1.7rem;
+            margin-bottom: 12px;
+            text-align: center;
+            line-height: 1.2;
+        }
+
+        p {
+            color: #4a5568;
+            font-size: 1.05rem;
+            line-height: 1.6;
+            margin-bottom: 20px;
+            text-align: center;
+        }
+
+        .video-container {
+            position: relative;
+            padding-bottom: 56.25%;
+            height: 0;
+            overflow: hidden;
+            border-radius: 12px;
+            margin-bottom: 30px;
+            background: #000;
+        }
+
+        .video-container iframe,
+        .video-container video {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+        }
+
+        .video-placeholder {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-size: 1rem;
+            text-align: center;
+            padding: 20px;
+        }
+
+        .form-group {
+            margin-bottom: 20px;
+        }
+
+        label {
+            display: block;
+            color: #2d3748;
+            font-weight: 600;
+            margin-bottom: 8px;
+            font-size: 0.95rem;
+        }
+
+        input[type="text"],
+        input[type="email"],
+        input[type="tel"] {
+            width: 100%;
+            padding: 15px;
+            border: 2px solid #e2e8f0;
+            border-radius: 10px;
+            font-size: 1rem;
+            transition: border-color 0.3s;
+            -webkit-appearance: none;
+        }
+
+        input:focus {
+            outline: none;
+            border-color: #667eea;
+            box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+        }
+
+        .btn {
+            width: 100%;
+            padding: 18px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            border-radius: 10px;
+            font-size: 1.1rem;
+            font-weight: 700;
+            cursor: pointer;
+            transition: transform 0.15s, box-shadow 0.15s;
+            margin-top: 10px;
+            letter-spacing: 0.3px;
+        }
+
+        .btn:active {
+            transform: scale(0.98);
+        }
+
+        .btn-secondary {
+            background: white;
+            color: #667eea;
+            border: 2px solid #667eea;
+        }
+
+        .aerial-view {
+            width: 100%;
+            height: 420px;
+            border-radius: 12px;
+            margin: 20px 0;
+            background: #f7fafc;
+            overflow: hidden;
+        }
+
+        .aerial-view iframe {
+            width: 100%;
+            height: 100%;
+            border: none;
+        }
+
+        .info-box {
+            background: #edf2f7;
+            border-left: 4px solid #667eea;
+            padding: 18px 20px;
+            border-radius: 8px;
+            margin: 20px 0;
+        }
+
+        .info-box h3 {
+            color: #2d3748;
+            margin-bottom: 8px;
+            font-size: 1rem;
+        }
+
+        .info-box p {
+            color: #4a5568;
+            margin: 0;
+            text-align: left;
+            font-size: 0.95rem;
+        }
+
+        .button-group {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 12px;
+            margin-top: 20px;
+        }
+
+        .features {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 16px;
+            margin: 24px 0;
+        }
+
+        .feature {
+            text-align: center;
+            padding: 16px 8px;
+        }
+
+        .feature-icon {
+            font-size: 2.4rem;
+            margin-bottom: 8px;
+        }
+
+        .feature h3 {
+            color: #2d3748;
+            font-size: 1rem;
+            margin-bottom: 6px;
+        }
+
+        .feature p {
+            color: #4a5568;
+            font-size: 0.85rem;
+            margin: 0;
+        }
+
+        .loading {
+            text-align: center;
+            padding: 50px 20px;
+        }
+
+        .spinner {
+            border: 4px solid #f3f4f6;
+            border-top: 4px solid #667eea;
+            border-radius: 50%;
+            width: 50px;
+            height: 50px;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 24px;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        /* Thank you screen */
+        .thankyou-icon {
+            font-size: 5rem;
+            text-align: center;
+            margin-bottom: 20px;
+        }
+
+        .thankyou-list {
+            list-style: none;
+            margin: 20px 0;
+            text-align: left;
+        }
+
+        .thankyou-list li {
+            padding: 10px 0;
+            border-bottom: 1px solid #e2e8f0;
+            color: #4a5568;
+            font-size: 1rem;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .thankyou-list li:last-child {
+            border-bottom: none;
+        }
+
+        .thankyou-list .check {
+            color: #48bb78;
+            font-size: 1.2rem;
+            flex-shrink: 0;
+        }
+
+        /* Exit intent popup */
+        .exit-popup {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.8);
+            z-index: 9999;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .exit-popup.active {
+            display: flex;
+        }
+
+        .exit-popup-content {
+            background: white;
+            border-radius: 20px;
+            padding: 36px;
+            max-width: 500px;
+            width: calc(100% - 32px);
+            position: relative;
+            animation: slideUp 0.35s ease;
+        }
+
+        @keyframes slideUp {
+            from { opacity: 0; transform: translateY(40px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        .exit-popup-close {
+            position: absolute;
+            top: 12px;
+            right: 12px;
+            background: none;
+            border: none;
+            font-size: 1.8rem;
+            cursor: pointer;
+            color: #718096;
+            width: 40px;
+            height: 40px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 50%;
+        }
+
+        .exit-popup h2 {
+            color: #1a202c;
+            font-size: 1.7rem;
+            margin-bottom: 12px;
+        }
+
+        .exit-popup p {
+            color: #4a5568;
+            font-size: 1rem;
+            margin-bottom: 16px;
+        }
+
+        .price-input-group {
+            margin: 24px 0;
+            background: #f7fafc;
+            padding: 20px;
+            border-radius: 12px;
+        }
+
+        .price-input-group label {
+            font-size: 1rem;
+            color: #2d3748;
+            margin-bottom: 10px;
+        }
+
+        .price-input {
+            width: 100%;
+            padding: 18px;
+            font-size: 2rem;
+            border: 3px solid #667eea;
+            border-radius: 10px;
+            text-align: center;
+            font-weight: bold;
+            color: #1a202c;
+            -webkit-appearance: none;
+        }
+
+        /* Google Places */
+        .pac-container {
+            z-index: 10000;
+            border-radius: 8px;
+            margin-top: 5px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+        }
+
+        .pac-item {
+            padding: 12px 15px;
+            cursor: pointer;
+            font-size: 1rem;
+            border-bottom: 1px solid #e2e8f0;
+        }
+
+        .pac-item:hover { background-color: #f7fafc; }
+        .pac-item-query { font-size: 1rem; color: #2d3748; }
+        .pac-matched { font-weight: 600; color: #667eea; }
+
+        @media (max-width: 600px) {
+            h1 { font-size: 1.7rem; }
+            h2 { font-size: 1.4rem; }
+            .screen { padding: 24px 20px; }
+            .button-group { grid-template-columns: 1fr; }
+            .features { grid-template-columns: repeat(3, 1fr); gap: 8px; }
+            .feature { padding: 12px 4px; }
+            .feature-icon { font-size: 2rem; }
+            .feature h3 { font-size: 0.85rem; }
+            .aerial-view { height: 300px; }
+            body { padding: 12px; }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+
+        <!-- Screen 1: Video Introduction -->
+        <div class="screen active" id="videoScreen">
+            <h1>See Your Home's Solar Potential</h1>
+            <p>No sales reps. No commissions. No hassle.<br>Just the facts, on your time.</p>
+
+            <div class="video-container">
+                <!--
+                    Replace this placeholder with your video embed:
+                    YouTube:  <iframe src="https://www.youtube.com/embed/VIDEO_ID" frameborder="0" allowfullscreen></iframe>
+                    Direct:   <video controls><source src="video.mp4" type="video/mp4"></video>
+                -->
+                <div class="video-placeholder">
+                    <div>
+                        <p style="margin-bottom:14px;font-size:1.05rem;font-weight:700;color:white;">We explain:</p>
+                        <p style="margin-bottom:8px;font-size:0.95rem;color:white;">&#10003; No pushy sales tactics</p>
+                        <p style="margin-bottom:8px;font-size:0.95rem;color:white;">&#10003; Transparent pricing</p>
+                        <p style="margin-bottom:8px;font-size:0.95rem;color:white;">&#10003; Your home's actual potential</p>
+                        <p style="margin-bottom:0;font-size:0.95rem;color:white;">&#10003; Make informed decisions</p>
+                    </div>
+                </div>
+            </div>
+
+            <div class="features">
+                <div class="feature">
+                    <div class="feature-icon">&#127968;</div>
+                    <h3>Your Home</h3>
+                    <p>Aerial imagery of your property</p>
+                </div>
+                <div class="feature">
+                    <div class="feature-icon">&#9728;&#65039;</div>
+                    <h3>Solar Analysis</h3>
+                    <p>Instant solar potential estimate</p>
+                </div>
+                <div class="feature">
+                    <div class="feature-icon">&#128176;</div>
+                    <h3>Real Numbers</h3>
+                    <p>Accurate costs and savings</p>
+                </div>
+            </div>
+
+            <button class="btn" onclick="nextScreen('addressScreen')">Start Your Free Analysis</button>
+        </div>
+
+        <!-- Screen 2: Address Input -->
+        <div class="screen" id="addressScreen">
+            <button class="back-btn" onclick="nextScreen('videoScreen')">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="15 18 9 12 15 6"></polyline></svg>
+                Back
+            </button>
+            <h2>Enter Your Address</h2>
+            <p>We'll pull up your home's aerial view to show your roof's solar potential.</p>
+
+            <form onsubmit="loadAerialView(event)">
+                <div class="form-group">
+                    <label for="address">Street Address</label>
+                    <input type="text" id="address" required placeholder="Start typing your address..." autocomplete="address-line1">
+                </div>
+                <div class="form-group">
+                    <label for="city">City</label>
+                    <input type="text" id="city" required placeholder="Salt Lake City">
+                </div>
+                <div class="form-group">
+                    <label for="state">State</label>
+                    <input type="text" id="state" required placeholder="UT" maxlength="2">
+                </div>
+                <div class="form-group">
+                    <label for="zip">ZIP Code</label>
+                    <input type="text" id="zip" required placeholder="84101" pattern="[0-9]{5}" inputmode="numeric">
+                </div>
+                <button type="submit" class="btn">View My Home</button>
+            </form>
+        </div>
+
+        <!-- Screen 3: Loading -->
+        <div class="screen" id="loadingScreen">
+            <div class="loading">
+                <div class="spinner"></div>
+                <h2>Loading Your Home...</h2>
+                <p>Pulling up aerial imagery of your property</p>
+            </div>
+        </div>
+
+        <!-- Screen 4: Aerial View -->
+        <div class="screen" id="aerialScreen">
+            <button class="back-btn" onclick="nextScreen('addressScreen')">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="15 18 9 12 15 6"></polyline></svg>
+                Back
+            </button>
+            <h2>Your Home</h2>
+            <p id="displayAddress"></p>
+
+            <div class="aerial-view">
+                <iframe id="mapFrame" title="Aerial view of your home"></iframe>
+            </div>
+
+            <div class="info-box">
+                <h3>Ready to Learn More?</h3>
+                <p>Schedule a consultation or get a direct offer based on your home's specifications — no commitment required.</p>
+            </div>
+
+            <div class="button-group">
+                <button class="btn" onclick="nextScreen('contactScreen', 'appointment')">Schedule Appointment</button>
+                <button class="btn btn-secondary" onclick="nextScreen('contactScreen', 'offer')">Get Direct Offer</button>
+            </div>
+        </div>
+
+        <!-- Screen 5: Contact Information -->
+        <div class="screen" id="contactScreen">
+            <button class="back-btn" onclick="nextScreen('aerialScreen')">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="15 18 9 12 15 6"></polyline></svg>
+                Back
+            </button>
+            <h2 id="contactTitle">Just a Few More Details</h2>
+            <p id="contactSubtitle">We'll reach out right away.</p>
+
+            <form onsubmit="submitForm(event)">
+                <div class="form-group">
+                    <label for="name">Full Name</label>
+                    <input type="text" id="name" required placeholder="John Smith" autocomplete="name">
+                </div>
+                <div class="form-group">
+                    <label for="phone">Phone Number</label>
+                    <input type="tel" id="phone" required placeholder="(555) 123-4567" inputmode="tel" autocomplete="tel">
+                </div>
+                <div class="form-group">
+                    <label for="email">Email Address</label>
+                    <input type="email" id="email" required placeholder="john@example.com" autocomplete="email" inputmode="email">
+                </div>
+                <button type="submit" class="btn" id="submitBtn">Continue</button>
+            </form>
+        </div>
+
+        <!-- Screen 6: Submitting -->
+        <div class="screen" id="submittingScreen">
+            <div class="loading">
+                <div class="spinner"></div>
+                <h2>Sending Your Info...</h2>
+                <p>Just a moment</p>
+            </div>
+        </div>
+
+        <!-- Screen 7: Thank You -->
+        <div class="screen" id="thankYouScreen">
+            <div class="thankyou-icon">&#127774;</div>
+            <h2>You're All Set!</h2>
+            <p>We've received your information and will be in touch shortly.</p>
+
+            <ul class="thankyou-list">
+                <li><span class="check">&#10003;</span> Your solar analysis is being prepared</li>
+                <li><span class="check">&#10003;</span> A specialist will contact you within 24 hours</li>
+                <li><span class="check">&#10003;</span> No obligation — just real numbers for your home</li>
+            </ul>
+
+            <p style="font-size: 0.9rem; color: #718096; margin-top: 8px;">Check your email for confirmation details.</p>
+        </div>
+
+    </div>
+
+    <!-- Exit Intent Popup -->
+    <div class="exit-popup" id="exitPopup">
+        <div class="exit-popup-content">
+            <button class="exit-popup-close" onclick="closeExitPopup()" aria-label="Close">&times;</button>
+            <h2>Wait! Name Your Price</h2>
+            <p>Before you go, tell us what price would make solar worth it for you today.</p>
+
+            <div class="price-input-group">
+                <label for="nameYourPrice">Your Target Price Per Watt ($)</label>
+                <input
+                    type="number"
+                    id="nameYourPrice"
+                    class="price-input"
+                    placeholder="2.50"
+                    step="0.01"
+                    min="0.50"
+                    max="5.00"
+                    value="2.50"
+                    inputmode="decimal"
+                >
+            </div>
+
+            <p style="font-size:0.9rem;color:#718096;">Market average: $3.00/W &bull; Our standard: $3.00/W</p>
+
+            <button class="btn" onclick="submitCustomPrice()">Submit My Price</button>
+            <button class="btn btn-secondary" onclick="closeExitPopup()" style="margin-top:10px;">Continue Browsing</button>
+        </div>
+    </div>
+
+    <!-- Google Places Autocomplete — replace YOUR_GOOGLE_PLACES_API_KEY -->
+    <script src="https://maps.googleapis.com/maps/api/js?key=YOUR_GOOGLE_PLACES_API_KEY&libraries=places" async defer></script>
+
+    <script>
+        let userChoice = '';
+        let formData = { address: '', city: '', state: '', zip: '', name: '', phone: '', email: '' };
+
+        let autocomplete;
+        let autocompleteInitialized = false;
+
+        function initAutocomplete() {
+            if (autocompleteInitialized || typeof google === 'undefined') return;
+            const input = document.getElementById('address');
+            if (!input) return;
+            autocomplete = new google.maps.places.Autocomplete(input, {
+                types: ['address'],
+                componentRestrictions: { country: 'us' }
+            });
+            autocomplete.addListener('place_changed', fillInAddress);
+            autocompleteInitialized = true;
+        }
+
+        function fillInAddress() {
+            const place = autocomplete.getPlace();
+            if (!place.address_components) return;
+
+            document.getElementById('address').value = '';
+            document.getElementById('city').value = '';
+            document.getElementById('state').value = '';
+            document.getElementById('zip').value = '';
+
+            let streetNumber = '', route = '';
+            for (const c of place.address_components) {
+                switch (c.types[0]) {
+                    case 'street_number':   streetNumber = c.long_name; break;
+                    case 'route':           route = c.short_name; break;
+                    case 'locality':        document.getElementById('city').value = c.long_name; break;
+                    case 'administrative_area_level_1': document.getElementById('state').value = c.short_name; break;
+                    case 'postal_code':     document.getElementById('zip').value = c.short_name; break;
+                }
+            }
+            document.getElementById('address').value = `${streetNumber} ${route}`.trim();
+        }
+
+        window.addEventListener('load', () => setTimeout(initAutocomplete, 800));
+
+        function nextScreen(screenId, choice = null) {
+            if (choice) userChoice = choice;
+
+            document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+            document.getElementById(screenId).classList.add('active');
+
+            if (screenId === 'addressScreen') setTimeout(initAutocomplete, 100);
+
+            if (screenId === 'contactScreen') {
+                if (userChoice === 'appointment') {
+                    document.getElementById('contactTitle').textContent = 'Schedule Your Appointment';
+                    document.getElementById('contactSubtitle').textContent = 'Enter your info to book your free consultation.';
+                    document.getElementById('submitBtn').textContent = 'Schedule Appointment';
+                } else {
+                    document.getElementById('contactTitle').textContent = 'Get Your Direct Offer';
+                    document.getElementById('contactSubtitle').textContent = 'Enter your info to receive your customized offer.';
+                    document.getElementById('submitBtn').textContent = 'Get My Offer';
+                }
+            }
+
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+        }
+
+        function loadAerialView(event) {
+            event.preventDefault();
+
+            formData.address = document.getElementById('address').value;
+            formData.city    = document.getElementById('city').value;
+            formData.state   = document.getElementById('state').value;
+            formData.zip     = document.getElementById('zip').value;
+
+            const fullAddress = `${formData.address}, ${formData.city}, ${formData.state} ${formData.zip}`;
+            nextScreen('loadingScreen');
+
+            const encoded = encodeURIComponent(fullAddress);
+            document.getElementById('mapFrame').src = `https://maps.google.com/maps?q=${encoded}&t=k&z=19&output=embed`;
+            document.getElementById('displayAddress').textContent = fullAddress;
+
+            setTimeout(() => nextScreen('aerialScreen'), 2000);
+        }
+
+        function submitForm(event) {
+            event.preventDefault();
+
+            formData.name  = document.getElementById('name').value;
+            formData.phone = document.getElementById('phone').value;
+            formData.email = document.getElementById('email').value;
+
+            if (!formData.address || !formData.city || !formData.state || !formData.zip) {
+                alert('Address information is missing. Please go back and enter your address.');
+                return;
+            }
+
+            nextScreen('submittingScreen');
+
+            const fullAddress = `${formData.address}, ${formData.city}, ${formData.state} ${formData.zip}`;
+            const params = new URLSearchParams({
+                name:    formData.name,
+                email:   formData.email,
+                phone:   formData.phone,
+                address: fullAddress
+            });
+
+            if (formData.customPricePerWatt) {
+                params.append('pricePerWatt', formData.customPricePerWatt);
+            }
+
+            const templateId = '69efb1c9049dc35ecf2c701d';
+            const leadSource = '0';
+            const url = `https://www.youtilitycrm.us/api/solar-leads/estimate/${templateId}/${leadSource}?${params.toString()}`;
+
+            // Submit in background; keep user inside the ad experience
+            fetch(url, { method: 'GET', mode: 'no-cors' })
+                .catch(() => {}) // CORS response hidden in no-cors mode — request still fires
+                .finally(() => nextScreen('thankYouScreen'));
+
+            if (typeof fbq !== 'undefined') {
+                fbq('track', 'Lead', { content_name: userChoice === 'appointment' ? 'Appointment' : 'Direct Offer' });
+            }
+        }
+
+        // Exit intent — desktop only (not shown on mobile/WebView)
+        let exitIntentShown = false;
+
+        document.addEventListener('mouseout', (e) => {
+            if (window.innerWidth < 768) return;
+            const current = document.querySelector('.screen.active').id;
+            if ((current === 'aerialScreen' || current === 'contactScreen') && !exitIntentShown && e.clientY <= 0) {
+                showExitPopup();
+            }
+        });
+
+        // Mobile exit intent: swipe down from top edge
+        let touchStartY = 0;
+        document.addEventListener('touchstart', (e) => { touchStartY = e.touches[0].clientY; }, { passive: true });
+        document.addEventListener('touchmove', (e) => {
+            const current = document.querySelector('.screen.active').id;
+            if ((current === 'aerialScreen' || current === 'contactScreen') &&
+                !exitIntentShown && touchStartY < 50 && e.touches[0].clientY > touchStartY + 100) {
+                showExitPopup();
+            }
+        }, { passive: true });
+
+        function showExitPopup() {
+            exitIntentShown = true;
+            document.getElementById('exitPopup').classList.add('active');
+            if (typeof fbq !== 'undefined') fbq('track', 'ViewContent', { content_name: 'Exit Intent - Name Your Price' });
+        }
+
+        function closeExitPopup() {
+            document.getElementById('exitPopup').classList.remove('active');
+        }
+
+        function submitCustomPrice() {
+            const val = parseFloat(document.getElementById('nameYourPrice').value);
+            if (!val || val < 0.50) { alert('Please enter a valid price per watt.'); return; }
+            formData.customPricePerWatt = val;
+            closeExitPopup();
+            if (document.querySelector('.screen.active').id === 'aerialScreen') {
+                userChoice = 'offer';
+                nextScreen('contactScreen');
+            }
+        }
+
+        /*
+         * Meta Pixel — replace YOUR_PIXEL_ID and uncomment:
+         *
+         * !function(f,b,e,v,n,t,s){if(f.fbq)return;n=f.fbq=function(){n.callMethod?
+         * n.callMethod.apply(n,arguments):n.queue.push(arguments)};if(!f._fbq)f._fbq=n;
+         * n.push=n;n.loaded=!0;n.version='2.0';n.queue=[];t=b.createElement(e);t.async=!0;
+         * t.src=v;s=b.getElementsByTagName(e)[0];s.parentNode.insertBefore(t,s)}
+         * (window,document,'script','https://connect.facebook.net/en_US/fbevents.js');
+         * fbq('init','YOUR_PIXEL_ID');
+         * fbq('track','PageView');
+         */
+    </script>
+</body>
+</html>
