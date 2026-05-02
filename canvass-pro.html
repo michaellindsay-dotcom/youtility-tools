@@ -1,0 +1,1219 @@
+<!DOCTYPE html>
+<!--
+  ============================================================================
+  CANVASS PRO — Homeowner Information Lookup (Knockstat)
+  ============================================================================
+  Single-page door-to-door canvassing tool. Enter an address, get every
+  available homeowner / property data field returned by the Knockstat API.
+
+  INTEGRATION NOTES:
+  - Single self-contained HTML file. No build step, no dependencies.
+  - The Knockstat API key is NEVER hardcoded. It is entered at runtime and
+    cached in sessionStorage (cleared when the tab closes).
+  - The actual HTTP call lives in ONE place: `knockstatFetch()` near the
+    bottom of the <script>. Update the URL / headers there once the
+    Knockstat endpoint spec is confirmed. The rest of the UI is driven by
+    a normalized shape produced by `normalizeKnockstatResponse()` so the
+    layout does not need to change when the response shape is finalized.
+  - "Demo data" button populates the UI from a local sample so the layout
+    can be reviewed without a live API call.
+  ============================================================================
+-->
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Canvass Pro — Homeowner Lookup</title>
+<meta name="description" content="Door-to-door canvassing tool: look up complete homeowner and property information by address via the Knockstat API." />
+<meta name="theme-color" content="#0EA5E9" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+<style>
+:root {
+  --bg-0:     #0A0F1A;
+  --bg-1:     #0F1727;
+  --bg-2:     #15203A;
+  --panel:    rgba(255,255,255,0.04);
+  --panel-hi: rgba(255,255,255,0.07);
+  --line:     rgba(255,255,255,0.08);
+  --line-hi:  rgba(255,255,255,0.16);
+  --ink:      #E8EEF8;
+  --ink-mid:  #A8B3C7;
+  --ink-dim:  #6B7589;
+  --accent:   #0EA5E9;
+  --accent-2: #38BDF8;
+  --good:     #34D399;
+  --warn:     #F59E0B;
+  --bad:      #F87171;
+  --radius:   14px;
+  --radius-sm: 10px;
+}
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+html { scroll-behavior: smooth; }
+body {
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  background:
+    radial-gradient(1200px 600px at 80% -10%, rgba(14,165,233,0.18), transparent 60%),
+    radial-gradient(900px 500px at -10% 110%, rgba(56,189,248,0.10), transparent 60%),
+    linear-gradient(180deg, var(--bg-0), var(--bg-1) 60%, var(--bg-2));
+  color: var(--ink);
+  min-height: 100vh;
+  -webkit-font-smoothing: antialiased;
+}
+
+a { color: var(--accent-2); text-decoration: none; }
+a:hover { text-decoration: underline; }
+
+.page { max-width: 1200px; margin: 0 auto; padding: 24px 20px 80px; }
+
+/* ─── Header ─────────────────────────────────────────────────────────────── */
+.topbar {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 16px; flex-wrap: wrap;
+  padding: 16px 20px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  backdrop-filter: blur(8px);
+}
+.brand {
+  display: flex; align-items: center; gap: 12px;
+  font-family: 'Space Grotesk', sans-serif;
+}
+.brand-mark {
+  width: 38px; height: 38px; border-radius: 10px;
+  background: linear-gradient(135deg, var(--accent), var(--accent-2));
+  display: grid; place-items: center;
+  box-shadow: 0 6px 20px rgba(14,165,233,0.35);
+  font-weight: 700; color: #00131F;
+}
+.brand-name { font-size: 18px; font-weight: 700; letter-spacing: 0.2px; }
+.brand-sub { font-size: 12px; color: var(--ink-mid); margin-top: 2px; }
+
+.api-pill {
+  display: inline-flex; align-items: center; gap: 8px;
+  padding: 8px 12px; font-size: 12px;
+  border-radius: 999px;
+  border: 1px solid var(--line-hi);
+  background: rgba(255,255,255,0.03);
+  color: var(--ink-mid);
+  cursor: pointer;
+}
+.api-pill .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--bad); }
+.api-pill.connected .dot { background: var(--good); }
+.api-pill:hover { color: var(--ink); border-color: var(--accent); }
+
+/* ─── Search ─────────────────────────────────────────────────────────────── */
+.search {
+  margin-top: 20px;
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  gap: 10px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 14px;
+}
+.search input[type="text"] {
+  width: 100%;
+  background: rgba(0,0,0,0.25);
+  color: var(--ink);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  padding: 14px 16px;
+  font-size: 16px;
+  font-family: inherit;
+  outline: none;
+  transition: border-color 0.15s;
+}
+.search input[type="text"]:focus { border-color: var(--accent); }
+.btn {
+  font-family: inherit; font-weight: 600; font-size: 14px;
+  padding: 0 18px; min-height: 46px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--line-hi);
+  background: rgba(255,255,255,0.04);
+  color: var(--ink);
+  cursor: pointer;
+  transition: transform 0.05s, background 0.15s, border-color 0.15s;
+  white-space: nowrap;
+}
+.btn:hover { background: rgba(255,255,255,0.08); border-color: var(--accent); }
+.btn:active { transform: translateY(1px); }
+.btn.primary {
+  background: linear-gradient(135deg, var(--accent), var(--accent-2));
+  border-color: transparent;
+  color: #00131F;
+}
+.btn.primary:hover { filter: brightness(1.05); }
+.btn.ghost { background: transparent; }
+.btn[disabled] { opacity: 0.5; cursor: not-allowed; }
+
+@media (max-width: 700px) {
+  .search { grid-template-columns: 1fr; }
+}
+
+/* ─── Status / banner ────────────────────────────────────────────────────── */
+.banner {
+  margin-top: 14px;
+  padding: 12px 14px;
+  border-radius: var(--radius-sm);
+  font-size: 14px;
+  display: none;
+}
+.banner.show { display: block; }
+.banner.info  { background: rgba(56,189,248,0.10); border: 1px solid rgba(56,189,248,0.35); color: #CFF1FF; }
+.banner.warn  { background: rgba(245,158,11,0.10); border: 1px solid rgba(245,158,11,0.35); color: #FFE3B0; }
+.banner.error { background: rgba(248,113,113,0.10); border: 1px solid rgba(248,113,113,0.35); color: #FFD3D3; }
+
+/* ─── Result grid ────────────────────────────────────────────────────────── */
+.result {
+  margin-top: 22px;
+  display: none;
+  grid-template-columns: repeat(12, 1fr);
+  gap: 16px;
+}
+.result.show { display: grid; }
+.card {
+  grid-column: span 6;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 18px;
+  min-width: 0;
+}
+.card.full  { grid-column: span 12; }
+.card.third { grid-column: span 4; }
+@media (max-width: 900px) {
+  .card, .card.full, .card.third { grid-column: span 12; }
+}
+.card h2 {
+  font-family: 'Space Grotesk', sans-serif;
+  font-size: 14px; font-weight: 600;
+  letter-spacing: 0.6px; text-transform: uppercase;
+  color: var(--ink-mid);
+  margin-bottom: 14px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--line);
+  display: flex; align-items: center; gap: 8px;
+}
+.card h2 .badge {
+  font-size: 10px; font-weight: 600;
+  padding: 3px 7px; border-radius: 999px;
+  background: rgba(14,165,233,0.15); color: var(--accent-2);
+  letter-spacing: 0.4px;
+}
+
+/* Address hero card */
+.addr-hero {
+  display: flex; flex-direction: column; gap: 6px;
+}
+.addr-line1 {
+  font-family: 'Space Grotesk', sans-serif;
+  font-size: 28px; font-weight: 700; line-height: 1.2;
+}
+.addr-line2 { color: var(--ink-mid); font-size: 16px; }
+.addr-meta {
+  display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px;
+}
+.chip {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-size: 12px; font-weight: 500;
+  padding: 5px 10px; border-radius: 999px;
+  background: rgba(255,255,255,0.05);
+  border: 1px solid var(--line);
+  color: var(--ink-mid);
+}
+.chip.good { color: #BBF7D0; border-color: rgba(52,211,153,0.35); background: rgba(52,211,153,0.10); }
+.chip.warn { color: #FFE3B0; border-color: rgba(245,158,11,0.35); background: rgba(245,158,11,0.10); }
+.chip.bad  { color: #FECACA; border-color: rgba(248,113,113,0.35); background: rgba(248,113,113,0.10); }
+
+/* Field list */
+dl.fields {
+  display: grid;
+  grid-template-columns: minmax(140px, 38%) 1fr;
+  row-gap: 8px; column-gap: 14px;
+  font-size: 14px;
+}
+dl.fields dt {
+  color: var(--ink-dim);
+  font-weight: 500;
+}
+dl.fields dd {
+  color: var(--ink);
+  font-weight: 500;
+  word-break: break-word;
+}
+dl.fields dd.mono { font-family: 'JetBrains Mono', monospace; font-size: 13px; }
+dl.fields dd.muted { color: var(--ink-dim); font-style: italic; font-weight: 400; }
+
+/* Owner / occupant list (multiple) */
+.person {
+  padding: 12px 0;
+  border-top: 1px dashed var(--line);
+}
+.person:first-child { padding-top: 0; border-top: 0; }
+.person-name { font-weight: 600; font-size: 15px; }
+.person-meta { color: var(--ink-mid); font-size: 13px; margin-top: 2px; }
+.person-contacts { margin-top: 8px; display: flex; flex-wrap: wrap; gap: 6px; }
+.contact-chip {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12px;
+  padding: 4px 8px;
+  border-radius: 6px;
+  background: rgba(14,165,233,0.10);
+  border: 1px solid rgba(14,165,233,0.25);
+  color: var(--accent-2);
+}
+
+/* Skeleton loading */
+.skeleton {
+  background: linear-gradient(90deg, rgba(255,255,255,0.04), rgba(255,255,255,0.10), rgba(255,255,255,0.04));
+  background-size: 200% 100%;
+  animation: shimmer 1.4s infinite linear;
+  border-radius: 6px;
+  color: transparent !important;
+}
+@keyframes shimmer {
+  0%   { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+/* Raw JSON viewer */
+details.raw {
+  margin-top: 18px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 12px 14px;
+}
+details.raw summary {
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--ink-mid);
+  font-weight: 500;
+  list-style: none;
+}
+details.raw summary::-webkit-details-marker { display: none; }
+details.raw summary::before { content: "▸ "; color: var(--accent-2); }
+details.raw[open] summary::before { content: "▾ "; }
+details.raw pre {
+  margin-top: 12px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12px;
+  color: var(--ink-mid);
+  background: rgba(0,0,0,0.35);
+  padding: 14px;
+  border-radius: var(--radius-sm);
+  overflow: auto;
+  max-height: 420px;
+}
+
+/* ─── Modal (API key) ────────────────────────────────────────────────────── */
+.modal-backdrop {
+  position: fixed; inset: 0;
+  background: rgba(5,10,20,0.7);
+  backdrop-filter: blur(6px);
+  display: none; align-items: center; justify-content: center;
+  z-index: 100; padding: 20px;
+}
+.modal-backdrop.show { display: flex; }
+.modal {
+  width: 100%; max-width: 480px;
+  background: linear-gradient(180deg, #15203A, #0F1727);
+  border: 1px solid var(--line-hi);
+  border-radius: var(--radius);
+  padding: 22px;
+}
+.modal h3 {
+  font-family: 'Space Grotesk', sans-serif;
+  font-size: 18px; font-weight: 700; margin-bottom: 6px;
+}
+.modal p { color: var(--ink-mid); font-size: 13px; line-height: 1.55; margin-bottom: 14px; }
+.modal .field-label {
+  display: block; font-size: 12px; color: var(--ink-mid);
+  margin-bottom: 6px; font-weight: 500;
+}
+.modal input {
+  width: 100%;
+  background: rgba(0,0,0,0.30);
+  color: var(--ink);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  padding: 12px 14px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 13px;
+  outline: none;
+}
+.modal input:focus { border-color: var(--accent); }
+.modal .row {
+  display: flex; gap: 10px; margin-top: 16px; justify-content: flex-end;
+}
+.modal .hint {
+  margin-top: 12px; font-size: 12px; color: var(--ink-dim);
+  background: rgba(245,158,11,0.08);
+  border: 1px solid rgba(245,158,11,0.25);
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+}
+
+footer {
+  margin-top: 28px;
+  text-align: center;
+  color: var(--ink-dim);
+  font-size: 12px;
+}
+</style>
+</head>
+<body>
+<div class="page">
+
+  <!-- ─── Header ─────────────────────────────────────────────────────── -->
+  <header class="topbar">
+    <div class="brand">
+      <div class="brand-mark">CP</div>
+      <div>
+        <div class="brand-name">Canvass Pro</div>
+        <div class="brand-sub">Homeowner intel, powered by Knockstat</div>
+      </div>
+    </div>
+    <button id="apiPill" class="api-pill" title="Manage API key">
+      <span class="dot"></span><span id="apiPillLabel">No API key</span>
+    </button>
+  </header>
+
+  <!-- ─── Search bar ─────────────────────────────────────────────────── -->
+  <form id="searchForm" class="search" autocomplete="off">
+    <input
+      id="addressInput"
+      type="text"
+      placeholder="Enter a street address — e.g. 1600 Pennsylvania Ave NW, Washington, DC"
+      aria-label="Address"
+      required
+    />
+    <button id="searchBtn" class="btn primary" type="submit">Look up</button>
+    <button id="demoBtn"   class="btn ghost"   type="button" title="Render the layout with sample data">Demo data</button>
+  </form>
+
+  <!-- ─── Status banner ──────────────────────────────────────────────── -->
+  <div id="banner" class="banner" role="status" aria-live="polite"></div>
+
+  <!-- ─── Results ────────────────────────────────────────────────────── -->
+  <section id="result" class="result" aria-live="polite">
+
+    <!-- Address hero -->
+    <article class="card full" id="card-address">
+      <div class="addr-hero">
+        <div class="addr-line1" id="f-addr1">—</div>
+        <div class="addr-line2" id="f-addr2">—</div>
+        <div class="addr-meta" id="f-addr-chips"></div>
+      </div>
+    </article>
+
+    <!-- Property -->
+    <article class="card" id="card-property">
+      <h2>Property <span class="badge">Physical</span></h2>
+      <dl class="fields" id="f-property"></dl>
+    </article>
+
+    <!-- Valuation -->
+    <article class="card" id="card-valuation">
+      <h2>Valuation &amp; Equity</h2>
+      <dl class="fields" id="f-valuation"></dl>
+    </article>
+
+    <!-- Owners -->
+    <article class="card" id="card-owners">
+      <h2>Owner(s) of Record</h2>
+      <div id="f-owners"></div>
+    </article>
+
+    <!-- Occupants / household -->
+    <article class="card" id="card-occupants">
+      <h2>Occupants &amp; Household</h2>
+      <div id="f-occupants"></div>
+    </article>
+
+    <!-- Mortgage -->
+    <article class="card" id="card-mortgage">
+      <h2>Mortgage</h2>
+      <dl class="fields" id="f-mortgage"></dl>
+    </article>
+
+    <!-- Sale history -->
+    <article class="card" id="card-sales">
+      <h2>Sale &amp; Listing History</h2>
+      <dl class="fields" id="f-sales"></dl>
+    </article>
+
+    <!-- Tax -->
+    <article class="card" id="card-tax">
+      <h2>Tax &amp; Assessment</h2>
+      <dl class="fields" id="f-tax"></dl>
+    </article>
+
+    <!-- Demographics -->
+    <article class="card" id="card-demos">
+      <h2>Neighborhood &amp; Demographics</h2>
+      <dl class="fields" id="f-demos"></dl>
+    </article>
+
+    <!-- Hazards -->
+    <article class="card" id="card-hazards">
+      <h2>Hazards &amp; Risk</h2>
+      <dl class="fields" id="f-hazards"></dl>
+    </article>
+
+    <!-- Identifiers -->
+    <article class="card full" id="card-ids">
+      <h2>Identifiers &amp; Legal</h2>
+      <dl class="fields" id="f-ids"></dl>
+    </article>
+
+    <!-- Raw JSON -->
+    <div class="card full" style="padding:0; background:transparent; border:0;">
+      <details class="raw">
+        <summary>Raw API response</summary>
+        <pre id="rawJson">{}</pre>
+      </details>
+    </div>
+
+  </section>
+
+  <footer>
+    Canvass Pro · API key is stored only in this tab (sessionStorage) and is never sent anywhere except the Knockstat API.
+  </footer>
+</div>
+
+<!-- ─── API key modal ──────────────────────────────────────────────────── -->
+<div id="modal" class="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
+  <div class="modal">
+    <h3 id="modalTitle">Knockstat API key</h3>
+    <p>Paste your Knockstat API key. It is kept in your browser tab only (<code>sessionStorage</code>) and is cleared when you close the tab. It is never written to disk and never sent anywhere except <code>api.knockstat.com</code>.</p>
+    <label class="field-label" for="apiKeyInput">API key</label>
+    <input id="apiKeyInput" type="password" placeholder="op_live_…" autocomplete="off" spellcheck="false" />
+    <div class="row">
+      <button id="apiClearBtn" class="btn ghost"   type="button">Clear</button>
+      <button id="apiCancelBtn" class="btn ghost"  type="button">Cancel</button>
+      <button id="apiSaveBtn"  class="btn primary" type="button">Save</button>
+    </div>
+    <div class="hint">
+      <strong>Heads up:</strong> a key starting with <code>op_live_</code> is a live key. Treat it like a password — anyone who has it can spend against your Knockstat account.
+    </div>
+  </div>
+</div>
+
+<script>
+"use strict";
+
+// ───────────────────────────────────────────────────────────────────────────
+// Configuration
+// ───────────────────────────────────────────────────────────────────────────
+const KNOCKSTAT = {
+  // TODO: confirm these against the official Knockstat docs and adjust if
+  // needed. Everything else in this file is driven by the normalized shape
+  // produced by `normalizeKnockstatResponse()`, so only this block + that
+  // function should ever need to change when the spec is finalized.
+  baseUrl:   "https://api.knockstat.com/v1",
+  endpoint:  "/property",          // GET ?address=...
+  addressParam: "address",
+  authHeader: "Authorization",
+  authScheme: "Bearer ",            // sent as `Bearer op_live_...`
+};
+
+const SS_KEY = "canvasspro.knockstat.apiKey";
+
+// ───────────────────────────────────────────────────────────────────────────
+// DOM helpers
+// ───────────────────────────────────────────────────────────────────────────
+const $  = (sel, root = document) => root.querySelector(sel);
+const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
+
+const els = {
+  apiPill:       $("#apiPill"),
+  apiPillLabel:  $("#apiPillLabel"),
+  modal:         $("#modal"),
+  apiKeyInput:   $("#apiKeyInput"),
+  apiSaveBtn:    $("#apiSaveBtn"),
+  apiCancelBtn:  $("#apiCancelBtn"),
+  apiClearBtn:   $("#apiClearBtn"),
+  searchForm:    $("#searchForm"),
+  addressInput:  $("#addressInput"),
+  searchBtn:     $("#searchBtn"),
+  demoBtn:       $("#demoBtn"),
+  banner:        $("#banner"),
+  result:        $("#result"),
+  rawJson:       $("#rawJson"),
+};
+
+// ───────────────────────────────────────────────────────────────────────────
+// API key management (sessionStorage only — never persisted to disk)
+// ───────────────────────────────────────────────────────────────────────────
+function getApiKey() { return sessionStorage.getItem(SS_KEY) || ""; }
+function setApiKey(k) {
+  if (k) sessionStorage.setItem(SS_KEY, k);
+  else   sessionStorage.removeItem(SS_KEY);
+  refreshApiPill();
+}
+function refreshApiPill() {
+  const k = getApiKey();
+  if (k) {
+    els.apiPill.classList.add("connected");
+    els.apiPillLabel.textContent = "Key: " + k.slice(0, 8) + "…" + k.slice(-4);
+  } else {
+    els.apiPill.classList.remove("connected");
+    els.apiPillLabel.textContent = "Add API key";
+  }
+}
+function openModal() {
+  els.apiKeyInput.value = getApiKey();
+  els.modal.classList.add("show");
+  setTimeout(() => els.apiKeyInput.focus(), 50);
+}
+function closeModal() { els.modal.classList.remove("show"); }
+
+els.apiPill.addEventListener("click", openModal);
+els.apiCancelBtn.addEventListener("click", closeModal);
+els.apiSaveBtn.addEventListener("click", () => {
+  setApiKey(els.apiKeyInput.value.trim());
+  closeModal();
+  banner("API key saved for this tab.", "info");
+});
+els.apiClearBtn.addEventListener("click", () => {
+  setApiKey("");
+  els.apiKeyInput.value = "";
+  banner("API key cleared.", "info");
+});
+els.modal.addEventListener("click", (e) => { if (e.target === els.modal) closeModal(); });
+document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeModal(); });
+
+// ───────────────────────────────────────────────────────────────────────────
+// UI helpers
+// ───────────────────────────────────────────────────────────────────────────
+function banner(msg, kind = "info") {
+  els.banner.className = "banner show " + kind;
+  els.banner.textContent = msg;
+}
+function clearBanner() { els.banner.className = "banner"; els.banner.textContent = ""; }
+
+const fmtCurrency = (n) =>
+  (n == null || n === "") ? null
+  : new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 }).format(Number(n));
+
+const fmtNumber = (n) =>
+  (n == null || n === "") ? null : new Intl.NumberFormat("en-US").format(Number(n));
+
+const fmtDate = (d) => {
+  if (!d) return null;
+  const dt = new Date(d);
+  return isNaN(dt) ? String(d) : dt.toLocaleDateString("en-US", { year: "numeric", month: "short", day: "numeric" });
+};
+
+const fmtPercent = (p) =>
+  (p == null || p === "") ? null : `${Number(p).toFixed(p < 1 ? 2 : 1)}%`;
+
+const yearsAgo = (d) => {
+  if (!d) return null;
+  const dt = new Date(d);
+  if (isNaN(dt)) return null;
+  const years = (Date.now() - dt.getTime()) / (365.25 * 24 * 3600 * 1000);
+  return years < 1 ? "<1 yr ago" : `${years.toFixed(0)} yr ago`;
+};
+
+function renderFields(dl, rows) {
+  dl.innerHTML = "";
+  let any = false;
+  for (const [label, value, opts] of rows) {
+    if (value == null || value === "" || value === "—") continue;
+    any = true;
+    const dt = document.createElement("dt");
+    dt.textContent = label;
+    const dd = document.createElement("dd");
+    if (opts && opts.mono) dd.classList.add("mono");
+    dd.textContent = value;
+    dl.appendChild(dt);
+    dl.appendChild(dd);
+  }
+  if (!any) {
+    const dt = document.createElement("dt");
+    const dd = document.createElement("dd");
+    dd.classList.add("muted");
+    dd.textContent = "No data returned for this section.";
+    dl.appendChild(dt);
+    dl.appendChild(dd);
+  }
+}
+
+function renderPeople(container, people, kind) {
+  container.innerHTML = "";
+  if (!people || !people.length) {
+    container.innerHTML = `<div style="color:var(--ink-dim); font-style:italic; font-size:14px;">No ${kind} data returned.</div>`;
+    return;
+  }
+  for (const p of people) {
+    const wrap = document.createElement("div");
+    wrap.className = "person";
+    const name = document.createElement("div");
+    name.className = "person-name";
+    name.textContent = p.name || "(name withheld)";
+    wrap.appendChild(name);
+
+    const metaBits = [];
+    if (p.role)        metaBits.push(p.role);
+    if (p.entityType)  metaBits.push(p.entityType);
+    if (p.ageRange)    metaBits.push(`age ${p.ageRange}`);
+    if (p.gender)      metaBits.push(p.gender);
+    if (p.maritalStatus) metaBits.push(p.maritalStatus);
+    if (p.lengthOfResidence) metaBits.push(`${p.lengthOfResidence} yrs at address`);
+    if (metaBits.length) {
+      const meta = document.createElement("div");
+      meta.className = "person-meta";
+      meta.textContent = metaBits.join(" · ");
+      wrap.appendChild(meta);
+    }
+
+    const contacts = [];
+    (p.phones || []).forEach((ph) => contacts.push(ph));
+    (p.emails || []).forEach((em) => contacts.push(em));
+    if (p.mailingAddress && p.mailingAddress !== p.address) {
+      contacts.push("Mail: " + p.mailingAddress);
+    }
+    if (contacts.length) {
+      const cwrap = document.createElement("div");
+      cwrap.className = "person-contacts";
+      contacts.forEach((c) => {
+        const chip = document.createElement("span");
+        chip.className = "contact-chip";
+        chip.textContent = c;
+        cwrap.appendChild(chip);
+      });
+      wrap.appendChild(cwrap);
+    }
+
+    container.appendChild(wrap);
+  }
+}
+
+function renderChips(container, chips) {
+  container.innerHTML = "";
+  for (const c of chips) {
+    if (!c || !c.label) continue;
+    const span = document.createElement("span");
+    span.className = "chip" + (c.tone ? " " + c.tone : "");
+    span.textContent = c.label;
+    container.appendChild(span);
+  }
+}
+
+// ───────────────────────────────────────────────────────────────────────────
+// Render the normalized property record
+// ───────────────────────────────────────────────────────────────────────────
+function renderProperty(rec, raw) {
+  els.result.classList.add("show");
+
+  // Address hero
+  $("#f-addr1").textContent = rec.address.line1 || "Unknown address";
+  $("#f-addr2").textContent = [rec.address.city, rec.address.state, rec.address.zip]
+    .filter(Boolean).join(", ");
+
+  const chips = [];
+  if (rec.property.type)             chips.push({ label: rec.property.type });
+  if (rec.property.yearBuilt)        chips.push({ label: `Built ${rec.property.yearBuilt}` });
+  if (rec.ownership.occupancy)       chips.push({
+    label: rec.ownership.occupancy,
+    tone: rec.ownership.occupancy.toLowerCase().includes("owner") ? "good" : "warn",
+  });
+  if (rec.ownership.lengthOfOwnership != null)
+    chips.push({ label: `Owned ${rec.ownership.lengthOfOwnership} yrs` });
+  if (rec.valuation.estimatedValue)
+    chips.push({ label: "Est. " + fmtCurrency(rec.valuation.estimatedValue) });
+  if (rec.hazards.floodZone && rec.hazards.floodZone !== "X")
+    chips.push({ label: `Flood zone ${rec.hazards.floodZone}`, tone: "warn" });
+  renderChips($("#f-addr-chips"), chips);
+
+  // Property
+  renderFields($("#f-property"), [
+    ["Type",            rec.property.type],
+    ["Subtype",         rec.property.subtype],
+    ["Year built",      rec.property.yearBuilt],
+    ["Bedrooms",        rec.property.bedrooms],
+    ["Bathrooms",       rec.property.bathrooms],
+    ["Living area",     rec.property.livingAreaSqft ? fmtNumber(rec.property.livingAreaSqft) + " sqft" : null],
+    ["Lot size",        rec.property.lotSizeSqft   ? fmtNumber(rec.property.lotSizeSqft)   + " sqft" : null],
+    ["Stories",         rec.property.stories],
+    ["Units",           rec.property.units],
+    ["Garage",          rec.property.garage],
+    ["Pool",            rec.property.pool],
+    ["Heating",         rec.property.heating],
+    ["Cooling",         rec.property.cooling],
+    ["Roof",            rec.property.roof],
+    ["Construction",    rec.property.construction],
+    ["Last renovated",  fmtDate(rec.property.lastRenovated)],
+    ["Zoning",          rec.property.zoning],
+    ["HOA",             rec.property.hoa],
+  ]);
+
+  // Valuation
+  renderFields($("#f-valuation"), [
+    ["Estimated value", fmtCurrency(rec.valuation.estimatedValue)],
+    ["Value range",     rec.valuation.estimatedLow && rec.valuation.estimatedHigh
+                          ? `${fmtCurrency(rec.valuation.estimatedLow)} – ${fmtCurrency(rec.valuation.estimatedHigh)}`
+                          : null],
+    ["Confidence",      rec.valuation.confidence],
+    ["Estimated equity",fmtCurrency(rec.valuation.estimatedEquity)],
+    ["Equity %",        fmtPercent(rec.valuation.equityPercent)],
+    ["LTV",             fmtPercent(rec.valuation.loanToValue)],
+    ["$ / sqft",        fmtCurrency(rec.valuation.pricePerSqft)],
+    ["Rent estimate",   rec.valuation.rentEstimate ? fmtCurrency(rec.valuation.rentEstimate) + "/mo" : null],
+    ["As of",           fmtDate(rec.valuation.asOf)],
+  ]);
+
+  // Owners + occupants
+  renderPeople($("#f-owners"),    rec.owners,    "owner");
+  renderPeople($("#f-occupants"), rec.occupants, "occupant");
+
+  // Mortgage
+  renderFields($("#f-mortgage"), [
+    ["Lender",          rec.mortgage.lender],
+    ["Loan type",       rec.mortgage.loanType],
+    ["Original amount", fmtCurrency(rec.mortgage.originalAmount)],
+    ["Current balance", fmtCurrency(rec.mortgage.currentBalance)],
+    ["Interest rate",   fmtPercent(rec.mortgage.interestRate)],
+    ["Term",            rec.mortgage.termYears ? rec.mortgage.termYears + " yrs" : null],
+    ["Origination",     fmtDate(rec.mortgage.originationDate)],
+    ["Maturity",        fmtDate(rec.mortgage.maturityDate)],
+    ["2nd lien",        rec.mortgage.secondLien ? "Yes" : null],
+    ["HELOC",           rec.mortgage.heloc ? "Yes" : null],
+    ["Position",        rec.mortgage.position],
+  ]);
+
+  // Sales / listing
+  renderFields($("#f-sales"), [
+    ["Last sale price", fmtCurrency(rec.sale.lastSalePrice)],
+    ["Last sale date",  fmtDate(rec.sale.lastSaleDate) + (rec.sale.lastSaleDate ? ` (${yearsAgo(rec.sale.lastSaleDate)})` : "")],
+    ["Prior sale",      rec.sale.priorSalePrice && rec.sale.priorSaleDate
+                          ? `${fmtCurrency(rec.sale.priorSalePrice)} on ${fmtDate(rec.sale.priorSaleDate)}` : null],
+    ["MLS status",      rec.listing.status],
+    ["List price",      fmtCurrency(rec.listing.listPrice)],
+    ["Listed on",       fmtDate(rec.listing.listedAt)],
+    ["Days on market",  rec.listing.daysOnMarket],
+    ["Listing agent",   rec.listing.agent],
+    ["Listing brokerage", rec.listing.brokerage],
+  ]);
+
+  // Tax
+  renderFields($("#f-tax"), [
+    ["Assessed value",  fmtCurrency(rec.tax.assessedValue)],
+    ["Land value",      fmtCurrency(rec.tax.landValue)],
+    ["Improvement",     fmtCurrency(rec.tax.improvementValue)],
+    ["Annual tax",      fmtCurrency(rec.tax.annualTax)],
+    ["Tax year",        rec.tax.taxYear],
+    ["Tax rate",        fmtPercent(rec.tax.taxRate)],
+    ["Exemptions",      (rec.tax.exemptions || []).join(", ") || null],
+    ["Delinquent",      rec.tax.delinquent ? "Yes" : null],
+  ]);
+
+  // Demographics
+  renderFields($("#f-demos"), [
+    ["Median income",       fmtCurrency(rec.demographics.medianIncome)],
+    ["Median home value",   fmtCurrency(rec.demographics.medianHomeValue)],
+    ["Owner occupancy %",   fmtPercent(rec.demographics.ownerOccupancyPct)],
+    ["Avg household size",  rec.demographics.avgHouseholdSize],
+    ["Median age",          rec.demographics.medianAge],
+    ["Population",          fmtNumber(rec.demographics.population)],
+    ["Walk score",          rec.demographics.walkScore],
+    ["School district",     rec.demographics.schoolDistrict],
+    ["Elementary",          rec.demographics.elementarySchool],
+    ["Middle",              rec.demographics.middleSchool],
+    ["High",                rec.demographics.highSchool],
+  ]);
+
+  // Hazards
+  renderFields($("#f-hazards"), [
+    ["FEMA flood zone", rec.hazards.floodZone],
+    ["Flood risk",      rec.hazards.floodRisk],
+    ["Wildfire risk",   rec.hazards.fireRisk],
+    ["Earthquake risk", rec.hazards.earthquakeRisk],
+    ["Hail / storm history", rec.hazards.stormHistory],
+    ["Crime index",     rec.hazards.crimeIndex],
+  ]);
+
+  // Identifiers
+  renderFields($("#f-ids"), [
+    ["APN / Parcel #",  rec.ids.apn,         { mono: true }],
+    ["FIPS",            rec.ids.fips,        { mono: true }],
+    ["County",          rec.ids.county],
+    ["Census tract",    rec.ids.censusTract, { mono: true }],
+    ["Subdivision",     rec.ids.subdivision],
+    ["Legal description", rec.ids.legalDescription],
+    ["Latitude",        rec.address.lat,     { mono: true }],
+    ["Longitude",       rec.address.lon,     { mono: true }],
+    ["Knockstat ID",    rec.ids.knockstatId, { mono: true }],
+  ]);
+
+  // Raw JSON
+  els.rawJson.textContent = JSON.stringify(raw, null, 2);
+}
+
+// ───────────────────────────────────────────────────────────────────────────
+// Knockstat API adapter
+//   The HTTP call lives ONLY here. Once the official spec is confirmed,
+//   adjust the URL / headers in KNOCKSTAT and the field paths in
+//   normalizeKnockstatResponse() — the UI does not need to change.
+// ───────────────────────────────────────────────────────────────────────────
+async function knockstatFetch(address) {
+  const apiKey = getApiKey();
+  if (!apiKey) {
+    const err = new Error("API key required");
+    err.code = "NO_KEY";
+    throw err;
+  }
+  const url = new URL(KNOCKSTAT.baseUrl + KNOCKSTAT.endpoint);
+  url.searchParams.set(KNOCKSTAT.addressParam, address);
+  const res = await fetch(url.toString(), {
+    method: "GET",
+    headers: {
+      "Accept": "application/json",
+      [KNOCKSTAT.authHeader]: KNOCKSTAT.authScheme + apiKey,
+    },
+  });
+  if (!res.ok) {
+    let body = "";
+    try { body = await res.text(); } catch (_) {}
+    const err = new Error(`Knockstat ${res.status}: ${res.statusText}${body ? " — " + body.slice(0, 240) : ""}`);
+    err.code = "HTTP_" + res.status;
+    throw err;
+  }
+  return res.json();
+}
+
+// Pluck the first defined value at any of the given dotted paths.
+function pick(obj, ...paths) {
+  for (const p of paths) {
+    const parts = p.split(".");
+    let v = obj;
+    let ok = true;
+    for (const part of parts) {
+      if (v == null) { ok = false; break; }
+      v = v[part];
+    }
+    if (ok && v != null && v !== "") return v;
+  }
+  return null;
+}
+
+// Normalize whatever Knockstat returns into the shape the UI consumes.
+// Field paths are best-guesses based on common property-data API conventions
+// (Estated, ATTOM, RealEstateAPI, etc.) — adjust to match the real response.
+function normalizeKnockstatResponse(raw) {
+  const r = raw && (raw.data || raw.result || raw.property || raw) || {};
+  return {
+    address: {
+      line1: pick(r, "address.line1", "address.street", "address.formatted", "address.full", "address"),
+      city:  pick(r, "address.city"),
+      state: pick(r, "address.state", "address.region"),
+      zip:   pick(r, "address.zip", "address.postalCode", "address.postcode"),
+      lat:   pick(r, "address.latitude", "geo.lat", "location.lat"),
+      lon:   pick(r, "address.longitude", "geo.lng", "location.lon", "location.lng"),
+    },
+    property: {
+      type:           pick(r, "property.type", "propertyType"),
+      subtype:        pick(r, "property.subtype", "propertySubtype"),
+      yearBuilt:      pick(r, "property.yearBuilt", "yearBuilt"),
+      bedrooms:       pick(r, "property.bedrooms", "bedrooms"),
+      bathrooms:      pick(r, "property.bathrooms", "bathrooms"),
+      livingAreaSqft: pick(r, "property.livingAreaSqft", "property.sqft", "buildingSqft", "livingArea"),
+      lotSizeSqft:    pick(r, "property.lotSizeSqft", "lotSqft", "lotSize"),
+      stories:        pick(r, "property.stories", "stories"),
+      units:          pick(r, "property.units", "units"),
+      garage:         pick(r, "property.garage", "garage"),
+      pool:           pick(r, "property.pool", "pool"),
+      heating:        pick(r, "property.heating", "heating"),
+      cooling:        pick(r, "property.cooling", "cooling"),
+      roof:           pick(r, "property.roof", "roofMaterial"),
+      construction:   pick(r, "property.construction", "constructionType"),
+      lastRenovated:  pick(r, "property.lastRenovated", "lastRenovationDate"),
+      zoning:         pick(r, "property.zoning", "zoning"),
+      hoa:            pick(r, "property.hoa", "hoa"),
+    },
+    valuation: {
+      estimatedValue:  pick(r, "valuation.estimatedValue", "estimate.value", "avm.value"),
+      estimatedLow:    pick(r, "valuation.low", "estimate.low", "avm.low"),
+      estimatedHigh:   pick(r, "valuation.high", "estimate.high", "avm.high"),
+      confidence:      pick(r, "valuation.confidence", "estimate.confidence", "avm.confidence"),
+      estimatedEquity: pick(r, "valuation.equity", "equity.amount"),
+      equityPercent:   pick(r, "valuation.equityPercent", "equity.percent"),
+      loanToValue:     pick(r, "valuation.ltv", "equity.ltv"),
+      pricePerSqft:    pick(r, "valuation.pricePerSqft", "estimate.pricePerSqft"),
+      rentEstimate:    pick(r, "valuation.rentEstimate", "rent.estimate"),
+      asOf:            pick(r, "valuation.asOf", "estimate.asOf"),
+    },
+    ownership: {
+      occupancy:          pick(r, "ownership.occupancy", "ownerOccupied")
+                             === true ? "Owner-occupied"
+                          : pick(r, "ownership.occupancy", "ownerOccupied")
+                             === false ? "Absentee owner"
+                          : pick(r, "ownership.occupancy"),
+      lengthOfOwnership:  pick(r, "ownership.lengthYears", "ownership.yearsOwned"),
+    },
+    owners:    normalizePeople(pick(r, "owners", "ownership.owners") || [], "Owner"),
+    occupants: normalizePeople(pick(r, "occupants", "household.members", "residents") || [], "Occupant"),
+    mortgage: (() => {
+      const m = pick(r, "mortgage", "mortgages.0", "loans.0") || {};
+      return {
+        lender:          pick(m, "lender", "lenderName"),
+        loanType:        pick(m, "loanType", "type"),
+        originalAmount:  pick(m, "originalAmount", "amount"),
+        currentBalance:  pick(m, "currentBalance", "balance"),
+        interestRate:    pick(m, "interestRate", "rate"),
+        termYears:       pick(m, "termYears", "term"),
+        originationDate: pick(m, "originationDate", "originated"),
+        maturityDate:    pick(m, "maturityDate", "matures"),
+        secondLien:      pick(m, "secondLien"),
+        heloc:           pick(m, "heloc"),
+        position:        pick(m, "position"),
+      };
+    })(),
+    sale: {
+      lastSalePrice:  pick(r, "sale.lastPrice", "lastSale.price", "sales.0.price"),
+      lastSaleDate:   pick(r, "sale.lastDate",  "lastSale.date",  "sales.0.date"),
+      priorSalePrice: pick(r, "sale.priorPrice", "sales.1.price"),
+      priorSaleDate:  pick(r, "sale.priorDate",  "sales.1.date"),
+    },
+    listing: {
+      status:       pick(r, "listing.status", "mls.status"),
+      listPrice:    pick(r, "listing.price",  "mls.listPrice"),
+      listedAt:     pick(r, "listing.listedAt", "mls.listDate"),
+      daysOnMarket: pick(r, "listing.daysOnMarket", "mls.dom"),
+      agent:        pick(r, "listing.agent", "mls.agent"),
+      brokerage:    pick(r, "listing.brokerage", "mls.brokerage"),
+    },
+    tax: {
+      assessedValue:    pick(r, "tax.assessedValue", "assessment.total"),
+      landValue:        pick(r, "tax.landValue", "assessment.land"),
+      improvementValue: pick(r, "tax.improvementValue", "assessment.improvement"),
+      annualTax:        pick(r, "tax.annual", "tax.amount"),
+      taxYear:          pick(r, "tax.year", "assessment.year"),
+      taxRate:          pick(r, "tax.rate"),
+      exemptions:       pick(r, "tax.exemptions"),
+      delinquent:       pick(r, "tax.delinquent"),
+    },
+    demographics: {
+      medianIncome:      pick(r, "demographics.medianIncome", "neighborhood.medianIncome"),
+      medianHomeValue:   pick(r, "demographics.medianHomeValue", "neighborhood.medianHomeValue"),
+      ownerOccupancyPct: pick(r, "demographics.ownerOccupancyPct", "neighborhood.ownerOccupancyPct"),
+      avgHouseholdSize:  pick(r, "demographics.avgHouseholdSize"),
+      medianAge:         pick(r, "demographics.medianAge"),
+      population:        pick(r, "demographics.population"),
+      walkScore:         pick(r, "demographics.walkScore"),
+      schoolDistrict:    pick(r, "schools.district"),
+      elementarySchool:  pick(r, "schools.elementary"),
+      middleSchool:      pick(r, "schools.middle"),
+      highSchool:        pick(r, "schools.high"),
+    },
+    hazards: {
+      floodZone:      pick(r, "hazards.floodZone", "flood.zone"),
+      floodRisk:      pick(r, "hazards.floodRisk", "flood.risk"),
+      fireRisk:       pick(r, "hazards.fireRisk",  "wildfire.risk"),
+      earthquakeRisk: pick(r, "hazards.earthquakeRisk", "earthquake.risk"),
+      stormHistory:   pick(r, "hazards.stormHistory"),
+      crimeIndex:     pick(r, "hazards.crimeIndex", "crime.index"),
+    },
+    ids: {
+      apn:              pick(r, "ids.apn", "parcel.apn", "apn"),
+      fips:             pick(r, "ids.fips", "parcel.fips", "fips"),
+      county:           pick(r, "ids.county", "parcel.county"),
+      censusTract:      pick(r, "ids.censusTract", "census.tract"),
+      subdivision:      pick(r, "ids.subdivision", "parcel.subdivision"),
+      legalDescription: pick(r, "ids.legalDescription", "parcel.legalDescription"),
+      knockstatId:      pick(r, "id", "knockstatId"),
+    },
+  };
+}
+
+function normalizePeople(arr, defaultRole) {
+  if (!Array.isArray(arr)) return [];
+  return arr.map((p) => ({
+    name:               pick(p, "name", "fullName") || [pick(p, "firstName"), pick(p, "lastName")].filter(Boolean).join(" "),
+    role:               pick(p, "role") || defaultRole,
+    entityType:         pick(p, "entityType", "ownerType"),
+    ageRange:           pick(p, "ageRange", "age"),
+    gender:             pick(p, "gender"),
+    maritalStatus:      pick(p, "maritalStatus"),
+    lengthOfResidence:  pick(p, "lengthOfResidence", "yearsAtAddress"),
+    phones:             arrayify(pick(p, "phones", "phone")),
+    emails:             arrayify(pick(p, "emails", "email")),
+    mailingAddress:     pick(p, "mailingAddress", "mailing"),
+    address:            pick(p, "address"),
+  }));
+}
+function arrayify(v) {
+  if (v == null) return [];
+  if (Array.isArray(v)) return v.map((x) => typeof x === "string" ? x : (x.number || x.address || x.value || JSON.stringify(x)));
+  return [v];
+}
+
+// ───────────────────────────────────────────────────────────────────────────
+// Search submit
+// ───────────────────────────────────────────────────────────────────────────
+els.searchForm.addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const address = els.addressInput.value.trim();
+  if (!address) return;
+
+  if (!getApiKey()) {
+    banner("Add your Knockstat API key first (top right).", "warn");
+    openModal();
+    return;
+  }
+
+  els.searchBtn.disabled = true;
+  els.searchBtn.textContent = "Looking up…";
+  clearBanner();
+
+  try {
+    const raw = await knockstatFetch(address);
+    const rec = normalizeKnockstatResponse(raw);
+    renderProperty(rec, raw);
+    banner(`Loaded data for "${address}".`, "info");
+  } catch (err) {
+    console.error(err);
+    if (err.code === "HTTP_401" || err.code === "HTTP_403") {
+      banner("Knockstat rejected the API key. Open the key panel to update it.", "error");
+    } else if (err.code === "HTTP_404") {
+      banner("No property found for that address.", "warn");
+    } else if (err.code && err.code.startsWith("HTTP_")) {
+      banner(err.message, "error");
+    } else {
+      banner("Request failed: " + err.message, "error");
+    }
+  } finally {
+    els.searchBtn.disabled = false;
+    els.searchBtn.textContent = "Look up";
+  }
+});
+
+// ───────────────────────────────────────────────────────────────────────────
+// Demo data
+// ───────────────────────────────────────────────────────────────────────────
+els.demoBtn.addEventListener("click", () => {
+  const sample = {
+    id: "ks_01H8X3Q2ZK2J3M4N5P6QR7S8TU",
+    address: {
+      line1: "742 Evergreen Terrace",
+      city:  "Springfield",
+      state: "IL",
+      zip:   "62704",
+      latitude:  39.7817,
+      longitude: -89.6501,
+    },
+    property: {
+      type: "Single Family",
+      subtype: "Detached",
+      yearBuilt: 1989,
+      bedrooms: 4,
+      bathrooms: 2.5,
+      livingAreaSqft: 2480,
+      lotSizeSqft: 8712,
+      stories: 2,
+      units: 1,
+      garage: "2-car attached",
+      pool: "No",
+      heating: "Forced air, gas",
+      cooling: "Central A/C",
+      roof: "Asphalt shingle",
+      construction: "Wood frame",
+      zoning: "R-1",
+      hoa: "None",
+    },
+    valuation: {
+      estimatedValue: 412500,
+      low: 398000, high: 431000,
+      confidence: "High (92%)",
+      equity: 188300, equityPercent: 45.6, ltv: 54.4,
+      pricePerSqft: 166,
+      rentEstimate: 2350,
+      asOf: "2026-04-15",
+    },
+    ownership: { occupancy: "Owner-occupied", lengthYears: 11 },
+    owners: [
+      {
+        firstName: "Homer", lastName: "Simpson",
+        entityType: "Individual", ageRange: "60-65", gender: "M",
+        maritalStatus: "Married", lengthOfResidence: 11,
+        phones: ["+1-555-0142"], emails: ["homer@example.com"],
+      },
+      {
+        firstName: "Marge", lastName: "Simpson",
+        entityType: "Individual", ageRange: "55-60", gender: "F",
+        maritalStatus: "Married", lengthOfResidence: 11,
+        phones: ["+1-555-0143"],
+      },
+    ],
+    occupants: [
+      { firstName: "Bart",   lastName: "Simpson", ageRange: "20-25", gender: "M" },
+      { firstName: "Lisa",   lastName: "Simpson", ageRange: "18-22", gender: "F" },
+      { firstName: "Maggie", lastName: "Simpson", ageRange: "10-15", gender: "F" },
+    ],
+    mortgage: {
+      lender: "First Springfield Savings",
+      loanType: "Conventional 30-yr fixed",
+      originalAmount: 285000,
+      currentBalance: 224200,
+      interestRate: 4.125,
+      termYears: 30,
+      originationDate: "2015-06-12",
+      maturityDate: "2045-06-12",
+      position: "1st",
+    },
+    sale: {
+      lastPrice: 298000, lastDate: "2015-06-08",
+      priorPrice: 215000, priorDate: "2003-09-22",
+    },
+    listing: { status: "Off-market" },
+    tax: {
+      assessedValue: 372000, landValue: 78000, improvementValue: 294000,
+      annual: 6840, year: 2025, rate: 1.84,
+      exemptions: ["Homestead"], delinquent: false,
+    },
+    demographics: {
+      medianIncome: 68450, medianHomeValue: 245000,
+      ownerOccupancyPct: 71.3, avgHouseholdSize: 2.4, medianAge: 38,
+      population: 116250, walkScore: 42,
+    },
+    schools: {
+      district: "Springfield Unified",
+      elementary: "Springfield Elementary",
+      middle: "Springfield Middle",
+      high: "Springfield High",
+    },
+    hazards: {
+      floodZone: "X", floodRisk: "Minimal",
+      fireRisk: "Low", earthquakeRisk: "Very low",
+      stormHistory: "3 hail events since 2018",
+      crimeIndex: "Below national average",
+    },
+    ids: {
+      apn: "13-22-401-018", fips: "17167",
+      county: "Sangamon", censusTract: "0017.02",
+      subdivision: "Evergreen Heights",
+      legalDescription: "LOT 18 EVERGREEN HEIGHTS UNIT 2",
+    },
+  };
+  els.addressInput.value = "742 Evergreen Terrace, Springfield, IL 62704";
+  renderProperty(normalizeKnockstatResponse(sample), sample);
+  banner("Showing local demo data — no API call was made.", "info");
+});
+
+// ───────────────────────────────────────────────────────────────────────────
+// Init
+// ───────────────────────────────────────────────────────────────────────────
+refreshApiPill();
+if (!getApiKey()) {
+  banner("Add your Knockstat API key (top right) to start looking up addresses, or click \"Demo data\" to preview the layout.", "info");
+}
+</script>
+</body>
+</html>
