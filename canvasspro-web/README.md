@@ -1,4 +1,4 @@
-# Canvass Pro — Web + iOS + Android
+# YoutilityKnock — Web + iOS + Android
 
 Multi-tenant door-to-door canvassing platform built on **React + Vite +
 TypeScript**, backed by **Firebase** (Auth, Firestore, Hosting, Cloud

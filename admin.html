@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!--
   ============================================================================
-  CANVASS PRO — ADMIN CONSOLE
+  YOUTILITYKNOCK — ADMIN CONSOLE
   ============================================================================
   Back-office for managing tenants (companies) and their user accounts.
   This is the ONLY place user accounts are managed — the field app does not
@@ -15,14 +15,14 @@
   client-side writes to companies/ and users/.
 
   SETUP: paste your Firebase web config into FIREBASE_CONFIG below (same values
-  as canvasspro-web/.env). These are public client identifiers.
+  as the field app's .env). These are public client identifiers.
   ============================================================================
 -->
 <html lang="en">
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>Canvass Pro · Admin Console</title>
+<title>YoutilityKnock · Admin Console</title>
 <meta name="theme-color" content="#0EA5E9" />
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -110,8 +110,8 @@
 <div id="loginScreen" class="auth-wrap">
   <div class="auth-card">
     <div class="brand" style="justify-content:center; margin-bottom:18px;">
-      <div class="brand-mark">CP</div>
-      <div><div class="brand-name">Admin Console</div><div class="brand-sub">Canvass Pro back-office</div></div>
+      <div class="brand-mark">YK</div>
+      <div><div class="brand-name">Admin Console</div><div class="brand-sub">YoutilityKnock back-office</div></div>
     </div>
     <div class="card" style="margin-top:0;">
       <div class="field"><span>Email</span><input id="loginEmail" type="email" autocomplete="email" /></div>
@@ -127,7 +127,7 @@
 <div id="console" class="page hidden">
   <header class="topbar">
     <div class="brand">
-      <div class="brand-mark">CP</div>
+      <div class="brand-mark">YK</div>
       <div><div class="brand-name">Admin Console</div><div class="brand-sub">Companies & accounts</div></div>
     </div>
     <div class="who">
@@ -192,9 +192,9 @@
 // ── Firebase config — paste your web config here (same as canvasspro-web/.env) ──
 const FIREBASE_CONFIG = {
   apiKey: "REPLACE_ME",
-  authDomain: "canvasspro-web.firebaseapp.com",
-  projectId: "canvasspro-web",
-  storageBucket: "canvasspro-web.appspot.com",
+  authDomain: "youtilityknock.firebaseapp.com",
+  projectId: "youtilityknock",
+  storageBucket: "youtilityknock.appspot.com",
   messagingSenderId: "REPLACE_ME",
   appId: "REPLACE_ME",
 };

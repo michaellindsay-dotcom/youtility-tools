@@ -1,8 +1,8 @@
 {
-  "name": "canvasspro-functions",
+  "name": "youtilityknock-functions",
   "version": "0.1.0",
   "private": true,
-  "description": "Cloud Functions for Canvass Pro: Knockstat proxy + role management.",
+  "description": "Cloud Functions for YoutilityKnock: Knockstat proxy + company/account management.",
   "main": "lib/index.js",
   "engines": {
     "node": "20"

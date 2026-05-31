@@ -1,9 +1,9 @@
 {
-  "name": "canvasspro-web",
+  "name": "youtilityknock-web",
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Canvass Pro — door-to-door canvassing dashboard (web + iOS + Android) on Firebase.",
+  "description": "YoutilityKnock — door-to-door canvassing dashboard (web + iOS + Android) on Firebase.",
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",

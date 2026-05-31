@@ -46,8 +46,8 @@ export default function Login() {
     <div className="auth-wrap">
       <div className="auth-card">
         <div className="brand center">
-          <div className="brand-mark lg">CP</div>
-          <div className="brand-name lg">Canvass Pro</div>
+          <div className="brand-mark lg">YK</div>
+          <div className="brand-name lg">YoutilityKnock</div>
           <div className="brand-sub">Homeowner intel for the field</div>
         </div>
 
