@@ -31,6 +31,28 @@ codebase everywhere.
 The in-app experience is field-only (Dashboard, Lookup, Leads, Territories,
 Settings). User/company management is intentionally **not** in the app.
 
+### Roles, hierarchy & downstream visibility
+
+- **Per-company roles** (`companies/{id}/roles`) are **titles on a base tier**
+  (`manager` | `user`). Every company is seeded with **Manager** and **User**;
+  company admins add custom titles and order them by `rank`.
+- **Teams + reporting tree:** each user has `managerId` + `managerPath`
+  (ancestors). Leads carry a denormalized `visibilityPath = [owner, ...managers]`.
+- **Downstream-only visibility:** a manager sees only their reports and below —
+  enforced in `firestore.rules` via `array-contains` on `visibilityPath`
+  (leads/shifts) and `managerPath` (users/stats), not just in the UI. Company
+  admins see the whole company; super-admins see everything.
+- Hierarchy is maintained server-side: `assignUserHierarchy` rebuilds
+  `managerPath` + lead `visibilityPath` after any reorg.
+
+### Super-admin "mirror" (impersonation)
+
+From `admin.html`, a super-admin can **Mirror** any user — `impersonate`
+returns a custom token, opened at `/app/#imp=<token>`. The app runs that session
+on a separate in-memory Firebase instance (so the operator's own session isn't
+clobbered), shows a mirror banner, and writes an `impersonationLogs` audit
+record. This is full act-as.
+
 ## Layout
 
 ```

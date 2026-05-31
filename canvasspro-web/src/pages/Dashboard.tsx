@@ -30,10 +30,13 @@ export default function Dashboard() {
     (async () => {
       try {
         const leads = collection(db, "leads");
-        // Always scope to the caller's company; reps further to their own leads.
+        // Company admins see the whole company; everyone else only their
+        // downstream (visibilityPath contains their uid).
         const scope = [
           where("companyId", "==", companyId),
-          ...(role === "rep" ? [where("assignedTo", "==", profile.uid)] : []),
+          ...(role === "admin"
+            ? []
+            : [where("visibilityPath", "array-contains", profile.uid)]),
         ];
         const totalSnap = await getCountFromServer(query(leads, ...scope));
         const statuses: LeadStatus[] = [
@@ -72,7 +75,7 @@ export default function Dashboard() {
       <div className="page-head">
         <h1>Welcome back{profile?.displayName ? `, ${profile.displayName.split(" ")[0]}` : ""}</h1>
         <p className="page-sub">
-          {role === "rep" ? "Your" : "Team"} canvassing activity at a glance.
+          {role === "user" ? "Your" : "Team"} canvassing activity at a glance.
         </p>
       </div>
 

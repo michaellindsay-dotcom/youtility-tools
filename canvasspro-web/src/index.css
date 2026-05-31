@@ -288,6 +288,28 @@ a {
   text-align: center;
 }
 
+/* ── Mirror (impersonation) banner ───────────────────────── */
+.mirror-bar {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 60;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  background: linear-gradient(90deg, #f59e0b, #fbbf24);
+  color: #3a2600;
+  font-weight: 600;
+  font-size: 13px;
+  padding: 7px 16px;
+}
+.mirror-bar .btn {
+  color: #3a2600;
+  border-color: rgba(58, 38, 0, 0.3);
+}
+
 /* ── Topbar ──────────────────────────────────────────────── */
 .topbar {
   display: flex;

@@ -1,70 +1,101 @@
 rules_version = '2';
+// ============================================================================
+// YoutilityKnock — multi-tenant rules with per-company role hierarchy and
+// DOWNSTREAM-only visibility.
+//
+// Access tiers: superadmin > admin (company) > manager > user.
+//   • superadmin = platform operator (custom claim superAdmin:true). Sees and
+//     acts across every company (this is what powers super-admin "mirror").
+//   • admin      = company admin; full access within their own company.
+//   • manager    = sees only their DOWNSTREAM (their reports and below), via
+//                  membership in a doc's managerPath / visibilityPath.
+//   • user       = leaf; sees only their own records.
+//
+// Custom company roles (companies/{id}/roles) are TITLES mapped onto a base
+// tier (manager|user); they never grant admin/superadmin.
+// ============================================================================
 service cloud.firestore {
   match /databases/{database}/documents {
 
     // ── helpers ──────────────────────────────────────────────────────────
-    function isSignedIn() {
-      return request.auth != null;
-    }
-    // Platform operator (manages every company). Set via the `superAdmin`
-    // custom claim by a Cloud Function / one-time bootstrap.
-    function isSuper() {
-      return isSignedIn() && request.auth.token.superAdmin == true;
-    }
-    function me() {
-      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
-    }
-    function myCompany() {
-      return isSignedIn() ? me().companyId : null;
-    }
-    function myRole() {
-      return isSignedIn() ? me().role : 'none';
-    }
-    function isCompanyAdmin() {
-      return myRole() == 'admin';
-    }
-    function isManagerOrAdmin() {
-      return myRole() == 'admin' || myRole() == 'manager';
-    }
-    // True when the doc belongs to the caller's company (or caller is super).
-    function inMyCompany(companyId) {
-      return isSuper() || (isSignedIn() && companyId == myCompany());
-    }
+    function isSignedIn() { return request.auth != null; }
+    function isSuper()    { return isSignedIn() && request.auth.token.superAdmin == true; }
+    function me()         { return get(/databases/$(database)/documents/users/$(request.auth.uid)).data; }
+    function myCompany()  { return isSignedIn() ? me().companyId : null; }
+    function myRole()     { return isSignedIn() ? me().role : 'none'; }
+    function isCompanyAdmin()  { return myRole() == 'admin'; }
+    function isManagerOrAdmin() { return myRole() == 'admin' || myRole() == 'manager'; }
+    function inMyCompany(cid) { return isSuper() || (isSignedIn() && cid == myCompany()); }
+    // Caller can see a record whose owner-chain is `path` (owner + ancestors).
+    function inPath(path) { return isSignedIn() && (request.auth.uid in path); }
 
-    // ── companies (tenants) ──────────────────────────────────────────────
-    // Created / edited only by the platform operator via Cloud Functions.
-    // Members may read their own company record.
+    // ── companies (tenants) + per-company roles & teams ──────────────────
     match /companies/{companyId} {
       allow read: if isSuper() || (isSignedIn() && companyId == myCompany());
-      allow write: if false; // server-side only (admin SDK)
+      allow write: if false; // server-side only (Cloud Functions)
+
+      // Role catalog + teams: any company member may read (to render titles /
+      // team names); only Cloud Functions (company admin / super) may write.
+      match /roles/{roleId} {
+        allow read: if inMyCompany(companyId);
+        allow write: if false;
+      }
+      match /teams/{teamId} {
+        allow read: if inMyCompany(companyId);
+        allow write: if false;
+      }
     }
 
-    // ── users (accounts) ─────────────────────────────────────────────────
-    // Readable by teammates in the same company (and super). All mutations
-    // (create / role / company / disable) go through Cloud Functions, never
-    // the client — that's how the HTML admin console manages accounts.
+    // ── users (accounts + hierarchy) ─────────────────────────────────────
+    // Own doc always; company admins see the whole company; managers see only
+    // their downstream (their uid in the target's managerPath). All writes go
+    // through Cloud Functions.
     match /users/{userId} {
       allow read: if isSuper()
                   || (isSignedIn() && request.auth.uid == userId)
-                  || (isSignedIn() && resource.data.companyId == myCompany());
-      allow write: if false; // server-side only (admin SDK)
+                  || (isSignedIn() && resource.data.companyId == myCompany()
+                      && (isCompanyAdmin() || request.auth.uid in resource.data.managerPath));
+      allow write: if false; // server-side only (Cloud Functions)
     }
 
-    // ── leads ────────────────────────────────────────────────────────────
+    // ── leads (downstream-scoped) ────────────────────────────────────────
     match /leads/{leadId} {
       allow read: if inMyCompany(resource.data.companyId)
-                  && (isSuper() || isManagerOrAdmin()
-                      || resource.data.assignedTo == request.auth.uid);
+                  && (isSuper() || isCompanyAdmin() || inPath(resource.data.visibilityPath));
       allow create: if isSignedIn()
                     && request.resource.data.companyId == myCompany()
-                    && request.resource.data.createdBy == request.auth.uid;
+                    && request.resource.data.createdBy == request.auth.uid
+                    && request.auth.uid in request.resource.data.visibilityPath;
       allow update: if inMyCompany(resource.data.companyId)
-                    && (isManagerOrAdmin() || resource.data.assignedTo == request.auth.uid)
+                    && (isSuper() || isCompanyAdmin() || inPath(resource.data.visibilityPath))
                     && request.resource.data.companyId == resource.data.companyId;
-      allow delete: if inMyCompany(resource.data.companyId) && isManagerOrAdmin();
+      allow delete: if inMyCompany(resource.data.companyId)
+                    && (isSuper() || isCompanyAdmin()
+                        || (isManagerOrAdmin() && inPath(resource.data.visibilityPath)));
     }
 
-    // ── territories ──────────────────────────────────────────────────────
+    // ── shifts (downstream-scoped, same visibilityPath pattern) ──────────
+    match /shifts/{shiftId} {
+      allow read: if inMyCompany(resource.data.companyId)
+                  && (isSuper() || isCompanyAdmin() || inPath(resource.data.visibilityPath));
+      allow create: if isSignedIn()
+                    && request.resource.data.companyId == myCompany()
+                    && request.auth.uid in request.resource.data.visibilityPath;
+      allow update, delete: if inMyCompany(resource.data.companyId)
+                    && (isSuper() || isCompanyAdmin() || inPath(resource.data.visibilityPath));
+    }
+
+    // ── user stats (downstream-scoped via managerPath) ───────────────────
+    match /userStats/{userId} {
+      allow read: if isSuper()
+                  || (isSignedIn() && request.auth.uid == userId)
+                  || (isSignedIn() && resource.data.companyId == myCompany()
+                      && (isCompanyAdmin() || request.auth.uid in resource.data.managerPath));
+      allow write: if isSignedIn()
+                   && (request.auth.uid == userId || isSuper());
+    }
+
+    // ── territories (company-wide) ───────────────────────────────────────
     match /territories/{territoryId} {
       allow read: if inMyCompany(resource.data.companyId);
       allow create: if isSignedIn()
@@ -73,14 +104,20 @@ service cloud.firestore {
       allow update, delete: if inMyCompany(resource.data.companyId) && isManagerOrAdmin();
     }
 
-    // ── lookups (audit log) ──────────────────────────────────────────────
+    // ── lookups (audit) ──────────────────────────────────────────────────
     match /lookups/{lookupId} {
       allow read: if inMyCompany(resource.data.companyId)
-                  && (isManagerOrAdmin() || resource.data.userId == request.auth.uid);
+                  && (isSuper() || isManagerOrAdmin() || resource.data.userId == request.auth.uid);
       allow create: if isSignedIn()
                     && request.resource.data.companyId == myCompany()
                     && request.resource.data.userId == request.auth.uid;
       allow update, delete: if isSuper();
+    }
+
+    // ── impersonation audit log (super-admin mirror) ─────────────────────
+    match /impersonationLogs/{logId} {
+      allow read: if isSuper();
+      allow write: if false; // written by Cloud Functions only
     }
   }
 }

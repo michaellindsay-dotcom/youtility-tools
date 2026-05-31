@@ -162,6 +162,52 @@
     </table>
   </section>
 
+  <!-- Roles (titles on a base tier) -->
+  <section id="rolesCard" class="card hidden">
+    <h2><span id="rolesTitle">Roles &amp; titles</span>
+      <button id="newRoleBtn" class="btn primary sm">+ New role</button>
+    </h2>
+    <p class="muted small" style="margin:-6px 0 12px;">Every company starts with <strong>Manager</strong> and <strong>User</strong>. Add custom titles mapped to a base tier; rank orders the hierarchy (higher = more senior).</p>
+    <div id="roleForm" class="hidden" style="margin-bottom:16px;">
+      <div class="grid-2">
+        <div class="field"><span>Title *</span><input id="roleTitle" placeholder="e.g. Regional Director" /></div>
+        <div class="field"><span>Base tier</span>
+          <select id="roleTier"><option value="manager">Manager (sees downstream)</option><option value="user">User (leaf)</option></select>
+        </div>
+        <div class="field"><span>Rank (1–999)</span><input id="roleRank" type="number" value="50" min="1" max="999" /></div>
+      </div>
+      <div class="row" style="justify-content:flex-end;">
+        <button id="roleCancel" class="btn ghost sm">Cancel</button>
+        <button id="roleSave" class="btn primary sm">Create role</button>
+      </div>
+    </div>
+    <table>
+      <thead><tr><th>Title</th><th>Base tier</th><th>Rank</th><th></th></tr></thead>
+      <tbody id="rolesBody"><tr><td colspan="4" class="muted">Select a company…</td></tr></tbody>
+    </table>
+  </section>
+
+  <!-- Teams -->
+  <section id="teamsCard" class="card hidden">
+    <h2><span id="teamsTitle">Teams</span>
+      <button id="newTeamBtn" class="btn primary sm">+ New team</button>
+    </h2>
+    <div id="teamForm" class="hidden" style="margin-bottom:16px;">
+      <div class="grid-2">
+        <div class="field"><span>Team name *</span><input id="teamName" placeholder="e.g. West Region" /></div>
+        <div class="field"><span>Parent team</span><select id="teamParent"><option value="">— none (top level) —</option></select></div>
+      </div>
+      <div class="row" style="justify-content:flex-end;">
+        <button id="teamCancel" class="btn ghost sm">Cancel</button>
+        <button id="teamSave" class="btn primary sm">Create team</button>
+      </div>
+    </div>
+    <table>
+      <thead><tr><th>Team</th><th>Parent</th><th></th></tr></thead>
+      <tbody id="teamsBody"><tr><td colspan="3" class="muted">Select a company…</td></tr></tbody>
+    </table>
+  </section>
+
   <!-- Users / accounts -->
   <section id="usersCard" class="card">
     <h2><span id="usersTitle">Accounts</span>
@@ -172,9 +218,9 @@
         <div class="field"><span>Name *</span><input id="userName" /></div>
         <div class="field"><span>Email *</span><input id="userEmail" type="email" /></div>
         <div class="field"><span>Temporary password *</span><input id="userPassword" type="text" placeholder="min 6 chars" /></div>
-        <div class="field"><span>Role</span>
-          <select id="userRole"><option value="rep">Rep</option><option value="manager">Manager</option><option value="admin">Admin</option></select>
-        </div>
+        <div class="field"><span>Role / title</span><select id="userRole"></select></div>
+        <div class="field"><span>Reports to (manager)</span><select id="userManager"><option value="">— none —</option></select></div>
+        <div class="field"><span>Team</span><select id="userTeam"><option value="">— none —</option></select></div>
       </div>
       <div class="row" style="justify-content:flex-end;">
         <button id="userCancel" class="btn ghost sm">Cancel</button>
@@ -182,8 +228,8 @@
       </div>
     </div>
     <table>
-      <thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Status</th><th></th></tr></thead>
-      <tbody id="usersBody"><tr><td colspan="5" class="muted">Select a company…</td></tr></tbody>
+      <thead><tr><th>Name</th><th>Email</th><th>Role / title</th><th>Reports to</th><th>Status</th><th></th></tr></thead>
+      <tbody id="usersBody"><tr><td colspan="6" class="muted">Select a company…</td></tr></tbody>
     </table>
   </section>
 </div>
@@ -214,13 +260,21 @@ const db = getFirestore(app);
 const fns = getFunctions(app);
 
 const $ = (id) => document.getElementById(id);
-const state = { isSuper:false, companyId:null, companyName:null, role:null, selectedCompany:null };
+const state = {
+  isSuper:false, companyId:null, role:null, selectedCompany:null,
+  roles:[], teams:[], users:[],
+};
 
 // callables
 const createCompany   = httpsCallable(fns, "createCompany");
 const createUser      = httpsCallable(fns, "createUser");
-const setUserRole     = httpsCallable(fns, "setUserRole");
 const setUserDisabled = httpsCallable(fns, "setUserDisabled");
+const setUserRole     = httpsCallable(fns, "setUserRole");
+const createRole      = httpsCallable(fns, "createRole");
+const deleteRole      = httpsCallable(fns, "deleteRole");
+const createTeam      = httpsCallable(fns, "createTeam");
+const assignUserHierarchy = httpsCallable(fns, "assignUserHierarchy");
+const impersonate     = httpsCallable(fns, "impersonate");
 
 function banner(el, msg, kind="info") {
   el.className = "banner show " + kind;
@@ -277,10 +331,22 @@ function enterConsole() {
     loadCompanies();
   } else {
     // Company admin: locked to their own company.
-    state.selectedCompany = state.companyId;
-    $("usersTitle").textContent = "Accounts";
-    loadUsers();
+    selectCompany(state.companyId, "");
   }
+}
+
+// Load everything for one company and reveal the roles/teams/users panels.
+async function selectCompany(companyId, companyName) {
+  state.selectedCompany = companyId;
+  const suffix = companyName ? ` · ${companyName}` : "";
+  $("rolesTitle").textContent = "Roles & titles" + suffix;
+  $("teamsTitle").textContent = "Teams" + suffix;
+  $("usersTitle").textContent = "Accounts" + suffix;
+  $("rolesCard").classList.remove("hidden");
+  $("teamsCard").classList.remove("hidden");
+  await Promise.all([loadRoles(), loadTeams()]);
+  await loadUsers();
+  populateUserFormSelects();
 }
 
 // ── Companies (super-admin) ──────────────────────────────────────────────
@@ -315,77 +381,194 @@ async function loadCompanies() {
         <td class="muted">${fmtDate(c.createdAt)}</td>
         <td><button class="btn sm">Manage accounts →</button></td>`;
       tr.querySelector("button").addEventListener("click", () => {
-        state.selectedCompany = d.id;
-        $("usersTitle").textContent = `Accounts · ${c.name}`;
-        loadUsers();
-        $("usersCard").scrollIntoView({ behavior:"smooth" });
+        selectCompany(d.id, c.name);
+        $("rolesCard").scrollIntoView({ behavior:"smooth" });
       });
       body.appendChild(tr);
     });
   } catch (e) { body.innerHTML = `<tr><td colspan="4" class="banner error show">${esc(e.message)}</td></tr>`; }
 }
 
+// ── Roles & titles ───────────────────────────────────────────────────────
+$("newRoleBtn").addEventListener("click", () => $("roleForm").classList.toggle("hidden"));
+$("roleCancel").addEventListener("click", () => $("roleForm").classList.add("hidden"));
+$("roleSave").addEventListener("click", async () => {
+  const title = $("roleTitle").value.trim();
+  if (!title) return;
+  $("roleSave").disabled = true;
+  try {
+    await createRole({ companyId: state.selectedCompany, title,
+      baseTier: $("roleTier").value, rank: Number($("roleRank").value) || 50 });
+    $("roleTitle").value = "";
+    $("roleForm").classList.add("hidden");
+    banner($("banner"), "Role created.", "good");
+    await loadRoles(); populateUserFormSelects();
+  } catch (e) { banner($("banner"), e.message || "Failed to create role.", "error"); }
+  finally { $("roleSave").disabled = false; }
+});
+
+async function loadRoles() {
+  const body = $("rolesBody");
+  body.innerHTML = `<tr><td colspan="4" class="muted">Loading…</td></tr>`;
+  try {
+    const snap = await getDocs(query(collection(db, `companies/${state.selectedCompany}/roles`), orderBy("rank","desc")));
+    state.roles = snap.docs.map((d) => ({ id:d.id, ...d.data() }));
+    if (!state.roles.length) { body.innerHTML = `<tr><td colspan="4" class="muted">No roles.</td></tr>`; return; }
+    body.innerHTML = "";
+    state.roles.forEach((r) => {
+      const tr = document.createElement("tr");
+      tr.innerHTML = `<td><strong>${esc(r.title)}</strong>${r.isDefault?' <span class="badge">default</span>':''}</td>
+        <td><span class="badge ${r.baseTier==='manager'?'manager':''}">${esc(r.baseTier)}</span></td>
+        <td>${r.rank}</td>
+        <td>${r.isDefault?'':'<button class="btn sm danger">Delete</button>'}</td>`;
+      const del = tr.querySelector("button");
+      if (del) del.addEventListener("click", async () => {
+        try { await deleteRole({ companyId: state.selectedCompany, roleId: r.id }); await loadRoles(); populateUserFormSelects(); }
+        catch (e) { banner($("banner"), e.message, "error"); }
+      });
+      body.appendChild(tr);
+    });
+  } catch (e) { body.innerHTML = `<tr><td colspan="4" class="banner error show">${esc(e.message)}</td></tr>`; }
+}
+
+// ── Teams ─────────────────────────────────────────────────────────────────
+$("newTeamBtn").addEventListener("click", () => $("teamForm").classList.toggle("hidden"));
+$("teamCancel").addEventListener("click", () => $("teamForm").classList.add("hidden"));
+$("teamSave").addEventListener("click", async () => {
+  const name = $("teamName").value.trim();
+  if (!name) return;
+  $("teamSave").disabled = true;
+  try {
+    await createTeam({ companyId: state.selectedCompany, name, parentTeamId: $("teamParent").value || null });
+    $("teamName").value = "";
+    $("teamForm").classList.add("hidden");
+    banner($("banner"), "Team created.", "good");
+    await loadTeams(); populateUserFormSelects();
+  } catch (e) { banner($("banner"), e.message || "Failed to create team.", "error"); }
+  finally { $("teamSave").disabled = false; }
+});
+
+async function loadTeams() {
+  const body = $("teamsBody");
+  body.innerHTML = `<tr><td colspan="3" class="muted">Loading…</td></tr>`;
+  try {
+    const snap = await getDocs(query(collection(db, `companies/${state.selectedCompany}/teams`), orderBy("createdAt","asc")));
+    state.teams = snap.docs.map((d) => ({ id:d.id, ...d.data() }));
+    const nameOf = (id) => (state.teams.find((t)=>t.id===id)||{}).name || "—";
+    // parent-team dropdown in the team form
+    $("teamParent").innerHTML = `<option value="">— none (top level) —</option>` +
+      state.teams.map((t)=>`<option value="${t.id}">${esc(t.name)}</option>`).join("");
+    if (!state.teams.length) { body.innerHTML = `<tr><td colspan="3" class="muted">No teams.</td></tr>`; return; }
+    body.innerHTML = "";
+    state.teams.forEach((t) => {
+      const tr = document.createElement("tr");
+      tr.innerHTML = `<td><strong>${esc(t.name)}</strong></td>
+        <td class="muted">${t.parentTeamId ? esc(nameOf(t.parentTeamId)) : "—"}</td><td></td>`;
+      body.appendChild(tr);
+    });
+  } catch (e) { body.innerHTML = `<tr><td colspan="3" class="banner error show">${esc(e.message)}</td></tr>`; }
+}
+
 // ── Users / accounts ─────────────────────────────────────────────────────
+// Populate the new-account form's role / manager / team selects from state.
+function populateUserFormSelects() {
+  const roleOpts = state.roles.map((r)=>`<option value="role:${r.id}">${esc(r.title)} (${esc(r.baseTier)})</option>`).join("");
+  $("userRole").innerHTML = roleOpts + `<option value="tier:admin">Company Admin</option>`;
+  const userOpts = `<option value="">— none —</option>` +
+    state.users.map((u)=>`<option value="${u.id}">${esc(u.displayName||u.email)}</option>`).join("");
+  $("userManager").innerHTML = userOpts;
+  $("userTeam").innerHTML = `<option value="">— none —</option>` +
+    state.teams.map((t)=>`<option value="${t.id}">${esc(t.name)}</option>`).join("");
+}
+
 $("newUserBtn").addEventListener("click", () => {
   if (!state.selectedCompany) { banner($("banner"), "Select a company first.", "error"); return; }
   $("userForm").classList.toggle("hidden");
 });
 $("userCancel").addEventListener("click", () => $("userForm").classList.add("hidden"));
 $("userSave").addEventListener("click", async () => {
-  const payload = {
-    companyId: state.selectedCompany,
-    name: $("userName").value.trim(),
-    email: $("userEmail").value.trim(),
-    password: $("userPassword").value,
-    role: $("userRole").value,
-  };
-  if (!payload.name || !payload.email || payload.password.length < 6) {
+  const name = $("userName").value.trim();
+  const email = $("userEmail").value.trim();
+  const password = $("userPassword").value;
+  if (!name || !email || password.length < 6) {
     banner($("banner"), "Name, email, and a 6+ char password are required.", "error"); return;
   }
+  const roleVal = $("userRole").value; // "role:<id>" or "tier:admin"
+  const payload = { companyId: state.selectedCompany, name, email, password,
+    managerId: $("userManager").value || null, teamId: $("userTeam").value || null };
+  if (roleVal.startsWith("role:")) payload.roleId = roleVal.slice(5);
+  else if (roleVal.startsWith("tier:")) payload.tier = roleVal.slice(5);
   $("userSave").disabled = true;
   try {
     await createUser(payload);
     $("userName").value = $("userEmail").value = $("userPassword").value = "";
     $("userForm").classList.add("hidden");
     banner($("banner"), "Account created.", "good");
-    loadUsers();
+    await loadUsers(); populateUserFormSelects();
   } catch (e) { banner($("banner"), e.message || "Failed to create account.", "error"); }
   finally { $("userSave").disabled = false; }
 });
 
 async function loadUsers() {
   const body = $("usersBody");
-  if (!state.selectedCompany) { body.innerHTML = `<tr><td colspan="5" class="muted">Select a company…</td></tr>`; return; }
-  body.innerHTML = `<tr><td colspan="5" class="muted">Loading…</td></tr>`;
+  if (!state.selectedCompany) { body.innerHTML = `<tr><td colspan="6" class="muted">Select a company…</td></tr>`; return; }
+  body.innerHTML = `<tr><td colspan="6" class="muted">Loading…</td></tr>`;
   try {
     const snap = await getDocs(query(collection(db, "users"),
       where("companyId", "==", state.selectedCompany), orderBy("createdAt", "desc")));
-    if (snap.empty) { body.innerHTML = `<tr><td colspan="5" class="muted">No accounts yet.</td></tr>`; return; }
+    state.users = snap.docs.map((d) => ({ id:d.id, ...d.data() }));
+    if (!state.users.length) { body.innerHTML = `<tr><td colspan="6" class="muted">No accounts yet.</td></tr>`; return; }
+    const nameOf = (uid) => { const u = state.users.find((x)=>x.id===uid); return u ? (u.displayName||u.email) : uid; };
     body.innerHTML = "";
-    snap.forEach((d) => {
-      const u = d.data();
+    state.users.forEach((u) => {
       const tr = document.createElement("tr");
-      const roleSel = `<select data-uid="${d.id}" class="roleSel">
-        ${["rep","manager","admin"].map(r=>`<option value="${r}" ${u.role===r?"selected":""}>${r}</option>`).join("")}
-      </select>`;
-      tr.innerHTML = `<td>${esc(u.displayName||"—")}</td>
+      // role/title select: company roles + Admin
+      const roleOptions = state.roles.map((r)=>`<option value="role:${r.id}" ${u.roleId===r.id?'selected':''}>${esc(r.title)}</option>`).join("")
+        + `<option value="tier:admin" ${u.role==='admin'?'selected':''}>Company Admin</option>`;
+      // manager select (exclude self)
+      const mgrOptions = `<option value="">— none —</option>` +
+        state.users.filter((x)=>x.id!==u.id).map((x)=>`<option value="${x.id}" ${u.managerId===x.id?'selected':''}>${esc(x.displayName||x.email)}</option>`).join("");
+      const mirrorBtn = state.isSuper ? `<button class="btn sm mirrorBtn">Mirror</button>` : "";
+      tr.innerHTML = `<td>${esc(u.displayName||"—")}${u.role==='admin'?' <span class="badge admin">admin</span>':''}</td>
         <td class="muted">${esc(u.email||"")}</td>
-        <td>${roleSel}</td>
+        <td><select class="roleSel">${roleOptions}</select></td>
+        <td><select class="mgrSel">${mgrOptions}</select></td>
         <td>${u.disabled ? '<span class="badge disabled">disabled</span>' : '<span class="badge">active</span>'}</td>
-        <td><button class="btn sm ${u.disabled?'':'danger'}" data-uid="${d.id}" data-disabled="${u.disabled?1:0}">
-          ${u.disabled ? "Enable" : "Disable"}</button></td>`;
+        <td><div class="row">${mirrorBtn}
+          <button class="btn sm ${u.disabled?'':'danger'} disBtn">${u.disabled ? "Enable" : "Disable"}</button></div></td>`;
+
       tr.querySelector(".roleSel").addEventListener("change", async (ev) => {
-        try { await setUserRole({ uid:d.id, role:ev.target.value }); banner($("banner"),"Role updated.","good"); }
+        const v = ev.target.value;
+        try {
+          if (v.startsWith("role:")) await assignUserHierarchy({ uid:u.id, roleId:v.slice(5) });
+          else if (v === "tier:admin") await setUserRole({ uid:u.id, role:"admin" });
+          banner($("banner"),"Role updated.","good"); await loadUsers(); populateUserFormSelects();
+        } catch (e) { banner($("banner"), e.message, "error"); }
+      });
+      tr.querySelector(".mgrSel").addEventListener("change", async (ev) => {
+        try { await assignUserHierarchy({ uid:u.id, managerId: ev.target.value || null });
+          banner($("banner"),"Manager updated.","good"); await loadUsers(); }
         catch (e) { banner($("banner"), e.message, "error"); loadUsers(); }
       });
-      tr.querySelector("button").addEventListener("click", async (ev) => {
-        const disable = ev.target.dataset.disabled !== "1";
-        try { await setUserDisabled({ uid:d.id, disabled:disable }); loadUsers(); }
+      tr.querySelector(".disBtn").addEventListener("click", async () => {
+        try { await setUserDisabled({ uid:u.id, disabled: !u.disabled }); loadUsers(); }
         catch (e) { banner($("banner"), e.message, "error"); }
+      });
+      const mb = tr.querySelector(".mirrorBtn");
+      if (mb) mb.addEventListener("click", async () => {
+        mb.disabled = true; mb.textContent = "…";
+        try {
+          const res = await impersonate({ targetUid: u.id });
+          const token = res.data.token;
+          window.open(`/app/#imp=${encodeURIComponent(token)}`, "_blank");
+          banner($("banner"), `Mirroring ${u.email} in a new tab.`, "good");
+        } catch (e) { banner($("banner"), e.message || "Mirror failed.", "error"); }
+        finally { mb.disabled = false; mb.textContent = "Mirror"; }
       });
       body.appendChild(tr);
     });
-  } catch (e) { body.innerHTML = `<tr><td colspan="5" class="banner error show">${esc(e.message)}</td></tr>`; }
+    void nameOf;
+  } catch (e) { body.innerHTML = `<tr><td colspan="6" class="banner error show">${esc(e.message)}</td></tr>`; }
 }
 
 function esc(s) { return String(s ?? "").replace(/[&<>"']/g, (c)=>({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;" }[c])); }

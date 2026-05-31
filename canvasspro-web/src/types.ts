@@ -1,6 +1,8 @@
 // Shared domain types used across the dashboard and (mirrored) in functions.
 
-export type Role = "admin" | "manager" | "rep";
+// System access tiers. Custom company roles are TITLES that map onto one of
+// these base tiers (see CompanyRole.baseTier).
+export type Role = "superadmin" | "admin" | "manager" | "user";
 
 export interface Company {
   id: string;
@@ -10,12 +12,40 @@ export interface Company {
   createdAt?: number;
 }
 
+// Per-company role/title. Every company is seeded with "Manager" and "User".
+// Company admins add custom titles and order them via `rank` (higher = more
+// senior). `baseTier` decides actual access (manager can see downstream, user
+// is a leaf). Titles never grant admin/superadmin.
+export interface CompanyRole {
+  id: string;
+  companyId: string;
+  title: string;
+  baseTier: "manager" | "user";
+  rank: number;
+  isDefault?: boolean;
+  createdAt?: number;
+}
+
+export interface Team {
+  id: string;
+  companyId: string;
+  name: string;
+  leadUserId?: string; // the manager of this team
+  parentTeamId?: string | null;
+  createdAt?: number;
+}
+
 export interface UserProfile {
   uid: string;
   email: string;
   displayName: string;
-  role: Role;
+  role: Role; // base access tier
   companyId: string;
+  roleId?: string; // -> companies/{companyId}/roles/{roleId}
+  title?: string; // denormalized role title for display
+  teamId?: string;
+  managerId?: string | null; // direct manager
+  managerPath?: string[]; // ancestor uids, nearest first (excludes self)
   territoryIds?: string[];
   createdAt?: number;
   disabled?: boolean;
@@ -44,7 +74,10 @@ export interface Lead {
   notes?: string;
   companyId: string;
   territoryId?: string;
-  assignedTo?: string; // uid
+  assignedTo?: string; // uid (owner)
+  // Owner + every manager above them (owner first). Drives downstream
+  // visibility: a manager sees a lead iff their uid is in this array.
+  visibilityPath: string[];
   createdBy: string; // uid
   createdAt: number;
   updatedAt: number;

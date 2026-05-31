@@ -33,17 +33,18 @@ export default function Leads() {
   useEffect(() => {
     if (!profile || !companyId) return;
     const base = collection(db, "leads");
-    // Always scope to the company; reps further to their own leads (also
-    // enforced by security rules).
+    // Company admins see the whole company; everyone else sees only their
+    // downstream (their uid in the lead's visibilityPath) — own leads included.
+    // Mirrors the security rules.
     const q =
-      role === "rep"
-        ? query(
+      role === "admin"
+        ? query(base, where("companyId", "==", companyId), orderBy("updatedAt", "desc"))
+        : query(
             base,
             where("companyId", "==", companyId),
-            where("assignedTo", "==", profile.uid),
+            where("visibilityPath", "array-contains", profile.uid),
             orderBy("updatedAt", "desc")
-          )
-        : query(base, where("companyId", "==", companyId), orderBy("updatedAt", "desc"));
+          );
     const unsub = onSnapshot(
       q,
       (snap) => {
@@ -162,6 +163,8 @@ function AddLead({ onDone }: { onDone: () => void }) {
         status: "new" as LeadStatus,
         companyId,
         assignedTo: profile.uid,
+        // owner + their management chain → drives downstream visibility.
+        visibilityPath: [profile.uid, ...(profile.managerPath ?? [])],
         createdBy: profile.uid,
         createdAt: now,
         updatedAt: now,
