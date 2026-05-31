@@ -1,0 +1,34 @@
+# dependencies
+node_modules/
+functions/node_modules/
+
+# build output
+dist/
+functions/lib/
+
+# env / secrets
+.env
+.env.local
+.env.*.local
+functions/.env
+.runtimeconfig.json
+serviceAccountKey.json
+
+# capacitor native projects (generated with `npx cap add`)
+ios/
+android/
+
+# firebase
+.firebase/
+firebase-debug.log
+firestore-debug.log
+ui-debug.log
+
+# editor / OS
+.DS_Store
+*.log
+.vscode/
+.idea/
+
+# typescript build info
+*.tsbuildinfo
