@@ -16,7 +16,7 @@ import { getFunctions, connectFunctionsEmulator } from "firebase/functions";
 // (e.g. to point at a different project) but default to the live config so a
 // build works without a .env file.
 const firebaseConfig = {
-  apiKey: import.meta.env.VITE_FIREBASE_API_KEY || "AIzaSyAArLWkY_WS7yabCgW_WZJu973J5iGcBI",
+  apiKey: import.meta.env.VITE_FIREBASE_API_KEY || "AIzaSyAAfrLWkY_WS7yabCgW_WZJu973J5iGcBI",
   authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN || "youtilityknock.firebaseapp.com",
   projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID || "youtilityknock",
   storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET || "youtilityknock.firebasestorage.app",
