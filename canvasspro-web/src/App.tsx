@@ -6,6 +6,7 @@ import Dashboard from "./pages/Dashboard";
 import Lookup from "./pages/Lookup";
 import Leads from "./pages/Leads";
 import Territories from "./pages/Territories";
+import MapPage from "./pages/Map";
 import Team from "./pages/Team";
 import Shifts from "./pages/Shifts";
 import Stats from "./pages/Stats";
@@ -25,6 +26,7 @@ export default function App() {
         <Route index element={<Dashboard />} />
         <Route path="lookup" element={<Lookup />} />
         <Route path="leads" element={<Leads />} />
+        <Route path="map" element={<MapPage />} />
         <Route path="team" element={<Team />} />
         <Route path="shifts" element={<Shifts />} />
         <Route path="stats" element={<Stats />} />

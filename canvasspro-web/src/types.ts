@@ -12,6 +12,11 @@ export interface Company {
   createdAt?: number;
 }
 
+export interface LatLng {
+  lat: number;
+  lng: number;
+}
+
 // Per-company role/title. Every company is seeded with "Manager" and "User".
 // Company admins add custom titles and order them via `rank` (higher = more
 // senior). `baseTier` decides actual access (manager can see downstream, user
@@ -66,7 +71,7 @@ export interface Lead {
   state?: string;
   zip?: string;
   lat?: number;
-  lon?: number;
+  lng?: number;
   ownerName?: string;
   phone?: string;
   email?: string;
@@ -90,6 +95,7 @@ export interface Territory {
   color?: string;
   companyId: string;
   managerId?: string; // uid
+  polygon?: LatLng[]; // map boundary
   createdAt: number;
 }
 
