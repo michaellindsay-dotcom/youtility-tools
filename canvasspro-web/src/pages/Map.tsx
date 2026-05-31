@@ -14,7 +14,8 @@ import { db } from "../firebase";
 import { useAuth } from "../auth/AuthContext";
 import type { Lead, Territory, LatLng } from "../types";
 
-const MAPS_KEY = import.meta.env.VITE_GOOGLE_MAPS_API_KEY || "";
+const MAPS_KEY =
+  import.meta.env.VITE_GOOGLE_MAPS_API_KEY || "AIzaSyAAfrLWkY_WS7yabCgW_WZJu973J5iGcBI";
 
 const STATUS_COLOR: Record<string, string> = {
   new: "#38BDF8",
