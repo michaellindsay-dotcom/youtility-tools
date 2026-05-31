@@ -43,6 +43,7 @@ const SUPERADMIN_NAME = "Michael Lindsay";
 const TEMP_PASSWORD = "Knock-q2MvpxfTny_2026"; // change on first login
 const ROLE = "superadmin"; // four-tier top tier
 const USERS_COLLECTION = "users";
+const PUBLIC_PROFILES_COLLECTION = "publicProfiles";
 
 const CONFIRMED = process.argv.includes("--yes-delete-all-users");
 
@@ -80,8 +81,8 @@ async function deleteAllAuthUsers(auth, users) {
   }
 }
 
-async function deleteAllUserDocs(db) {
-  const snap = await db.collection(USERS_COLLECTION).get();
+async function deleteAllDocs(db, collectionName) {
+  const snap = await db.collection(collectionName).get();
   let n = 0;
   for (let i = 0; i < snap.docs.length; i += 450) {
     const batch = db.batch();
@@ -118,9 +119,10 @@ async function main() {
   console.log("Deleting all auth users…");
   await deleteAllAuthUsers(auth, users);
 
-  console.log(`Deleting all /${USERS_COLLECTION} docs…`);
-  const removed = await deleteAllUserDocs(db);
-  console.log(`  removed ${removed} docs`);
+  console.log(`Deleting all /${USERS_COLLECTION} and /${PUBLIC_PROFILES_COLLECTION} docs…`);
+  const removedUsers = await deleteAllDocs(db, USERS_COLLECTION);
+  const removedProfiles = await deleteAllDocs(db, PUBLIC_PROFILES_COLLECTION);
+  console.log(`  removed ${removedUsers} user docs, ${removedProfiles} public profiles`);
 
   console.log(`Creating ${SUPERADMIN_EMAIL}…`);
   const rec = await auth.createUser({
@@ -140,6 +142,13 @@ async function main() {
     superAdmin: true,
     mustChangePassword: true,
     createdAt: Date.now(),
+  });
+  // Display-only mirror for team lists / chat names (see canvasspro-firestore.rules).
+  await db.collection(PUBLIC_PROFILES_COLLECTION).doc(rec.uid).set({
+    uid: rec.uid,
+    displayName: SUPERADMIN_NAME,
+    photoURL: null,
+    role: ROLE,
   });
 
   console.log("\n✅ Done.");

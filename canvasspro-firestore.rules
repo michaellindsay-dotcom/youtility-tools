@@ -1,0 +1,150 @@
+rules_version = '2';
+// ============================================================================
+// CanvassPro (project canvasspro-7edd6) — FOUR-TIER security rules
+// ----------------------------------------------------------------------------
+// Role hierarchy:  superadmin > admin > manager > user
+//   • role is stored in users/{uid}.role
+//   • superadmin is ALSO carried as a custom claim (superAdmin:true) so the
+//     top tier is recognized even without a profile read.
+//
+// users/{uid}        = PRIVATE profile (email, settings, sensitive fields).
+//                      Readable only by the owner and managers+.
+// publicProfiles/{uid} = SAFE display fields (displayName, photoURL, role)
+//                      readable by any signed-in user. Use THIS for team lists,
+//                      chat names, leaderboards — NOT collection-wide reads of
+//                      users/. Authorization always reads users/{uid}.role,
+//                      never publicProfiles (which is display-only).
+//
+// NOTE: do NOT store OAuth tokens (googleAccessToken, etc.) in users/. Keep
+// tokens server-side or in an owner-only restricted doc.
+// ============================================================================
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ── Helpers ──────────────────────────────────────────────────────────
+    function isAuth() {
+      return request.auth != null;
+    }
+    function isOwn(uid) {
+      return isAuth() && request.auth.uid == uid;
+    }
+    function userRole() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role;
+    }
+    function roleRank(r) {
+      return r == 'superadmin' ? 4 : r == 'admin' ? 3 : r == 'manager' ? 2 : 1;
+    }
+    // Superadmin via custom claim OR profile role (claim avoids a doc read).
+    function isSuper() {
+      return isAuth() && (request.auth.token.superAdmin == true || userRole() == 'superadmin');
+    }
+    // Caller's tier is at least the given role.
+    function atLeast(r) {
+      return isSuper() || (isAuth() && roleRank(userRole()) >= roleRank(r));
+    }
+    // The role value in the incoming write (or 'user' if none provided).
+    function incomingRole() {
+      return request.resource.data.keys().hasAny(['role']) ? request.resource.data.role : 'user';
+    }
+
+    // ── Public profiles (display-only: name / photo / role) ──────────────
+    match /publicProfiles/{uid} {
+      allow read: if isAuth();
+      // Owner maintains their own display fields; admins+ can manage any.
+      // Role is mirrored here for display only and is NEVER used for auth.
+      allow write: if isOwn(uid) || atLeast('admin');
+    }
+
+    // ── Private user profiles ────────────────────────────────────────────
+    match /users/{uid} {
+      // No public-field branch — peers use publicProfiles instead.
+      allow read: if isOwn(uid) || atLeast('manager');
+
+      // On self-signup a user may only create themselves as a base 'user'
+      // (no self-promotion).
+      allow create: if isOwn(uid) && incomingRole() == 'user';
+
+      // Owners may edit their own profile but NOT change their own role.
+      // Role changes require admin+; granting/altering superadmin requires
+      // superadmin; admins cannot modify a superadmin account.
+      allow update: if
+        (isOwn(uid) && request.resource.data.role == resource.data.role)
+        || (atLeast('admin')
+            && resource.data.role != 'superadmin'
+            && incomingRole() != 'superadmin')
+        || isSuper();
+
+      allow delete: if atLeast('admin') && resource.data.role != 'superadmin'
+                    || isSuper();
+    }
+
+    // ── Leads ────────────────────────────────────────────────────────────
+    match /leads/{leadId} {
+      allow read: if isAuth();
+      allow create: if isAuth() && request.resource.data.userId == request.auth.uid;
+      allow update, delete: if isAuth()
+        && (resource.data.userId == request.auth.uid || atLeast('admin'));
+    }
+
+    // ── Territories ──────────────────────────────────────────────────────
+    match /territories/{territoryId} {
+      allow read: if isAuth();
+      allow write: if atLeast('manager');
+    }
+
+    // ── Shifts ───────────────────────────────────────────────────────────
+    match /shifts/{shiftId} {
+      allow read: if isAuth();
+      allow create: if isAuth() && request.resource.data.userId == request.auth.uid;
+      allow update: if isAuth() && (resource.data.userId == request.auth.uid || atLeast('manager'));
+      allow delete: if isAuth() && (resource.data.userId == request.auth.uid || atLeast('admin'));
+    }
+
+    // ── Group chat ───────────────────────────────────────────────────────
+    match /chat/{messageId} {
+      allow read: if isAuth();
+      // Author-stamped; only the author may edit/delete (or admins+).
+      allow create: if isAuth() && request.resource.data.userId == request.auth.uid;
+      allow update, delete: if isAuth()
+        && (resource.data.userId == request.auth.uid || atLeast('admin'));
+    }
+
+    // ── Direct messages ──────────────────────────────────────────────────
+    match /chat_dm/{channelId} {
+      allow read, write: if isAuth();
+      match /messages/{messageId} {
+        allow read: if isAuth();
+        allow create: if isAuth() && request.resource.data.userId == request.auth.uid;
+        allow update, delete: if isAuth()
+          && (resource.data.userId == request.auth.uid || atLeast('admin'));
+      }
+    }
+
+    // ── Gamification config ──────────────────────────────────────────────
+    match /config/{configId} {
+      allow read: if isAuth();
+      allow write: if atLeast('admin');
+    }
+
+    // ── User stats ───────────────────────────────────────────────────────
+    match /userStats/{uid} {
+      allow read: if isAuth();
+      allow write: if isOwn(uid) || atLeast('manager');
+    }
+
+    // ── Invite codes ─────────────────────────────────────────────────────
+    match /invites/{inviteId} {
+      allow read: if isAuth();
+      allow write: if atLeast('admin');
+    }
+
+    // ── Goals ────────────────────────────────────────────────────────────
+    match /goals/{goalId} {
+      allow read: if isAuth();
+      // Owner-stamped goals; managers+ may manage team goals.
+      allow create: if isAuth() && request.resource.data.userId == request.auth.uid;
+      allow update, delete: if isAuth()
+        && (resource.data.userId == request.auth.uid || atLeast('manager'));
+    }
+  }
+}
