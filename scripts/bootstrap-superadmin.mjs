@@ -1,7 +1,7 @@
 // ============================================================================
 // bootstrap-superadmin.mjs
 // ----------------------------------------------------------------------------
-// ONE-TIME operational script for the canvasspro-7edd6 Firebase project.
+// ONE-TIME operational script for the youtilityknock Firebase project.
 //
 // It will, in order:
 //   1. DELETE every Firebase Authentication user.
@@ -37,7 +37,7 @@ import { getFirestore } from "firebase-admin/firestore";
 import { readFileSync } from "node:fs";
 
 // ── Config ──────────────────────────────────────────────────────────────────
-const PROJECT_ID = "canvasspro-7edd6";
+const PROJECT_ID = "youtilityknock";
 const SUPERADMIN_EMAIL = "michael@rockymountainsolar.net";
 const SUPERADMIN_NAME = "Michael Lindsay";
 const TEMP_PASSWORD = "Knock-q2MvpxfTny_2026"; // change on first login

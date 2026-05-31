@@ -10,18 +10,18 @@ import {
 import { getFirestore, connectFirestoreEmulator } from "firebase/firestore";
 import { getFunctions, connectFunctionsEmulator } from "firebase/functions";
 
-// Public client identifiers for the canvasspro-7edd6 Firebase project. These
+// Public client identifiers for the youtilityknock Firebase project. These
 // are safe to ship in the bundle — security is enforced by Firebase Auth +
 // Firestore rules, not by keeping these secret. Env vars override the literals
 // (e.g. to point at a different project) but default to the live config so a
 // build works without a .env file.
 const firebaseConfig = {
-  apiKey: import.meta.env.VITE_FIREBASE_API_KEY || "AIzaSyDngv3feWeWn0kpjs_bqKwth2MDHCgGRAA",
-  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN || "canvasspro-7edd6.firebaseapp.com",
-  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID || "canvasspro-7edd6",
-  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET || "canvasspro-7edd6.firebasestorage.app",
-  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID || "19980259659",
-  appId: import.meta.env.VITE_FIREBASE_APP_ID || "1:19980259659:web:d4ace641083db2b99c98ce",
+  apiKey: import.meta.env.VITE_FIREBASE_API_KEY || "AIzaSyAArLWkY_WS7yabCgW_WZJu973J5iGcBI",
+  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN || "youtilityknock.firebaseapp.com",
+  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID || "youtilityknock",
+  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET || "youtilityknock.firebasestorage.app",
+  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID || "426528140931",
+  appId: import.meta.env.VITE_FIREBASE_APP_ID || "1:426528140931:web:91366949118c237fe1f5b6",
 };
 
 // ── Super-admin "mirror" (impersonation) ────────────────────────────────────
