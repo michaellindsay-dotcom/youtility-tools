@@ -93,6 +93,32 @@ export interface Territory {
   createdAt: number;
 }
 
+export interface Shift {
+  id: string;
+  companyId: string;
+  userId: string;
+  userName?: string;
+  visibilityPath: string[]; // [owner, ...managers]
+  status: "active" | "ended";
+  startAt: number;
+  endAt?: number;
+  doorsKnocked?: number;
+  notes?: string;
+}
+
+export interface UserStats {
+  uid: string;
+  companyId: string;
+  userName?: string;
+  managerPath: string[]; // ancestors, for downstream roll-up
+  leadsCreated?: number;
+  appointments?: number;
+  sales?: number;
+  doorsKnocked?: number;
+  shifts?: number;
+  updatedAt?: number;
+}
+
 // ---- Knockstat normalized property record (ported from canvass-pro.html) ----
 
 export interface Person {

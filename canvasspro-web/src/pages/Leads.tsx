@@ -12,6 +12,7 @@ import {
 } from "firebase/firestore";
 import { db } from "../firebase";
 import { useAuth } from "../auth/AuthContext";
+import { bumpStats } from "../lib/stats";
 import type { Lead, LeadStatus } from "../types";
 
 const STATUSES: { value: LeadStatus; label: string }[] = [
@@ -63,6 +64,10 @@ export default function Leads() {
 
   const setStatus = async (id: string, status: LeadStatus) => {
     await updateDoc(doc(db, "leads", id), { status, updatedAt: Date.now() });
+    if (profile) {
+      if (status === "appointment") void bumpStats(profile, { appointments: 1 });
+      else if (status === "sold") void bumpStats(profile, { sales: 1 });
+    }
   };
 
   const remove = async (id: string) => {
@@ -169,6 +174,7 @@ function AddLead({ onDone }: { onDone: () => void }) {
         createdAt: now,
         updatedAt: now,
       });
+      void bumpStats(profile, { leadsCreated: 1 });
       onDone();
     } finally {
       setBusy(false);

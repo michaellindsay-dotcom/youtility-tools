@@ -107,6 +107,14 @@ async function rebuildCompanyHierarchy(companyId: string) {
     if (++ops >= 450) await flush();
   }
   await flush();
+
+  // Keep per-user stats roll-up reachable by the right managers.
+  const statsSnap = await db.collection("userStats").where("companyId", "==", companyId).get();
+  for (const d of statsSnap.docs) {
+    batch.update(d.ref, { managerPath: pathFor(d.id) });
+    if (++ops >= 450) await flush();
+  }
+  await flush();
 }
 
 // ───────────────────────────────────────────────────────────────────────────

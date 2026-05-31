@@ -4,6 +4,9 @@ const links = [
   { to: "/", label: "Dashboard", icon: "▦", end: true },
   { to: "/lookup", label: "Address Lookup", icon: "⌖" },
   { to: "/leads", label: "Leads", icon: "☰" },
+  { to: "/team", label: "Team", icon: "⛩" },
+  { to: "/shifts", label: "Shifts", icon: "◷" },
+  { to: "/stats", label: "Stats", icon: "★" },
   { to: "/territories", label: "Territories", icon: "▰" },
   { to: "/settings", label: "Settings", icon: "⚐" },
 ];

@@ -775,6 +775,69 @@ details.raw pre {
   border-color: var(--ink);
 }
 
+/* ── Org chart (Team) ────────────────────────────────────── */
+.section-h {
+  font-family: "Space Grotesk", sans-serif;
+  font-size: 15px;
+  margin: 22px 0 12px;
+}
+.org-tree,
+.org-children {
+  list-style: none;
+}
+.org-children {
+  border-left: 1px solid var(--line);
+  margin-left: 18px;
+  padding-left: 14px;
+}
+.org-node {
+  margin: 8px 0;
+}
+.org-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  padding: 10px 14px;
+}
+.org-body {
+  min-width: 0;
+}
+.org-name {
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.avatar.sm {
+  width: 30px;
+  height: 30px;
+  font-size: 13px;
+}
+
+/* ── Shifts ──────────────────────────────────────────────── */
+.shift-control {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+.shift-live {
+  font-weight: 700;
+  color: var(--good);
+  font-size: 16px;
+}
+
+/* ── Stats ───────────────────────────────────────────────── */
+.stat-hl {
+  color: var(--accent-2);
+  font-weight: 700;
+}
+
 /* ── Tables / roles ──────────────────────────────────────── */
 .table-card {
   padding: 0;
