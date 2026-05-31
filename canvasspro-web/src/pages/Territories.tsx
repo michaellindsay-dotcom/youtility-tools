@@ -7,6 +7,7 @@ import {
   onSnapshot,
   orderBy,
   query,
+  where,
 } from "firebase/firestore";
 import { db } from "../firebase";
 import { useAuth } from "../auth/AuthContext";
@@ -15,7 +16,7 @@ import type { Territory } from "../types";
 const COLORS = ["#0EA5E9", "#34D399", "#F59E0B", "#F87171", "#A78BFA", "#F472B6"];
 
 export default function Territories() {
-  const { profile, role } = useAuth();
+  const { profile, role, companyId } = useAuth();
   const canManage = role === "admin" || role === "manager";
   const [items, setItems] = useState<Territory[]>([]);
   const [loading, setLoading] = useState(true);
@@ -24,7 +25,12 @@ export default function Territories() {
   const [color, setColor] = useState(COLORS[0]);
 
   useEffect(() => {
-    const q = query(collection(db, "territories"), orderBy("createdAt", "desc"));
+    if (!companyId) return;
+    const q = query(
+      collection(db, "territories"),
+      where("companyId", "==", companyId),
+      orderBy("createdAt", "desc")
+    );
     const unsub = onSnapshot(
       q,
       (snap) => {
@@ -37,15 +43,16 @@ export default function Territories() {
       }
     );
     return unsub;
-  }, []);
+  }, [companyId]);
 
   const add = async (e: FormEvent) => {
     e.preventDefault();
-    if (!profile || !name.trim()) return;
+    if (!profile || !companyId || !name.trim()) return;
     await addDoc(collection(db, "territories"), {
       name: name.trim(),
       description: description.trim() || null,
       color,
+      companyId,
       managerId: profile.uid,
       createdAt: Date.now(),
     });

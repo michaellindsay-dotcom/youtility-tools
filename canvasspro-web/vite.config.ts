@@ -5,6 +5,8 @@ import react from "@vitejs/plugin-react";
 // bundles into the native iOS / Android apps.
 export default defineConfig({
   plugins: [react()],
+  // The app is served under /app on the shared Firebase Hosting site.
+  base: "/app/",
   build: {
     outDir: "dist",
     sourcemap: true,

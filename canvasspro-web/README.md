@@ -1,90 +1,113 @@
 # Canvass Pro — Web + iOS + Android
 
-Door-to-door canvassing dashboard built on **React + Vite + TypeScript**, backed
-by **Firebase** (Auth, Firestore, Hosting, Cloud Functions) and packaged for
-**iOS / Android** with **Capacitor** — one frontend codebase everywhere.
+Multi-tenant door-to-door canvassing platform built on **React + Vite +
+TypeScript**, backed by **Firebase** (Auth, Firestore, Hosting, Cloud
+Functions) and packaged for **iOS / Android** with **Capacitor** — one frontend
+codebase everywhere.
 
-## What's here
+> Deploy config lives at the **repo root** (`/firebase.json`, `/firestore.rules`,
+> `/firestore.indexes.json`). This folder is just the React field app + Cloud
+> Functions. See the root README for the deploy overview.
+
+## Surfaces
+
+| Path | What | Who |
+|------|------|-----|
+| `/` | Landing page (`index.html`) | anyone |
+| `/app` | React field app (this folder) | reps, managers, company admins |
+| `/admin.html` | Back-office console | super-admins + company admins |
+| `/api/knockstat` | Knockstat proxy Cloud Function | authenticated app users |
+
+## Multi-tenancy model
+
+- **Company** = a tenant org. Each has its own users, leads, territories — fully
+  isolated by `companyId` in Firestore rules.
+- **User accounts** belong to one company with a role: `admin` / `manager` /
+  `rep`. Accounts are **provisioned from `/admin.html`**, never self-registered
+  in the app.
+- **Super-admin** (platform operator) — a Firebase custom claim
+  `superAdmin: true`. Manages all companies + users from `/admin.html`.
+
+The in-app experience is field-only (Dashboard, Lookup, Leads, Territories,
+Settings). User/company management is intentionally **not** in the app.
+
+## Layout
 
 ```
 canvasspro-web/
-├─ src/                  React app (dashboard, lookup, leads, territories, admin)
-│  ├─ auth/              Auth context + route guards
-│  ├─ components/        Layout, sidebar, topbar, property cards
-│  ├─ lib/               Knockstat normalization + formatters (ported from canvass-pro.html)
-│  └─ pages/             Login, Dashboard, Lookup, Leads, Territories, Admin, Settings
-├─ functions/            Cloud Functions: Knockstat proxy + role management
-├─ firebase.json         Hosting + Functions + Firestore + emulators
-├─ firestore.rules       Role-based security rules
-├─ capacitor.config.ts   Native iOS/Android wrapper config
-└─ .env.example          Firebase web config (copy to .env)
+├─ src/
+│  ├─ auth/        AuthContext (sign-in only) + route guards
+│  ├─ components/  Layout, sidebar, topbar, property cards
+│  ├─ lib/         Knockstat normalization + formatters (ported from canvass-pro.html)
+│  └─ pages/       Login, Dashboard, Lookup, Leads, Territories, Settings
+└─ functions/      Cloud Functions: knockstat proxy + company/account management
 ```
 
-Roles: **admin** (full control + role management), **manager** (sees all
-leads/territories), **rep** (only their own leads). Roles are stored in
-`users/{uid}.role` and can only be changed server-side via the `setUserRole`
-Cloud Function.
-
-## 1. Prerequisites
-
-- Node 20+
-- A Firebase project (the configs assume project id `canvasspro-web` — change
-  in `.firebaserc` and `.env`)
-- `npm i -g firebase-tools`
-
-## 2. Configure
+## 1. Configure
 
 ```bash
-cp .env.example .env          # fill in Firebase web SDK config
-cp functions/.env.example functions/.env   # add your Knockstat API key
+cp .env.example .env                        # Firebase web config (Vite app)
+cp functions/.env.example functions/.env    # Knockstat API key (server-side)
 ```
 
-In the Firebase console: enable **Email/Password** and **Google** sign-in
-providers, and create a **Firestore** database.
+Also paste the same Firebase web config into `../admin.html` (`FIREBASE_CONFIG`).
 
-## 3. Run locally
+In the Firebase console: enable **Email/Password** + **Google** sign-in and
+create a **Firestore** database.
+
+## 2. Run locally
 
 ```bash
-npm install
-npm run dev                   # web app at http://localhost:5173
-
-# optional: full local Firebase stack
-npm run emulators             # set VITE_USE_EMULATORS=1 in .env first
+# from repo root — builds the app, assembles public/, starts emulators
+cd .. && npm install && npm run emulators
+# or just the Vite dev server for the app:
+cd canvasspro-web && npm install && npm run dev   # http://localhost:5173/app
 ```
 
-## 4. Make yourself an admin
+## 3. Bootstrap the first super-admin (one time)
 
-The first account you create is a `rep`. To bootstrap an admin, set the role
-directly in Firestore (console → `users/{your-uid}` → `role: "admin"`). After
-that you can manage everyone else from the in-app **Admin** screen.
+There's no super-admin yet, so do this once with the Admin SDK / a small script
+(or the Firebase CLI). Given a user's `uid`:
 
-## 5. Deploy the web app + backend
+```js
+// node, using firebase-admin with a service account
+await admin.auth().setCustomUserClaims(uid, { superAdmin: true });
+```
+
+Then sign in at `/admin.html` → create a company → create its `admin` account.
+From there, company admins manage their own users.
+
+## 4. Deploy (from repo root)
 
 ```bash
 firebase login
-firebase use canvasspro-web   # or your project id
-npm run deploy                # builds, then deploys hosting + functions + rules
+firebase use <your-project-id>     # also update /.firebaserc and configs
+npm run deploy                     # builds app, assembles public/, deploys
+                                   # hosting + functions + firestore rules
 ```
 
-## 6. Build the mobile apps (Capacitor)
+## 5. Build the mobile apps (Capacitor)
 
 ```bash
-npm install                   # capacitor deps already in package.json
-npx cap add ios               # requires macOS + Xcode
-npx cap add android           # requires Android Studio
-npm run cap:ios               # build web → sync → open Xcode
-npm run cap:android           # build web → sync → open Android Studio
+npm install
+npx cap add ios        # requires macOS + Xcode
+npx cap add android    # requires Android Studio
+npm run cap:ios        # build web → sync → open Xcode
+npm run cap:android    # build web → sync → open Android Studio
 ```
 
-The native apps load the same built `dist/` and talk to the same Firebase
-backend. For Google sign-in on native you'll also add the iOS/Android OAuth
-client IDs in the Firebase console and the reversed-client-id URL scheme.
+The native apps load the same built app and talk to the same Firebase backend.
+For native Google sign-in, add the iOS/Android OAuth client IDs + reversed
+client-id URL scheme in the Firebase console.
 
 ## Security notes
 
 - The Knockstat API key lives **only** in `functions/.env` (server-side). The
-  browser/app calls the `/api/knockstat` proxy with a Firebase ID token — the
-  key is never shipped to clients (a real improvement over the original
-  single-file `canvass-pro.html`, which held the key in the browser).
-- `VITE_FIREBASE_*` values are public client identifiers; access is controlled
-  by Auth + `firestore.rules`, not by hiding them.
+  app calls `/api/knockstat` with a Firebase ID token — the key never reaches
+  the browser/app (an improvement over the original `canvass-pro.html`, which
+  held the key in the browser).
+- All company/user mutations go through Cloud Functions (admin SDK).
+  `firestore.rules` forbid client-side writes to `companies/` and `users/` and
+  enforce per-company isolation on `leads`, `territories`, and `lookups`.
+- `VITE_FIREBASE_*` and the values in `admin.html` are public client
+  identifiers; access is controlled by Auth + rules, not by hiding them.

@@ -13,7 +13,7 @@ import type { PropertyRecord } from "../types";
 type Banner = { kind: "info" | "warn" | "error"; msg: string } | null;
 
 export default function Lookup() {
-  const { user } = useAuth();
+  const { user, companyId } = useAuth();
   const [address, setAddress] = useState("");
   const [rec, setRec] = useState<PropertyRecord | null>(null);
   const [raw, setRaw] = useState<unknown>(null);
@@ -22,10 +22,11 @@ export default function Lookup() {
 
   // Record an audit-log entry so managers can see who looked up what.
   const logLookup = async (addr: string, found: boolean) => {
-    if (!user) return;
+    if (!user || !companyId) return;
     try {
       await addDoc(collection(db, "lookups"), {
         userId: user.uid,
+        companyId,
         address: addr,
         found,
         createdAt: serverTimestamp(),

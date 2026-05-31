@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 import { collection, getCountFromServer, query, where } from "firebase/firestore";
 import { db } from "../firebase";
 import { useAuth } from "../auth/AuthContext";
@@ -19,17 +20,22 @@ const STATUS_LABELS: Record<LeadStatus, string> = {
 };
 
 export default function Dashboard() {
-  const { profile, role } = useAuth();
+  const { profile, role, companyId } = useAuth();
   const [stats, setStats] = useState<Stats | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    if (!profile || !companyId) return;
     let cancelled = false;
     (async () => {
       try {
         const leads = collection(db, "leads");
-        const mine = role === "rep" && profile ? [where("assignedTo", "==", profile.uid)] : [];
-        const totalSnap = await getCountFromServer(query(leads, ...mine));
+        // Always scope to the caller's company; reps further to their own leads.
+        const scope = [
+          where("companyId", "==", companyId),
+          ...(role === "rep" ? [where("assignedTo", "==", profile.uid)] : []),
+        ];
+        const totalSnap = await getCountFromServer(query(leads, ...scope));
         const statuses: LeadStatus[] = [
           "new",
           "contacted",
@@ -42,7 +48,7 @@ export default function Dashboard() {
         await Promise.all(
           statuses.map(async (st) => {
             const snap = await getCountFromServer(
-              query(leads, where("status", "==", st), ...mine)
+              query(leads, ...scope, where("status", "==", st))
             );
             byStatus[st] = snap.data().count;
           })
@@ -59,7 +65,7 @@ export default function Dashboard() {
     return () => {
       cancelled = true;
     };
-  }, [profile, role]);
+  }, [profile, role, companyId]);
 
   return (
     <div className="page-body">
@@ -90,14 +96,14 @@ export default function Dashboard() {
       )}
 
       <div className="quick-links">
-        <a href="/lookup" className="card link-card">
+        <Link to="/lookup" className="card link-card">
           <h2>⌖ Run an address lookup</h2>
           <p className="muted">Pull homeowner intel before you knock.</p>
-        </a>
-        <a href="/leads" className="card link-card">
+        </Link>
+        <Link to="/leads" className="card link-card">
           <h2>☰ Work your leads</h2>
           <p className="muted">Update statuses and notes from the field.</p>
-        </a>
+        </Link>
       </div>
     </div>
   );

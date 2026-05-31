@@ -24,20 +24,26 @@ const STATUSES: { value: LeadStatus; label: string }[] = [
 ];
 
 export default function Leads() {
-  const { profile, role } = useAuth();
+  const { profile, role, companyId } = useAuth();
   const [leads, setLeads] = useState<Lead[]>([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<LeadStatus | "all">("all");
   const [showAdd, setShowAdd] = useState(false);
 
   useEffect(() => {
-    if (!profile) return;
+    if (!profile || !companyId) return;
     const base = collection(db, "leads");
-    // Reps only see their own leads (also enforced by security rules).
+    // Always scope to the company; reps further to their own leads (also
+    // enforced by security rules).
     const q =
       role === "rep"
-        ? query(base, where("assignedTo", "==", profile.uid), orderBy("updatedAt", "desc"))
-        : query(base, orderBy("updatedAt", "desc"));
+        ? query(
+            base,
+            where("companyId", "==", companyId),
+            where("assignedTo", "==", profile.uid),
+            orderBy("updatedAt", "desc")
+          )
+        : query(base, where("companyId", "==", companyId), orderBy("updatedAt", "desc"));
     const unsub = onSnapshot(
       q,
       (snap) => {
@@ -50,7 +56,7 @@ export default function Leads() {
       }
     );
     return unsub;
-  }, [profile, role]);
+  }, [profile, role, companyId]);
 
   const shown = filter === "all" ? leads : leads.filter((l) => l.status === filter);
 
@@ -137,7 +143,7 @@ export default function Leads() {
 }
 
 function AddLead({ onDone }: { onDone: () => void }) {
-  const { profile } = useAuth();
+  const { profile, companyId } = useAuth();
   const [address, setAddress] = useState("");
   const [ownerName, setOwnerName] = useState("");
   const [notes, setNotes] = useState("");
@@ -145,7 +151,7 @@ function AddLead({ onDone }: { onDone: () => void }) {
 
   const submit = async (e: FormEvent) => {
     e.preventDefault();
-    if (!profile || !address.trim()) return;
+    if (!profile || !companyId || !address.trim()) return;
     setBusy(true);
     try {
       const now = Date.now();
@@ -154,6 +160,7 @@ function AddLead({ onDone }: { onDone: () => void }) {
         ownerName: ownerName.trim() || null,
         notes: notes.trim() || null,
         status: "new" as LeadStatus,
+        companyId,
         assignedTo: profile.uid,
         createdBy: profile.uid,
         createdAt: now,

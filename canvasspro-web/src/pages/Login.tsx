@@ -3,15 +3,13 @@ import { useNavigate, useLocation, Navigate } from "react-router-dom";
 import { useAuth } from "../auth/AuthContext";
 
 export default function Login() {
-  const { user, login, register, loginWithGoogle, loading } = useAuth();
+  const { user, login, loginWithGoogle, loading } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
   const from = (location.state as { from?: Location })?.from?.pathname || "/";
 
-  const [mode, setMode] = useState<"login" | "register">("login");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [name, setName] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
 
@@ -22,8 +20,7 @@ export default function Login() {
     setError("");
     setBusy(true);
     try {
-      if (mode === "login") await login(email, password);
-      else await register(email, password, name);
+      await login(email, password);
       navigate(from, { replace: true });
     } catch (err: any) {
       setError(prettyError(err?.code) || err?.message || "Something went wrong.");
@@ -54,30 +51,7 @@ export default function Login() {
           <div className="brand-sub">Homeowner intel for the field</div>
         </div>
 
-        <div className="seg">
-          <button
-            className={"seg-btn" + (mode === "login" ? " active" : "")}
-            onClick={() => setMode("login")}
-            type="button"
-          >
-            Sign in
-          </button>
-          <button
-            className={"seg-btn" + (mode === "register" ? " active" : "")}
-            onClick={() => setMode("register")}
-            type="button"
-          >
-            Create account
-          </button>
-        </div>
-
-        <form onSubmit={submit} className="auth-form">
-          {mode === "register" && (
-            <label className="field">
-              <span>Name</span>
-              <input value={name} onChange={(e) => setName(e.target.value)} required />
-            </label>
-          )}
+        <form onSubmit={submit} className="auth-form" style={{ marginTop: 22 }}>
           <label className="field">
             <span>Email</span>
             <input
@@ -94,16 +68,15 @@ export default function Login() {
               type="password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              autoComplete={mode === "login" ? "current-password" : "new-password"}
+              autoComplete="current-password"
               required
-              minLength={6}
             />
           </label>
 
           {error && <div className="banner error show">{error}</div>}
 
           <button className="btn primary block" type="submit" disabled={busy}>
-            {busy ? "Please wait…" : mode === "login" ? "Sign in" : "Create account"}
+            {busy ? "Please wait…" : "Sign in"}
           </button>
         </form>
 
@@ -111,6 +84,10 @@ export default function Login() {
         <button className="btn block" type="button" onClick={google} disabled={busy}>
           Continue with Google
         </button>
+
+        <p className="muted small" style={{ marginTop: 16, textAlign: "center" }}>
+          Accounts are created by your administrator. No login yet? Contact your admin.
+        </p>
       </div>
     </div>
   );
@@ -122,10 +99,8 @@ function prettyError(code?: string): string | null {
     case "auth/wrong-password":
     case "auth/user-not-found":
       return "Incorrect email or password.";
-    case "auth/email-already-in-use":
-      return "An account with that email already exists.";
-    case "auth/weak-password":
-      return "Password should be at least 6 characters.";
+    case "auth/user-disabled":
+      return "This account has been disabled. Contact your admin.";
     case "auth/invalid-email":
       return "That doesn't look like a valid email.";
     default:

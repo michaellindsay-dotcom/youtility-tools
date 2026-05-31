@@ -2,11 +2,20 @@
 
 export type Role = "admin" | "manager" | "rep";
 
+export interface Company {
+  id: string;
+  name: string;
+  plan?: string;
+  status?: string;
+  createdAt?: number;
+}
+
 export interface UserProfile {
   uid: string;
   email: string;
   displayName: string;
   role: Role;
+  companyId: string;
   territoryIds?: string[];
   createdAt?: number;
   disabled?: boolean;
@@ -33,6 +42,7 @@ export interface Lead {
   email?: string;
   status: LeadStatus;
   notes?: string;
+  companyId: string;
   territoryId?: string;
   assignedTo?: string; // uid
   createdBy: string; // uid
@@ -45,6 +55,7 @@ export interface Territory {
   name: string;
   description?: string;
   color?: string;
+  companyId: string;
   managerId?: string; // uid
   createdAt: number;
 }

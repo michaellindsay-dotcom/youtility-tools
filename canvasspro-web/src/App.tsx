@@ -6,7 +6,6 @@ import Dashboard from "./pages/Dashboard";
 import Lookup from "./pages/Lookup";
 import Leads from "./pages/Leads";
 import Territories from "./pages/Territories";
-import Admin from "./pages/Admin";
 import Settings from "./pages/Settings";
 
 export default function App() {
@@ -25,14 +24,6 @@ export default function App() {
         <Route path="leads" element={<Leads />} />
         <Route path="territories" element={<Territories />} />
         <Route path="settings" element={<Settings />} />
-        <Route
-          path="admin"
-          element={
-            <ProtectedRoute roles={["admin", "manager"]}>
-              <Admin />
-            </ProtectedRoute>
-          }
-        />
       </Route>
     </Routes>
   );

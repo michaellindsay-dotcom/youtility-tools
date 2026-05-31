@@ -1,17 +1,14 @@
 import { NavLink } from "react-router-dom";
-import { useAuth } from "../auth/AuthContext";
 
 const links = [
   { to: "/", label: "Dashboard", icon: "▦", end: true },
   { to: "/lookup", label: "Address Lookup", icon: "⌖" },
   { to: "/leads", label: "Leads", icon: "☰" },
   { to: "/territories", label: "Territories", icon: "▰" },
+  { to: "/settings", label: "Settings", icon: "⚐" },
 ];
 
 export default function Sidebar() {
-  const { role } = useAuth();
-  const canAdmin = role === "admin" || role === "manager";
-
   return (
     <aside className="sidebar">
       <div className="brand">
@@ -34,22 +31,6 @@ export default function Sidebar() {
             {l.label}
           </NavLink>
         ))}
-        {canAdmin && (
-          <NavLink
-            to="/admin"
-            className={({ isActive }) => "nav-link" + (isActive ? " active" : "")}
-          >
-            <span className="nav-icon">⚙</span>
-            Admin
-          </NavLink>
-        )}
-        <NavLink
-          to="/settings"
-          className={({ isActive }) => "nav-link" + (isActive ? " active" : "")}
-        >
-          <span className="nav-icon">⚐</span>
-          Settings
-        </NavLink>
       </nav>
     </aside>
   );

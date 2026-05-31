@@ -1,0 +1,86 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ── helpers ──────────────────────────────────────────────────────────
+    function isSignedIn() {
+      return request.auth != null;
+    }
+    // Platform operator (manages every company). Set via the `superAdmin`
+    // custom claim by a Cloud Function / one-time bootstrap.
+    function isSuper() {
+      return isSignedIn() && request.auth.token.superAdmin == true;
+    }
+    function me() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+    function myCompany() {
+      return isSignedIn() ? me().companyId : null;
+    }
+    function myRole() {
+      return isSignedIn() ? me().role : 'none';
+    }
+    function isCompanyAdmin() {
+      return myRole() == 'admin';
+    }
+    function isManagerOrAdmin() {
+      return myRole() == 'admin' || myRole() == 'manager';
+    }
+    // True when the doc belongs to the caller's company (or caller is super).
+    function inMyCompany(companyId) {
+      return isSuper() || (isSignedIn() && companyId == myCompany());
+    }
+
+    // ── companies (tenants) ──────────────────────────────────────────────
+    // Created / edited only by the platform operator via Cloud Functions.
+    // Members may read their own company record.
+    match /companies/{companyId} {
+      allow read: if isSuper() || (isSignedIn() && companyId == myCompany());
+      allow write: if false; // server-side only (admin SDK)
+    }
+
+    // ── users (accounts) ─────────────────────────────────────────────────
+    // Readable by teammates in the same company (and super). All mutations
+    // (create / role / company / disable) go through Cloud Functions, never
+    // the client — that's how the HTML admin console manages accounts.
+    match /users/{userId} {
+      allow read: if isSuper()
+                  || (isSignedIn() && request.auth.uid == userId)
+                  || (isSignedIn() && resource.data.companyId == myCompany());
+      allow write: if false; // server-side only (admin SDK)
+    }
+
+    // ── leads ────────────────────────────────────────────────────────────
+    match /leads/{leadId} {
+      allow read: if inMyCompany(resource.data.companyId)
+                  && (isSuper() || isManagerOrAdmin()
+                      || resource.data.assignedTo == request.auth.uid);
+      allow create: if isSignedIn()
+                    && request.resource.data.companyId == myCompany()
+                    && request.resource.data.createdBy == request.auth.uid;
+      allow update: if inMyCompany(resource.data.companyId)
+                    && (isManagerOrAdmin() || resource.data.assignedTo == request.auth.uid)
+                    && request.resource.data.companyId == resource.data.companyId;
+      allow delete: if inMyCompany(resource.data.companyId) && isManagerOrAdmin();
+    }
+
+    // ── territories ──────────────────────────────────────────────────────
+    match /territories/{territoryId} {
+      allow read: if inMyCompany(resource.data.companyId);
+      allow create: if isSignedIn()
+                    && request.resource.data.companyId == myCompany()
+                    && isManagerOrAdmin();
+      allow update, delete: if inMyCompany(resource.data.companyId) && isManagerOrAdmin();
+    }
+
+    // ── lookups (audit log) ──────────────────────────────────────────────
+    match /lookups/{lookupId} {
+      allow read: if inMyCompany(resource.data.companyId)
+                  && (isManagerOrAdmin() || resource.data.userId == request.auth.uid);
+      allow create: if isSignedIn()
+                    && request.resource.data.companyId == myCompany()
+                    && request.resource.data.userId == request.auth.uid;
+      allow update, delete: if isSuper();
+    }
+  }
+}

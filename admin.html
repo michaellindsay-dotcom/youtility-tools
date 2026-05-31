@@ -1,0 +1,397 @@
+<!DOCTYPE html>
+<!--
+  ============================================================================
+  CANVASS PRO — ADMIN CONSOLE
+  ============================================================================
+  Back-office for managing tenants (companies) and their user accounts.
+  This is the ONLY place user accounts are managed — the field app does not
+  manage users.
+
+  Access:
+    • Super-admin  (custom claim superAdmin:true) → manage ALL companies + users
+    • Company admin (users/{uid}.role == 'admin')  → manage THEIR company's users
+
+  All mutations go through Cloud Functions (admin SDK). Firestore rules forbid
+  client-side writes to companies/ and users/.
+
+  SETUP: paste your Firebase web config into FIREBASE_CONFIG below (same values
+  as canvasspro-web/.env). These are public client identifiers.
+  ============================================================================
+-->
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Canvass Pro · Admin Console</title>
+<meta name="theme-color" content="#0EA5E9" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+<style>
+  :root {
+    --bg-0:#0A0F1A; --bg-1:#0F1727; --bg-2:#15203A;
+    --panel:rgba(255,255,255,.04); --panel-hi:rgba(255,255,255,.07);
+    --line:rgba(255,255,255,.08); --line-hi:rgba(255,255,255,.16);
+    --ink:#E8EEF8; --ink-mid:#A8B3C7; --ink-dim:#6B7589;
+    --accent:#0EA5E9; --accent-2:#38BDF8; --good:#34D399; --warn:#F59E0B; --bad:#F87171;
+    --radius:14px; --radius-sm:10px;
+  }
+  *,*::before,*::after { box-sizing:border-box; margin:0; padding:0; }
+  body {
+    font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
+    color:var(--ink); min-height:100vh;
+    background:
+      radial-gradient(1200px 600px at 80% -10%, rgba(14,165,233,.18), transparent 60%),
+      linear-gradient(180deg,var(--bg-0),var(--bg-1) 60%,var(--bg-2));
+    -webkit-font-smoothing:antialiased;
+  }
+  a { color:var(--accent-2); text-decoration:none; }
+  .page { max-width:1100px; margin:0 auto; padding:24px 20px 80px; }
+  .topbar { display:flex; align-items:center; justify-content:space-between; gap:16px; flex-wrap:wrap;
+    padding:16px 20px; background:var(--panel); border:1px solid var(--line); border-radius:var(--radius); }
+  .brand { display:flex; align-items:center; gap:12px; font-family:'Space Grotesk',sans-serif; }
+  .brand-mark { width:38px; height:38px; border-radius:10px; display:grid; place-items:center; font-weight:700; color:#00131F;
+    background:linear-gradient(135deg,var(--accent),var(--accent-2)); box-shadow:0 6px 20px rgba(14,165,233,.35); }
+  .brand-name { font-size:18px; font-weight:700; }
+  .brand-sub { font-size:12px; color:var(--ink-mid); margin-top:2px; }
+  .who { display:flex; align-items:center; gap:12px; font-size:13px; color:var(--ink-mid); }
+
+  .btn { font-family:inherit; font-weight:600; font-size:14px; padding:0 16px; min-height:42px; border-radius:var(--radius-sm);
+    border:1px solid var(--line-hi); background:rgba(255,255,255,.04); color:var(--ink); cursor:pointer; white-space:nowrap; }
+  .btn:hover { background:rgba(255,255,255,.08); border-color:var(--accent); }
+  .btn.primary { background:linear-gradient(135deg,var(--accent),var(--accent-2)); border-color:transparent; color:#00131F; }
+  .btn.sm { min-height:34px; padding:0 12px; font-size:13px; }
+  .btn.ghost { background:transparent; }
+  .btn.danger { border-color:rgba(248,113,113,.4); color:#FECACA; }
+  .btn[disabled] { opacity:.5; cursor:not-allowed; }
+
+  .card { background:var(--panel); border:1px solid var(--line); border-radius:var(--radius); padding:20px; margin-top:18px; }
+  .card h2 { font-family:'Space Grotesk',sans-serif; font-size:14px; font-weight:600; letter-spacing:.6px; text-transform:uppercase;
+    color:var(--ink-mid); margin-bottom:14px; padding-bottom:10px; border-bottom:1px solid var(--line);
+    display:flex; align-items:center; justify-content:space-between; gap:10px; }
+  .grid-2 { display:grid; grid-template-columns:1fr 1fr; gap:14px; }
+  @media (max-width:640px){ .grid-2 { grid-template-columns:1fr; } }
+  .field { display:grid; gap:6px; margin-bottom:12px; }
+  .field > span { font-size:12px; color:var(--ink-mid); font-weight:500; }
+  input,select { width:100%; background:rgba(0,0,0,.25); color:var(--ink); border:1px solid var(--line);
+    border-radius:var(--radius-sm); padding:11px 13px; font-size:15px; font-family:inherit; outline:none; }
+  input:focus,select:focus { border-color:var(--accent); }
+
+  table { width:100%; border-collapse:collapse; }
+  th,td { text-align:left; padding:11px 12px; border-bottom:1px solid var(--line); font-size:14px; vertical-align:middle; }
+  th { color:var(--ink-mid); font-size:12px; text-transform:uppercase; letter-spacing:.5px; }
+  tr:last-child td { border-bottom:0; }
+  .badge { display:inline-block; padding:3px 9px; border-radius:999px; font-size:12px; font-weight:600; text-transform:capitalize;
+    background:rgba(255,255,255,.06); border:1px solid var(--line); }
+  .badge.admin { color:#FECACA; border-color:rgba(248,113,113,.4); background:rgba(248,113,113,.1); }
+  .badge.manager { color:#CFF1FF; border-color:rgba(56,189,248,.4); background:rgba(56,189,248,.1); }
+  .badge.disabled { color:#FFE3B0; border-color:rgba(245,158,11,.4); background:rgba(245,158,11,.1); }
+  .row { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+  .muted { color:var(--ink-dim); }
+  .small { font-size:12px; }
+  .mono { font-family:'JetBrains Mono',monospace; font-size:12px; }
+
+  .banner { margin-top:14px; padding:12px 14px; border-radius:var(--radius-sm); font-size:14px; display:none; }
+  .banner.show { display:block; }
+  .banner.info { background:rgba(56,189,248,.1); border:1px solid rgba(56,189,248,.35); color:#CFF1FF; }
+  .banner.error { background:rgba(248,113,113,.1); border:1px solid rgba(248,113,113,.35); color:#FFD3D3; }
+  .banner.good { background:rgba(52,211,153,.1); border:1px solid rgba(52,211,153,.35); color:#BBF7D0; }
+
+  .auth-wrap { min-height:100vh; display:grid; place-items:center; padding:24px; }
+  .auth-card { width:100%; max-width:400px; }
+  .hidden { display:none !important; }
+  .pill { display:inline-flex; align-items:center; gap:6px; font-size:12px; padding:5px 10px; border-radius:999px;
+    border:1px solid var(--line-hi); background:rgba(255,255,255,.03); color:var(--ink-mid); }
+</style>
+</head>
+<body>
+
+<!-- ── Sign-in screen ──────────────────────────────────────────────────── -->
+<div id="loginScreen" class="auth-wrap">
+  <div class="auth-card">
+    <div class="brand" style="justify-content:center; margin-bottom:18px;">
+      <div class="brand-mark">CP</div>
+      <div><div class="brand-name">Admin Console</div><div class="brand-sub">Canvass Pro back-office</div></div>
+    </div>
+    <div class="card" style="margin-top:0;">
+      <div class="field"><span>Email</span><input id="loginEmail" type="email" autocomplete="email" /></div>
+      <div class="field"><span>Password</span><input id="loginPassword" type="password" autocomplete="current-password" /></div>
+      <button id="loginBtn" class="btn primary" style="width:100%;">Sign in</button>
+      <div id="loginBanner" class="banner error"></div>
+      <p class="muted small" style="margin-top:12px;">Admins only. Reps use the <a href="/app">field app</a>.</p>
+    </div>
+  </div>
+</div>
+
+<!-- ── Console ─────────────────────────────────────────────────────────── -->
+<div id="console" class="page hidden">
+  <header class="topbar">
+    <div class="brand">
+      <div class="brand-mark">CP</div>
+      <div><div class="brand-name">Admin Console</div><div class="brand-sub">Companies & accounts</div></div>
+    </div>
+    <div class="who">
+      <span id="whoLabel"></span>
+      <span id="scopePill" class="pill"></span>
+      <button id="logoutBtn" class="btn ghost sm">Sign out</button>
+    </div>
+  </header>
+
+  <div id="banner" class="banner"></div>
+
+  <!-- Companies (super-admin only) -->
+  <section id="companiesCard" class="card hidden">
+    <h2>Companies
+      <button id="newCompanyBtn" class="btn primary sm">+ New company</button>
+    </h2>
+    <div id="companyForm" class="hidden" style="margin-bottom:16px;">
+      <div class="grid-2">
+        <div class="field"><span>Company name *</span><input id="companyName" /></div>
+        <div class="field"><span>Plan</span>
+          <select id="companyPlan"><option value="standard">Standard</option><option value="pro">Pro</option><option value="trial">Trial</option></select>
+        </div>
+      </div>
+      <div class="row" style="justify-content:flex-end;">
+        <button id="companyCancel" class="btn ghost sm">Cancel</button>
+        <button id="companySave" class="btn primary sm">Create company</button>
+      </div>
+    </div>
+    <table>
+      <thead><tr><th>Company</th><th>Plan</th><th>Created</th><th></th></tr></thead>
+      <tbody id="companiesBody"><tr><td colspan="4" class="muted">Loading…</td></tr></tbody>
+    </table>
+  </section>
+
+  <!-- Users / accounts -->
+  <section id="usersCard" class="card">
+    <h2><span id="usersTitle">Accounts</span>
+      <button id="newUserBtn" class="btn primary sm">+ New account</button>
+    </h2>
+    <div id="userForm" class="hidden" style="margin-bottom:16px;">
+      <div class="grid-2">
+        <div class="field"><span>Name *</span><input id="userName" /></div>
+        <div class="field"><span>Email *</span><input id="userEmail" type="email" /></div>
+        <div class="field"><span>Temporary password *</span><input id="userPassword" type="text" placeholder="min 6 chars" /></div>
+        <div class="field"><span>Role</span>
+          <select id="userRole"><option value="rep">Rep</option><option value="manager">Manager</option><option value="admin">Admin</option></select>
+        </div>
+      </div>
+      <div class="row" style="justify-content:flex-end;">
+        <button id="userCancel" class="btn ghost sm">Cancel</button>
+        <button id="userSave" class="btn primary sm">Create account</button>
+      </div>
+    </div>
+    <table>
+      <thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Status</th><th></th></tr></thead>
+      <tbody id="usersBody"><tr><td colspan="5" class="muted">Select a company…</td></tr></tbody>
+    </table>
+  </section>
+</div>
+
+<script type="module">
+// ── Firebase config — paste your web config here (same as canvasspro-web/.env) ──
+const FIREBASE_CONFIG = {
+  apiKey: "REPLACE_ME",
+  authDomain: "canvasspro-web.firebaseapp.com",
+  projectId: "canvasspro-web",
+  storageBucket: "canvasspro-web.appspot.com",
+  messagingSenderId: "REPLACE_ME",
+  appId: "REPLACE_ME",
+};
+
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.13.2/firebase-app.js";
+import { getAuth, signInWithEmailAndPassword, onAuthStateChanged, signOut }
+  from "https://www.gstatic.com/firebasejs/10.13.2/firebase-auth.js";
+import { getFirestore, collection, query, where, orderBy, getDocs, doc, getDoc }
+  from "https://www.gstatic.com/firebasejs/10.13.2/firebase-firestore.js";
+import { getFunctions, httpsCallable }
+  from "https://www.gstatic.com/firebasejs/10.13.2/firebase-functions.js";
+
+const app = initializeApp(FIREBASE_CONFIG);
+const auth = getAuth(app);
+const db = getFirestore(app);
+const fns = getFunctions(app);
+
+const $ = (id) => document.getElementById(id);
+const state = { isSuper:false, companyId:null, companyName:null, role:null, selectedCompany:null };
+
+// callables
+const createCompany   = httpsCallable(fns, "createCompany");
+const createUser      = httpsCallable(fns, "createUser");
+const setUserRole     = httpsCallable(fns, "setUserRole");
+const setUserDisabled = httpsCallable(fns, "setUserDisabled");
+
+function banner(el, msg, kind="info") {
+  el.className = "banner show " + kind;
+  el.textContent = msg;
+  if (kind !== "error") setTimeout(() => { el.className = "banner"; }, 4000);
+}
+const fmtDate = (ms) => ms ? new Date(ms).toLocaleDateString("en-US",{year:"numeric",month:"short",day:"numeric"}) : "—";
+
+// ── Auth ───────────────────────────────────────────────────────────────
+$("loginBtn").addEventListener("click", async () => {
+  $("loginBtn").disabled = true;
+  try {
+    await signInWithEmailAndPassword(auth, $("loginEmail").value.trim(), $("loginPassword").value);
+  } catch (e) {
+    banner($("loginBanner"), e.code === "auth/invalid-credential" ? "Incorrect email or password." : (e.message||"Sign-in failed."), "error");
+  } finally { $("loginBtn").disabled = false; }
+});
+$("loginPassword").addEventListener("keydown", (e)=>{ if(e.key==="Enter") $("loginBtn").click(); });
+$("logoutBtn").addEventListener("click", () => signOut(auth));
+
+onAuthStateChanged(auth, async (user) => {
+  if (!user) { showLogin(); return; }
+  try {
+    const tok = await user.getIdTokenResult(true);
+    state.isSuper = tok.claims.superAdmin === true;
+    const snap = await getDoc(doc(db, "users", user.uid));
+    const me = snap.exists() ? snap.data() : null;
+    state.role = me?.role ?? null;
+    state.companyId = me?.companyId ?? null;
+
+    if (!state.isSuper && state.role !== "admin") {
+      banner($("loginBanner"), "This account isn't an admin. Reps/managers use the field app.", "error");
+      await signOut(auth);
+      return;
+    }
+    $("whoLabel").textContent = user.email;
+    $("scopePill").textContent = state.isSuper ? "Super-admin" : "Company admin";
+    enterConsole();
+  } catch (e) {
+    banner($("loginBanner"), e.message || "Could not load your account.", "error");
+    await signOut(auth);
+  }
+});
+
+function showLogin() {
+  $("console").classList.add("hidden");
+  $("loginScreen").classList.remove("hidden");
+}
+function enterConsole() {
+  $("loginScreen").classList.add("hidden");
+  $("console").classList.remove("hidden");
+  if (state.isSuper) {
+    $("companiesCard").classList.remove("hidden");
+    loadCompanies();
+  } else {
+    // Company admin: locked to their own company.
+    state.selectedCompany = state.companyId;
+    $("usersTitle").textContent = "Accounts";
+    loadUsers();
+  }
+}
+
+// ── Companies (super-admin) ──────────────────────────────────────────────
+$("newCompanyBtn").addEventListener("click", () => $("companyForm").classList.toggle("hidden"));
+$("companyCancel").addEventListener("click", () => $("companyForm").classList.add("hidden"));
+$("companySave").addEventListener("click", async () => {
+  const name = $("companyName").value.trim();
+  if (!name) return;
+  $("companySave").disabled = true;
+  try {
+    await createCompany({ name, plan: $("companyPlan").value });
+    $("companyName").value = "";
+    $("companyForm").classList.add("hidden");
+    banner($("banner"), "Company created.", "good");
+    loadCompanies();
+  } catch (e) { banner($("banner"), e.message || "Failed to create company.", "error"); }
+  finally { $("companySave").disabled = false; }
+});
+
+async function loadCompanies() {
+  const body = $("companiesBody");
+  body.innerHTML = `<tr><td colspan="4" class="muted">Loading…</td></tr>`;
+  try {
+    const snap = await getDocs(query(collection(db, "companies"), orderBy("createdAt", "desc")));
+    if (snap.empty) { body.innerHTML = `<tr><td colspan="4" class="muted">No companies yet. Create one.</td></tr>`; return; }
+    body.innerHTML = "";
+    snap.forEach((d) => {
+      const c = d.data();
+      const tr = document.createElement("tr");
+      tr.innerHTML = `<td><strong>${esc(c.name)}</strong><div class="mono muted">${d.id}</div></td>
+        <td><span class="badge">${esc(c.plan||"—")}</span></td>
+        <td class="muted">${fmtDate(c.createdAt)}</td>
+        <td><button class="btn sm">Manage accounts →</button></td>`;
+      tr.querySelector("button").addEventListener("click", () => {
+        state.selectedCompany = d.id;
+        $("usersTitle").textContent = `Accounts · ${c.name}`;
+        loadUsers();
+        $("usersCard").scrollIntoView({ behavior:"smooth" });
+      });
+      body.appendChild(tr);
+    });
+  } catch (e) { body.innerHTML = `<tr><td colspan="4" class="banner error show">${esc(e.message)}</td></tr>`; }
+}
+
+// ── Users / accounts ─────────────────────────────────────────────────────
+$("newUserBtn").addEventListener("click", () => {
+  if (!state.selectedCompany) { banner($("banner"), "Select a company first.", "error"); return; }
+  $("userForm").classList.toggle("hidden");
+});
+$("userCancel").addEventListener("click", () => $("userForm").classList.add("hidden"));
+$("userSave").addEventListener("click", async () => {
+  const payload = {
+    companyId: state.selectedCompany,
+    name: $("userName").value.trim(),
+    email: $("userEmail").value.trim(),
+    password: $("userPassword").value,
+    role: $("userRole").value,
+  };
+  if (!payload.name || !payload.email || payload.password.length < 6) {
+    banner($("banner"), "Name, email, and a 6+ char password are required.", "error"); return;
+  }
+  $("userSave").disabled = true;
+  try {
+    await createUser(payload);
+    $("userName").value = $("userEmail").value = $("userPassword").value = "";
+    $("userForm").classList.add("hidden");
+    banner($("banner"), "Account created.", "good");
+    loadUsers();
+  } catch (e) { banner($("banner"), e.message || "Failed to create account.", "error"); }
+  finally { $("userSave").disabled = false; }
+});
+
+async function loadUsers() {
+  const body = $("usersBody");
+  if (!state.selectedCompany) { body.innerHTML = `<tr><td colspan="5" class="muted">Select a company…</td></tr>`; return; }
+  body.innerHTML = `<tr><td colspan="5" class="muted">Loading…</td></tr>`;
+  try {
+    const snap = await getDocs(query(collection(db, "users"),
+      where("companyId", "==", state.selectedCompany), orderBy("createdAt", "desc")));
+    if (snap.empty) { body.innerHTML = `<tr><td colspan="5" class="muted">No accounts yet.</td></tr>`; return; }
+    body.innerHTML = "";
+    snap.forEach((d) => {
+      const u = d.data();
+      const tr = document.createElement("tr");
+      const roleSel = `<select data-uid="${d.id}" class="roleSel">
+        ${["rep","manager","admin"].map(r=>`<option value="${r}" ${u.role===r?"selected":""}>${r}</option>`).join("")}
+      </select>`;
+      tr.innerHTML = `<td>${esc(u.displayName||"—")}</td>
+        <td class="muted">${esc(u.email||"")}</td>
+        <td>${roleSel}</td>
+        <td>${u.disabled ? '<span class="badge disabled">disabled</span>' : '<span class="badge">active</span>'}</td>
+        <td><button class="btn sm ${u.disabled?'':'danger'}" data-uid="${d.id}" data-disabled="${u.disabled?1:0}">
+          ${u.disabled ? "Enable" : "Disable"}</button></td>`;
+      tr.querySelector(".roleSel").addEventListener("change", async (ev) => {
+        try { await setUserRole({ uid:d.id, role:ev.target.value }); banner($("banner"),"Role updated.","good"); }
+        catch (e) { banner($("banner"), e.message, "error"); loadUsers(); }
+      });
+      tr.querySelector("button").addEventListener("click", async (ev) => {
+        const disable = ev.target.dataset.disabled !== "1";
+        try { await setUserDisabled({ uid:d.id, disabled:disable }); loadUsers(); }
+        catch (e) { banner($("banner"), e.message, "error"); }
+      });
+      body.appendChild(tr);
+    });
+  } catch (e) { body.innerHTML = `<tr><td colspan="5" class="banner error show">${esc(e.message)}</td></tr>`; }
+}
+
+function esc(s) { return String(s ?? "").replace(/[&<>"']/g, (c)=>({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;" }[c])); }
+
+if (FIREBASE_CONFIG.apiKey === "REPLACE_ME") {
+  banner($("loginBanner"), "Set FIREBASE_CONFIG in admin.html before using the console.", "error");
+}
+</script>
+</body>
+</html>

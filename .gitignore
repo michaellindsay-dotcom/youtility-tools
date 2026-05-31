@@ -1,0 +1,22 @@
+# assembled hosting output (built by scripts/assemble.mjs)
+public/
+
+# node
+node_modules/
+
+# firebase
+.firebase/
+firebase-debug.log
+firestore-debug.log
+ui-debug.log
+
+# env / secrets
+.env
+.env.local
+serviceAccountKey.json
+
+# OS / editor
+.DS_Store
+*.log
+.vscode/
+.idea/
