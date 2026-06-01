@@ -120,9 +120,10 @@ export default function MapPage() {
     });
   }
 
-  // A loaded home is "already a lead" if it matches a saved lead by address or
-  // sits within ~25 m of one — so we never paint a blank house over a knocked
-  // lead (which would hide its disposition + the off-site ✕).
+  // A loaded home is "already a lead" only if it's the SAME house — matched by
+  // address, or within ~8 m (a lead is created from that exact home pin, so its
+  // coords match within a meter or two). Kept tight so neighboring homes — which
+  // sit ~15–20 m away — still get their own pins.
   function isExistingLead(h: { address: string; lat: number; lng: number }): boolean {
     const norm = (a?: string) => (a || "").toLowerCase().replace(/[^a-z0-9]/g, "").slice(0, 24);
     const ha = norm(h.address);
@@ -130,7 +131,7 @@ export default function MapPage() {
     return leadsRef.current.some((l) => {
       if (ha && norm(l.address) === ha) return true;
       const c = validCoord(l.lat, l.lng);
-      return !!c && here.distanceTo(L.latLng(c[0], c[1])) < 25;
+      return !!c && here.distanceTo(L.latLng(c[0], c[1])) < 8;
     });
   }
 
