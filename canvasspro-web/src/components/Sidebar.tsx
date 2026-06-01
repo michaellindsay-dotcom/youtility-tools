@@ -38,6 +38,9 @@ export default function Sidebar() {
           </NavLink>
         ))}
       </nav>
+      <div className="brand-sub" style={{ marginTop: "auto", padding: "8px" }}>
+        build BUILD-9
+      </div>
     </aside>
   );
 }
