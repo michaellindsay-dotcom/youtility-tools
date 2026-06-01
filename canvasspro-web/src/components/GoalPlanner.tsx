@@ -11,11 +11,13 @@ const CONVO = new Set(["pipeline", "appointment", "not_interested", "sold"]);
 const FALLBACK = { closeRate: 0.3, apptPerDoor: 0.03, apptPerConv: 0.1, doorsPerHour: 30 };
 
 type GoalType = "closes" | "appointments";
-const WEEKS_PER_MONTH = 4.345; // avg, for the weekly pace breakdown
+const WEEKS_PER_MONTH = 4.345; // avg, to convert the monthly goal to a weekly pace
 // Conversion rates use a rolling 30-day window once the rep has that much data;
-// before then we look back at least two weeks so the sample isn't too noisy.
+// before then (< ~2 weeks of real data) doors & hours fall back to a baseline.
 const WINDOW_DAYS = 30;
-const MIN_WINDOW_DAYS = 14;
+const MIN_DATA_DAYS = 14;
+const DEFAULT_DOORS_WEEK = 400;
+const DEFAULT_HOURS_WEEK = 35;
 
 interface Actuals { doors: number; conv: number; appt: number; closes: number; hours: number; }
 interface Goals {
@@ -42,6 +44,9 @@ export default function GoalPlanner() {
   const [goals, setGoals] = useState<Goals>(DEFAULT_GOALS);
   const [goalType, setGoalType] = useState<GoalType>("closes");
   const [goalCount, setGoalCount] = useState(10);
+  // True once the rep has ~2+ weeks of real activity — only then do doors/hours
+  // come from live data instead of the 400/35 baseline.
+  const [hasRealData, setHasRealData] = useState(false);
 
   // Load saved goals + rate overrides (local to this device, per the spec).
   useEffect(() => {
@@ -67,9 +72,8 @@ export default function GoalPlanner() {
         ]);
         if (off) return;
         const leads = leadSnap.docs.map((d) => d.data() as Lead).filter((l) => l.verified !== false);
-        const hours = shiftSnap.docs
-          .map((d) => d.data() as Shift)
-          .reduce((s, sh) => s + ((sh.endAt ?? Date.now()) - sh.startAt), 0) / 3600000;
+        const shifts = shiftSnap.docs.map((d) => d.data() as Shift);
+        const hours = shifts.reduce((s, sh) => s + ((sh.endAt ?? Date.now()) - sh.startAt), 0) / 3600000;
         const m: Actuals = {
           doors: leads.length,
           conv: leads.filter((l) => CONVO.has(l.status)).length,
@@ -78,6 +82,10 @@ export default function GoalPlanner() {
           hours: Math.round(hours * 10) / 10,
         };
         setMeasured(m);
+        // "Real data" = at least 2 weeks of span AND some doors + hours logged.
+        const ts = [...leads.map((l) => l.knockedAt || l.createdAt), ...shifts.map((s) => s.startAt)].filter(Boolean) as number[];
+        const spanDays = ts.length ? (Date.now() - Math.min(...ts)) / 86400000 : 0;
+        setHasRealData(spanDays >= MIN_DATA_DAYS && m.doors > 0 && m.hours > 0);
         // Seed editable rates from measured data only if the rep hasn't set their own.
         setActuals((cur) =>
           cur.doors || cur.appt || cur.closes || cur.hours ? cur : m
@@ -110,25 +118,21 @@ export default function GoalPlanner() {
     };
   }, [actuals]);
 
-  // Reverse-plan the MONTHLY goal: work backward to appts → conversations →
-  // doors → hours, then break the monthly totals into a realistic weekly pace.
+  // Reverse-plan the MONTHLY close goal, shown as a WEEKLY game plan.
+  // Appointments & conversations always come from the conversion math; doors &
+  // hours use a 400/35 weekly baseline until the rep has ~2 weeks of real data.
   const plan = useMemo(() => {
-    const apptsNeeded = goalType === "closes" ? goalCount / (rates.closeRate || FALLBACK.closeRate) : goalCount;
-    const convNeeded = apptsNeeded / (rates.apptPerConv || FALLBACK.apptPerConv);
-    const doorsNeeded = apptsNeeded / (rates.apptPerDoor || FALLBACK.apptPerDoor);
-    const hoursNeeded = doorsNeeded / (rates.doorsPerHour || FALLBACK.doorsPerHour);
+    const apptsMonthly = goalType === "closes" ? goalCount / (rates.closeRate || FALLBACK.closeRate) : goalCount;
+    const convMonthly = apptsMonthly / (rates.apptPerConv || FALLBACK.apptPerConv);
+    const doorsMonthly = apptsMonthly / (rates.apptPerDoor || FALLBACK.apptPerDoor);
+    const hoursMonthly = doorsMonthly / (rates.doorsPerHour || FALLBACK.doorsPerHour);
     return {
-      appts: ceil(apptsNeeded),
-      conv: ceil(convNeeded),
-      doors: ceil(doorsNeeded),
-      hours: Math.round(hoursNeeded * 10) / 10,
-      perWeek: {
-        doors: ceil(doorsNeeded / WEEKS_PER_MONTH),
-        appts: Math.round((apptsNeeded / WEEKS_PER_MONTH) * 10) / 10,
-        hours: Math.round((hoursNeeded / WEEKS_PER_MONTH) * 10) / 10,
-      },
+      appts: ceil(apptsMonthly / WEEKS_PER_MONTH),
+      conv: ceil(convMonthly / WEEKS_PER_MONTH),
+      doors: hasRealData ? ceil(doorsMonthly / WEEKS_PER_MONTH) : DEFAULT_DOORS_WEEK,
+      hours: hasRealData ? Math.round((hoursMonthly / WEEKS_PER_MONTH) * 10) / 10 : DEFAULT_HOURS_WEEK,
     };
-  }, [goalType, goalCount, rates]);
+  }, [goalType, goalCount, rates, hasRealData]);
 
   const aField = (label: string, key: keyof Actuals, hint?: string) => (
     <label className="field">
@@ -160,8 +164,8 @@ export default function GoalPlanner() {
       <div className="card">
         <h2 className="planner-h">◎ Monthly Goal Planner</h2>
         <p className="muted small">
-          Set your monthly target and we'll work backward through <em>your</em> conversion rates to the
-          appointments, doors, and hours it takes — then break it into a weekly pace.
+          Set your monthly close target and we'll work backward through <em>your</em> conversion rates into a
+          weekly game plan.
         </p>
 
         <div className="planner-goalbar">
@@ -178,17 +182,20 @@ export default function GoalPlanner() {
           <span>this month</span>
         </div>
 
+        <div className="muted small" style={{ margin: "6px 0 4px" }}>Your weekly game plan:</div>
         <div className="plan-grid">
-          {goalType === "closes" && <PlanStat n={plan.appts} label="Appointments" />}
-          <PlanStat n={plan.conv} label="Conversations" />
-          <PlanStat n={plan.doors} label="Doors" />
-          <PlanStat n={plan.hours} label="Hours" />
+          {goalType === "closes" && <PlanStat n={plan.appts} label="Appts / wk" />}
+          <PlanStat n={plan.conv} label="Conversations / wk" />
+          <PlanStat n={plan.doors} label="Doors / wk" />
+          <PlanStat n={plan.hours} label="Hours / wk" />
         </div>
 
-        <div className="plan-perday muted small">
-          ≈ <strong>{plan.perWeek.doors} doors</strong>, <strong>{plan.perWeek.appts} appts</strong> and{" "}
-          <strong>{plan.perWeek.hours} h</strong> per week to stay on pace.
-        </div>
+        {!hasRealData && (
+          <div className="muted small" style={{ marginTop: 4 }}>
+            Doors &amp; hours use a {DEFAULT_DOORS_WEEK}/{DEFAULT_HOURS_WEEK} weekly baseline — they'll adjust to your
+            real pace once you've logged ~2 weeks of data.
+          </div>
+        )}
       </div>
 
       {/* ── Your numbers (editable, seed the rates) ─────────── */}
@@ -199,7 +206,7 @@ export default function GoalPlanner() {
         </div>
         <p className="muted small">
           Auto-filled from your rolling last {WINDOW_DAYS} days ({measured.doors} doors, {measured.appt} appts,{" "}
-          {measured.closes} closes, {measured.hours}h) — the more you log (min ~{MIN_WINDOW_DAYS} days), the more
+          {measured.closes} closes, {measured.hours}h) — the more you log (min ~{MIN_DATA_DAYS} days), the more
           accurate it gets. Tweak any number to match your real rates.
         </p>
         <div className="planner-actuals">

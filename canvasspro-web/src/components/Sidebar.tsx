@@ -42,7 +42,7 @@ export default function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
         ))}
       </nav>
       <div className="brand-sub" style={{ marginTop: "auto", padding: "8px" }}>
-        build BUILD-32
+        build BUILD-33
       </div>
     </aside>
   );
