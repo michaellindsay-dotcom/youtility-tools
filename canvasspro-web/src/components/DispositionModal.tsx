@@ -7,6 +7,7 @@ import { useAuth } from "../auth/AuthContext";
 import { DISPOSITIONS } from "../lib/dispositions";
 import { lookupAddress, normalizeKnockstatResponse, buildEnrichment } from "../lib/knockstat";
 import { bumpStats } from "../lib/stats";
+import { validAppointmentTime } from "../lib/scheduling";
 import { useShift } from "../shift/ShiftContext";
 import type { LeadStatus, LeadEnrichment, EventType } from "../types";
 
@@ -301,6 +302,15 @@ export default function DispositionModal({
       // scheduling failure surfaces a warning but doesn't lose the lead.
       const cfg = SCHEDULE_FOR[d.status];
       if (cfg && schedule && scheduleAt) {
+        // Appointments must fall inside the company's booking practices.
+        if (d.status === "appointment" && company?.scheduling) {
+          const v = validAppointmentTime(new Date(scheduleAt).getTime(), company.scheduling);
+          if (!v.ok) {
+            setErr(`Saved the lead, but the appointment time ${v.reason} — pick a valid time and save again.`);
+            onSaved?.();
+            return; // keep modal open so they can fix the time
+          }
+        }
         try {
           await addDoc(collection(db, "events"), clean({
             companyId,

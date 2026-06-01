@@ -328,6 +328,100 @@ export const createUser = onCall(async (request) => {
 });
 
 // ───────────────────────────────────────────────────────────────────────────
+// inviteUser — provisions an account and emails a magic sign-in link. The
+// invitee clicks it, is signed in, and is prompted to set their own password.
+// No temp password to share.
+// ───────────────────────────────────────────────────────────────────────────
+const APP_URL = process.env.APP_URL || "https://youtilityknock.web.app";
+
+export const inviteUser = onCall(async (request) => {
+  const caller = await getCaller(request);
+  const { companyId, name, email, tier, roleId, title, teamId, managerId } =
+    request.data as {
+      companyId?: string; name?: string; email?: string;
+      tier?: Tier; roleId?: string; title?: string; teamId?: string; managerId?: string;
+    };
+  const targetCompany = authorizeForCompany(caller, companyId);
+  if (!email?.trim()) throw new HttpsError("invalid-argument", "A valid email is required.");
+
+  let baseTier: Tier = TIERS.includes(tier as Tier) ? (tier as Tier) : "user";
+  let roleTitle = title || null;
+  if (roleId) {
+    const roleSnap = await db.doc(`companies/${targetCompany}/roles/${roleId}`).get();
+    if (!roleSnap.exists) throw new HttpsError("invalid-argument", "Unknown role.");
+    const r = roleSnap.data()!;
+    baseTier = (r.baseTier as Tier) || "user";
+    roleTitle = r.title;
+  }
+  if (baseTier === "admin" && !(caller.isSuper || caller.role === "admin")) {
+    throw new HttpsError("permission-denied", "Not allowed to create an admin.");
+  }
+
+  // Random throwaway password — the invitee sets their own on first sign-in.
+  const tempPw = "Yk-" + Math.random().toString(36).slice(2, 10) + "A9!";
+  let userRecord;
+  try {
+    userRecord = await getAuth().createUser({
+      email: email.trim(), password: tempPw, displayName: name?.trim() || email.split("@")[0],
+    });
+  } catch (err: any) {
+    if (err?.code === "auth/email-already-exists") throw new HttpsError("already-exists", "That email is already in use.");
+    throw new HttpsError("internal", err?.message || "Could not create user.");
+  }
+
+  const managerPath = await computeManagerPath(managerId);
+  await getAuth().setCustomUserClaims(userRecord.uid, { role: baseTier, companyId: targetCompany });
+  await db.doc(`users/${userRecord.uid}`).set({
+    uid: userRecord.uid,
+    email: userRecord.email,
+    displayName: userRecord.displayName,
+    role: baseTier,
+    companyId: targetCompany,
+    roleId: roleId || null,
+    title: roleTitle,
+    teamId: teamId || null,
+    managerId: managerId || null,
+    managerPath,
+    disabled: false,
+    invitePending: true,
+    createdAt: Date.now(),
+    createdBy: caller.uid,
+  });
+
+  // Magic sign-in link → app login (which forces a set-password step).
+  let link = "";
+  try {
+    link = await getAuth().generateSignInWithEmailLink(email.trim(), {
+      url: `${APP_URL}/app/login?invite=1`,
+      handleCodeInApp: true,
+    });
+  } catch (err: any) {
+    throw new HttpsError("internal", err?.message || "Could not generate invite link.");
+  }
+
+  // Email it (best-effort — needs SendGrid configured).
+  let emailed = false;
+  try {
+    const cfg = await getNotifyConfig();
+    const companyName = (await db.doc(`companies/${targetCompany}`).get()).data()?.name || "your team";
+    emailed = await sendEmail(
+      cfg,
+      email.trim(),
+      "You're invited to YoutilityKnock",
+      `Hi ${name || "there"},\n\nYou've been added to ${companyName} on YoutilityKnock.\n\n` +
+        `Tap to sign in and set your password:\n${link}\n\n` +
+        `This link signs you in directly, then asks you to create a password. ` +
+        `If you didn't expect this, you can ignore it.`
+    );
+  } catch (e) {
+    logger.warn("invite email send failed", e);
+  }
+
+  logger.info(`User ${userRecord.uid} invited to ${targetCompany} by ${caller.uid} (emailed=${emailed})`);
+  return { ok: true, uid: userRecord.uid, inviteLink: link, emailed };
+});
+
+// ───────────────────────────────────────────────────────────────────────────
 // Company role catalog (titles on a base tier). Company admin / super-admin.
 // ───────────────────────────────────────────────────────────────────────────
 export const createRole = onCall(async (request) => {
@@ -784,7 +878,37 @@ const DEFAULT_SCHEDULING = {
   apptDurationMin: 60,
   bufferMin: 0,
   assignment: "self_gen" as const,
+  timezone: "America/Denver",
+  dayStartMin: 9 * 60,
+  dayEndMin: 20 * 60,
+  workDays: [1, 2, 3, 4, 5, 6],
+  slotMin: 30,
 };
+
+// Weekday (0=Sun) + minutes-from-midnight of a timestamp in a given IANA tz.
+function localParts(ms: number, tz: string): { dow: number; minutes: number } {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: tz || "America/Denver",
+    weekday: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).formatToParts(new Date(ms));
+  const wd: Record<string, number> = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 };
+  let dow = 0, hh = 0, mm = 0;
+  for (const p of parts) {
+    if (p.type === "weekday") dow = wd[p.value] ?? 0;
+    else if (p.type === "hour") hh = parseInt(p.value, 10) % 24;
+    else if (p.type === "minute") mm = parseInt(p.value, 10);
+  }
+  return { dow, minutes: hh * 60 + mm };
+}
+
+function withinBusinessHours(ms: number, sched: any): boolean {
+  const { dow, minutes } = localParts(ms, sched.timezone);
+  if (Array.isArray(sched.workDays) && sched.workDays.length && !sched.workDays.includes(dow)) return false;
+  return minutes >= (sched.dayStartMin ?? 0) && minutes <= (sched.dayEndMin ?? 1440);
+}
 
 // ── company admin: scheduling settings (min/max window, duration, routing) ───
 export const setCompanySettings = onCall(async (request) => {
@@ -795,6 +919,9 @@ export const setCompanySettings = onCall(async (request) => {
   };
   authorizeForCompany(caller, companyId);
   if (!scheduling) throw new HttpsError("invalid-argument", "scheduling is required.");
+  const days = Array.isArray(scheduling.workDays)
+    ? (scheduling.workDays as unknown[]).map((n) => Number(n)).filter((n) => n >= 0 && n <= 6)
+    : DEFAULT_SCHEDULING.workDays;
   const s = {
     apptMinLeadHours: Math.max(0, Number(scheduling.apptMinLeadHours) || DEFAULT_SCHEDULING.apptMinLeadHours),
     apptMaxDaysOut: Math.max(1, Number(scheduling.apptMaxDaysOut) || DEFAULT_SCHEDULING.apptMaxDaysOut),
@@ -803,6 +930,11 @@ export const setCompanySettings = onCall(async (request) => {
     assignment: ["self_gen", "round_robin", "highest_production", "manual"].includes(String(scheduling.assignment))
       ? String(scheduling.assignment)
       : "self_gen",
+    timezone: String(scheduling.timezone || DEFAULT_SCHEDULING.timezone),
+    dayStartMin: Math.min(1439, Math.max(0, Number(scheduling.dayStartMin) ?? DEFAULT_SCHEDULING.dayStartMin)),
+    dayEndMin: Math.min(1440, Math.max(0, Number(scheduling.dayEndMin) ?? DEFAULT_SCHEDULING.dayEndMin)),
+    workDays: days.length ? days : DEFAULT_SCHEDULING.workDays,
+    slotMin: Math.max(5, Number(scheduling.slotMin) || DEFAULT_SCHEDULING.slotMin),
   };
   await db.doc(`companies/${companyId}`).set({ scheduling: s }, { merge: true });
   return { ok: true, scheduling: s };
@@ -1167,6 +1299,7 @@ export const assignAppointment = onCall(async (request) => {
   const maxAt = now + sched.apptMaxDaysOut * 86400 * 1000;
   if (d.startAt < minAt) throw new HttpsError("failed-precondition", `Too soon — needs ${sched.apptMinLeadHours}h lead time.`);
   if (d.startAt > maxAt) throw new HttpsError("failed-precondition", `Too far out — max ${sched.apptMaxDaysOut} days.`);
+  if (!withinBusinessHours(d.startAt, sched)) throw new HttpsError("failed-precondition", "Outside the company's booking hours/days.");
 
   const dur = (d.durationMin || sched.apptDurationMin) * 60 * 1000;
   const endAt = d.startAt + dur;

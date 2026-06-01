@@ -13,6 +13,11 @@ export interface SchedulingSettings {
   apptDurationMin: number; // appointment length, minutes
   bufferMin: number; // required gap between a rep's appointments, minutes
   assignment: AssignmentMethod; // routing for non-self-gen appointments
+  timezone: string; // IANA tz the business hours are expressed in
+  dayStartMin: number; // earliest time of day to book, minutes from midnight
+  dayEndMin: number; // latest time of day to book, minutes from midnight
+  workDays: number[]; // bookable weekdays, 0=Sun … 6=Sat
+  slotMin: number; // booking granularity, minutes
 }
 
 export const DEFAULT_SCHEDULING: SchedulingSettings = {
@@ -21,6 +26,11 @@ export const DEFAULT_SCHEDULING: SchedulingSettings = {
   apptDurationMin: 60,
   bufferMin: 0,
   assignment: "self_gen",
+  timezone: "America/Denver",
+  dayStartMin: 9 * 60, // 9:00 AM
+  dayEndMin: 20 * 60, // 8:00 PM
+  workDays: [1, 2, 3, 4, 5, 6], // Mon–Sat
+  slotMin: 30,
 };
 
 export interface Company {
