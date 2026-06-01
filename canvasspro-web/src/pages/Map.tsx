@@ -14,6 +14,8 @@ import type { Lead, Territory, LatLng } from "../types";
 
 const DEFAULT_CENTER: [number, number] = [40.34, -111.91];
 const NEAREST_N = 200;
+const ROAM_THRESHOLD_M = 450; // reload nearby homes once you've moved ~0.28 mi
+const HOME_CAP = 700; // accumulate up to this many roaming pins, then reset
 
 const HOUSE_SVG =
   '<svg viewBox="0 0 24 24" width="14" height="14" fill="#fff"><path d="M12 3 3 10.5h2.4V21h5.1v-6h3v6h5.1V10.5H21z"/></svg>';
@@ -56,6 +58,10 @@ export default function MapPage() {
   const leadLayer = useRef<L.LayerGroup>(L.layerGroup());
   const homeLayer = useRef<L.LayerGroup>(L.layerGroup());
   const leadsRef = useRef<Lead[]>([]);
+  const homeKeys = useRef<Set<string>>(new Set()); // dedupe accumulated home pins
+  const lastLoadCenter = useRef<L.LatLng | null>(null);
+  const loadingRef = useRef(false);
+  const roamTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const territoryLayer = useRef<L.LayerGroup>(L.layerGroup());
   const assigned = useRef<Territory[]>([]);
   const myLoc = useRef<LatLng | null>(null);
@@ -139,6 +145,9 @@ export default function MapPage() {
   }
 
   function addHomeMarker(h: { address: string; lat: number; lng: number }): boolean {
+    const key = `${h.lat.toFixed(5)},${h.lng.toFixed(5)}`;
+    if (homeKeys.current.has(key)) return false; // already on the map
+    homeKeys.current.add(key);
     if (isExistingLead(h)) return false; // keep the existing lead pin, don't recreate
     L.marker([h.lat, h.lng], { icon: homeIcon("#475569") })
       .on("click", () => setDispoTarget({ address: h.address, lat: h.lat, lng: h.lng }))
@@ -146,16 +155,28 @@ export default function MapPage() {
     return true;
   }
 
-  // Auto-load homes: inside the assigned territory(ies), or nearest 30 if none.
+  // Pull the nearest ~200 homes around a center and drop pins (dedupes against
+  // what's already shown; does NOT clear, so it accumulates as the rep moves).
+  async function fetchNearby(center: LatLng) {
+    const token = await auth.currentUser!.getIdToken();
+    const raw = await lookupArea(center.lat, center.lng, 0.5, token);
+    parseAreaProperties(raw)
+      .map((h) => ({ ...h, d: L.latLng(center.lat, center.lng).distanceTo(L.latLng(h.lat, h.lng)) }))
+      .sort((a, b) => a.d - b.d)
+      .slice(0, NEAREST_N)
+      .forEach((h) => addHomeMarker(h));
+  }
+
+  // Manual / initial load: assigned territory(ies), or nearest 200 around the rep.
   async function loadHomes() {
     const map = mapRef.current;
     if (!map || !profile) return;
     setLoadingHomes(true);
     homeLayer.current.clearLayers();
+    homeKeys.current.clear();
     try {
       const token = await auth.currentUser!.getIdToken();
       if (assigned.current.length) {
-        let total = 0;
         for (const t of assigned.current) {
           const poly = t.polygon!;
           const lats = poly.map((p) => p.lat);
@@ -168,22 +189,46 @@ export default function MapPage() {
           const raw = await lookupArea(center.lat, center.lng, Math.max(0.1, +radius.toFixed(2)), token);
           parseAreaProperties(raw)
             .filter((h) => inPolygon({ lat: h.lat, lng: h.lng }, poly))
-            .forEach((h) => { if (addHomeMarker(h)) total++; });
+            .forEach((h) => addHomeMarker(h));
         }
-        setStatus(`${total} homes in your area`);
+        lastLoadCenter.current = null;
+        setStatus(`${homeLayer.current.getLayers().length} homes in your area`);
       } else {
         const c = myLoc.current || { lat: map.getCenter().lat, lng: map.getCenter().lng };
-        const raw = await lookupArea(c.lat, c.lng, 0.5, token);
-        const nearest = parseAreaProperties(raw)
-          .map((h) => ({ ...h, d: L.latLng(c.lat, c.lng).distanceTo(L.latLng(h.lat, h.lng)) }))
-          .sort((a, b) => a.d - b.d)
-          .slice(0, NEAREST_N);
-        const shown = nearest.filter((h) => addHomeMarker(h)).length;
-        setStatus(`Nearest ${shown} homes (draw an area to focus)`);
+        await fetchNearby(c);
+        lastLoadCenter.current = L.latLng(c.lat, c.lng);
+        setStatus(`${homeLayer.current.getLayers().length} homes nearby · move to load more`);
       }
     } catch (e: any) {
       setStatus("Could not load homes: " + (e?.message || ""));
     } finally {
+      setLoadingHomes(false);
+    }
+  }
+
+  // Auto-load as the rep moves: when the map center drifts past the threshold
+  // (and they're not in an assigned area or drawing), pull homes around the new
+  // center and accumulate them — no manual refresh needed.
+  async function autoRoam() {
+    const map = mapRef.current;
+    if (!map || !profile || loadingRef.current) return;
+    if (assigned.current.length || modeRef.current === "draw") return;
+    const ctr = map.getCenter();
+    if (lastLoadCenter.current && ctr.distanceTo(lastLoadCenter.current) < ROAM_THRESHOLD_M) return;
+    loadingRef.current = true;
+    setLoadingHomes(true);
+    try {
+      if (homeLayer.current.getLayers().length > HOME_CAP) {
+        homeLayer.current.clearLayers();
+        homeKeys.current.clear();
+      }
+      await fetchNearby({ lat: ctr.lat, lng: ctr.lng });
+      lastLoadCenter.current = ctr;
+      setStatus(`${homeLayer.current.getLayers().length} homes loaded · keep moving`);
+    } catch {
+      /* silent — keep what's already shown */
+    } finally {
+      loadingRef.current = false;
       setLoadingHomes(false);
     }
   }
@@ -225,6 +270,12 @@ export default function MapPage() {
       ).addTo(map);
     });
 
+    // Auto-load homes as the rep pans / walks the map (debounced).
+    map.on("moveend", () => {
+      if (roamTimer.current) clearTimeout(roamTimer.current);
+      roamTimer.current = setTimeout(() => void autoRoam(), 700);
+    });
+
     (async () => {
       try {
         const pos = await Geolocation.getCurrentPosition({ enableHighAccuracy: true, timeout: 8000 });
@@ -242,6 +293,7 @@ export default function MapPage() {
     })();
 
     return () => {
+      if (roamTimer.current) clearTimeout(roamTimer.current);
       map.remove();
       mapRef.current = null;
     };
