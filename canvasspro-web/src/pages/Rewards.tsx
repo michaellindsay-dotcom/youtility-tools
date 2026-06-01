@@ -147,6 +147,19 @@ export default function Rewards() {
           createdAt: Date.now(),
         }).catch(() => {});
       });
+      // Make individual wins public in Team Chat (team rewards are shared, so we
+      // skip those to avoid every member posting the same message).
+      const mine = fresh.filter((r) => r.audience === "individual");
+      if (mine.length && companyId) {
+        const names = mine.map((r) => `"${r.name}"`).join(", ");
+        addDoc(collection(db, "chat"), {
+          companyId,
+          userId: profile.uid,
+          userName: profile.displayName,
+          text: `🎉 ${profile.displayName} just unlocked ${names}! 🔥 Who's next?`,
+          createdAt: Date.now(),
+        }).catch(() => {});
+      }
       persist();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -299,6 +312,11 @@ function RewardCard({ r, value, isAdmin, claimed, onClaim, onRemove, onToggle }:
         <div className="reward-cond">{METRIC_EMOJI[r.metric]} {cond}</div>
         <div className="reward-bar"><span style={{ width: `${pct}%` }} className={met ? "full" : ""} /></div>
         <div className="reward-progress muted small">{value.toLocaleString()} / {r.target.toLocaleString()} ({pct}%)</div>
+        {!met && pct >= 80 && (
+          <div className="reward-nudge">
+            🔥 {(r.target - value).toLocaleString()} {r.kind === "store" ? "pts" : METRIC_LABEL[r.metric].toLowerCase()} to go!
+          </div>
+        )}
 
         {r.kind === "store" && r.audience === "individual" && (
           <button className="btn primary sm" disabled={!met || claimed} onClick={onClaim} style={{ marginTop: 8 }}>

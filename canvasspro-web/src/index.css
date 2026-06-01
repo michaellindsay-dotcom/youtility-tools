@@ -1318,6 +1318,21 @@ details.raw pre {
 .reward-bar > span { display: block; height: 100%; border-radius: 999px; background: var(--accent); transition: width .8s cubic-bezier(.22,1,.36,1); }
 .reward-bar > span.full { background: var(--good); }
 .reward-progress { margin-top: 4px; }
+.reward-nudge {
+  margin-top: 8px;
+  font-size: 12px;
+  font-weight: 700;
+  color: #06121f;
+  background: linear-gradient(135deg, var(--warn), #fbbf24);
+  padding: 5px 10px;
+  border-radius: 8px;
+  text-align: center;
+  animation: nudge-pulse 1.8s ease-in-out infinite;
+}
+@keyframes nudge-pulse {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.03); }
+}
 .reward-form { margin-bottom: 18px; }
 .reward-form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; }
 .reward-form-preview { max-height: 120px; border-radius: 10px; margin-top: 12px; }
