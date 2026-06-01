@@ -1,15 +1,16 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
-  addDoc, collection, deleteDoc, doc, getDocs, onSnapshot, query, updateDoc, where,
+  addDoc, collection, deleteDoc, doc, getDocs, onSnapshot, orderBy, query, updateDoc, where,
 } from "firebase/firestore";
 import { ref as storageRef, uploadBytes, getDownloadURL } from "firebase/storage";
 import { db, storage } from "../firebase";
 import { useAuth } from "../auth/AuthContext";
+import { confettiBurst } from "../lib/confetti";
 import {
   METRIC_LABEL, METRIC_EMOJI, PERIOD_LABEL, valsFromCounts, valsFromStats, ZERO_VALS, type MetricVals,
 } from "../lib/rewards";
 import type {
-  Reward, RewardKind, RewardAudience, RewardMetric, RewardPeriod, UserStats, Lead, Shift,
+  Reward, RewardKind, RewardAudience, RewardMetric, RewardPeriod, UserStats, Lead, Shift, Redemption,
 } from "../types";
 
 const CONVO = new Set(["pipeline", "appointment", "not_interested", "sold"]);
@@ -28,6 +29,13 @@ export default function Rewards() {
   const [myMonth, setMyMonth] = useState<MetricVals>(ZERO_VALS);
   const [teamAll, setTeamAll] = useState<MetricVals>(ZERO_VALS);
   const [claimed, setClaimed] = useState<Set<string>>(new Set());
+  const [statsReady, setStatsReady] = useState(false);
+  const [windowReady, setWindowReady] = useState(false);
+  const [toast, setToast] = useState<string | null>(null);
+  const [redemptions, setRedemptions] = useState<Redemption[]>([]);
+  // Reward ids we've already celebrated on this device (avoid re-firing).
+  const seenRef = useRef<Set<string> | null>(null);
+  const seededRef = useRef(false);
 
   // Rewards (live).
   useEffect(() => {
@@ -59,6 +67,7 @@ export default function Rewards() {
         {} as Partial<UserStats>
       );
       setTeamAll(valsFromStats(sum));
+      setStatsReady(true);
     });
   }, [profile, companyId, isAdmin]);
 
@@ -88,6 +97,7 @@ export default function Rewards() {
       };
       setMyMonth(calc(since));
       setMyWeek(calc(wk));
+      setWindowReady(true);
     })();
     return () => { off = true; };
   }, [profile]);
@@ -97,6 +107,63 @@ export default function Rewards() {
     const bundle = r.period === "weekly" ? myWeek : r.period === "monthly" ? myMonth : myAll;
     return bundle[r.metric];
   };
+
+  // Celebrate newly-unlocked rewards: confetti + toast + a bell notification.
+  // Seeds silently on first load so we don't party over already-earned rewards.
+  useEffect(() => {
+    if (!profile || !rewards.length || !statsReady || !windowReady) return;
+    if (!seenRef.current) {
+      try {
+        const raw = localStorage.getItem(`yk_unlocked_${profile.uid}`);
+        seenRef.current = new Set(raw ? JSON.parse(raw) : []);
+      } catch { seenRef.current = new Set(); }
+    }
+    const seen = seenRef.current;
+    const met = rewards.filter((r) => (r.active ?? true) && valueFor(r) >= r.target);
+    const persist = () =>
+      localStorage.setItem(`yk_unlocked_${profile.uid}`, JSON.stringify([...seen]));
+
+    if (!seededRef.current) {
+      seededRef.current = true;
+      met.forEach((r) => seen.add(r.id));
+      persist();
+      return;
+    }
+    const fresh = met.filter((r) => !seen.has(r.id));
+    if (fresh.length) {
+      confettiBurst();
+      const r0 = fresh[0];
+      setToast(`🎉 Unlocked: ${r0.name}${fresh.length > 1 ? ` +${fresh.length - 1} more` : ""}`);
+      setTimeout(() => setToast(null), 6000);
+      fresh.forEach((r) => {
+        seen.add(r.id);
+        addDoc(collection(db, "notifications"), {
+          userId: profile.uid,
+          type: "reward",
+          title: `🎁 Reward unlocked: ${r.name}`,
+          body: r.description || (r.audience === "team" ? "Your team hit the goal!" : "You hit the goal!"),
+          link: "/app/rewards",
+          read: false,
+          createdAt: Date.now(),
+        }).catch(() => {});
+      });
+      persist();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rewards, myAll, myWeek, myMonth, teamAll, statsReady, windowReady, profile]);
+
+  // Admin: live redemption inbox.
+  useEffect(() => {
+    if (!isAdmin || !companyId) return;
+    return onSnapshot(
+      query(collection(db, "redemptions"), where("companyId", "==", companyId), orderBy("createdAt", "desc")),
+      (snap) => setRedemptions(snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<Redemption, "id">) }))),
+      (e) => console.error("redemptions", e)
+    );
+  }, [isAdmin, companyId]);
+
+  const fulfill = (r: Redemption) => updateDoc(doc(db, "redemptions", r.id), { status: "fulfilled" }).catch(() => {});
+  const dismissRedemption = (r: Redemption) => deleteDoc(doc(db, "redemptions", r.id)).catch(() => {});
 
   const team = rewards.filter((r) => r.audience === "team" && (r.active ?? true));
   const indiv = rewards.filter((r) => r.audience === "individual" && (r.active ?? true));
@@ -133,7 +200,39 @@ export default function Rewards() {
         )}
       </div>
 
+      {toast && <div className="reward-toast">{toast}</div>}
+
       {isAdmin && showForm && <RewardForm companyId={companyId!} uid={profile!.uid} onDone={() => setShowForm(false)} />}
+
+      {isAdmin && redemptions.length > 0 && (
+        <>
+          <h2 className="section-h">
+            📥 Redemptions
+            {redemptions.some((r) => r.status === "requested") && (
+              <span className="redeem-count">{redemptions.filter((r) => r.status === "requested").length} pending</span>
+            )}
+          </h2>
+          <div className="card table-card">
+            <table className="data-table">
+              <thead><tr><th>Rep</th><th>Reward</th><th>When</th><th>Status</th><th></th></tr></thead>
+              <tbody>
+                {redemptions.map((r) => (
+                  <tr key={r.id}>
+                    <td>{r.userName}</td>
+                    <td>{r.rewardName}</td>
+                    <td className="muted">{new Date(r.createdAt).toLocaleDateString()}</td>
+                    <td><span className={`badge ${r.status === "fulfilled" ? "disabled" : ""}`}>{r.status}</span></td>
+                    <td className="row" style={{ gap: 6 }}>
+                      {r.status === "requested" && <button className="btn primary sm" onClick={() => fulfill(r)}>Mark fulfilled</button>}
+                      <button className="btn ghost sm" onClick={() => dismissRedemption(r)}>✕</button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </>
+      )}
 
       <Section title="🏆 Team Rewards" subtitle="Unlocked when the whole team hits the goal — a group win."
         rewards={team} valueFor={valueFor} isAdmin={isAdmin} onClaim={claim} claimed={claimed} onRemove={remove} onToggle={toggle}
