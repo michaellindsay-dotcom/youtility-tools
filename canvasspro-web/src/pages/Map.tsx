@@ -13,7 +13,7 @@ import ShiftHud from "../components/ShiftHud";
 import type { Lead, Territory, LatLng } from "../types";
 
 const DEFAULT_CENTER: [number, number] = [40.34, -111.91];
-const NEAREST_N = 30;
+const NEAREST_N = 200;
 
 const HOUSE_SVG =
   '<svg viewBox="0 0 24 24" width="14" height="14" fill="#fff"><path d="M12 3 3 10.5h2.4V21h5.1v-6h3v6h5.1V10.5H21z"/></svg>';
