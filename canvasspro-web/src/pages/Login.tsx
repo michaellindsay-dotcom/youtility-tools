@@ -174,10 +174,15 @@ export default function Login() {
               </button>
             </form>
 
-            <div className="or">or</div>
-            <button className="btn block" type="button" onClick={google} disabled={busy}>
-              Continue with Google
-            </button>
+            {/* Google popup sign-in doesn't work inside the native WebView — web only. */}
+            {import.meta.env.VITE_NATIVE !== "1" && (
+              <>
+                <div className="or">or</div>
+                <button className="btn block" type="button" onClick={google} disabled={busy}>
+                  Continue with Google
+                </button>
+              </>
+            )}
 
             <p className="muted small" style={{ marginTop: 16, textAlign: "center" }}>
               Accounts are created by your administrator. No login yet? Contact your admin.

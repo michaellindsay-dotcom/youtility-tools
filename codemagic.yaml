@@ -1,0 +1,75 @@
+# ============================================================================
+# Codemagic CI — build, sign, and ship the YoutilityKnock iOS app with no Mac.
+# ============================================================================
+# ONE-TIME SETUP (in the Codemagic web app at codemagic.io):
+#   1. Sign up / log in → "Add application" → connect this GitHub repo.
+#   2. Enroll in the Apple Developer Program first (developer.apple.com, $99/yr).
+#   3. Create an App Store Connect API key:
+#        App Store Connect → Users and Access → Integrations → App Store Connect
+#        API → generate a key (Admin or App Manager role). Download the .p8.
+#   4. In Codemagic → Teams → your team → Integrations → App Store Connect:
+#        add that key. NAME IT EXACTLY:  YoutilityKnock ASC
+#        (or rename it here under integrations.app_store_connect).
+#   5. In App Store Connect → My Apps → "+" → New App:
+#        Platform iOS, Name "YoutilityKnock", Bundle ID  us.youtility.knock
+#        (Codemagic can also auto-register the bundle id on the first build.)
+#   6. Run the `ios-release` workflow from the Codemagic UI.
+#
+# The build auto-creates the native iOS project, injects the required
+# permission strings, signs with your App Store profile, and uploads to
+# TestFlight. Promote to the public App Store from App Store Connect when ready.
+# ============================================================================
+
+workflows:
+  ios-release:
+    name: YoutilityKnock iOS
+    instance_type: mac_mini_m2
+    max_build_duration: 60
+    integrations:
+      app_store_connect: YoutilityKnock ASC
+    environment:
+      ios_signing:
+        distribution_type: app_store
+        bundle_identifier: us.youtility.knock
+      node: 20
+      xcode: latest
+      cocoapods: default
+    scripts:
+      - name: Build the web bundle (native mode)
+        script: |
+          npm --prefix canvasspro-web install
+          npm --prefix canvasspro-web run build:native
+      - name: Create iOS project & sync Capacitor
+        script: |
+          cd canvasspro-web
+          npm install @capacitor/ios
+          [ -d ios ] || npx cap add ios
+          npx cap sync ios
+      - name: Inject iOS permission strings (location / camera / photos)
+        script: |
+          PLIST=canvasspro-web/ios/App/App/Info.plist
+          P=/usr/libexec/PlistBuddy
+          set_or_add () {
+            $P -c "Set :$1 $2" "$PLIST" 2>/dev/null || $P -c "Add :$1 string $2" "$PLIST"
+          }
+          set_or_add NSLocationWhenInUseUsageDescription "YoutilityKnock uses your location to show nearby homes and confirm on-site knocks."
+          set_or_add NSCameraUsageDescription "Used to photograph the home and the utility bill on a lead."
+          set_or_add NSPhotoLibraryUsageDescription "Attach photos to a lead."
+      - name: Install CocoaPods
+        script: |
+          cd canvasspro-web/ios/App && pod install
+      - name: Set build number
+        script: |
+          cd canvasspro-web/ios/App && agvtool new-version -all "$BUILD_NUMBER"
+      - name: Fetch signing profiles & build IPA
+        script: |
+          cd canvasspro-web/ios/App
+          xcode-project use-profiles
+          xcode-project build-ipa --workspace "App.xcworkspace" --scheme "App"
+    artifacts:
+      - canvasspro-web/ios/App/build/ios/ipa/*.ipa
+      - /tmp/xcodebuild_logs/*.log
+    publishing:
+      app_store_connect:
+        auth: integration
+        submit_to_testflight: true
