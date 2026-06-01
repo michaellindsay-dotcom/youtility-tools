@@ -75,27 +75,27 @@ export function normalizeKnockstatResponse(raw: AnyObj): PropertyRecord {
       lon: pick(r, "address.longitude", "geo.lng", "location.lon", "location.lng", "location.longitude", "propertyInfo.longitude", "longitude"),
     },
     property: {
-      type: pick(r, "property.type", "propertyType", "summary.proptype", "summary.propclass", "propertyInfo.propertyUseStandardized", "propertyInfo.propertyUse", "landUseDescription"),
-      subtype: pick(r, "property.subtype", "propertySubtype", "summary.propsubtype"),
-      yearBuilt: pick(r, "property.yearBuilt", "yearBuilt", "summary.yearbuilt", "propertyInfo.yearBuilt"),
+      type: pick(r, "property.type", "propertyType", "summary.propertyType", "summary.propClass", "summary.propType", "propertyInfo.propertyUseStandardized", "landUseDescription"),
+      subtype: pick(r, "property.subtype", "propertySubtype", "summary.propSubType"),
+      yearBuilt: pick(r, "property.yearBuilt", "yearBuilt", "summary.yearBuilt", "propertyInfo.yearBuilt"),
       bedrooms: pick(r, "property.bedrooms", "bedrooms", "building.rooms.beds", "propertyInfo.bedrooms"),
-      bathrooms: pick(r, "property.bathrooms", "bathrooms", "building.rooms.bathstotal", "propertyInfo.bathrooms"),
-      livingAreaSqft: pick(r, "property.livingAreaSqft", "property.sqft", "buildingSqft", "livingArea", "building.size.livingsize", "building.size.universalsize", "propertyInfo.livingSquareFeet"),
-      lotSizeSqft: pick(r, "property.lotSizeSqft", "lotSqft", "lotSize", "lot.lotsize2", "lotInfo.lotSquareFeet"),
-      stories: pick(r, "property.stories", "stories"),
-      units: pick(r, "property.units", "units"),
-      garage: pick(r, "property.garage", "garage"),
-      pool: pick(r, "property.pool", "pool"),
-      heating: pick(r, "property.heating", "heating"),
-      cooling: pick(r, "property.cooling", "cooling"),
-      roof: pick(r, "property.roof", "roofMaterial"),
-      construction: pick(r, "property.construction", "constructionType"),
+      bathrooms: pick(r, "property.bathrooms", "bathrooms", "building.rooms.bathsTotal", "propertyInfo.bathrooms"),
+      livingAreaSqft: pick(r, "property.livingAreaSqft", "property.sqft", "buildingSqft", "livingArea", "building.size.livingSize", "building.size.universalSize", "building.size.bldgSize", "propertyInfo.livingSquareFeet"),
+      lotSizeSqft: pick(r, "property.lotSizeSqft", "lotSqft", "lotSize", "lot.lotSize2", "lotInfo.lotSquareFeet"),
+      stories: pick(r, "property.stories", "stories", "building.summary.levels"),
+      units: pick(r, "property.units", "units", "building.summary.unitsCount"),
+      garage: pick(r, "property.garage", "garage", "building.parking.garageType", "building.parking.prkgType"),
+      pool: pick(r, "property.pool", "pool", "lot.poolType"),
+      heating: pick(r, "property.heating", "heating", "utilities.heatingType"),
+      cooling: pick(r, "property.cooling", "cooling", "utilities.coolingType"),
+      roof: pick(r, "property.roof", "roofMaterial", "building.construction.roofCover"),
+      construction: pick(r, "property.construction", "constructionType", "building.construction.constructionType"),
       lastRenovated: pick(r, "property.lastRenovated", "lastRenovationDate"),
-      zoning: pick(r, "property.zoning", "zoning"),
+      zoning: pick(r, "property.zoning", "zoning", "lot.zoningType"),
       hoa: pick(r, "property.hoa", "hoa"),
     },
     valuation: {
-      estimatedValue: pick(r, "valuation.estimatedValue", "estimate.value", "avm.value", "avm.amount.value", "assessment.market.mktttlvalue", "estimatedValue"),
+      estimatedValue: pick(r, "valuation.estimatedValue", "estimate.value", "avm.value", "avm.amount.value", "assessment.market.mktTtlValue", "assessment.assessed.assdTtlValue", "estimatedValue"),
       estimatedLow: pick(r, "valuation.low", "estimate.low", "avm.low", "estimatedValueLow"),
       estimatedHigh: pick(r, "valuation.high", "estimate.high", "avm.high", "estimatedValueHigh"),
       confidence: pick(r, "valuation.confidence", "estimate.confidence", "avm.confidence"),
@@ -112,7 +112,7 @@ export function normalizeKnockstatResponse(raw: AnyObj): PropertyRecord {
           ? "Owner-occupied"
           : pick(r, "ownership.occupancy", "ownerOccupied", "ownerInfo.ownerOccupied") === false
           ? "Absentee owner"
-          : pick(r, "ownership.occupancy"),
+          : pick(r, "ownership.occupancy", "summary.absenteeInd"),
       lengthOfOwnership: pick(r, "ownership.lengthYears", "ownership.yearsOwned"),
     },
     owners: (() => {
@@ -133,13 +133,20 @@ export function normalizeKnockstatResponse(raw: AnyObj): PropertyRecord {
       let names = [oi.owner1FullName, oi.owner2FullName].filter(Boolean) as string[];
       let mailing = pick(oi, "mailAddress.label", "mailAddress.address");
 
-      // ATTOM assessment.owner.owner1/owner2 (firstname / lastname).
+      // ATTOM assessment.owner.owner1/owner2 (fullName / firstNameAndMi + lastName).
       if (!names.length) {
         const ao: AnyObj = pick(r, "assessment.owner", "owner") || {};
-        const fmt = (o: AnyObj | undefined) =>
-          o ? [o.firstname || o.firstName, o.lastname || o.lastName].filter(Boolean).join(" ") : "";
+        const fmt = (o: AnyObj | undefined): string => {
+          if (!o) return "";
+          if (o.fullName) return String(o.fullName);
+          return [o.firstNameAndMi || o.firstName || o.firstname, o.lastName || o.lastname]
+            .filter(Boolean)
+            .join(" ");
+        };
         names = [fmt(ao.owner1), fmt(ao.owner2), fmt(ao.owner3)].filter(Boolean);
-        mailing = pick(r, "assessment.owner.mailingaddressoneline", "address.oneLine") || mailing;
+        mailing =
+          pick(r, "assessment.owner.mailingAddressOneLine", "assessment.owner.mailingaddressoneline", "address.oneLine") ||
+          mailing;
       }
       if (!names.length) return [];
 
@@ -162,15 +169,15 @@ export function normalizeKnockstatResponse(raw: AnyObj): PropertyRecord {
       "Occupant"
     ),
     mortgage: (() => {
-      const m: AnyObj = pick(r, "mortgage", "mortgages.0", "loans.0") || {};
+      const m: AnyObj = pick(r, "mortgage", "mortgages.0", "loans.0", "assessment.mortgage.FirstConcurrent") || {};
       return {
-        lender: pick(m, "lender", "lenderName"),
-        loanType: pick(m, "loanType", "type"),
+        lender: pick(m, "lender", "lenderName", "lenderLastName"),
+        loanType: pick(m, "loanType", "type", "loanTypeCode"),
         originalAmount: pick(m, "originalAmount", "amount"),
         currentBalance: pick(m, "currentBalance", "balance"),
         interestRate: pick(m, "interestRate", "rate"),
         termYears: pick(m, "termYears", "term"),
-        originationDate: pick(m, "originationDate", "originated"),
+        originationDate: pick(m, "originationDate", "originated", "date"),
         maturityDate: pick(m, "maturityDate", "matures"),
         secondLien: pick(m, "secondLien"),
         heloc: pick(m, "heloc"),
@@ -178,8 +185,8 @@ export function normalizeKnockstatResponse(raw: AnyObj): PropertyRecord {
       };
     })(),
     sale: {
-      lastSalePrice: pick(r, "sale.lastPrice", "lastSale.price", "sales.0.price", "lastSale.saleAmount", "saleHistory.0.saleAmount", "lastSaleAmount", "sale.amount.saleamt"),
-      lastSaleDate: pick(r, "sale.lastDate", "lastSale.date", "sales.0.date", "lastSaleDate", "saleHistory.0.saleDate", "sale.salesearchdate", "sale.amount.salerecdate"),
+      lastSalePrice: pick(r, "sale.lastPrice", "lastSale.price", "sales.0.price", "lastSale.saleAmount", "saleHistory.0.saleAmount", "lastSaleAmount", "sale.amount.saleAmt"),
+      lastSaleDate: pick(r, "sale.lastDate", "lastSale.date", "sales.0.date", "lastSaleDate", "saleHistory.0.saleDate", "sale.saleSearchDate", "sale.saleTransDate", "sale.amount.saleRecDate"),
       priorSalePrice: pick(r, "sale.priorPrice", "sales.1.price", "saleHistory.1.saleAmount"),
       priorSaleDate: pick(r, "sale.priorDate", "sales.1.date", "saleHistory.1.saleDate"),
     },
@@ -192,11 +199,11 @@ export function normalizeKnockstatResponse(raw: AnyObj): PropertyRecord {
       brokerage: pick(r, "listing.brokerage", "mls.brokerage"),
     },
     tax: {
-      assessedValue: pick(r, "tax.assessedValue", "assessment.total"),
-      landValue: pick(r, "tax.landValue", "assessment.land"),
-      improvementValue: pick(r, "tax.improvementValue", "assessment.improvement"),
-      annualTax: pick(r, "tax.annual", "tax.amount"),
-      taxYear: pick(r, "tax.year", "assessment.year"),
+      assessedValue: pick(r, "tax.assessedValue", "assessment.total", "assessment.assessed.assdTtlValue"),
+      landValue: pick(r, "tax.landValue", "assessment.land", "assessment.assessed.assdLandValue"),
+      improvementValue: pick(r, "tax.improvementValue", "assessment.improvement", "assessment.assessed.assdImprValue"),
+      annualTax: pick(r, "tax.annual", "tax.amount", "assessment.tax.taxAmt"),
+      taxYear: pick(r, "tax.year", "assessment.year", "assessment.tax.taxYear"),
       taxRate: pick(r, "tax.rate"),
       exemptions: pick(r, "tax.exemptions"),
       delinquent: pick(r, "tax.delinquent"),
@@ -223,13 +230,13 @@ export function normalizeKnockstatResponse(raw: AnyObj): PropertyRecord {
       crimeIndex: pick(r, "hazards.crimeIndex", "crime.index"),
     },
     ids: {
-      apn: pick(r, "ids.apn", "parcel.apn", "apn", "lotInfo.apn", "lotInfo.legalDescription"),
-      fips: pick(r, "ids.fips", "parcel.fips", "fips", "lotInfo.fips"),
-      county: pick(r, "ids.county", "parcel.county", "lotInfo.county"),
-      censusTract: pick(r, "ids.censusTract", "census.tract"),
-      subdivision: pick(r, "ids.subdivision", "parcel.subdivision", "lotInfo.subdivision"),
-      legalDescription: pick(r, "ids.legalDescription", "parcel.legalDescription", "lotInfo.legalDescription"),
-      knockstatId: pick(r, "id", "knockstatId", "propertyId"),
+      apn: pick(r, "ids.apn", "parcel.apn", "apn", "identifier.apn", "lotInfo.apn"),
+      fips: pick(r, "ids.fips", "parcel.fips", "fips", "identifier.fips"),
+      county: pick(r, "ids.county", "parcel.county", "area.countrySecSubd", "lotInfo.county"),
+      censusTract: pick(r, "ids.censusTract", "census.tract", "area.censusTractIdent"),
+      subdivision: pick(r, "ids.subdivision", "parcel.subdivision", "area.subdName"),
+      legalDescription: pick(r, "ids.legalDescription", "parcel.legalDescription", "summary.legal1"),
+      knockstatId: pick(r, "id", "knockstatId", "propertyId", "identifier.attomId"),
     },
   };
 }
