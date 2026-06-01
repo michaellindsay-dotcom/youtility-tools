@@ -209,6 +209,14 @@ service cloud.firestore {
       allow write: if isSignedIn() && request.auth.uid == uid;
     }
 
+    // ── subscription plans / pricing tiers (super-admin defines) ─────────
+    // Readable by any signed-in user (to show plan features); only the
+    // super-admin writes them.
+    match /plans/{planId} {
+      allow read: if isSignedIn();
+      allow write: if isSuper();
+    }
+
     // ── platform config (notification + integration keys) ────────────────
     // Holds secrets (SendGrid/Twilio, OAuth client secrets). Cloud Functions
     // only — never exposed to any client. Consoles read/write via callables

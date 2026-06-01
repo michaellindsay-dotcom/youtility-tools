@@ -31,6 +31,21 @@ const BATCH = {
   enabled: process.env.BATCHDATA_SKIPTRACE !== "0",
 };
 
+// Provider keys can be overridden from the super-admin screen (config/api),
+// falling back to the env defaults. Refreshed at the top of each /api request.
+async function refreshApiConfig(): Promise<void> {
+  try {
+    const snap = await db.doc("config/api").get();
+    if (!snap.exists) return;
+    const c = snap.data() as Record<string, unknown>;
+    if (typeof c.attomKey === "string" && c.attomKey) ATTOM.key = c.attomKey;
+    if (typeof c.attomUrl === "string" && c.attomUrl) ATTOM.baseUrl = c.attomUrl;
+    if (typeof c.batchKey === "string" && c.batchKey) BATCH.key = c.batchKey;
+    if (typeof c.batchUrl === "string" && c.batchUrl) BATCH.baseUrl = c.batchUrl;
+    if (typeof c.batchEnabled === "boolean") BATCH.enabled = c.batchEnabled;
+  } catch { /* keep env defaults */ }
+}
+
 async function batchSkipTrace(attomJson: any, address1: string, address2: string) {
   const p = attomJson?.property?.[0] || {};
   const o1 = p?.assessment?.owner?.owner1 || p?.owner?.owner1 || {};
@@ -193,6 +208,8 @@ export const api = onRequest({ cors: true }, async (req, res) => {
   if (!match) { res.status(401).json({ error: "Missing bearer token" }); return; }
   try { await getAuth().verifyIdToken(match[1]); }
   catch { res.status(401).json({ error: "Invalid token" }); return; }
+
+  await refreshApiConfig(); // pick up super-admin key overrides
 
   if (!ATTOM.key) {
     logger.error("ATTOM_API_KEY not set");
@@ -1444,4 +1461,73 @@ export const weeklyRecap = onSchedule({ schedule: "0 17 * * 5", timeZone: "Ameri
     });
     logger.info(`weekly recap posted for ${companyId}`);
   }
+});
+
+// ════════════════════════════════════════════════════════════════════════════
+// PLATFORM ADMIN — provider keys (ATTOM/BatchData), Stripe billing config, and
+// company plan assignment. Super-admin only.
+// ════════════════════════════════════════════════════════════════════════════
+
+// Show the keys actually in use (config override, else env) so the operator can
+// see "our keys" in the super-admin screen.
+export const getApiKeys = onCall(async (request) => {
+  const caller = await getCaller(request);
+  if (!caller.isSuper) throw new HttpsError("permission-denied", "Super-admins only.");
+  await refreshApiConfig();
+  return {
+    attomKey: ATTOM.key, attomUrl: ATTOM.baseUrl,
+    batchKey: BATCH.key, batchUrl: BATCH.baseUrl, batchEnabled: BATCH.enabled,
+  };
+});
+
+export const setApiKeys = onCall(async (request) => {
+  const caller = await getCaller(request);
+  if (!caller.isSuper) throw new HttpsError("permission-denied", "Super-admins only.");
+  const d = (request.data || {}) as Record<string, unknown>;
+  const u: Record<string, unknown> = { updatedAt: Date.now(), updatedBy: caller.uid };
+  if (typeof d.attomKey === "string" && d.attomKey.trim()) u.attomKey = d.attomKey.trim();
+  if (typeof d.attomUrl === "string") u.attomUrl = (d.attomUrl as string).trim();
+  if (typeof d.batchKey === "string" && d.batchKey.trim()) u.batchKey = d.batchKey.trim();
+  if (typeof d.batchUrl === "string") u.batchUrl = (d.batchUrl as string).trim();
+  if (typeof d.batchEnabled === "boolean") u.batchEnabled = d.batchEnabled;
+  await db.doc("config/api").set(u, { merge: true });
+  return { ok: true };
+});
+
+// Stripe keys — publishable is shown; secret + webhook are masked.
+export const getStripeConfig = onCall(async (request) => {
+  const caller = await getCaller(request);
+  if (!caller.isSuper) throw new HttpsError("permission-denied", "Super-admins only.");
+  const c = ((await db.doc("config/billing").get()).data() as Record<string, string>) || {};
+  return {
+    publishableKey: c.stripePublishableKey || "",
+    secretConfigured: !!c.stripeSecretKey,
+    secretMask: mask(c.stripeSecretKey),
+    webhookConfigured: !!c.stripeWebhookSecret,
+  };
+});
+
+export const setStripeConfig = onCall(async (request) => {
+  const caller = await getCaller(request);
+  if (!caller.isSuper) throw new HttpsError("permission-denied", "Super-admins only.");
+  const d = (request.data || {}) as Record<string, string>;
+  const u: Record<string, unknown> = { updatedAt: Date.now(), updatedBy: caller.uid };
+  if (typeof d.publishableKey === "string") u.stripePublishableKey = d.publishableKey.trim();
+  if (typeof d.secretKey === "string" && d.secretKey.trim()) u.stripeSecretKey = d.secretKey.trim();
+  if (typeof d.webhookSecret === "string" && d.webhookSecret.trim()) u.stripeWebhookSecret = d.webhookSecret.trim();
+  await db.doc("config/billing").set(u, { merge: true });
+  return { ok: true };
+});
+
+// Assign / change a company's subscription plan + status.
+export const setCompanyPlan = onCall(async (request) => {
+  const caller = await getCaller(request);
+  if (!caller.isSuper) throw new HttpsError("permission-denied", "Super-admins only.");
+  const { companyId, plan, status } = (request.data || {}) as { companyId?: string; plan?: string; status?: string };
+  if (!companyId) throw new HttpsError("invalid-argument", "companyId required.");
+  const u: Record<string, unknown> = { updatedAt: Date.now() };
+  if (typeof plan === "string") u.plan = plan;
+  if (typeof status === "string") u.status = status;
+  await db.doc(`companies/${companyId}`).set(u, { merge: true });
+  return { ok: true };
 });

@@ -160,7 +160,7 @@
       </div>
     </div>
     <table>
-      <thead><tr><th>Company</th><th>Plan</th><th>Created</th><th></th></tr></thead>
+      <thead><tr><th>Company</th><th>Plan</th><th>Status</th><th></th></tr></thead>
       <tbody id="companiesBody"><tr><td colspan="4" class="muted">Loading…</td></tr></tbody>
     </table>
   </section>
@@ -225,6 +225,85 @@
       <button id="msSave" class="btn primary sm">Save Microsoft</button>
     </div>
     <div id="integBanner" class="banner"></div>
+  </section>
+
+  <!-- Provider API keys (super-admin only) -->
+  <section id="apiKeysCard" class="card hidden">
+    <h2>Data provider keys</h2>
+    <p class="muted" style="margin:-6px 0 14px;font-size:13px;">
+      The homeowner-data keys powering address lookups + skip-trace. Overrides the server defaults.
+    </p>
+    <h3 style="font-size:14px;margin-bottom:10px;">🏠 ATTOM (property + owner data)</h3>
+    <div class="grid-2">
+      <div class="field"><span>API key</span><input id="attomKey" autocomplete="off" /></div>
+      <div class="field"><span>API base URL</span><input id="attomUrl" /></div>
+    </div>
+    <h3 style="font-size:14px;margin:18px 0 10px;">📇 BatchData (phones + emails)</h3>
+    <div class="grid-2">
+      <div class="field"><span>API key</span><input id="batchKey" autocomplete="off" /></div>
+      <div class="field"><span>API base URL</span><input id="batchUrl" /></div>
+      <label class="day-chip" style="align-self:center;"><input id="batchEnabled" type="checkbox" /> Skip-trace enabled</label>
+    </div>
+    <div class="row" style="justify-content:flex-end;margin-top:10px;">
+      <button id="apiKeysSave" class="btn primary sm">Save provider keys</button>
+    </div>
+    <div id="apiKeysBanner" class="banner"></div>
+  </section>
+
+  <!-- Plans & pricing (super-admin only) -->
+  <section id="plansCard" class="card hidden">
+    <h2>Plans &amp; pricing
+      <button id="newPlanBtn" class="btn primary sm">+ New plan</button>
+    </h2>
+    <p class="muted" style="margin:-6px 0 14px;font-size:13px;">
+      Subscription tiers and what each unlocks. Assign a plan to each company in the Companies list.
+    </p>
+    <div id="planForm" class="hidden" style="margin-bottom:16px;">
+      <div class="grid-2">
+        <div class="field"><span>Plan name *</span><input id="planName" placeholder="e.g. Pro" /></div>
+        <div class="field"><span>Price / month (USD)</span><input id="planPrice" type="number" min="0" value="0" /></div>
+        <div class="field"><span>Max users (0 = unlimited)</span><input id="planMaxUsers" type="number" min="0" value="0" /></div>
+        <div class="field"><span>Stripe Price ID (optional)</span><input id="planStripeId" placeholder="price_..." /></div>
+      </div>
+      <div class="field"><span>What this tier includes</span>
+        <div class="row" style="gap:10px;flex-wrap:wrap;">
+          <label class="day-chip"><input type="checkbox" class="planFeat" value="map" checked /> Map &amp; canvassing</label>
+          <label class="day-chip"><input type="checkbox" class="planFeat" value="skiptrace" /> Skip-trace (phones/emails)</label>
+          <label class="day-chip"><input type="checkbox" class="planFeat" value="scheduling" /> Scheduling</label>
+          <label class="day-chip"><input type="checkbox" class="planFeat" value="calendar" /> Calendar sync</label>
+          <label class="day-chip"><input type="checkbox" class="planFeat" value="rewards" /> Rewards &amp; gamify</label>
+          <label class="day-chip"><input type="checkbox" class="planFeat" value="analytics" /> Advanced analytics</label>
+          <label class="day-chip"><input type="checkbox" class="planFeat" value="chat" /> Team chat</label>
+        </div>
+      </div>
+      <div class="field"><span>Description</span><input id="planDesc" placeholder="Short summary reps/admins see" /></div>
+      <div class="row" style="justify-content:flex-end;">
+        <button id="planCancel" class="btn ghost sm">Cancel</button>
+        <button id="planSave" class="btn primary sm">Create plan</button>
+      </div>
+      <div id="planBanner" class="banner"></div>
+    </div>
+    <table>
+      <thead><tr><th>Plan</th><th>Price</th><th>Max users</th><th>Includes</th><th></th></tr></thead>
+      <tbody id="plansBody"><tr><td colspan="5" class="muted">No plans yet.</td></tr></tbody>
+    </table>
+  </section>
+
+  <!-- Stripe billing (super-admin only) -->
+  <section id="billingCard" class="card hidden">
+    <h2>Billing — Stripe</h2>
+    <p class="muted" style="margin:-6px 0 14px;font-size:13px;">
+      Connect Stripe to charge companies for their plan. Secret keys are stored server-side and never shown again.
+    </p>
+    <div class="grid-2">
+      <div class="field"><span>Publishable key</span><input id="stripePub" placeholder="pk_live_…" autocomplete="off" /></div>
+      <div class="field"><span>Secret key</span><input id="stripeSecret" type="password" placeholder="sk_live_… (leave blank to keep)" autocomplete="off" /></div>
+      <div class="field"><span>Webhook signing secret</span><input id="stripeWebhook" type="password" placeholder="whsec_… (leave blank to keep)" autocomplete="off" /></div>
+    </div>
+    <div class="row" style="justify-content:flex-end;margin-top:10px;">
+      <button id="stripeSave" class="btn primary sm">Save Stripe keys</button>
+    </div>
+    <div id="billingBanner" class="banner"></div>
   </section>
 
   <!-- Roles (titles on a base tier) -->
@@ -447,7 +526,7 @@ const storage = getStorage(app);
 const $ = (id) => document.getElementById(id);
 const state = {
   isSuper:false, companyId:null, role:null, selectedCompany:null,
-  roles:[], teams:[], users:[],
+  roles:[], teams:[], users:[], plans:[],
 };
 
 // callables
@@ -467,6 +546,11 @@ const clearNotificationProvider = httpsCallable(fns, "clearNotificationProvider"
 const setCompanySettings      = httpsCallable(fns, "setCompanySettings");
 const getIntegrationPublicConfig = httpsCallable(fns, "getIntegrationPublicConfig");
 const setIntegrationConfig    = httpsCallable(fns, "setIntegrationConfig");
+const getApiKeys      = httpsCallable(fns, "getApiKeys");
+const setApiKeys      = httpsCallable(fns, "setApiKeys");
+const getStripeConfig = httpsCallable(fns, "getStripeConfig");
+const setStripeConfig = httpsCallable(fns, "setStripeConfig");
+const setCompanyPlan  = httpsCallable(fns, "setCompanyPlan");
 
 function banner(el, msg, kind="info") {
   el.className = "banner show " + kind;
@@ -519,12 +603,13 @@ function enterConsole() {
   $("loginScreen").classList.add("hidden");
   $("console").classList.remove("hidden");
   if (state.isSuper) {
-    $("companiesCard").classList.remove("hidden");
-    $("notifyCard").classList.remove("hidden");
-    $("integrationsCard").classList.remove("hidden");
-    loadCompanies();
+    ["companiesCard","notifyCard","integrationsCard","apiKeysCard","plansCard","billingCard"]
+      .forEach((id) => $(id).classList.remove("hidden"));
+    loadPlans().then(loadCompanies);
     loadNotifyConfig();
     loadIntegrations();
+    loadApiKeys();
+    loadStripe();
   } else {
     // Company admin: locked to their own company.
     selectCompany(state.companyId, "");
@@ -683,6 +768,92 @@ $("schSave").addEventListener("click", async () => {
   finally { $("schSave").disabled = false; }
 });
 
+// ── Data provider keys (super-admin) ─────────────────────────────────────
+async function loadApiKeys() {
+  try {
+    const { data } = await getApiKeys();
+    $("attomKey").value = data.attomKey || "";
+    $("attomUrl").value = data.attomUrl || "";
+    $("batchKey").value = data.batchKey || "";
+    $("batchUrl").value = data.batchUrl || "";
+    $("batchEnabled").checked = data.batchEnabled !== false;
+  } catch (e) { banner($("apiKeysBanner"), e.message || "Could not load keys.", "error"); }
+}
+$("apiKeysSave").addEventListener("click", async () => {
+  $("apiKeysSave").disabled = true;
+  try {
+    await setApiKeys({
+      attomKey: $("attomKey").value, attomUrl: $("attomUrl").value,
+      batchKey: $("batchKey").value, batchUrl: $("batchUrl").value,
+      batchEnabled: $("batchEnabled").checked,
+    });
+    banner($("apiKeysBanner"), "Provider keys saved.", "good");
+  } catch (e) { banner($("apiKeysBanner"), e.message || "Save failed.", "error"); }
+  finally { $("apiKeysSave").disabled = false; }
+});
+
+// ── Stripe billing (super-admin) ─────────────────────────────────────────
+async function loadStripe() {
+  try {
+    const { data } = await getStripeConfig();
+    $("stripePub").value = data.publishableKey || "";
+    $("stripeSecret").placeholder = data.secretConfigured ? `${data.secretMask} (leave blank to keep)` : "sk_live_…";
+    $("stripeWebhook").placeholder = data.webhookConfigured ? "configured (leave blank to keep)" : "whsec_…";
+  } catch (e) { banner($("billingBanner"), e.message || "Could not load Stripe config.", "error"); }
+}
+$("stripeSave").addEventListener("click", async () => {
+  $("stripeSave").disabled = true;
+  try {
+    await setStripeConfig({ publishableKey: $("stripePub").value, secretKey: $("stripeSecret").value, webhookSecret: $("stripeWebhook").value });
+    $("stripeSecret").value = ""; $("stripeWebhook").value = "";
+    banner($("billingBanner"), "Stripe keys saved.", "good");
+    loadStripe();
+  } catch (e) { banner($("billingBanner"), e.message || "Save failed.", "error"); }
+  finally { $("stripeSave").disabled = false; }
+});
+
+// ── Plans & pricing (super-admin) ────────────────────────────────────────
+$("newPlanBtn").addEventListener("click", () => $("planForm").classList.toggle("hidden"));
+$("planCancel").addEventListener("click", () => $("planForm").classList.add("hidden"));
+$("planSave").addEventListener("click", async () => {
+  const name = $("planName").value.trim();
+  if (!name) { banner($("planBanner"), "Plan name required.", "error"); return; }
+  const features = [...document.querySelectorAll(".planFeat")].filter((c) => c.checked).map((c) => c.value);
+  $("planSave").disabled = true;
+  try {
+    await addDoc(collection(db, "plans"), {
+      name, priceMonthly: Number($("planPrice").value) || 0,
+      maxUsers: Number($("planMaxUsers").value) || 0,
+      stripePriceId: $("planStripeId").value.trim() || "",
+      features, description: $("planDesc").value.trim() || "",
+      createdAt: Date.now(),
+    });
+    $("planName").value = $("planDesc").value = $("planStripeId").value = "";
+    $("planForm").classList.add("hidden");
+    banner($("banner"), "Plan created.", "good");
+    await loadPlans(); loadCompanies();
+  } catch (e) { banner($("planBanner"), e.message || "Save failed.", "error"); }
+  finally { $("planSave").disabled = false; }
+});
+async function loadPlans() {
+  try {
+    const snap = await getDocs(collection(db, "plans"));
+    state.plans = snap.docs.map((d) => ({ id:d.id, ...d.data() })).sort((a,b)=>(a.priceMonthly||0)-(b.priceMonthly||0));
+  } catch { state.plans = []; }
+  const body = $("plansBody");
+  if (!state.plans.length) { body.innerHTML = `<tr><td colspan="5" class="muted">No plans yet.</td></tr>`; return; }
+  body.innerHTML = "";
+  state.plans.forEach((p) => {
+    const tr = document.createElement("tr");
+    tr.innerHTML = `<td><strong>${esc(p.name)}</strong>${p.description?`<div class="muted small">${esc(p.description)}</div>`:""}</td>`+
+      `<td>$${(p.priceMonthly||0)}/mo</td><td>${p.maxUsers?p.maxUsers:"∞"}</td>`+
+      `<td class="muted small">${(p.features||[]).join(", ")||"—"}</td>`+
+      `<td><button class="btn ghost sm del">Delete</button></td>`;
+    tr.querySelector(".del").addEventListener("click", async () => { if (confirm(`Delete plan "${p.name}"?`)) { await deleteDoc(doc(db,"plans",p.id)); await loadPlans(); loadCompanies(); } });
+    body.appendChild(tr);
+  });
+}
+
 // ── Calendar integrations (super-admin) ──────────────────────────────────
 async function loadIntegrations() {
   try {
@@ -804,15 +975,26 @@ async function loadCompanies() {
     body.innerHTML = "";
     snap.forEach((d) => {
       const c = d.data();
+      const planOpts = ['<option value="">— plan —</option>']
+        .concat(state.plans.map((p) => `<option value="${esc(p.name)}" ${c.plan===p.name?"selected":""}>${esc(p.name)} ($${p.priceMonthly||0}/mo)</option>`));
+      if (c.plan && !state.plans.some((p) => p.name === c.plan)) planOpts.splice(1, 0, `<option value="${esc(c.plan)}" selected>${esc(c.plan)}</option>`);
+      const statusOpts = ["active","trial","suspended"].map((s) => `<option value="${s}" ${(c.status||"active")===s?"selected":""}>${s}</option>`);
       const tr = document.createElement("tr");
       tr.innerHTML = `<td><strong>${esc(c.name)}</strong><div class="mono muted">${d.id}</div></td>
-        <td><span class="badge">${esc(c.plan||"—")}</span></td>
-        <td class="muted">${fmtDate(c.createdAt)}</td>
-        <td><button class="btn sm">Manage accounts →</button></td>`;
-      tr.querySelector("button").addEventListener("click", () => {
+        <td><select class="planSel">${planOpts.join("")}</select></td>
+        <td><select class="statusSel">${statusOpts.join("")}</select></td>
+        <td class="row" style="gap:6px;"><button class="btn sm mng">Manage →</button></td>`;
+      tr.querySelector(".mng").addEventListener("click", () => {
         selectCompany(d.id, c.name);
         $("rolesCard").scrollIntoView({ behavior:"smooth" });
       });
+      const savePlan = async () => {
+        try { await setCompanyPlan({ companyId:d.id, plan: tr.querySelector(".planSel").value, status: tr.querySelector(".statusSel").value });
+          banner($("banner"), `${esc(c.name)}: plan updated.`, "good"); }
+        catch (e) { banner($("banner"), e.message || "Update failed.", "error"); }
+      };
+      tr.querySelector(".planSel").addEventListener("change", savePlan);
+      tr.querySelector(".statusSel").addEventListener("change", savePlan);
       body.appendChild(tr);
     });
   } catch (e) { body.innerHTML = `<tr><td colspan="4" class="banner error show">${esc(e.message)}</td></tr>`; }
