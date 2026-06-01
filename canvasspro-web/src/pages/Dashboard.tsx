@@ -1,0 +1,102 @@
+import { useEffect, useState } from "react";
+import { Link } from "react-router-dom";
+import { collection, getCountFromServer, query, where } from "firebase/firestore";
+import { db } from "../firebase";
+import { useAuth } from "../auth/AuthContext";
+import { DISPOSITIONS } from "../lib/dispositions";
+import type { LeadStatus } from "../types";
+
+interface Stats {
+  total: number;
+  byStatus: Partial<Record<LeadStatus, number>>;
+}
+
+const STATUS_LABELS: Record<string, string> = Object.fromEntries(
+  DISPOSITIONS.map((d) => [d.value, d.label])
+);
+
+export default function Dashboard() {
+  const { profile, role, companyId } = useAuth();
+  const [stats, setStats] = useState<Stats | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    if (!profile || !companyId) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const leads = collection(db, "leads");
+        // Company admins see the whole company; everyone else only their
+        // downstream (visibilityPath contains their uid).
+        const scope = [
+          where("companyId", "==", companyId),
+          ...(role === "admin"
+            ? []
+            : [where("visibilityPath", "array-contains", profile.uid)]),
+        ];
+        const totalSnap = await getCountFromServer(query(leads, ...scope));
+        const statuses: LeadStatus[] = DISPOSITIONS.map((d) => d.value);
+        const byStatus: Partial<Record<LeadStatus, number>> = {};
+        await Promise.all(
+          statuses.map(async (st) => {
+            const snap = await getCountFromServer(
+              query(leads, ...scope, where("status", "==", st))
+            );
+            byStatus[st] = snap.data().count;
+          })
+        );
+        if (!cancelled) {
+          setStats({ total: totalSnap.data().count, byStatus });
+          setLoading(false);
+        }
+      } catch (err) {
+        console.error("Failed to load stats", err);
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [profile, role, companyId]);
+
+  return (
+    <div className="page-body">
+      <div className="page-head">
+        <h1>Welcome back{profile?.displayName ? `, ${profile.displayName.split(" ")[0]}` : ""}</h1>
+        <p className="page-sub">
+          {role === "user" ? "Your" : "Team"} canvassing activity at a glance.
+        </p>
+      </div>
+
+      {loading ? (
+        <div className="muted">Loading stats…</div>
+      ) : !stats ? (
+        <div className="banner warn show">Couldn't load stats. Check Firestore configuration.</div>
+      ) : (
+        <div className="stat-grid">
+          <div className="stat-card highlight">
+            <div className="stat-value">{stats.total}</div>
+            <div className="stat-label">Total leads</div>
+          </div>
+          {(Object.keys(STATUS_LABELS) as LeadStatus[]).map((st) => (
+            <div className="stat-card" key={st}>
+              <div className="stat-value">{stats.byStatus[st] ?? 0}</div>
+              <div className="stat-label">{STATUS_LABELS[st]}</div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <div className="quick-links">
+        <Link to="/lookup" className="card link-card">
+          <h2>⌖ Run an address lookup</h2>
+          <p className="muted">Pull homeowner intel before you knock.</p>
+        </Link>
+        <Link to="/leads" className="card link-card">
+          <h2>☰ Work your leads</h2>
+          <p className="muted">Update statuses and notes from the field.</p>
+        </Link>
+      </div>
+    </div>
+  );
+}

@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>YoutilityKnock</title>
+<meta name="theme-color" content="#0EA5E9" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+<style>
+  :root { --accent:#0EA5E9; --accent-2:#38BDF8; --ink:#E8EEF8; --ink-mid:#A8B3C7; --line:rgba(255,255,255,.08); --panel:rgba(255,255,255,.04); }
+  * { box-sizing:border-box; margin:0; padding:0; }
+  body {
+    font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
+    color:var(--ink); min-height:100vh; padding:40px 20px;
+    background:
+      radial-gradient(1200px 600px at 80% -10%, rgba(14,165,233,.18), transparent 60%),
+      radial-gradient(900px 500px at -10% 110%, rgba(56,189,248,.10), transparent 60%),
+      linear-gradient(180deg,#0A0F1A,#0F1727 60%,#15203A);
+    -webkit-font-smoothing:antialiased;
+  }
+  .wrap { max-width:860px; margin:0 auto; }
+  .brand { display:flex; align-items:center; gap:14px; margin-bottom:8px; }
+  .mark { width:52px; height:52px; border-radius:13px; display:grid; place-items:center; font-family:'Space Grotesk'; font-weight:700; color:#00131F; background:linear-gradient(135deg,var(--accent),var(--accent-2)); box-shadow:0 6px 20px rgba(14,165,233,.35); }
+  h1 { font-family:'Space Grotesk',sans-serif; font-size:28px; }
+  .sub { color:var(--ink-mid); margin:6px 0 28px; }
+  .grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(240px,1fr)); gap:16px; }
+  a.card { display:block; padding:20px; border-radius:14px; border:1px solid var(--line); background:var(--panel); color:var(--ink); text-decoration:none; transition:border-color .15s, transform .05s; }
+  a.card:hover { border-color:var(--accent); }
+  a.card:active { transform:translateY(1px); }
+  a.card.primary { background:linear-gradient(135deg,rgba(14,165,233,.18),rgba(56,189,248,.08)); border-color:rgba(56,189,248,.3); }
+  .card h2 { font-family:'Space Grotesk',sans-serif; font-size:17px; margin-bottom:6px; }
+  .card p { color:var(--ink-mid); font-size:13px; }
+  .section-label { color:var(--ink-mid); font-size:12px; text-transform:uppercase; letter-spacing:.6px; margin:30px 0 12px; }
+  footer { color:var(--ink-mid); font-size:12px; margin-top:36px; }
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="brand">
+      <div class="mark">YK</div>
+      <div>
+        <h1>YoutilityKnock</h1>
+        <div class="sub">Door-to-door canvassing platform · Youtility</div>
+      </div>
+    </div>
+
+    <div class="grid">
+      <a class="card primary" href="/app">
+        <h2>⌖ Field App →</h2>
+        <p>The canvassing dashboard for reps & managers (web + iOS + Android).</p>
+      </a>
+      <a class="card" href="/admin.html">
+        <h2>⚙ Admin Console →</h2>
+        <p>Manage companies, accounts, and app users.</p>
+      </a>
+    </div>
+
+    <div class="section-label">Standalone tools</div>
+    <div class="grid">
+      <a class="card" href="/canvass-pro.html"><h2>Homeowner Lookup (lite)</h2><p>Single-page homeowner lookup.</p></a>
+      <a class="card" href="/youtility-crm.html"><h2>Youtility CRM</h2><p>Lead gen + Knockstat enrichment.</p></a>
+      <a class="card" href="/solar-analysis.html"><h2>Solar Analysis</h2><p>Meta Instant Experience funnel.</p></a>
+      <a class="card" href="/player-highlight.html"><h2>Player Highlight</h2><p>Athlete spotlight page.</p></a>
+    </div>
+
+    <footer>© Youtility · YoutilityKnock</footer>
+  </div>
+</body>
+</html>

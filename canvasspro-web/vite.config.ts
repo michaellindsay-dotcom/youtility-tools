@@ -1,0 +1,18 @@
+import { defineConfig } from "vite";
+import react from "@vitejs/plugin-react";
+
+// Build output goes to dist/ which Firebase Hosting serves and Capacitor
+// bundles into the native iOS / Android apps.
+export default defineConfig({
+  plugins: [react()],
+  // The app is served under /app on the shared Firebase Hosting site.
+  base: "/app/",
+  build: {
+    outDir: "dist",
+    sourcemap: true,
+  },
+  server: {
+    port: 5173,
+    host: true,
+  },
+});

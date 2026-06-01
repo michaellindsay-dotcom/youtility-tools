@@ -1,0 +1,22 @@
+{
+  "name": "youtility-tools",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Youtility tools + YoutilityKnock dashboard, deployed to one Firebase Hosting site.",
+  "type": "module",
+  "scripts": {
+    "build:app": "npm --prefix canvasspro-web install && npm --prefix canvasspro-web run build",
+    "build:functions": "npm --prefix canvasspro-web/functions install && npm --prefix canvasspro-web/functions run build",
+    "assemble": "node scripts/assemble.mjs",
+    "build": "npm run build:app && npm run assemble",
+    "deploy": "npm run build && npm run build:functions && firebase deploy",
+    "deploy:hosting": "npm run build && firebase deploy --only hosting",
+    "emulators": "npm run build && firebase emulators:start",
+    "bootstrap:superadmin": "node scripts/bootstrap-superadmin.mjs",
+    "seed:company": "node scripts/seed-company.mjs"
+  },
+  "devDependencies": {
+    "firebase-admin": "^12.5.0",
+    "firebase-tools": "^13.20.2"
+  }
+}
