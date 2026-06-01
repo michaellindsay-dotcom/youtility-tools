@@ -25,6 +25,17 @@ function homeIcon(color: string, flagged = false): L.DivIcon {
   });
 }
 
+// Guard against corrupt/missing coordinates (the cause of pins smearing across
+// the globe): must be finite, in range, and not the 0,0 null-island.
+function validCoord(lat: unknown, lng: unknown): [number, number] | null {
+  const la = Number(lat);
+  const ln = Number(lng);
+  if (!isFinite(la) || !isFinite(ln)) return null;
+  if (la === 0 && ln === 0) return null;
+  if (Math.abs(la) > 90 || Math.abs(ln) > 180) return null;
+  return [la, ln];
+}
+
 function inPolygon(pt: LatLng, poly: LatLng[]): boolean {
   let inside = false;
   for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
@@ -71,13 +82,14 @@ export default function MapPage() {
     leadLayer.current.clearLayers();
     const leads = await fetchLeads();
     leads.forEach((lead) => {
-      if (lead.lat == null || lead.lng == null) return;
-      L.marker([lead.lat, lead.lng], {
+      const c = validCoord(lead.lat, lead.lng);
+      if (!c) return;
+      L.marker(c, {
         icon: homeIcon(DISP_COLOR[lead.status] || "#94A3B8", lead.verified === false),
       })
         .on("click", () =>
           setDispoTarget({
-            leadId: lead.id, address: lead.address, lat: lead.lat, lng: lead.lng, status: lead.status,
+            leadId: lead.id, address: lead.address, lat: c[0], lng: c[1], status: lead.status,
             name: lead.ownerName || "", phone: lead.phone || "", email: lead.email || "", notes: lead.notes || "",
             enrichment: lead.enrichment,
           })
@@ -156,19 +168,19 @@ export default function MapPage() {
   useEffect(() => {
     if (!companyId || !profile || !elRef.current || mapRef.current) return;
 
-    // Google satellite tiles are georeferenced to GPS (Esri imagery is offset a
-    // few meters in some areas, which made rooftop pins look misplaced).
-    const gSub = { subdomains: ["mt0", "mt1", "mt2", "mt3"], maxZoom: 21, attribution: "© Google" };
-    const hybrid = L.tileLayer("https://{s}.google.com/vt/lyrs=y&x={x}&y={y}&z={z}", gSub);
-    const satellite = L.tileLayer("https://{s}.google.com/vt/lyrs=s&x={x}&y={y}&z={z}", gSub);
-    const esri = L.tileLayer(
+    const satellite = L.tileLayer(
       "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
-      { maxZoom: 19, attribution: "Tiles © Esri" }
+      { maxZoom: 19, attribution: "Tiles © Esri — Maxar, Earthstar Geographics" }
+    );
+    const labels = L.tileLayer(
+      "https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}",
+      { maxZoom: 19 }
     );
     const street = L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 19, attribution: "© OpenStreetMap" });
+    const hybrid = L.layerGroup([satellite, labels]);
 
-    const map = L.map(elRef.current, { center: DEFAULT_CENTER, zoom: 14, maxZoom: 21, layers: [hybrid] });
-    L.control.layers({ "Satellite + labels": hybrid, Satellite: satellite, "Esri imagery": esri, Street: street }).addTo(map);
+    const map = L.map(elRef.current, { center: DEFAULT_CENTER, zoom: 14, layers: [hybrid] });
+    L.control.layers({ "Satellite + labels": hybrid, Satellite: satellite, Street: street }).addTo(map);
     territoryLayer.current.addTo(map);
     homeLayer.current.addTo(map);
     leadLayer.current.addTo(map);

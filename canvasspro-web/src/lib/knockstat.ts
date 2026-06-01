@@ -467,5 +467,12 @@ export function parseAreaProperties(
         lng,
       };
     })
-    .filter((x) => !isNaN(x.lat) && !isNaN(x.lng));
+    .filter(
+      (x) =>
+        isFinite(x.lat) &&
+        isFinite(x.lng) &&
+        Math.abs(x.lat) <= 90 &&
+        Math.abs(x.lng) <= 180 &&
+        !(x.lat === 0 && x.lng === 0)
+    );
 }
