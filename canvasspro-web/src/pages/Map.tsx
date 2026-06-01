@@ -61,15 +61,33 @@ function orderRoute(start: LatLng, stops: Lead[]): Lead[] {
   return out;
 }
 
-// Free geocoding via OpenStreetMap Nominatim (no key, CORS-friendly).
-async function geocode(addr: string): Promise<LatLng | null> {
+const GEOCODE_KEY =
+  import.meta.env.VITE_GOOGLE_MAPS_API_KEY || "AIzaSyAAfrLWkY_WS7yabCgW_WZJu973J5iGcBI";
+
+type GeoResult = { loc: LatLng; source: "google" | "nominatim" } | null;
+
+// Prefer Google Geocoding (fast, high quality); fall back to free OSM Nominatim
+// if Google is unavailable (CORS, quota, key restriction).
+async function geocode(addr: string): Promise<GeoResult> {
+  try {
+    const res = await fetch(
+      `https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(addr)}&key=${GEOCODE_KEY}`
+    );
+    const data = await res.json();
+    if (data.status === "OK" && data.results?.[0]) {
+      const l = data.results[0].geometry.location;
+      return { loc: { lat: l.lat, lng: l.lng }, source: "google" };
+    }
+  } catch {
+    /* fall through to Nominatim */
+  }
   try {
     const res = await fetch(
       `https://nominatim.openstreetmap.org/search?format=json&limit=1&q=${encodeURIComponent(addr)}`,
       { headers: { Accept: "application/json" } }
     );
     const data = (await res.json()) as Array<{ lat: string; lon: string }>;
-    if (data?.[0]) return { lat: parseFloat(data[0].lat), lng: parseFloat(data[0].lon) };
+    if (data?.[0]) return { loc: { lat: parseFloat(data[0].lat), lng: parseFloat(data[0].lon) }, source: "nominatim" };
   } catch {
     /* ignore */
   }
@@ -141,20 +159,21 @@ export default function MapPage() {
     setStatus(`${plotted} leads plotted${needGeo.length ? ` · geocoding ${needGeo.length}…` : ""}`);
     refreshPinVisibility();
 
-    // Geocode the rest (rate-limited for Nominatim) and persist back.
+    // Geocode the rest (Google-first, Nominatim fallback) and persist back.
     for (const lead of needGeo) {
       const full = [lead.address, lead.city, lead.state, lead.zip].filter(Boolean).join(", ");
-      const loc = await geocode(full);
-      if (loc) {
-        lead.lat = loc.lat;
-        lead.lng = loc.lng;
+      const r = await geocode(full);
+      if (r) {
+        lead.lat = r.loc.lat;
+        lead.lng = r.loc.lng;
         addPin(lead);
         plotted++;
         setStatus(`${plotted} leads plotted`);
         refreshPinVisibility();
-        await updateDoc(doc(db, "leads", lead.id), { lat: loc.lat, lng: loc.lng }).catch(() => {});
+        await updateDoc(doc(db, "leads", lead.id), { lat: r.loc.lat, lng: r.loc.lng }).catch(() => {});
       }
-      await sleep(1100); // respect Nominatim ~1 req/sec
+      // Only throttle hard when we hit Nominatim's ~1 req/sec policy.
+      await sleep(r?.source === "google" ? 120 : 1100);
     }
     setStatus(`${plotted} leads plotted`);
   }
