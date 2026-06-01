@@ -114,8 +114,14 @@ export default function DispositionModal({
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [summary, setSummary] = useState("");
-  // Geofence: distance from the rep to this home (ft) and whether it counts.
-  const [geo, setGeo] = useState<{ ft: number | null; verified: boolean }>({ ft: null, verified: true });
+  // Geofence: distance to the home, the GPS accuracy margin, whether it counts,
+  // and whether we're still acquiring a precise fix.
+  const [geo, setGeo] = useState<{ ft: number | null; accFt: number; verified: boolean; locating: boolean }>({
+    ft: null,
+    accFt: 0,
+    verified: true,
+    locating: false,
+  });
   // On-the-spot scheduling (shown for go-back / pipeline / appointment).
   const [schedule, setSchedule] = useState(true);
   const [scheduleAt, setScheduleAt] = useState("");
@@ -136,7 +142,7 @@ export default function DispositionModal({
       ...target,
     });
     setSummary(summarize(target.enrichment));
-    setGeo({ ft: null, verified: true });
+    setGeo({ ft: null, accFt: 0, verified: true, locating: target.lat != null && target.lng != null });
     setSchedule(true);
     setScheduleAt("");
     setPhotos({ home: null, bill: null });
@@ -156,11 +162,46 @@ export default function DispositionModal({
 
   async function checkGeo(lat: number, lng: number) {
     try {
-      const pos = await Geolocation.getCurrentPosition({ enableHighAccuracy: true, timeout: 8000 });
-      const ft = distanceFt({ lat: pos.coords.latitude, lng: pos.coords.longitude }, { lat, lng });
-      setGeo({ ft, verified: ft <= ONSITE_FT });
+      // A single getCurrentPosition often returns a coarse first fix (50–70 m
+      // off). Watch for a few seconds and keep the most accurate sample, then
+      // re-evaluate on each better fix so the badge tightens as GPS settles.
+      let best: { latitude: number; longitude: number; accuracy: number } | null = null;
+      const evaluate = () => {
+        if (!best) return;
+        const ft = distanceFt({ lat: best.latitude, lng: best.longitude }, { lat, lng });
+        const accFt = Math.round((best.accuracy || 0) * 3.28084);
+        // On-site if you're within range — or close enough that the GPS error
+        // margin could place you within range.
+        const verified = ft - accFt <= ONSITE_FT;
+        setGeo({ ft, accFt, verified, locating: false });
+      };
+
+      let watchId: string | null = null;
+      const stop = () => {
+        if (watchId) Geolocation.clearWatch({ id: watchId }).catch(() => {});
+        watchId = null;
+      };
+      // Hard stop after 8s regardless.
+      const timer = setTimeout(stop, 8000);
+
+      watchId = await Geolocation.watchPosition(
+        { enableHighAccuracy: true, timeout: 8000, maximumAge: 0 },
+        (pos) => {
+          if (!pos) return;
+          const a = pos.coords.accuracy ?? 9999;
+          if (!best || a < best.accuracy) {
+            best = { latitude: pos.coords.latitude, longitude: pos.coords.longitude, accuracy: a };
+            evaluate();
+          }
+          // Good enough — stop early once we have a tight fix.
+          if (a <= 15) {
+            clearTimeout(timer);
+            stop();
+          }
+        }
+      );
     } catch {
-      setGeo({ ft: null, verified: true }); // no GPS → don't penalize
+      setGeo({ ft: null, accFt: 0, verified: true, locating: false }); // no GPS → don't penalize
     }
   }
 
@@ -336,14 +377,18 @@ export default function DispositionModal({
           <div className="muted small dispo-summary">{enriching ? "Looking up home data…" : summary}</div>
         )}
 
-        {geo.ft != null && !geo.verified && (
+        {geo.locating && (
+          <div className="muted small dispo-summary">📍 Getting a precise location…</div>
+        )}
+
+        {geo.ft != null && !geo.locating && !geo.verified && (
           <div className="banner warn show" style={{ marginBottom: 10 }}>
-            ⚠ You're <strong>{geo.ft} ft</strong> from this home (over {ONSITE_FT} ft). This won't count toward
-            your door knocks or stats.
+            ⚠ You're <strong>{geo.ft} ft</strong> from this home (over {ONSITE_FT} ft
+            {geo.accFt > 0 ? `, GPS ±${geo.accFt} ft` : ""}). This won't count toward your door knocks or stats.
           </div>
         )}
 
-        {!onShift && geo.ft != null && geo.verified && (
+        {!onShift && geo.ft != null && !geo.locating && geo.verified && (
           <div className="banner info show start-shift-prompt" style={{ marginBottom: 10 }}>
             <span>You're on-site but not on a shift — start one so this knock counts.</span>
             <button className="btn primary sm" onClick={() => startShift()}>▶ Start Shift</button>
