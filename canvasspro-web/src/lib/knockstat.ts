@@ -58,24 +58,30 @@ function normalizePeople(arr: any, defaultRole: string): Person[] {
 }
 
 export function normalizeKnockstatResponse(raw: AnyObj): PropertyRecord {
-  const r: AnyObj = (raw && (raw.data || raw.result || raw.property || raw)) || {};
+  // ATTOM returns { property: [ {...} ] }; unwrap the first record.
+  const r: AnyObj =
+    (raw &&
+      (Array.isArray(raw.property)
+        ? raw.property[0]
+        : raw.data || raw.result || raw.property || raw)) ||
+    {};
   return {
     address: {
-      line1: pick(r, "address.line1", "address.street", "address.formatted", "address.full", "propertyInfo.address.address", "propertyInfo.address.label", "address"),
-      city: pick(r, "address.city", "propertyInfo.address.city"),
-      state: pick(r, "address.state", "address.region", "propertyInfo.address.state"),
-      zip: pick(r, "address.zip", "address.postalCode", "address.postcode", "propertyInfo.address.zip"),
-      lat: pick(r, "address.latitude", "geo.lat", "location.lat", "propertyInfo.latitude", "latitude"),
-      lon: pick(r, "address.longitude", "geo.lng", "location.lon", "location.lng", "propertyInfo.longitude", "longitude"),
+      line1: pick(r, "address.line1", "address.street", "address.formatted", "address.full", "address.oneLine", "propertyInfo.address.address", "propertyInfo.address.label", "address"),
+      city: pick(r, "address.city", "address.locality", "propertyInfo.address.city"),
+      state: pick(r, "address.state", "address.region", "address.countrySubd", "propertyInfo.address.state"),
+      zip: pick(r, "address.zip", "address.postalCode", "address.postcode", "address.postal1", "propertyInfo.address.zip"),
+      lat: pick(r, "address.latitude", "geo.lat", "location.lat", "location.latitude", "propertyInfo.latitude", "latitude"),
+      lon: pick(r, "address.longitude", "geo.lng", "location.lon", "location.lng", "location.longitude", "propertyInfo.longitude", "longitude"),
     },
     property: {
-      type: pick(r, "property.type", "propertyType", "propertyInfo.propertyUseStandardized", "propertyInfo.propertyUse", "landUseDescription"),
-      subtype: pick(r, "property.subtype", "propertySubtype"),
-      yearBuilt: pick(r, "property.yearBuilt", "yearBuilt", "propertyInfo.yearBuilt"),
-      bedrooms: pick(r, "property.bedrooms", "bedrooms", "propertyInfo.bedrooms"),
-      bathrooms: pick(r, "property.bathrooms", "bathrooms", "propertyInfo.bathrooms"),
-      livingAreaSqft: pick(r, "property.livingAreaSqft", "property.sqft", "buildingSqft", "livingArea", "propertyInfo.livingSquareFeet"),
-      lotSizeSqft: pick(r, "property.lotSizeSqft", "lotSqft", "lotSize", "lotInfo.lotSquareFeet"),
+      type: pick(r, "property.type", "propertyType", "summary.proptype", "summary.propclass", "propertyInfo.propertyUseStandardized", "propertyInfo.propertyUse", "landUseDescription"),
+      subtype: pick(r, "property.subtype", "propertySubtype", "summary.propsubtype"),
+      yearBuilt: pick(r, "property.yearBuilt", "yearBuilt", "summary.yearbuilt", "propertyInfo.yearBuilt"),
+      bedrooms: pick(r, "property.bedrooms", "bedrooms", "building.rooms.beds", "propertyInfo.bedrooms"),
+      bathrooms: pick(r, "property.bathrooms", "bathrooms", "building.rooms.bathstotal", "propertyInfo.bathrooms"),
+      livingAreaSqft: pick(r, "property.livingAreaSqft", "property.sqft", "buildingSqft", "livingArea", "building.size.livingsize", "building.size.universalsize", "propertyInfo.livingSquareFeet"),
+      lotSizeSqft: pick(r, "property.lotSizeSqft", "lotSqft", "lotSize", "lot.lotsize2", "lotInfo.lotSquareFeet"),
       stories: pick(r, "property.stories", "stories"),
       units: pick(r, "property.units", "units"),
       garage: pick(r, "property.garage", "garage"),
@@ -89,7 +95,7 @@ export function normalizeKnockstatResponse(raw: AnyObj): PropertyRecord {
       hoa: pick(r, "property.hoa", "hoa"),
     },
     valuation: {
-      estimatedValue: pick(r, "valuation.estimatedValue", "estimate.value", "avm.value", "estimatedValue"),
+      estimatedValue: pick(r, "valuation.estimatedValue", "estimate.value", "avm.value", "avm.amount.value", "assessment.market.mktttlvalue", "estimatedValue"),
       estimatedLow: pick(r, "valuation.low", "estimate.low", "avm.low", "estimatedValueLow"),
       estimatedHigh: pick(r, "valuation.high", "estimate.high", "avm.high", "estimatedValueHigh"),
       confidence: pick(r, "valuation.confidence", "estimate.confidence", "avm.confidence"),
@@ -110,15 +116,33 @@ export function normalizeKnockstatResponse(raw: AnyObj): PropertyRecord {
       lengthOfOwnership: pick(r, "ownership.lengthYears", "ownership.yearsOwned"),
     },
     owners: (() => {
-      const generic = normalizePeople(pick(r, "owners", "ownership.owners") || [], "Owner");
-      if (generic.length) return generic;
-      // RealEstateAPI: ownerInfo.owner1FullName / owner2FullName (+ skip-trace contacts).
-      const oi: AnyObj = pick(r, "ownerInfo") || {};
-      const names = [oi.owner1FullName, oi.owner2FullName].filter(Boolean) as string[];
-      if (!names.length) return [];
+      // BatchData skip-trace contacts (attached server-side as _skiptrace).
       const skip: AnyObj = (raw && raw._skiptrace) || {};
       const phones = arrayify(pick(skip, "phones", "phoneNumbers", "output.phones", "output.phoneNumbers"));
       const emails = arrayify(pick(skip, "emails", "output.emails"));
+
+      const generic = normalizePeople(pick(r, "owners", "ownership.owners") || [], "Owner");
+      if (generic.length) {
+        if (phones.length) generic[0].phones = [...(generic[0].phones || []), ...phones];
+        if (emails.length) generic[0].emails = [...(generic[0].emails || []), ...emails];
+        return generic;
+      }
+
+      // RealEstateAPI ownerInfo.owner1FullName / owner2FullName.
+      const oi: AnyObj = pick(r, "ownerInfo") || {};
+      let names = [oi.owner1FullName, oi.owner2FullName].filter(Boolean) as string[];
+      let mailing = pick(oi, "mailAddress.label", "mailAddress.address");
+
+      // ATTOM assessment.owner.owner1/owner2 (firstname / lastname).
+      if (!names.length) {
+        const ao: AnyObj = pick(r, "assessment.owner", "owner") || {};
+        const fmt = (o: AnyObj | undefined) =>
+          o ? [o.firstname || o.firstName, o.lastname || o.lastName].filter(Boolean).join(" ") : "";
+        names = [fmt(ao.owner1), fmt(ao.owner2), fmt(ao.owner3)].filter(Boolean);
+        mailing = pick(r, "assessment.owner.mailingaddressoneline", "address.oneLine") || mailing;
+      }
+      if (!names.length) return [];
+
       return names.map((name, i) => ({
         name,
         role: "Owner",
@@ -129,7 +153,7 @@ export function normalizeKnockstatResponse(raw: AnyObj): PropertyRecord {
         lengthOfResidence: undefined,
         phones: i === 0 ? phones : [],
         emails: i === 0 ? emails : [],
-        mailingAddress: pick(oi, "mailAddress.label", "mailAddress.address"),
+        mailingAddress: mailing,
         address: undefined,
       }));
     })(),
@@ -154,8 +178,8 @@ export function normalizeKnockstatResponse(raw: AnyObj): PropertyRecord {
       };
     })(),
     sale: {
-      lastSalePrice: pick(r, "sale.lastPrice", "lastSale.price", "sales.0.price", "lastSale.saleAmount", "saleHistory.0.saleAmount", "lastSaleAmount"),
-      lastSaleDate: pick(r, "sale.lastDate", "lastSale.date", "sales.0.date", "lastSaleDate", "saleHistory.0.saleDate"),
+      lastSalePrice: pick(r, "sale.lastPrice", "lastSale.price", "sales.0.price", "lastSale.saleAmount", "saleHistory.0.saleAmount", "lastSaleAmount", "sale.amount.saleamt"),
+      lastSaleDate: pick(r, "sale.lastDate", "lastSale.date", "sales.0.date", "lastSaleDate", "saleHistory.0.saleDate", "sale.salesearchdate", "sale.amount.salerecdate"),
       priorSalePrice: pick(r, "sale.priorPrice", "sales.1.price", "saleHistory.1.saleAmount"),
       priorSaleDate: pick(r, "sale.priorDate", "sales.1.date", "saleHistory.1.saleDate"),
     },
@@ -395,4 +419,45 @@ export async function lookupAddress(
     throw err;
   }
   return res.json();
+}
+
+// Fetch every home within `radius` miles of (lat,lng) via the /api/area proxy.
+export async function lookupArea(
+  lat: number,
+  lng: number,
+  radius: number,
+  idToken: string
+): Promise<AnyObj> {
+  const base = import.meta.env.VITE_API_BASE || "/api";
+  const res = await fetch(`${base}/area?lat=${lat}&lng=${lng}&radius=${radius}`, {
+    headers: { Authorization: `Bearer ${idToken}` },
+  });
+  if (!res.ok) {
+    const body = await res.text().catch(() => "");
+    const err = new Error(`Area lookup failed (${res.status})${body ? ": " + body.slice(0, 200) : ""}`);
+    (err as any).code = "HTTP_" + res.status;
+    throw err;
+  }
+  return res.json();
+}
+
+// Light pin records from an ATTOM snapshot (area) response.
+export function parseAreaProperties(
+  raw: AnyObj
+): { id: string; address: string; lat: number; lng: number }[] {
+  const list: AnyObj[] = Array.isArray(raw?.property) ? raw.property : [];
+  return list
+    .map((p) => {
+      const a = p.address || {};
+      const loc = p.location || {};
+      const lat = Number(a.latitude ?? loc.latitude);
+      const lng = Number(a.longitude ?? loc.longitude);
+      return {
+        id: String(pick(p, "identifier.attomId", "identifier.obPropId", "identifier.Id") ?? `${lat},${lng}`),
+        address: a.oneLine || [a.line1, a.line2].filter(Boolean).join(", ") || "Unknown address",
+        lat,
+        lng,
+      };
+    })
+    .filter((x) => !isNaN(x.lat) && !isNaN(x.lng));
 }

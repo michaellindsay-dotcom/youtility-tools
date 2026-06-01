@@ -6,7 +6,13 @@ import { Geolocation } from "@capacitor/geolocation";
 import { db, auth } from "../firebase";
 import { useAuth } from "../auth/AuthContext";
 import { DISPOSITIONS, DISP_COLOR, DISP_LABEL } from "../lib/dispositions";
-import { lookupAddress, normalizeKnockstatResponse, buildEnrichment } from "../lib/knockstat";
+import {
+  lookupAddress,
+  normalizeKnockstatResponse,
+  buildEnrichment,
+  lookupArea,
+  parseAreaProperties,
+} from "../lib/knockstat";
 import { bumpStats } from "../lib/stats";
 import type { Lead, Territory, LatLng } from "../types";
 
@@ -95,6 +101,7 @@ export default function MapPage() {
   const elRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<L.Map | null>(null);
   const pinsLayer = useRef<L.LayerGroup>(L.layerGroup());
+  const homesLayer = useRef<L.LayerGroup>(L.layerGroup());
   const territoryLayer = useRef<L.LayerGroup>(L.layerGroup());
   const routeLine = useRef<L.Polyline | null>(null);
   const myLoc = useRef<LatLng | null>(null);
@@ -109,6 +116,114 @@ export default function MapPage() {
   const selectedRef = useRef<string[]>([]);
   selectedRef.current = selected;
   modeRef.current = mode;
+
+  const [loadingHomes, setLoadingHomes] = useState(false);
+
+  // Load every home in the current map view from ATTOM and drop a pin on each.
+  async function loadHomes() {
+    const map = mapRef.current;
+    if (!map || !profile) return;
+    setLoadingHomes(true);
+    setStatus("Loading homes in view…");
+    try {
+      const c = map.getCenter();
+      const ne = map.getBounds().getNorthEast();
+      const miles = Math.min(map.distance(c, ne) / 1609.34, 1); // cap at 1 mile to control cost
+      const token = await auth.currentUser!.getIdToken();
+      const raw = await lookupArea(c.lat, c.lng, Math.max(0.1, +miles.toFixed(2)), token);
+      const homes = parseAreaProperties(raw);
+      homesLayer.current.clearLayers();
+      homes.forEach((h) => {
+        const m = L.circleMarker([h.lat, h.lng], {
+          radius: 5,
+          color: "#cbd5e1",
+          weight: 1,
+          fillColor: "#94a3b8",
+          fillOpacity: 0.8,
+        });
+        m.bindPopup(() => makeHomePopup(h), { minWidth: 230 });
+        homesLayer.current.addLayer(m);
+      });
+      setStatus(`${homes.length} homes loaded in view`);
+    } catch (e: any) {
+      setStatus("Could not load homes: " + (e?.message || ""));
+    } finally {
+      setLoadingHomes(false);
+    }
+  }
+
+  // Popup for an un-leaded home: pull owner data and/or add it as a lead.
+  function makeHomePopup(home: { id: string; address: string; lat: number; lng: number }): HTMLElement {
+    const el = document.createElement("div");
+    el.className = "pin-popup";
+    el.innerHTML = `<div class="pin-head"><strong>${home.address}</strong></div>`;
+    const info = document.createElement("div");
+    info.className = "muted small";
+    info.style.marginTop = "4px";
+    el.appendChild(info);
+
+    const row = document.createElement("div");
+    row.className = "row";
+    row.style.marginTop = "8px";
+
+    const ownerBtn = document.createElement("button");
+    ownerBtn.className = "btn sm";
+    ownerBtn.textContent = "Owner data";
+    ownerBtn.onclick = async () => {
+      ownerBtn.disabled = true;
+      ownerBtn.textContent = "Loading…";
+      try {
+        const token = await auth.currentUser!.getIdToken();
+        const raw = await lookupAddress(home.address, token);
+        const { ownerName, phone, email, enrichment } = buildEnrichment(normalizeKnockstatResponse(raw));
+        info.innerHTML =
+          (ownerName ? `<strong>${ownerName}</strong><br/>` : "") +
+          (phone ? `📞 ${phone} ` : "") +
+          (email ? `✉ ${email}<br/>` : "") +
+          [enrichment.propertyType, enrichment.beds ? `${enrichment.beds}bd` : null, enrichment.baths ? `${enrichment.baths}ba` : null]
+            .filter(Boolean)
+            .join(" · ");
+        ownerBtn.textContent = "Owner data ✓";
+      } catch (e: any) {
+        ownerBtn.disabled = false;
+        ownerBtn.textContent = "Retry";
+        info.textContent = "Unavailable: " + (e?.message || "");
+      }
+    };
+
+    const addBtn = document.createElement("button");
+    addBtn.className = "btn primary sm";
+    addBtn.textContent = "Add as lead";
+    addBtn.onclick = async () => {
+      if (!profile || !companyId) return;
+      addBtn.disabled = true;
+      try {
+        const now = Date.now();
+        await addDoc(collection(db, "leads"), {
+          address: home.address,
+          lat: home.lat,
+          lng: home.lng,
+          status: "new",
+          companyId,
+          assignedTo: profile.uid,
+          visibilityPath: [profile.uid, ...(profile.managerPath ?? [])],
+          createdBy: profile.uid,
+          createdAt: now,
+          updatedAt: now,
+        });
+        addBtn.textContent = "Added ✓";
+        await buildPins();
+      } catch (e: any) {
+        addBtn.disabled = false;
+        info.textContent = "Could not add: " + (e?.message || "");
+      }
+    };
+
+    row.appendChild(ownerBtn);
+    row.appendChild(addBtn);
+    el.appendChild(row);
+    return el;
+  }
 
   const canDraw = role === "admin" || role === "manager";
 
@@ -348,6 +463,7 @@ export default function MapPage() {
     const map = L.map(elRef.current, { center: DEFAULT_CENTER, zoom: 14, layers: [hybrid] });
     L.control.layers({ Satellite: satellite, Hybrid: hybrid, Street: street }).addTo(map);
     territoryLayer.current.addTo(map);
+    homesLayer.current.addTo(map);
     mapRef.current = map;
 
     map.on("zoomend", refreshPinVisibility);
@@ -466,6 +582,9 @@ export default function MapPage() {
           <p className="page-sub">{status}</p>
         </div>
         <div className="filter-bar">
+          <button className="chip-btn" onClick={loadHomes} disabled={loadingHomes}>
+            {loadingHomes ? "Loading…" : "⌂ Load homes"}
+          </button>
           <button className={"chip-btn" + (mode === "view" ? " active" : "")} onClick={() => setMode("view")}>
             View
           </button>

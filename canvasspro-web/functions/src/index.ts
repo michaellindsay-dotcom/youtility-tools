@@ -7,12 +7,66 @@ import { getFirestore, FieldValue } from "firebase-admin/firestore";
 initializeApp();
 const db = getFirestore();
 
-const REAPI = {
-  baseUrl: process.env.REAL_ESTATE_API_URL || "https://api.realestateapi.com",
-  key: process.env.REAL_ESTATE_API_KEY || process.env.KNOCKSTAT_API_KEY || "",
-  // Best-effort skip-trace for owner phones/emails (extra cost per call). "0" disables.
-  skipTrace: process.env.REAL_ESTATE_SKIPTRACE !== "0",
+const ATTOM = {
+  baseUrl: process.env.ATTOM_API_URL || "https://api.gateway.attomdata.com/propertyapi/v1.0.0",
+  key: process.env.ATTOM_API_KEY || "",
 };
+
+async function attomGet(path: string, params: Record<string, string | number | undefined>) {
+  const url = new URL(ATTOM.baseUrl + path);
+  Object.entries(params).forEach(([k, v]) => {
+    if (v != null && v !== "") url.searchParams.set(k, String(v));
+  });
+  const res = await fetch(url.toString(), { headers: { apikey: ATTOM.key, Accept: "application/json" } });
+  const json = await res.json().catch(() => ({}));
+  return { ok: res.ok, status: res.status, json };
+}
+
+// BatchData skip-tracing — owner phones/emails (ATTOM doesn't provide contact).
+const BATCH = {
+  baseUrl: process.env.BATCHDATA_API_URL || "https://api.batchdata.com",
+  key: process.env.BATCHDATA_API_KEY || "",
+  enabled: process.env.BATCHDATA_SKIPTRACE !== "0",
+};
+
+async function batchSkipTrace(attomJson: any, address1: string, address2: string) {
+  const p = attomJson?.property?.[0] || {};
+  const o1 = p?.assessment?.owner?.owner1 || p?.owner?.owner1 || {};
+  const addr = p?.address || {};
+  const m = address2.match(/^(.*?),?\s*([A-Za-z]{2})\s*(\d{5})?/) || [];
+  const body = {
+    requests: [
+      {
+        propertyAddress: {
+          street: addr.line1 || address1,
+          city: addr.locality || (m[1] || "").trim(),
+          state: addr.countrySubd || m[2] || "",
+          zip: addr.postal1 || m[3] || "",
+        },
+        name: {
+          first: o1.firstname || o1.firstName || "",
+          last: o1.lastname || o1.lastName || "",
+        },
+      },
+    ],
+  };
+  const res = await fetch(`${BATCH.baseUrl}/api/v1/property/skip-trace`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${BATCH.key}`, "Content-Type": "application/json", Accept: "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) return undefined;
+  const bd: any = await res.json().catch(() => null);
+  const persons = bd?.results?.persons || bd?.persons || bd?.results?.[0]?.persons || [];
+  const p0 = persons[0] || {};
+  const phones = (p0.phoneNumbers || p0.phones || [])
+    .map((x: any) => (typeof x === "string" ? x : x.number || x.phone))
+    .filter(Boolean);
+  const emails = (p0.emails || [])
+    .map((x: any) => (typeof x === "string" ? x : x.email))
+    .filter(Boolean);
+  return { phones, emails };
+}
 
 type Tier = "admin" | "manager" | "user";
 const TIERS: Tier[] = ["admin", "manager", "user"];
@@ -119,66 +173,62 @@ async function rebuildCompanyHierarchy(companyId: string) {
 }
 
 // ───────────────────────────────────────────────────────────────────────────
-// /api/property — authenticated proxy to RealEstateAPI.com (key stays server-
-// side; client only sends a Firebase ID token). Returns PropertyDetail JSON
-// with best-effort owner contacts merged under `_skiptrace`.
+// /api/property?address=  — single-home detail (owner + property + sale).
+// /api/area?lat=&lng=&radius=  — every home in a radius (for map pins).
+// Authenticated proxy to ATTOM Data (key stays server-side).
 // ───────────────────────────────────────────────────────────────────────────
 export const api = onRequest({ cors: true }, async (req, res) => {
-  if (!(req.path.endsWith("/property") || req.path.endsWith("/knockstat"))) {
-    res.status(404).json({ error: "Not found" });
-    return;
-  }
+  const isProperty = req.path.endsWith("/property") || req.path.endsWith("/knockstat");
+  const isArea = req.path.endsWith("/area");
+  if (!isProperty && !isArea) { res.status(404).json({ error: "Not found" }); return; }
+
   const match = (req.headers.authorization || "").match(/^Bearer (.+)$/);
   if (!match) { res.status(401).json({ error: "Missing bearer token" }); return; }
   try { await getAuth().verifyIdToken(match[1]); }
   catch { res.status(401).json({ error: "Invalid token" }); return; }
 
-  const address = (req.query.address as string | undefined)?.trim();
-  if (!address) { res.status(400).json({ error: "address query param required" }); return; }
-  if (!REAPI.key) {
-    logger.error("REAL_ESTATE_API_KEY not set");
-    res.status(503).json({ error: "Property data not configured — set REAL_ESTATE_API_KEY" });
+  if (!ATTOM.key) {
+    logger.error("ATTOM_API_KEY not set");
+    res.status(503).json({ error: "Property data not configured — set ATTOM_API_KEY" });
     return;
   }
-  try {
-    const detailRes = await fetch(`${REAPI.baseUrl}/v2/PropertyDetail`, {
-      method: "POST",
-      headers: { "x-api-key": REAPI.key, "Content-Type": "application/json", Accept: "application/json" },
-      body: JSON.stringify({ address }),
-    });
-    const detail: any = await detailRes.json().catch(() => ({}));
-    if (!detailRes.ok) { res.status(detailRes.status).json(detail); return; }
 
-    // Best-effort skip-trace for owner phones/emails.
-    if (REAPI.skipTrace) {
+  try {
+    if (isArea) {
+      const lat = req.query.lat as string | undefined;
+      const lng = req.query.lng as string | undefined;
+      const radius = (req.query.radius as string | undefined) || "0.5"; // miles
+      if (!lat || !lng) { res.status(400).json({ error: "lat & lng required" }); return; }
+      const { ok, status, json } = await attomGet("/property/snapshot", {
+        latitude: lat,
+        longitude: lng,
+        radius,
+        pagesize: 200,
+      });
+      res.status(ok ? 200 : status).json(json);
+      return;
+    }
+
+    // Single-property detail (owner + property + sale).
+    const address = (req.query.address as string | undefined)?.trim();
+    if (!address) { res.status(400).json({ error: "address query param required" }); return; }
+    const ci = address.indexOf(",");
+    const address1 = ci > -1 ? address.slice(0, ci).trim() : address;
+    const address2 = ci > -1 ? address.slice(ci + 1).trim() : "";
+    const { ok, status, json } = await attomGet("/property/expandedprofile", { address1, address2 });
+    if (!ok) { res.status(status).json(json); return; }
+    // Merge BatchData skip-trace (owner phones/emails) when configured.
+    if (BATCH.enabled && BATCH.key) {
       try {
-        const d = detail?.data || {};
-        const oi = d.ownerInfo || {};
-        const addr = d.propertyInfo?.address || d.address || {};
-        const parts = String(oi.owner1FullName || "").trim().split(/\s+/);
-        const first = parts[0] || "";
-        const last = parts.length > 1 ? parts[parts.length - 1] : "";
-        if (first && last) {
-          const stRes = await fetch(`${REAPI.baseUrl}/v1/SkipTrace`, {
-            method: "POST",
-            headers: { "x-api-key": REAPI.key, "Content-Type": "application/json", Accept: "application/json" },
-            body: JSON.stringify({
-              first_name: first, last_name: last,
-              address: addr.address || addr.label || address, city: addr.city, state: addr.state, zip: addr.zip,
-            }),
-          });
-          if (stRes.ok) {
-            const st: any = await stRes.json().catch(() => null);
-            if (st) detail._skiptrace = st.output || st.data || st;
-          }
-        }
+        const skip = await batchSkipTrace(json, address1, address2);
+        if (skip) (json as any)._skiptrace = skip;
       } catch (e) {
-        logger.warn("Skip-trace failed (continuing with property data)", e);
+        logger.warn("BatchData skip-trace failed (continuing)", e);
       }
     }
-    res.status(200).json(detail);
+    res.status(200).json(json);
   } catch (err) {
-    logger.error("RealEstateAPI request failed", err);
+    logger.error("ATTOM request failed", err);
     res.status(502).json({ error: "Upstream request failed" });
   }
 });
