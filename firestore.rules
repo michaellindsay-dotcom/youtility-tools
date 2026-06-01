@@ -51,6 +51,11 @@ service cloud.firestore {
         allow read: if inMyCompany(companyId);
         allow write: if isSuper() || (isSignedIn() && companyId == myCompany() && isCompanyAdmin());
       }
+
+      // Weekly-recap snapshot state — Cloud Functions only.
+      match /recap/{docId} {
+        allow read, write: if false;
+      }
     }
 
     // ── reward redemptions (a rep claims a reward) ───────────────────────

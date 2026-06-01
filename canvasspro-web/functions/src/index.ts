@@ -1371,3 +1371,59 @@ export const assignAppointment = onCall(async (request) => {
 
   return { ok: true, eventId: ref.id, assignedTo: chosen.uid, assignedName: chosen.displayName || "" };
 });
+
+// ════════════════════════════════════════════════════════════════════════════
+// WEEKLY SEASON RECAP — every Friday evening, post a hype recap to each
+// company's Team Chat: top 3 by points + the biggest climber vs. last week.
+// Mirrors the client points model (lib/points.ts).
+// ════════════════════════════════════════════════════════════════════════════
+const STAT_PTS = { door: 1, lead: 3, appointment: 20, sale: 100, shift: 25 };
+function pointsOf(s: any): number {
+  return (
+    (Number(s.doorsKnocked) || 0) * STAT_PTS.door +
+    (Number(s.leadsCreated) || 0) * STAT_PTS.lead +
+    (Number(s.appointments) || 0) * STAT_PTS.appointment +
+    (Number(s.sales) || 0) * STAT_PTS.sale +
+    (Number(s.shifts) || 0) * STAT_PTS.shift
+  );
+}
+
+export const weeklyRecap = onSchedule({ schedule: "0 17 * * 5", timeZone: "America/Denver" }, async () => {
+  const companies = await db.collection("companies").get();
+  for (const co of companies.docs) {
+    const companyId = co.id;
+    const statsSnap = await db.collection("userStats").where("companyId", "==", companyId).get();
+    if (statsSnap.empty) continue;
+
+    const cur = statsSnap.docs.map((d) => {
+      const s = d.data();
+      return { uid: d.id, name: (s.userName as string) || "Rep", points: pointsOf(s) };
+    });
+    const top = [...cur].sort((a, b) => b.points - a.points).slice(0, 3).filter((t) => t.points > 0);
+    if (!top.length) continue;
+
+    // Biggest climber vs. the last snapshot.
+    const snapRef = db.doc(`companies/${companyId}/recap/last`);
+    const prev = ((await snapRef.get()).data()?.points as Record<string, number>) || {};
+    let climber: { name: string; delta: number } | null = null;
+    for (const u of cur) {
+      const delta = u.points - (Number(prev[u.uid]) || 0);
+      if (delta > 0 && (!climber || delta > climber.delta)) climber = { name: u.name, delta };
+    }
+
+    const medals = ["🥇", "🥈", "🥉"];
+    let msg = "🏆 Weekly Recap — new season, fresh board!\n\nTop performers:\n";
+    top.forEach((t, i) => { msg += `${medals[i]} ${t.name} — ${t.points.toLocaleString()} pts\n`; });
+    if (climber) msg += `\n🚀 Biggest climber: ${climber.name} (+${climber.delta.toLocaleString()} pts this week)`;
+    msg += "\n\nLet's get out there and run it back this week! 💪";
+
+    await db.collection("chat").add({
+      companyId, userId: "system", userName: "🏆 Weekly Recap", text: msg, createdAt: Date.now(),
+    });
+
+    const points: Record<string, number> = {};
+    cur.forEach((u) => { points[u.uid] = u.points; });
+    await snapRef.set({ points, at: Date.now() });
+    logger.info(`weekly recap posted for ${companyId}`);
+  }
+});
