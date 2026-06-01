@@ -2,10 +2,10 @@
 // labels, and colors used across the Leads list, Map pins, and Dashboard.
 export const DISPOSITIONS = [
   { value: "new", label: "New", color: "#38BDF8" },
-  { value: "not_home", label: "Not Home", color: "#F59E0B" },
+  { value: "not_home", label: "Not Home 1", color: "#F59E0B" },
+  { value: "not_home_2", label: "Not Home 2", color: "#FB923C" },
   { value: "go_back", label: "Go Back", color: "#FBBF24" },
-  { value: "contacted", label: "Contacted", color: "#A78BFA" },
-  { value: "interested", label: "Interested", color: "#22D3EE" },
+  { value: "pipeline", label: "Pipeline", color: "#A78BFA" },
   { value: "appointment", label: "Appointment", color: "#34D399" },
   { value: "not_interested", label: "Not Interested", color: "#F87171" },
   { value: "sold", label: "Sold", color: "#22C55E" },

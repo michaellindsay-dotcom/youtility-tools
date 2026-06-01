@@ -5,7 +5,7 @@ import { addDoc, collection, doc, getDocs, query, updateDoc, where } from "fireb
 import { Geolocation } from "@capacitor/geolocation";
 import { db, auth } from "../firebase";
 import { useAuth } from "../auth/AuthContext";
-import { DISPOSITIONS, DISP_COLOR, DISP_LABEL } from "../lib/dispositions";
+import { DISPOSITIONS, DISP_COLOR } from "../lib/dispositions";
 import {
   lookupAddress,
   normalizeKnockstatResponse,
@@ -14,87 +14,38 @@ import {
   parseAreaProperties,
 } from "../lib/knockstat";
 import { bumpStats } from "../lib/stats";
-import type { Lead, Territory, LatLng } from "../types";
+import type { Lead, Territory, LatLng, LeadStatus, LeadEnrichment } from "../types";
 
-const DEFAULT_CENTER: [number, number] = [40.34, -111.91]; // Utah County fallback
-const PIN_ZOOM = 13; // only show home pins at/above this zoom
+const DEFAULT_CENTER: [number, number] = [40.34, -111.91];
+const PIN_ZOOM = 13;
 
-type Mode = "view" | "draw" | "route";
+const HOUSE_SVG =
+  '<svg viewBox="0 0 24 24" width="15" height="15" fill="#fff"><path d="M12 3 3 10.5h2.4V21h5.1v-6h3v6h5.1V10.5H21z"/></svg>';
 
-function statusIcon(status: string): L.DivIcon {
-  const color = DISP_COLOR[status] || "#94A3B8";
+function homeIcon(color: string): L.DivIcon {
   return L.divIcon({
-    className: "lead-pin",
-    html: `<span style="background:${color}"></span>`,
-    iconSize: [18, 18],
-    iconAnchor: [9, 9],
-    popupAnchor: [0, -10],
+    className: "home-pin",
+    html: `<span style="background:${color}">${HOUSE_SVG}</span>`,
+    iconSize: [30, 30],
+    iconAnchor: [15, 15],
   });
 }
 
-function haversine(a: LatLng, b: LatLng): number {
-  const R = 6371;
-  const dLat = ((b.lat - a.lat) * Math.PI) / 180;
-  const dLng = ((b.lng - a.lng) * Math.PI) / 180;
-  const s =
-    Math.sin(dLat / 2) ** 2 +
-    Math.cos((a.lat * Math.PI) / 180) * Math.cos((b.lat * Math.PI) / 180) * Math.sin(dLng / 2) ** 2;
-  return 2 * R * Math.asin(Math.sqrt(s));
+// Disposition target: a home (no leadId yet) or an existing lead being updated.
+interface Dispo {
+  leadId?: string;
+  address: string;
+  lat: number;
+  lng: number;
+  status: LeadStatus;
+  name: string;
+  phone: string;
+  email: string;
+  notes: string;
+  enrichment?: LeadEnrichment;
+  summary?: string;
+  enriching: boolean;
 }
-
-// Greedy nearest-neighbour ordering from a start point.
-function orderRoute(start: LatLng, stops: Lead[]): Lead[] {
-  const remaining = [...stops];
-  const out: Lead[] = [];
-  let cur = start;
-  while (remaining.length) {
-    let bi = 0;
-    let bd = Infinity;
-    remaining.forEach((l, i) => {
-      const d = haversine(cur, { lat: l.lat!, lng: l.lng! });
-      if (d < bd) { bd = d; bi = i; }
-    });
-    const next = remaining.splice(bi, 1)[0];
-    out.push(next);
-    cur = { lat: next.lat!, lng: next.lng! };
-  }
-  return out;
-}
-
-const GEOCODE_KEY =
-  import.meta.env.VITE_GOOGLE_MAPS_API_KEY || "AIzaSyAAfrLWkY_WS7yabCgW_WZJu973J5iGcBI";
-
-type GeoResult = { loc: LatLng; source: "google" | "nominatim" } | null;
-
-// Prefer Google Geocoding (fast, high quality); fall back to free OSM Nominatim
-// if Google is unavailable (CORS, quota, key restriction).
-async function geocode(addr: string): Promise<GeoResult> {
-  try {
-    const res = await fetch(
-      `https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(addr)}&key=${GEOCODE_KEY}`
-    );
-    const data = await res.json();
-    if (data.status === "OK" && data.results?.[0]) {
-      const l = data.results[0].geometry.location;
-      return { loc: { lat: l.lat, lng: l.lng }, source: "google" };
-    }
-  } catch {
-    /* fall through to Nominatim */
-  }
-  try {
-    const res = await fetch(
-      `https://nominatim.openstreetmap.org/search?format=json&limit=1&q=${encodeURIComponent(addr)}`,
-      { headers: { Accept: "application/json" } }
-    );
-    const data = (await res.json()) as Array<{ lat: string; lon: string }>;
-    if (data?.[0]) return { loc: { lat: parseFloat(data[0].lat), lng: parseFloat(data[0].lon) }, source: "nominatim" };
-  } catch {
-    /* ignore */
-  }
-  return null;
-}
-
-const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 export default function MapPage() {
   const { profile, role, companyId } = useAuth();
@@ -103,142 +54,118 @@ export default function MapPage() {
   const pinsLayer = useRef<L.LayerGroup>(L.layerGroup());
   const homesLayer = useRef<L.LayerGroup>(L.layerGroup());
   const territoryLayer = useRef<L.LayerGroup>(L.layerGroup());
-  const routeLine = useRef<L.Polyline | null>(null);
   const myLoc = useRef<LatLng | null>(null);
-  const leadsCache = useRef<Lead[]>([]);
-  const modeRef = useRef<Mode>("view");
   const drawPts = useRef<LatLng[]>([]);
   const drawLayer = useRef<L.Polygon | null>(null);
+  const modeRef = useRef<"view" | "draw">("view");
 
   const [status, setStatus] = useState("Loading map…");
-  const [mode, setMode] = useState<Mode>("view");
-  const [selected, setSelected] = useState<string[]>([]);
-  const selectedRef = useRef<string[]>([]);
-  selectedRef.current = selected;
+  const [mode, setMode] = useState<"view" | "draw">("view");
+  const [loadingHomes, setLoadingHomes] = useState(false);
+  const [dispo, setDispo] = useState<Dispo | null>(null);
+  const [saving, setSaving] = useState(false);
   modeRef.current = mode;
 
-  const [loadingHomes, setLoadingHomes] = useState(false);
+  const canDraw = role === "admin" || role === "manager";
 
-  // Load every home in the current map view from ATTOM and drop a pin on each.
-  async function loadHomes() {
-    const map = mapRef.current;
-    if (!map || !profile) return;
-    setLoadingHomes(true);
-    setStatus("Loading homes in view…");
+  // ── Open the disposition card for a home/lead, then auto-pull owner data ────
+  function openDispo(d: Partial<Dispo> & { address: string; lat: number; lng: number }) {
+    const target: Dispo = {
+      status: "new",
+      name: "",
+      phone: "",
+      email: "",
+      notes: "",
+      enriching: !d.enrichment,
+      ...d,
+    };
+    setDispo(target);
+    if (!d.enrichment) void doEnrich(target);
+  }
+
+  async function doEnrich(target: Dispo) {
     try {
-      const c = map.getCenter();
-      const ne = map.getBounds().getNorthEast();
-      const miles = Math.min(map.distance(c, ne) / 1609.34, 1); // cap at 1 mile to control cost
       const token = await auth.currentUser!.getIdToken();
-      const raw = await lookupArea(c.lat, c.lng, Math.max(0.1, +miles.toFixed(2)), token);
-      const homes = parseAreaProperties(raw);
-      homesLayer.current.clearLayers();
-      homes.forEach((h) => {
-        const m = L.circleMarker([h.lat, h.lng], {
-          radius: 5,
-          color: "#cbd5e1",
-          weight: 1,
-          fillColor: "#94a3b8",
-          fillOpacity: 0.8,
-        });
-        m.bindPopup(() => makeHomePopup(h), { minWidth: 230 });
-        homesLayer.current.addLayer(m);
-      });
-      setStatus(`${homes.length} homes loaded in view`);
-    } catch (e: any) {
-      setStatus("Could not load homes: " + (e?.message || ""));
-    } finally {
-      setLoadingHomes(false);
+      const raw = await lookupAddress(target.address, token);
+      const rec = normalizeKnockstatResponse(raw);
+      const { ownerName, phone, email, enrichment } = buildEnrichment(rec);
+      const summary = [
+        enrichment.propertyType,
+        enrichment.beds != null ? `${enrichment.beds}bd` : null,
+        enrichment.baths != null ? `${enrichment.baths}ba` : null,
+        enrichment.sqft != null ? `${Number(enrichment.sqft).toLocaleString()} sqft` : null,
+        enrichment.estValue ? `$${Number(enrichment.estValue).toLocaleString()}` : null,
+      ]
+        .filter(Boolean)
+        .join(" · ");
+      setDispo((cur) =>
+        cur && cur.address === target.address
+          ? {
+              ...cur,
+              name: cur.name || ownerName || "",
+              phone: cur.phone || phone || "",
+              email: cur.email || email || "",
+              enrichment,
+              summary,
+              enriching: false,
+            }
+          : cur
+      );
+    } catch {
+      setDispo((cur) => (cur ? { ...cur, enriching: false } : cur));
     }
   }
 
-  // Popup for an un-leaded home: pull owner data and/or add it as a lead.
-  function makeHomePopup(home: { id: string; address: string; lat: number; lng: number }): HTMLElement {
-    const el = document.createElement("div");
-    el.className = "pin-popup";
-    el.innerHTML = `<div class="pin-head"><strong>${home.address}</strong></div>`;
-    const info = document.createElement("div");
-    info.className = "muted small";
-    info.style.marginTop = "4px";
-    el.appendChild(info);
-
-    const row = document.createElement("div");
-    row.className = "row";
-    row.style.marginTop = "8px";
-
-    const ownerBtn = document.createElement("button");
-    ownerBtn.className = "btn sm";
-    ownerBtn.textContent = "Owner data";
-    ownerBtn.onclick = async () => {
-      ownerBtn.disabled = true;
-      ownerBtn.textContent = "Loading…";
-      try {
-        const token = await auth.currentUser!.getIdToken();
-        const raw = await lookupAddress(home.address, token);
-        const { ownerName, phone, email, enrichment } = buildEnrichment(normalizeKnockstatResponse(raw));
-        info.innerHTML =
-          (ownerName ? `<strong>${ownerName}</strong><br/>` : "") +
-          (phone ? `📞 ${phone} ` : "") +
-          (email ? `✉ ${email}<br/>` : "") +
-          [enrichment.propertyType, enrichment.beds ? `${enrichment.beds}bd` : null, enrichment.baths ? `${enrichment.baths}ba` : null]
-            .filter(Boolean)
-            .join(" · ");
-        ownerBtn.textContent = "Owner data ✓";
-      } catch (e: any) {
-        ownerBtn.disabled = false;
-        ownerBtn.textContent = "Retry";
-        info.textContent = "Unavailable: " + (e?.message || "");
-      }
-    };
-
-    const addBtn = document.createElement("button");
-    addBtn.className = "btn primary sm";
-    addBtn.textContent = "Add as lead";
-    addBtn.onclick = async () => {
-      if (!profile || !companyId) return;
-      addBtn.disabled = true;
-      try {
-        const now = Date.now();
+  async function saveDispo() {
+    if (!profile || !companyId || !dispo) return;
+    setSaving(true);
+    try {
+      const now = Date.now();
+      const contact = {
+        ownerName: dispo.name || null,
+        phone: dispo.phone || null,
+        email: dispo.email || null,
+        notes: dispo.notes || null,
+        status: dispo.status,
+        enrichment: dispo.enrichment ?? null,
+        enriched: !!dispo.enrichment,
+        updatedAt: now,
+      };
+      if (dispo.leadId) {
+        await updateDoc(doc(db, "leads", dispo.leadId), contact);
+      } else {
         await addDoc(collection(db, "leads"), {
-          address: home.address,
-          lat: home.lat,
-          lng: home.lng,
-          status: "new",
+          ...contact,
+          address: dispo.address,
+          lat: dispo.lat,
+          lng: dispo.lng,
           companyId,
           assignedTo: profile.uid,
           visibilityPath: [profile.uid, ...(profile.managerPath ?? [])],
           createdBy: profile.uid,
           createdAt: now,
-          updatedAt: now,
         });
-        addBtn.textContent = "Added ✓";
-        await buildPins();
-      } catch (e: any) {
-        addBtn.disabled = false;
-        info.textContent = "Could not add: " + (e?.message || "");
       }
-    };
-
-    row.appendChild(ownerBtn);
-    row.appendChild(addBtn);
-    el.appendChild(row);
-    return el;
-  }
-
-  const canDraw = role === "admin" || role === "manager";
-
-  function refreshPinVisibility() {
-    const map = mapRef.current;
-    if (!map) return;
-    if (map.getZoom() >= PIN_ZOOM) {
-      if (!map.hasLayer(pinsLayer.current)) map.addLayer(pinsLayer.current);
-    } else if (map.hasLayer(pinsLayer.current)) {
-      map.removeLayer(pinsLayer.current);
+      if (dispo.status === "appointment") void bumpStats(profile, { appointments: 1 });
+      else if (dispo.status === "sold") void bumpStats(profile, { sales: 1 });
+      setDispo(null);
+      await buildPins();
+    } catch (e: any) {
+      setStatus("Could not save: " + (e?.message || ""));
+    } finally {
+      setSaving(false);
     }
   }
 
-  function toggleSelect(id: string) {
-    setSelected((cur) => (cur.includes(id) ? cur.filter((x) => x !== id) : [...cur, id]));
+  // ── Pins ────────────────────────────────────────────────────────────────────
+  function refreshPinVisibility() {
+    const map = mapRef.current;
+    if (!map) return;
+    const show = map.getZoom() >= PIN_ZOOM;
+    [pinsLayer.current, homesLayer.current].forEach((layer) => {
+      if (show && !map.hasLayer(layer)) map.addLayer(layer);
+      else if (!show && map.hasLayer(layer)) map.removeLayer(layer);
+    });
   }
 
   async function fetchLeads(): Promise<Lead[]> {
@@ -255,175 +182,29 @@ export default function MapPage() {
   async function buildPins() {
     pinsLayer.current.clearLayers();
     const leads = await fetchLeads();
-    leadsCache.current = leads;
     let plotted = 0;
-    let needGeo = leads.filter((l) => (l.lat == null || l.lng == null) && l.address);
-
-    // Plot the ones that already have coords immediately.
-    for (const lead of leads) {
-      if (lead.lat == null || lead.lng == null) continue;
-      addPin(lead);
+    leads.forEach((lead) => {
+      if (lead.lat == null || lead.lng == null) return;
+      const m = L.marker([lead.lat, lead.lng], { icon: homeIcon(DISP_COLOR[lead.status] || "#94A3B8") });
+      m.on("click", () =>
+        openDispo({
+          leadId: lead.id,
+          address: lead.address,
+          lat: lead.lat!,
+          lng: lead.lng!,
+          status: lead.status,
+          name: lead.ownerName || "",
+          phone: lead.phone || "",
+          email: lead.email || "",
+          notes: lead.notes || "",
+          enrichment: lead.enrichment,
+        })
+      );
+      pinsLayer.current.addLayer(m);
       plotted++;
-    }
-    setStatus(`${plotted} leads plotted${needGeo.length ? ` · geocoding ${needGeo.length}…` : ""}`);
+    });
+    setStatus(`${plotted} lead pin${plotted === 1 ? "" : "s"}`);
     refreshPinVisibility();
-
-    // Geocode the rest (Google-first, Nominatim fallback) and persist back.
-    for (const lead of needGeo) {
-      const full = [lead.address, lead.city, lead.state, lead.zip].filter(Boolean).join(", ");
-      const r = await geocode(full);
-      if (r) {
-        lead.lat = r.loc.lat;
-        lead.lng = r.loc.lng;
-        addPin(lead);
-        plotted++;
-        setStatus(`${plotted} leads plotted`);
-        refreshPinVisibility();
-        await updateDoc(doc(db, "leads", lead.id), { lat: r.loc.lat, lng: r.loc.lng }).catch(() => {});
-      }
-      // Only throttle hard when we hit Nominatim's ~1 req/sec policy.
-      await sleep(r?.source === "google" ? 120 : 1100);
-    }
-    setStatus(`${plotted} leads plotted`);
-  }
-
-  function addPin(lead: Lead) {
-    if (lead.lat == null || lead.lng == null) return;
-    const m = L.marker([lead.lat, lead.lng], { icon: statusIcon(lead.status) });
-    m.bindPopup(() => makePopupEl(lead, m), { minWidth: 250, maxWidth: 300 });
-    m.on("click", () => {
-      if (modeRef.current === "route") {
-        toggleSelect(lead.id);
-        m.closePopup();
-      }
-    });
-    pinsLayer.current.addLayer(m);
-  }
-
-  // Update a home's disposition from its pin.
-  async function setDisposition(lead: Lead, value: Lead["status"], m: L.Marker) {
-    try {
-      await updateDoc(doc(db, "leads", lead.id), { status: value, updatedAt: Date.now() });
-      lead.status = value;
-      m.setIcon(statusIcon(value));
-      if (profile && (value === "appointment" || value === "sold")) {
-        void bumpStats(profile, value === "sold" ? { sales: 1 } : { appointments: 1 });
-      }
-      m.setPopupContent(makePopupEl(lead, m));
-    } catch (e: any) {
-      setStatus("Could not update: " + (e?.message || ""));
-    }
-  }
-
-  // Pull homeowner / property data (public records via the Knockstat proxy) and
-  // attach it to the lead.
-  async function enrich(lead: Lead, m: L.Marker, btn: HTMLButtonElement) {
-    btn.disabled = true;
-    btn.textContent = "Enriching…";
-    try {
-      const token = await auth.currentUser!.getIdToken();
-      const full = [lead.address, lead.city, lead.state, lead.zip].filter(Boolean).join(", ");
-      const raw = await lookupAddress(full, token);
-      const rec = normalizeKnockstatResponse(raw);
-      const { enrichment, ownerName, phone, email } = buildEnrichment(rec);
-      lead.enrichment = enrichment;
-      lead.enriched = true;
-      lead.enrichedAt = Date.now();
-      lead.ownerName = ownerName || lead.ownerName;
-      lead.phone = phone || lead.phone;
-      lead.email = email || lead.email;
-      await updateDoc(doc(db, "leads", lead.id), {
-        enrichment,
-        enriched: true,
-        enrichedAt: lead.enrichedAt,
-        ownerName: lead.ownerName ?? null,
-        phone: lead.phone ?? null,
-        email: lead.email ?? null,
-      });
-      m.setPopupContent(makePopupEl(lead, m));
-    } catch (e: any) {
-      btn.disabled = false;
-      btn.textContent = "Retry enrich";
-      const msg = document.createElement("div");
-      msg.className = "muted small";
-      msg.style.marginTop = "6px";
-      msg.textContent = "Enrichment unavailable: " + (e?.message || "error");
-      btn.parentElement?.appendChild(msg);
-    }
-  }
-
-  // Build the interactive pin popup (homeowner data + disposition buttons).
-  function makePopupEl(lead: Lead, m: L.Marker): HTMLElement {
-    const el = document.createElement("div");
-    el.className = "pin-popup";
-    const e = lead.enrichment;
-    const ownerLine = lead.ownerName ? `<strong>${lead.ownerName}</strong>` : "<strong>Lead</strong>";
-    const contacts =
-      (lead.phone ? `📞 ${lead.phone} ` : "") + (lead.email ? `✉ ${lead.email}` : "");
-    const propBits = e
-      ? [
-          e.propertyType,
-          e.beds != null ? `${e.beds}bd` : null,
-          e.baths != null ? `${e.baths}ba` : null,
-          e.sqft != null ? `${Number(e.sqft).toLocaleString()} sqft` : null,
-          e.yearBuilt ? `built ${e.yearBuilt}` : null,
-        ]
-          .filter(Boolean)
-          .join(" · ")
-      : "";
-    const money = (n?: number) =>
-      n == null ? "" : "$" + Number(n).toLocaleString(undefined, { maximumFractionDigits: 0 });
-    const valueLine = e
-      ? [
-          e.estValue ? `Est. ${money(e.estValue)}` : null,
-          e.equity ? `Equity ${money(e.equity)}` : null,
-          e.ownerOccupied || null,
-        ]
-          .filter(Boolean)
-          .join(" · ")
-      : "";
-
-    el.innerHTML =
-      `<div class="pin-head">${ownerLine}<span class="pin-disp" style="background:${DISP_COLOR[lead.status] || "#94A3B8"}">${DISP_LABEL[lead.status] || lead.status}</span></div>` +
-      `<div class="pin-addr">${lead.address ?? ""}</div>` +
-      (contacts ? `<div class="pin-contacts">${contacts}</div>` : "") +
-      (propBits ? `<div class="pin-prop">${propBits}</div>` : "") +
-      (valueLine ? `<div class="pin-prop">${valueLine}</div>` : "") +
-      (lead.notes ? `<div class="pin-notes">${lead.notes}</div>` : "");
-
-    // Disposition buttons
-    const grid = document.createElement("div");
-    grid.className = "pin-disp-grid";
-    DISPOSITIONS.forEach((d) => {
-      const b = document.createElement("button");
-      b.className = "pin-disp-btn" + (lead.status === d.value ? " active" : "");
-      b.textContent = d.label;
-      b.style.borderColor = d.color;
-      if (lead.status === d.value) b.style.background = d.color;
-      b.onclick = () => setDisposition(lead, d.value, m);
-      grid.appendChild(b);
-    });
-    el.appendChild(grid);
-
-    // Enrich
-    if (!lead.enriched) {
-      const wrap = document.createElement("div");
-      const eb = document.createElement("button");
-      eb.className = "btn sm";
-      eb.style.marginTop = "8px";
-      eb.textContent = "＋ Homeowner data";
-      eb.onclick = () => enrich(lead, m, eb);
-      wrap.appendChild(eb);
-      el.appendChild(wrap);
-    } else if (e?.owners && e.owners.length > 1) {
-      const extra = document.createElement("div");
-      extra.className = "muted small";
-      extra.style.marginTop = "6px";
-      extra.textContent =
-        "Also: " + e.owners.slice(1).map((o) => o.name).filter(Boolean).join(", ");
-      el.appendChild(extra);
-    }
-    return el;
   }
 
   async function buildTerritories() {
@@ -442,6 +223,33 @@ export default function MapPage() {
     });
   }
 
+  async function loadHomes() {
+    const map = mapRef.current;
+    if (!map || !profile) return;
+    setLoadingHomes(true);
+    setStatus("Loading homes in view…");
+    try {
+      const c = map.getCenter();
+      const ne = map.getBounds().getNorthEast();
+      const miles = Math.min(map.distance(c, ne) / 1609.34, 1);
+      const token = await auth.currentUser!.getIdToken();
+      const raw = await lookupArea(c.lat, c.lng, Math.max(0.1, +miles.toFixed(2)), token);
+      const homes = parseAreaProperties(raw);
+      homesLayer.current.clearLayers();
+      homes.forEach((h) => {
+        const m = L.marker([h.lat, h.lng], { icon: homeIcon("#475569") });
+        m.on("click", () => openDispo({ address: h.address, lat: h.lat, lng: h.lng }));
+        homesLayer.current.addLayer(m);
+      });
+      setStatus(`${homes.length} homes in view — tap a house to disposition`);
+      refreshPinVisibility();
+    } catch (e: any) {
+      setStatus("Could not load homes: " + (e?.message || ""));
+    } finally {
+      setLoadingHomes(false);
+    }
+  }
+
   // ── Init map ────────────────────────────────────────────────────────────────
   useEffect(() => {
     if (!companyId || !profile || !elRef.current || mapRef.current) return;
@@ -454,10 +262,7 @@ export default function MapPage() {
       "https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}",
       { maxZoom: 19 }
     );
-    const street = L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-      maxZoom: 19,
-      attribution: "© OpenStreetMap",
-    });
+    const street = L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 19, attribution: "© OpenStreetMap" });
     const hybrid = L.layerGroup([satellite, labels]);
 
     const map = L.map(elRef.current, { center: DEFAULT_CENTER, zoom: 14, layers: [hybrid] });
@@ -465,10 +270,8 @@ export default function MapPage() {
     territoryLayer.current.addTo(map);
     homesLayer.current.addTo(map);
     mapRef.current = map;
-
     map.on("zoomend", refreshPinVisibility);
 
-    // Draw mode: click to add polygon vertices.
     map.on("click", (e: L.LeafletMouseEvent) => {
       if (modeRef.current !== "draw") return;
       drawPts.current.push({ lat: e.latlng.lat, lng: e.latlng.lng });
@@ -480,11 +283,10 @@ export default function MapPage() {
     });
 
     (async () => {
-      // Center on current location if available.
       try {
         const pos = await Geolocation.getCurrentPosition({ enableHighAccuracy: true, timeout: 8000 });
         myLoc.current = { lat: pos.coords.latitude, lng: pos.coords.longitude };
-        map.setView([myLoc.current.lat, myLoc.current.lng], 16);
+        map.setView([myLoc.current.lat, myLoc.current.lng], 17);
         L.circleMarker([myLoc.current.lat, myLoc.current.lng], {
           radius: 7,
           color: "#fff",
@@ -495,7 +297,7 @@ export default function MapPage() {
           .addTo(map)
           .bindTooltip("You");
       } catch {
-        /* location denied — keep default center */
+        /* location denied */
       }
       await buildTerritories();
       await buildPins();
@@ -508,9 +310,12 @@ export default function MapPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [companyId, profile, role]);
 
-  // ── Draw area: finish / cancel ───────────────────────────────────────────────
+  // Draw mode finish/cancel
   async function finishDraw() {
-    if (drawPts.current.length < 3) { setStatus("Tap at least 3 points to make an area."); return; }
+    if (drawPts.current.length < 3) {
+      setStatus("Tap at least 3 points to make an area.");
+      return;
+    }
     const name = window.prompt("Name this territory:");
     if (name && companyId && profile) {
       try {
@@ -522,8 +327,8 @@ export default function MapPage() {
           managerId: profile.uid,
           createdAt: Date.now(),
         });
-        setStatus(`Territory “${name.trim()}” saved`);
         await buildTerritories();
+        setStatus(`Territory “${name.trim()}” saved`);
       } catch (e: any) {
         setStatus("Could not save: " + (e?.message || ""));
       }
@@ -532,46 +337,11 @@ export default function MapPage() {
   }
   function cancelDraw() {
     drawPts.current = [];
-    if (drawLayer.current) { drawLayer.current.remove(); drawLayer.current = null; }
+    if (drawLayer.current) {
+      drawLayer.current.remove();
+      drawLayer.current = null;
+    }
     setMode("view");
-  }
-
-  // ── Route ─────────────────────────────────────────────────────────────────
-  function buildRoute() {
-    const map = mapRef.current;
-    if (!map) return;
-    const stops = selectedRef.current
-      .map((id) => leadsCache.current.find((l) => l.id === id))
-      .filter((l): l is Lead => !!l && l.lat != null && l.lng != null);
-    if (!stops.length) { setStatus("Tap leads on the map to add stops."); return; }
-    const start = myLoc.current || { lat: stops[0].lat!, lng: stops[0].lng! };
-    const ordered = orderRoute(start, stops);
-    const pts: [number, number][] = [
-      [start.lat, start.lng],
-      ...ordered.map((l) => [l.lat!, l.lng!] as [number, number]),
-    ];
-    if (routeLine.current) routeLine.current.remove();
-    routeLine.current = L.polyline(pts, { color: "#0EA5E9", weight: 4, dashArray: "6 6" }).addTo(map);
-    map.fitBounds(L.latLngBounds(pts), { padding: [40, 40] });
-    setStatus(`Route: ${ordered.length} stops (nearest-first)`);
-  }
-
-  function navigateRoute() {
-    const stops = selectedRef.current
-      .map((id) => leadsCache.current.find((l) => l.id === id))
-      .filter((l): l is Lead => !!l && l.lat != null && l.lng != null);
-    if (!stops.length) return;
-    const start = myLoc.current || { lat: stops[0].lat!, lng: stops[0].lng! };
-    const ordered = orderRoute(start, stops);
-    const origin = myLoc.current ? `${myLoc.current.lat},${myLoc.current.lng}` : "";
-    const dest = `${ordered[ordered.length - 1].lat},${ordered[ordered.length - 1].lng}`;
-    const waypoints = ordered.slice(0, -1).map((l) => `${l.lat},${l.lng}`).join("|");
-    const url =
-      `https://www.google.com/maps/dir/?api=1&travelmode=walking` +
-      (origin ? `&origin=${origin}` : "") +
-      `&destination=${dest}` +
-      (waypoints ? `&waypoints=${encodeURIComponent(waypoints)}` : "");
-    window.open(url, "_blank");
   }
 
   return (
@@ -585,17 +355,11 @@ export default function MapPage() {
           <button className="chip-btn" onClick={loadHomes} disabled={loadingHomes}>
             {loadingHomes ? "Loading…" : "⌂ Load homes"}
           </button>
-          <button className={"chip-btn" + (mode === "view" ? " active" : "")} onClick={() => setMode("view")}>
-            View
-          </button>
           {canDraw && (
-            <button className={"chip-btn" + (mode === "draw" ? " active" : "")} onClick={() => setMode("draw")}>
+            <button className={"chip-btn" + (mode === "draw" ? " active" : "")} onClick={() => setMode(mode === "draw" ? "view" : "draw")}>
               ✏ Draw area
             </button>
           )}
-          <button className={"chip-btn" + (mode === "route" ? " active" : "")} onClick={() => setMode("route")}>
-            ⤳ Route
-          </button>
         </div>
       </div>
 
@@ -609,17 +373,6 @@ export default function MapPage() {
         </div>
       )}
 
-      {mode === "route" && (
-        <div className="card route-bar">
-          <span className="muted">{selected.length} stop(s) — tap leads on the map.</span>
-          <div className="row">
-            <button className="btn sm" onClick={() => { setSelected([]); routeLine.current?.remove(); }}>Clear</button>
-            <button className="btn sm" onClick={buildRoute}>Build route</button>
-            <button className="btn primary sm" onClick={navigateRoute}>Navigate ↗</button>
-          </div>
-        </div>
-      )}
-
       <div ref={elRef} className="map-canvas" />
 
       <div className="map-legend">
@@ -628,8 +381,95 @@ export default function MapPage() {
             <span className="legend-dot" style={{ background: d.color }} /> {d.label}
           </span>
         ))}
-        <span className="legend-item muted">· pins appear at zoom {PIN_ZOOM}+</span>
+        <span className="legend-item muted">· tap a house to disposition · pins at zoom {PIN_ZOOM}+</span>
       </div>
+
+      {/* ── Log Disposition card ─────────────────────────────────────────── */}
+      {dispo && (
+        <div className="modal-overlay" onClick={() => setDispo(null)}>
+          <div className="dispo-card" onClick={(e) => e.stopPropagation()}>
+            <div className="dispo-head">
+              <div>
+                <h3>Log Disposition</h3>
+                <div className="muted small">{dispo.address}</div>
+              </div>
+              <button className="dispo-x" onClick={() => setDispo(null)}>✕</button>
+            </div>
+
+            <div className="field-label">Disposition</div>
+            <div className="dispo-grid">
+              {DISPOSITIONS.map((d) => (
+                <button
+                  key={d.value}
+                  type="button"
+                  className={"dispo-pill" + (dispo.status === d.value ? " active" : "")}
+                  style={{
+                    borderColor: d.color,
+                    ...(dispo.status === d.value ? { background: d.color, color: "#06121f" } : {}),
+                  }}
+                  onClick={() => setDispo({ ...dispo, status: d.value })}
+                >
+                  {d.label}
+                </button>
+              ))}
+            </div>
+
+            {dispo.summary && <div className="muted small dispo-summary">{dispo.summary}</div>}
+
+            <label className="field">
+              <span>Address</span>
+              <input value={dispo.address} onChange={(e) => setDispo({ ...dispo, address: e.target.value })} />
+            </label>
+            <div className="grid-2">
+              <label className="field">
+                <span>Name {dispo.enriching && <em className="muted">· looking up…</em>}</span>
+                <input
+                  value={dispo.name}
+                  placeholder="Full name"
+                  onChange={(e) => setDispo({ ...dispo, name: e.target.value })}
+                />
+              </label>
+              <label className="field">
+                <span>Phone</span>
+                <input
+                  value={dispo.phone}
+                  placeholder="(555) 000-0000"
+                  onChange={(e) => setDispo({ ...dispo, phone: e.target.value })}
+                />
+              </label>
+            </div>
+            <label className="field">
+              <span>Email</span>
+              <input
+                value={dispo.email}
+                placeholder="email@example.com"
+                onChange={(e) => setDispo({ ...dispo, email: e.target.value })}
+              />
+            </label>
+            <label className="field">
+              <span>Notes</span>
+              <textarea
+                rows={2}
+                value={dispo.notes}
+                placeholder="Add notes…"
+                onChange={(e) => setDispo({ ...dispo, notes: e.target.value })}
+              />
+            </label>
+
+            <div className="dispo-foot">
+              <span className="muted small mono">
+                {dispo.lat.toFixed(5)}, {dispo.lng.toFixed(5)}
+              </span>
+              <div className="row">
+                <button className="btn ghost sm" onClick={() => setDispo(null)}>Cancel</button>
+                <button className="btn primary sm" onClick={saveDispo} disabled={saving}>
+                  {saving ? "Saving…" : dispo.leadId ? "Save" : "Add Lead"}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
