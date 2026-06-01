@@ -4,12 +4,43 @@
 // these base tiers (see CompanyRole.baseTier).
 export type Role = "superadmin" | "admin" | "manager" | "user";
 
+// How company appointments (that a rep didn't self-generate) get routed.
+export type AssignmentMethod = "self_gen" | "round_robin" | "highest_production" | "manual";
+
+export interface SchedulingSettings {
+  apptMinLeadHours: number; // earliest bookable = now + this many hours
+  apptMaxDaysOut: number; // latest bookable = now + this many days
+  apptDurationMin: number; // appointment length, minutes
+  bufferMin: number; // required gap between a rep's appointments, minutes
+  assignment: AssignmentMethod; // routing for non-self-gen appointments
+}
+
+export const DEFAULT_SCHEDULING: SchedulingSettings = {
+  apptMinLeadHours: 1,
+  apptMaxDaysOut: 30,
+  apptDurationMin: 60,
+  bufferMin: 0,
+  assignment: "self_gen",
+};
+
 export interface Company {
   id: string;
   name: string;
   plan?: string;
   status?: string;
+  scheduling?: SchedulingSettings;
   createdAt?: number;
+}
+
+// A rep's linked external calendars (status only — tokens live server-side).
+export interface CalendarLink {
+  connected: boolean;
+  email?: string;
+  connectedAt?: number;
+}
+export interface CalendarLinks {
+  google?: CalendarLink;
+  microsoft?: CalendarLink;
 }
 
 export interface LatLng {
@@ -46,6 +77,7 @@ export interface UserProfile {
   displayName: string;
   role: Role; // base access tier
   phone?: string; // for SMS notification fallback when offline
+  calendar?: CalendarLinks; // linked external calendars (status)
   companyId: string;
   roleId?: string; // -> companies/{companyId}/roles/{roleId}
   title?: string; // denormalized role title for display
@@ -179,6 +211,10 @@ export interface ScheduleEvent {
   address?: string;
   leadId?: string;
   startAt: number;
+  endAt?: number;
+  durationMin?: number;
+  assignedBy?: string; // uid of the admin/manager who routed this (if not self-gen)
+  source?: "self_gen" | "assigned";
   notes?: string;
   visibilityPath: string[];
   createdAt: number;

@@ -772,3 +772,469 @@ export const clearNotificationProvider = onCall(async (request) => {
   }
   return { ok: true };
 });
+
+// ════════════════════════════════════════════════════════════════════════════
+// SCHEDULING — company settings, self-service profile, calendar sync, and
+// availability-aware assignment.
+// ════════════════════════════════════════════════════════════════════════════
+
+const DEFAULT_SCHEDULING = {
+  apptMinLeadHours: 1,
+  apptMaxDaysOut: 30,
+  apptDurationMin: 60,
+  bufferMin: 0,
+  assignment: "self_gen" as const,
+};
+
+// ── company admin: scheduling settings (min/max window, duration, routing) ───
+export const setCompanySettings = onCall(async (request) => {
+  const caller = await getCaller(request);
+  const { companyId, scheduling } = (request.data || {}) as {
+    companyId?: string;
+    scheduling?: Record<string, unknown>;
+  };
+  authorizeForCompany(caller, companyId);
+  if (!scheduling) throw new HttpsError("invalid-argument", "scheduling is required.");
+  const s = {
+    apptMinLeadHours: Math.max(0, Number(scheduling.apptMinLeadHours) || DEFAULT_SCHEDULING.apptMinLeadHours),
+    apptMaxDaysOut: Math.max(1, Number(scheduling.apptMaxDaysOut) || DEFAULT_SCHEDULING.apptMaxDaysOut),
+    apptDurationMin: Math.max(5, Number(scheduling.apptDurationMin) || DEFAULT_SCHEDULING.apptDurationMin),
+    bufferMin: Math.max(0, Number(scheduling.bufferMin) || 0),
+    assignment: ["self_gen", "round_robin", "highest_production", "manual"].includes(String(scheduling.assignment))
+      ? String(scheduling.assignment)
+      : "self_gen",
+  };
+  await db.doc(`companies/${companyId}`).set({ scheduling: s }, { merge: true });
+  return { ok: true, scheduling: s };
+});
+
+// ── self-service: a user sets their own phone (calendar handled via OAuth) ───
+export const setMyProfile = onCall(async (request) => {
+  const caller = await getCaller(request);
+  const { phone } = (request.data || {}) as { phone?: string };
+  const update: Record<string, unknown> = {};
+  if (typeof phone === "string") {
+    const trimmed = phone.trim();
+    // Light E.164-ish normalization for the SMS fallback.
+    update.phone = trimmed ? (trimmed.startsWith("+") ? trimmed : trimmed.replace(/[^\d]/g, "").replace(/^/, "+1").slice(0, 12)) : "";
+  }
+  if (Object.keys(update).length === 0) throw new HttpsError("invalid-argument", "Nothing to update.");
+  await db.doc(`users/${caller.uid}`).set(update, { merge: true });
+  return { ok: true, phone: update.phone };
+});
+
+// ── integration credentials (OAuth client id/secret) — super-admin only ──────
+interface IntegrationConfig {
+  googleClientId: string;
+  googleClientSecret: string;
+  microsoftClientId: string;
+  microsoftClientSecret: string;
+  microsoftTenant: string;
+}
+async function getIntegrationConfig(): Promise<IntegrationConfig> {
+  let c: Record<string, string> = {};
+  try {
+    const snap = await db.doc("config/integrations").get();
+    if (snap.exists) c = (snap.data() as Record<string, string>) || {};
+  } catch (e) {
+    logger.warn("getIntegrationConfig failed", e);
+  }
+  return {
+    googleClientId: c.googleClientId || process.env.GOOGLE_CLIENT_ID || "",
+    googleClientSecret: c.googleClientSecret || process.env.GOOGLE_CLIENT_SECRET || "",
+    microsoftClientId: c.microsoftClientId || process.env.MS_CLIENT_ID || "",
+    microsoftClientSecret: c.microsoftClientSecret || process.env.MS_CLIENT_SECRET || "",
+    microsoftTenant: c.microsoftTenant || process.env.MS_TENANT || "common",
+  };
+}
+
+// Public (non-secret) integration config — any signed-in user, so the client
+// can launch the OAuth flow with the right client IDs.
+export const getIntegrationPublicConfig = onCall(async (request) => {
+  await getCaller(request);
+  const c = await getIntegrationConfig();
+  return {
+    google: { clientId: c.googleClientId, configured: !!c.googleClientId && !!c.googleClientSecret },
+    microsoft: {
+      clientId: c.microsoftClientId,
+      tenant: c.microsoftTenant,
+      configured: !!c.microsoftClientId && !!c.microsoftClientSecret,
+    },
+  };
+});
+
+export const setIntegrationConfig = onCall(async (request) => {
+  const caller = await getCaller(request);
+  if (!caller.isSuper) throw new HttpsError("permission-denied", "Super-admins only.");
+  const d = (request.data || {}) as Record<string, string>;
+  const update: Record<string, unknown> = { updatedAt: Date.now(), updatedBy: caller.uid };
+  if (typeof d.googleClientId === "string") update.googleClientId = d.googleClientId.trim();
+  if (typeof d.googleClientSecret === "string" && d.googleClientSecret.trim()) update.googleClientSecret = d.googleClientSecret.trim();
+  if (typeof d.microsoftClientId === "string") update.microsoftClientId = d.microsoftClientId.trim();
+  if (typeof d.microsoftClientSecret === "string" && d.microsoftClientSecret.trim()) update.microsoftClientSecret = d.microsoftClientSecret.trim();
+  if (typeof d.microsoftTenant === "string") update.microsoftTenant = d.microsoftTenant.trim() || "common";
+  await db.doc("config/integrations").set(update, { merge: true });
+  return { ok: true };
+});
+
+// ── calendar OAuth: exchange an auth code for an offline refresh token ───────
+// Tokens are stored in calendarTokens/{uid} (server-only); only a connection
+// summary lands on the user doc.
+export const connectGoogleCalendar = onCall(async (request) => {
+  const caller = await getCaller(request);
+  const { code, redirectUri } = (request.data || {}) as { code?: string; redirectUri?: string };
+  if (!code || !redirectUri) throw new HttpsError("invalid-argument", "code & redirectUri required.");
+  const cfg = await getIntegrationConfig();
+  if (!cfg.googleClientId || !cfg.googleClientSecret) {
+    throw new HttpsError("failed-precondition", "Google integration not configured by the platform admin.");
+  }
+  const res = await fetch("https://oauth2.googleapis.com/token", {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
+      code,
+      client_id: cfg.googleClientId,
+      client_secret: cfg.googleClientSecret,
+      redirect_uri: redirectUri,
+      grant_type: "authorization_code",
+    }).toString(),
+  });
+  const tok = (await res.json().catch(() => ({}))) as Record<string, string>;
+  if (!res.ok || !tok.refresh_token) {
+    logger.error("Google token exchange failed", tok);
+    throw new HttpsError("internal", "Google sign-in failed. Make sure offline access is granted.");
+  }
+  let email = "";
+  try {
+    const u = await fetch("https://www.googleapis.com/oauth2/v2/userinfo", {
+      headers: { Authorization: `Bearer ${tok.access_token}` },
+    });
+    email = ((await u.json()) as { email?: string }).email || "";
+  } catch { /* non-fatal */ }
+  await db.doc(`calendarTokens/${caller.uid}`).set({ google: { refreshToken: tok.refresh_token } }, { merge: true });
+  await db.doc(`users/${caller.uid}`).set(
+    { calendar: { google: { connected: true, email, connectedAt: Date.now() } } },
+    { merge: true }
+  );
+  return { ok: true, email };
+});
+
+export const connectMicrosoftCalendar = onCall(async (request) => {
+  const caller = await getCaller(request);
+  const { code, redirectUri } = (request.data || {}) as { code?: string; redirectUri?: string };
+  if (!code || !redirectUri) throw new HttpsError("invalid-argument", "code & redirectUri required.");
+  const cfg = await getIntegrationConfig();
+  if (!cfg.microsoftClientId || !cfg.microsoftClientSecret) {
+    throw new HttpsError("failed-precondition", "Microsoft integration not configured by the platform admin.");
+  }
+  const res = await fetch(`https://login.microsoftonline.com/${cfg.microsoftTenant}/oauth2/v2.0/token`, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
+      code,
+      client_id: cfg.microsoftClientId,
+      client_secret: cfg.microsoftClientSecret,
+      redirect_uri: redirectUri,
+      grant_type: "authorization_code",
+      scope: "offline_access Calendars.ReadWrite User.Read",
+    }).toString(),
+  });
+  const tok = (await res.json().catch(() => ({}))) as Record<string, string>;
+  if (!res.ok || !tok.refresh_token) {
+    logger.error("Microsoft token exchange failed", tok);
+    throw new HttpsError("internal", "Microsoft sign-in failed.");
+  }
+  let email = "";
+  try {
+    const u = await fetch("https://graph.microsoft.com/v1.0/me", {
+      headers: { Authorization: `Bearer ${tok.access_token}` },
+    });
+    const me = (await u.json()) as { mail?: string; userPrincipalName?: string };
+    email = me.mail || me.userPrincipalName || "";
+  } catch { /* non-fatal */ }
+  await db.doc(`calendarTokens/${caller.uid}`).set({ microsoft: { refreshToken: tok.refresh_token } }, { merge: true });
+  await db.doc(`users/${caller.uid}`).set(
+    { calendar: { microsoft: { connected: true, email, connectedAt: Date.now() } } },
+    { merge: true }
+  );
+  return { ok: true, email };
+});
+
+export const disconnectCalendar = onCall(async (request) => {
+  const caller = await getCaller(request);
+  const { provider } = (request.data || {}) as { provider?: string };
+  if (provider !== "google" && provider !== "microsoft") {
+    throw new HttpsError("invalid-argument", "provider must be 'google' or 'microsoft'.");
+  }
+  await db.doc(`calendarTokens/${caller.uid}`).set({ [provider]: FieldValue.delete() }, { merge: true });
+  await db.doc(`users/${caller.uid}`).set(
+    { calendar: { [provider]: { connected: false } } },
+    { merge: true }
+  );
+  return { ok: true };
+});
+
+// ── external free/busy ───────────────────────────────────────────────────────
+type Interval = { start: number; end: number };
+
+async function googleAccessToken(refreshToken: string, cfg: IntegrationConfig): Promise<string> {
+  const res = await fetch("https://oauth2.googleapis.com/token", {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
+      client_id: cfg.googleClientId,
+      client_secret: cfg.googleClientSecret,
+      refresh_token: refreshToken,
+      grant_type: "refresh_token",
+    }).toString(),
+  });
+  const j = (await res.json().catch(() => ({}))) as Record<string, string>;
+  return j.access_token || "";
+}
+
+async function microsoftAccessToken(refreshToken: string, cfg: IntegrationConfig): Promise<string> {
+  const res = await fetch(`https://login.microsoftonline.com/${cfg.microsoftTenant}/oauth2/v2.0/token`, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
+      client_id: cfg.microsoftClientId,
+      client_secret: cfg.microsoftClientSecret,
+      refresh_token: refreshToken,
+      grant_type: "refresh_token",
+      scope: "offline_access Calendars.ReadWrite User.Read",
+    }).toString(),
+  });
+  const j = (await res.json().catch(() => ({}))) as Record<string, string>;
+  return j.access_token || "";
+}
+
+// Busy intervals from a rep's connected external calendars over [startMs,endMs].
+async function externalBusy(uid: string, startMs: number, endMs: number): Promise<Interval[]> {
+  const tokSnap = await db.doc(`calendarTokens/${uid}`).get();
+  if (!tokSnap.exists) return [];
+  const t = tokSnap.data() as { google?: { refreshToken?: string }; microsoft?: { refreshToken?: string } };
+  const cfg = await getIntegrationConfig();
+  const out: Interval[] = [];
+  const timeMin = new Date(startMs).toISOString();
+  const timeMax = new Date(endMs).toISOString();
+
+  if (t.google?.refreshToken && cfg.googleClientId) {
+    try {
+      const at = await googleAccessToken(t.google.refreshToken, cfg);
+      if (at) {
+        const r = await fetch("https://www.googleapis.com/calendar/v3/freeBusy", {
+          method: "POST",
+          headers: { Authorization: `Bearer ${at}`, "Content-Type": "application/json" },
+          body: JSON.stringify({ timeMin, timeMax, items: [{ id: "primary" }] }),
+        });
+        const j = (await r.json().catch(() => ({}))) as any;
+        for (const b of j?.calendars?.primary?.busy || []) {
+          out.push({ start: Date.parse(b.start), end: Date.parse(b.end) });
+        }
+      }
+    } catch (e) { logger.warn("google freebusy failed", e); }
+  }
+
+  if (t.microsoft?.refreshToken && cfg.microsoftClientId) {
+    try {
+      const at = await microsoftAccessToken(t.microsoft.refreshToken, cfg);
+      if (at) {
+        const url = `https://graph.microsoft.com/v1.0/me/calendarView?startDateTime=${encodeURIComponent(timeMin)}&endDateTime=${encodeURIComponent(timeMax)}&$select=start,end,showAs&$top=100`;
+        const r = await fetch(url, { headers: { Authorization: `Bearer ${at}`, Prefer: 'outlook.timezone="UTC"' } });
+        const j = (await r.json().catch(() => ({}))) as any;
+        for (const ev of j?.value || []) {
+          if (ev.showAs === "free") continue;
+          out.push({ start: Date.parse(ev.start?.dateTime + "Z"), end: Date.parse(ev.end?.dateTime + "Z") });
+        }
+      }
+    } catch (e) { logger.warn("microsoft calendarView failed", e); }
+  }
+  return out.filter((i) => Number.isFinite(i.start) && Number.isFinite(i.end));
+}
+
+const overlaps = (a: Interval, b: Interval) => a.start < b.end && b.start < a.end;
+
+// Is a rep free for [startMs,endMs] (± buffer): no app appointment and no
+// external busy block overlaps.
+async function isUserFree(uid: string, startMs: number, endMs: number, bufferMin: number): Promise<boolean> {
+  const buf = bufferMin * 60 * 1000;
+  const win: Interval = { start: startMs - buf, end: endMs + buf };
+
+  // Internal appointments (events) for this user.
+  const evSnap = await db.collection("events").where("userId", "==", uid).where("startAt", "<=", win.end).get();
+  for (const d of evSnap.docs) {
+    const ev = d.data();
+    const s = Number(ev.startAt);
+    const e = Number(ev.endAt) || s + (Number(ev.durationMin) || 60) * 60 * 1000;
+    if (overlaps(win, { start: s, end: e })) return false;
+  }
+
+  // External calendars.
+  const busy = await externalBusy(uid, win.start, win.end);
+  return !busy.some((b) => overlaps(win, b));
+}
+
+// Push an appointment to a rep's connected external calendars (best-effort).
+async function pushExternalEvent(uid: string, ev: { title: string; address?: string; notes?: string; startMs: number; endMs: number }): Promise<void> {
+  const tokSnap = await db.doc(`calendarTokens/${uid}`).get();
+  if (!tokSnap.exists) return;
+  const t = tokSnap.data() as { google?: { refreshToken?: string }; microsoft?: { refreshToken?: string } };
+  const cfg = await getIntegrationConfig();
+  const startISO = new Date(ev.startMs).toISOString();
+  const endISO = new Date(ev.endMs).toISOString();
+
+  if (t.google?.refreshToken && cfg.googleClientId) {
+    try {
+      const at = await googleAccessToken(t.google.refreshToken, cfg);
+      if (at) {
+        await fetch("https://www.googleapis.com/calendar/v3/calendars/primary/events", {
+          method: "POST",
+          headers: { Authorization: `Bearer ${at}`, "Content-Type": "application/json" },
+          body: JSON.stringify({
+            summary: ev.title,
+            location: ev.address || "",
+            description: ev.notes || "Booked via YoutilityKnock",
+            start: { dateTime: startISO },
+            end: { dateTime: endISO },
+          }),
+        });
+      }
+    } catch (e) { logger.warn("google event push failed", e); }
+  }
+  if (t.microsoft?.refreshToken && cfg.microsoftClientId) {
+    try {
+      const at = await microsoftAccessToken(t.microsoft.refreshToken, cfg);
+      if (at) {
+        await fetch("https://graph.microsoft.com/v1.0/me/events", {
+          method: "POST",
+          headers: { Authorization: `Bearer ${at}`, "Content-Type": "application/json" },
+          body: JSON.stringify({
+            subject: ev.title,
+            location: { displayName: ev.address || "" },
+            body: { contentType: "text", content: ev.notes || "Booked via YoutilityKnock" },
+            start: { dateTime: startISO, timeZone: "UTC" },
+            end: { dateTime: endISO, timeZone: "UTC" },
+          }),
+        });
+      }
+    } catch (e) { logger.warn("microsoft event push failed", e); }
+  }
+}
+
+// ── availability + assignment ────────────────────────────────────────────────
+async function companyScheduling(companyId: string) {
+  const snap = await db.doc(`companies/${companyId}`).get();
+  const s = (snap.exists ? snap.data()?.scheduling : null) || {};
+  return { ...DEFAULT_SCHEDULING, ...s };
+}
+
+// Check whether a given rep (or the caller) is free for a slot.
+export const checkAvailability = onCall(async (request) => {
+  const caller = await getCaller(request);
+  const { uid, startAt, durationMin } = (request.data || {}) as { uid?: string; startAt?: number; durationMin?: number };
+  const targetUid = uid || caller.uid;
+  if (!startAt) throw new HttpsError("invalid-argument", "startAt required.");
+  const sched = caller.companyId ? await companyScheduling(caller.companyId) : DEFAULT_SCHEDULING;
+  const dur = (durationMin || sched.apptDurationMin) * 60 * 1000;
+  const free = await isUserFree(targetUid, startAt, startAt + dur, sched.bufferMin);
+  return { free };
+});
+
+// Route a (non-self-gen) appointment to an available rep per company policy.
+export const assignAppointment = onCall(async (request) => {
+  const caller = await getCaller(request);
+  const d = (request.data || {}) as {
+    companyId?: string;
+    startAt?: number;
+    durationMin?: number;
+    title?: string;
+    address?: string;
+    name?: string;
+    notes?: string;
+    leadId?: string;
+    candidateUid?: string; // for manual
+    pushExternal?: boolean;
+  };
+  const companyId = d.companyId || caller.companyId || "";
+  if (!companyId || caller.companyId !== companyId) {
+    if (!caller.isSuper) throw new HttpsError("permission-denied", "Wrong company.");
+  }
+  if (!d.startAt) throw new HttpsError("invalid-argument", "startAt required.");
+
+  const sched = await companyScheduling(companyId);
+  const now = Date.now();
+  const minAt = now + sched.apptMinLeadHours * 3600 * 1000;
+  const maxAt = now + sched.apptMaxDaysOut * 86400 * 1000;
+  if (d.startAt < minAt) throw new HttpsError("failed-precondition", `Too soon — needs ${sched.apptMinLeadHours}h lead time.`);
+  if (d.startAt > maxAt) throw new HttpsError("failed-precondition", `Too far out — max ${sched.apptMaxDaysOut} days.`);
+
+  const dur = (d.durationMin || sched.apptDurationMin) * 60 * 1000;
+  const endAt = d.startAt + dur;
+
+  // Candidate reps: enabled company members (managers + users).
+  const usersSnap = await db.collection("users").where("companyId", "==", companyId).get();
+  const candidates: Array<{ uid: string; [k: string]: any }> = usersSnap.docs
+    .map((u): { uid: string; [k: string]: any } => ({ uid: u.id, ...(u.data() as Record<string, any>) }))
+    .filter((u) => u.disabled !== true && (u.role === "user" || u.role === "manager"));
+
+  // Keep only those actually free at the slot.
+  const freeFlags = await Promise.all(candidates.map((c) => isUserFree(c.uid, d.startAt!, endAt, sched.bufferMin)));
+  let pool = candidates.filter((_, i) => freeFlags[i]);
+  if (pool.length === 0) throw new HttpsError("failed-precondition", "No rep is available at that time.");
+
+  let chosen = pool[0];
+  if (sched.assignment === "manual") {
+    if (!d.candidateUid) throw new HttpsError("invalid-argument", "Manual assignment needs candidateUid.");
+    const found = pool.find((p) => p.uid === d.candidateUid);
+    if (!found) throw new HttpsError("failed-precondition", "Chosen rep isn't available then.");
+    chosen = found;
+  } else if (sched.assignment === "highest_production") {
+    const statsSnap = await db.collection("userStats").where("companyId", "==", companyId).get();
+    const sales: Record<string, number> = {};
+    statsSnap.forEach((s) => (sales[s.id] = Number(s.data().sales) || 0));
+    pool = pool.sort((a, b) => (sales[b.uid] || 0) - (sales[a.uid] || 0));
+    chosen = pool[0];
+  } else if (sched.assignment === "round_robin") {
+    pool = pool.sort((a, b) => a.uid.localeCompare(b.uid));
+    const cur = Number((await db.doc(`companies/${companyId}`).get()).data()?.rrCursor) || 0;
+    chosen = pool[cur % pool.length];
+    await db.doc(`companies/${companyId}`).set({ rrCursor: cur + 1 }, { merge: true });
+  } else {
+    // self_gen: assign to the caller if they're in the pool, else first free.
+    chosen = pool.find((p) => p.uid === caller.uid) || pool[0];
+  }
+
+  const managerPath = (chosen.managerPath as string[]) || [];
+  const ev = {
+    companyId,
+    userId: chosen.uid,
+    userName: chosen.displayName || "",
+    type: "appointment",
+    title: d.title || `Appointment${d.name ? ` — ${d.name}` : ""}`,
+    address: d.address || "",
+    leadId: d.leadId || null,
+    startAt: d.startAt,
+    endAt,
+    durationMin: d.durationMin || sched.apptDurationMin,
+    assignedBy: caller.uid,
+    source: "assigned",
+    notes: d.notes || "",
+    visibilityPath: [chosen.uid, ...managerPath],
+    reminded: false,
+    createdAt: now,
+  };
+  const ref = await db.collection("events").add(ev);
+
+  if (d.pushExternal !== false) {
+    await pushExternalEvent(chosen.uid, { title: ev.title, address: ev.address, notes: ev.notes, startMs: d.startAt, endMs: endAt });
+  }
+  await notifyUser({
+    userId: chosen.uid,
+    type: "event",
+    title: `New appointment assigned`,
+    body: [ev.title, new Date(d.startAt).toLocaleString()].filter(Boolean).join(" — "),
+    link: "/app/schedule",
+  });
+
+  return { ok: true, eventId: ref.id, assignedTo: chosen.uid, assignedName: chosen.displayName || "" };
+});

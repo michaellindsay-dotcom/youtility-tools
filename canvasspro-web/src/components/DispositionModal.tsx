@@ -26,6 +26,20 @@ function toLocalInput(ms: number): string {
   return d.toISOString().slice(0, 16);
 }
 
+// Recursively drop `undefined` values — Firestore rejects a write if any field
+// (however deeply nested, e.g. inside ATTOM enrichment) is undefined.
+function clean<T>(obj: T): T {
+  if (Array.isArray(obj)) return obj.map((v) => clean(v)) as unknown as T;
+  if (obj && typeof obj === "object") {
+    const out: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(obj as Record<string, unknown>)) {
+      if (v !== undefined) out[k] = clean(v);
+    }
+    return out as T;
+  }
+  return obj;
+}
+
 // Distance between two lat/lng points, in feet.
 function distanceFt(a: { lat: number; lng: number }, b: { lat: number; lng: number }): number {
   const R = 20925524.9; // earth radius in feet
@@ -93,11 +107,12 @@ export default function DispositionModal({
   onClose: () => void;
   onSaved?: () => void;
 }) {
-  const { profile, companyId } = useAuth();
+  const { profile, companyId, company } = useAuth();
   const { active: onShift, startShift, recordKnock } = useShift();
   const [d, setD] = useState<Form | null>(null);
   const [enriching, setEnriching] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
   const [summary, setSummary] = useState("");
   // Geofence: distance from the rep to this home (ft) and whether it counts.
   const [geo, setGeo] = useState<{ ft: number | null; verified: boolean }>({ ft: null, verified: true });
@@ -125,6 +140,7 @@ export default function DispositionModal({
     setSchedule(true);
     setScheduleAt("");
     setPhotos({ home: null, bill: null });
+    setErr(null);
     if (autoEnrich && !target.enrichment) void enrich(target.address);
     // Check how far the rep is from the home.
     if (target.lat != null && target.lng != null) void checkGeo(target.lat, target.lng);
@@ -183,20 +199,25 @@ export default function DispositionModal({
   async function save() {
     if (!profile || !companyId || !d) return;
     setSaving(true);
+    setErr(null);
     try {
       const now = Date.now();
-      // Upload any newly captured photos first, falling back to existing URLs.
+
+      // Upload any newly captured photos. Non-blocking: a Storage failure must
+      // never stop the lead from saving.
       let homeUrl = d.photoHomeUrl ?? null;
       let billUrl = d.photoBillUrl ?? null;
       try {
         if (photos.home) homeUrl = await uploadPhoto(photos.home, "home");
         if (photos.bill) billUrl = await uploadPhoto(photos.bill, "bill");
-      } catch (err) {
-        console.error("Photo upload failed", err);
-        alert("Photo upload failed. Make sure Firebase Storage is enabled — saving without the new photo.");
+      } catch (e) {
+        console.error("Photo upload failed", e);
+        setErr("Photo upload failed (is Storage enabled?) — saved the lead without the new photo.");
       }
 
-      const fields = {
+      // Strip undefined so Firestore never rejects the whole write (ATTOM
+      // enrichment can contain undefined nested values).
+      const fields = clean({
         ownerName: d.name || null,
         phone: d.phone || null,
         email: d.email || null,
@@ -210,12 +231,14 @@ export default function DispositionModal({
         distanceFt: geo.ft ?? null,
         knockedAt: now,
         updatedAt: now,
-      };
+      });
+
+      // The lead is the core deliverable — save it first, on its own.
       let leadId = d.leadId;
       if (leadId) {
         await updateDoc(doc(db, "leads", leadId), fields);
       } else {
-        const refDoc = await addDoc(collection(db, "leads"), {
+        const refDoc = await addDoc(collection(db, "leads"), clean({
           ...fields,
           address: d.address,
           lat: d.lat ?? null,
@@ -225,34 +248,49 @@ export default function DispositionModal({
           visibilityPath: [profile.uid, ...(profile.managerPath ?? [])],
           createdBy: profile.uid,
           createdAt: now,
-        });
+        }));
         leadId = refDoc.id;
-      }
-
-      // On-the-spot scheduling for go-back / pipeline / appointment.
-      const cfg = SCHEDULE_FOR[d.status];
-      if (cfg && schedule && scheduleAt) {
-        await addDoc(collection(db, "events"), {
-          companyId,
-          userId: profile.uid,
-          userName: profile.displayName,
-          type: cfg.eventType,
-          title: `${cfg.label}${d.name ? ` — ${d.name}` : ""}`,
-          address: d.address,
-          leadId,
-          startAt: new Date(scheduleAt).getTime(),
-          notes: d.notes || "",
-          visibilityPath: [profile.uid, ...(profile.managerPath ?? [])],
-          reminded: false,
-          createdAt: now,
-        });
       }
 
       if (d.status === "appointment") void bumpStats(profile, { appointments: 1 });
       else if (d.status === "sold") void bumpStats(profile, { sales: 1 });
       void recordKnock(geo.verified); // counts toward the active shift if on-site
+
+      // On-the-spot scheduling. Non-blocking: the lead is already saved, so a
+      // scheduling failure surfaces a warning but doesn't lose the lead.
+      const cfg = SCHEDULE_FOR[d.status];
+      if (cfg && schedule && scheduleAt) {
+        try {
+          await addDoc(collection(db, "events"), clean({
+            companyId,
+            userId: profile.uid,
+            userName: profile.displayName,
+            type: cfg.eventType,
+            title: `${cfg.label}${d.name ? ` — ${d.name}` : ""}`,
+            address: d.address || "",
+            leadId,
+            startAt: new Date(scheduleAt).getTime(),
+            durationMin: company?.scheduling?.apptDurationMin ?? 60,
+            endAt: new Date(scheduleAt).getTime() + (company?.scheduling?.apptDurationMin ?? 60) * 60000,
+            source: "self_gen",
+            notes: d.notes || "",
+            visibilityPath: [profile.uid, ...(profile.managerPath ?? [])],
+            reminded: false,
+            createdAt: now,
+          }));
+        } catch (e) {
+          console.error("Scheduling failed", e);
+          setErr("Saved the lead, but couldn't add the calendar event. Add it from the Schedule page.");
+          onSaved?.();
+          return; // keep modal open so the warning is visible
+        }
+      }
+
       onSaved?.();
       onClose();
+    } catch (e) {
+      console.error("Save failed", e);
+      setErr((e as Error)?.message || "Couldn't save. Please try again.");
     } finally {
       setSaving(false);
     }
@@ -366,6 +404,12 @@ export default function DispositionModal({
                 onPick={(f) => setPhotos((p) => ({ ...p, bill: f }))}
               />
             </div>
+          </div>
+        )}
+
+        {err && (
+          <div className="banner warn show" style={{ marginBottom: 10 }}>
+            {err}
           </div>
         )}
 

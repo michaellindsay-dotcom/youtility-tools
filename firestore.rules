@@ -171,11 +171,17 @@ service cloud.firestore {
       allow write: if isSignedIn() && request.auth.uid == uid;
     }
 
-    // ── platform config (notification provider keys, etc.) ───────────────
-    // Holds secrets (SendGrid/Twilio). Cloud Functions only — never exposed to
-    // any client. The super-admin console reads/writes via callables that mask
-    // the secrets.
+    // ── platform config (notification + integration keys) ────────────────
+    // Holds secrets (SendGrid/Twilio, OAuth client secrets). Cloud Functions
+    // only — never exposed to any client. Consoles read/write via callables
+    // that mask the secrets.
     match /config/{docId} {
+      allow read, write: if false;
+    }
+
+    // ── calendar OAuth refresh tokens (per user) ─────────────────────────
+    // Highly sensitive. Cloud Functions only.
+    match /calendarTokens/{uid} {
       allow read, write: if false;
     }
   }
