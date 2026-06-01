@@ -6,6 +6,7 @@ import { useAuth } from "../auth/AuthContext";
 import { DISPOSITIONS } from "../lib/dispositions";
 import { lookupAddress, normalizeKnockstatResponse, buildEnrichment } from "../lib/knockstat";
 import { bumpStats } from "../lib/stats";
+import { useShift } from "../shift/ShiftContext";
 import type { LeadStatus, LeadEnrichment } from "../types";
 
 const ONSITE_FT = 100; // a knock only counts if you're within 100 ft of the home
@@ -74,6 +75,7 @@ export default function DispositionModal({
   onSaved?: () => void;
 }) {
   const { profile, companyId } = useAuth();
+  const { active: onShift, startShift, recordKnock } = useShift();
   const [d, setD] = useState<Form | null>(null);
   const [enriching, setEnriching] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -172,6 +174,7 @@ export default function DispositionModal({
       }
       if (d.status === "appointment") void bumpStats(profile, { appointments: 1 });
       else if (d.status === "sold") void bumpStats(profile, { sales: 1 });
+      void recordKnock(geo.verified); // counts toward the active shift if on-site
       onSaved?.();
       onClose();
     } finally {
@@ -218,6 +221,13 @@ export default function DispositionModal({
           <div className="banner warn show" style={{ marginBottom: 10 }}>
             ⚠ You're <strong>{geo.ft} ft</strong> from this home (over {ONSITE_FT} ft). This won't count toward
             your door knocks or stats.
+          </div>
+        )}
+
+        {!onShift && geo.ft != null && geo.verified && (
+          <div className="banner info show start-shift-prompt" style={{ marginBottom: 10 }}>
+            <span>You're on-site but not on a shift — start one so this knock counts.</span>
+            <button className="btn primary sm" onClick={() => startShift()}>▶ Start Shift</button>
           </div>
         )}
 

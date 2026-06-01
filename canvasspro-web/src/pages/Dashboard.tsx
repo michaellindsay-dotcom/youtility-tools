@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import { collection, getDocs, query, where, orderBy, limit } from "firebase/firestore";
 import { db } from "../firebase";
 import { useAuth } from "../auth/AuthContext";
+import { useShift, fmtElapsed } from "../shift/ShiftContext";
 import type { Lead, Shift, UserStats } from "../types";
 
 // Default targets (configurable later via a company `config` doc).
@@ -46,6 +47,7 @@ interface Funnel {
 
 export default function Dashboard() {
   const { profile } = useAuth();
+  const shift = useShift();
   const [leads, setLeads] = useState<Lead[]>([]);
   const [shifts, setShifts] = useState<Shift[]>([]);
   const [top, setTop] = useState<UserStats[]>([]);
@@ -145,7 +147,18 @@ export default function Dashboard() {
           </div>
         </div>
         <div className="row">
-          <Link to="/shifts" className="btn primary sm">▶ Start Shift</Link>
+          {shift.active ? (
+            <div className="shift-live-bar">
+              <span className="shift-dot" />
+              <span className="shift-time mono">{fmtElapsed(shift.elapsedSec)}</span>
+              <span className="shift-doors">{shift.doors} doors</span>
+              <button className="btn sm" onClick={() => shift.stopShift()}>Stop</button>
+            </div>
+          ) : (
+            <button className="btn primary sm" onClick={() => shift.startShift()} disabled={shift.starting}>
+              ▶ {shift.starting ? "Starting…" : "Start Shift"}
+            </button>
+          )}
           <Link to="/leaderboard" className="btn sm">🏆 Leaderboard</Link>
         </div>
       </div>

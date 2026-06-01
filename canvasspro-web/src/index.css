@@ -1036,6 +1036,44 @@ details.raw pre {
   font-weight: 700;
 }
 
+/* ── Shift bar ───────────────────────────────────────────── */
+.shift-live-bar {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 5px 10px 5px 12px;
+  border-radius: 999px;
+  background: rgba(52, 211, 153, 0.12);
+  border: 1px solid rgba(52, 211, 153, 0.4);
+  font-size: 13px;
+}
+.shift-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--good);
+  box-shadow: 0 0 0 0 rgba(52, 211, 153, 0.6);
+  animation: shiftpulse 1.6s infinite;
+}
+@keyframes shiftpulse {
+  70% { box-shadow: 0 0 0 7px rgba(52, 211, 153, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(52, 211, 153, 0); }
+}
+.shift-time {
+  font-weight: 700;
+  color: var(--good);
+}
+.shift-doors {
+  color: var(--ink-mid);
+}
+.start-shift-prompt {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
 /* ── Dashboard ───────────────────────────────────────────── */
 .dash-hero {
   background: linear-gradient(135deg, rgba(14, 165, 233, 0.22), rgba(56, 189, 248, 0.06));
