@@ -70,6 +70,13 @@ export default function Leads() {
     if (confirm("Delete this lead?")) await deleteDoc(doc(db, "leads", id));
   };
 
+  const clearAll = async () => {
+    if (!confirm(`Delete ALL ${leads.length} leads? This cannot be undone.`)) return;
+    for (const lead of leads) {
+      await deleteDoc(doc(db, "leads", lead.id)).catch(() => {});
+    }
+  };
+
   return (
     <div className="page-body">
       <div className="page-head row">
@@ -77,9 +84,16 @@ export default function Leads() {
           <h1>Leads</h1>
           <p className="page-sub">{shown.length} shown</p>
         </div>
-        <button className="btn primary" onClick={() => setShowAdd((s) => !s)}>
-          {showAdd ? "Close" : "+ New lead"}
-        </button>
+        <div className="row">
+          {(role === "admin" || role === "manager") && leads.length > 0 && (
+            <button className="btn ghost sm danger" onClick={clearAll}>
+              Clear all ({leads.length})
+            </button>
+          )}
+          <button className="btn primary" onClick={() => setShowAdd((s) => !s)}>
+            {showAdd ? "Close" : "+ New lead"}
+          </button>
+        </div>
       </div>
 
       {showAdd && <AddLead onDone={() => setShowAdd(false)} />}
