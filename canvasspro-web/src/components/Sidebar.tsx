@@ -10,8 +10,10 @@ const links = [
   { to: "/team", label: "Team", icon: "⛩" },
   { to: "/shifts", label: "Shifts", icon: "◷" },
   { to: "/stats", label: "Analytics", icon: "★" },
+  { to: "/working", label: "Who's Working", icon: "🔥" },
   { to: "/leaderboard", label: "Leaderboard", icon: "🏆" },
   { to: "/gamify", label: "Gamify", icon: "🎮" },
+  { to: "/rewards", label: "Rewards", icon: "🎁" },
   { to: "/territories", label: "Territories", icon: "▰" },
   { to: "/settings", label: "Settings", icon: "⚐" },
 ];
@@ -41,7 +43,7 @@ export default function Sidebar() {
         ))}
       </nav>
       <div className="brand-sub" style={{ marginTop: "auto", padding: "8px" }}>
-        build BUILD-22
+        build BUILD-23
       </div>
     </aside>
   );

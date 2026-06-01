@@ -44,6 +44,24 @@ service cloud.firestore {
         allow read: if inMyCompany(companyId);
         allow write: if false;
       }
+
+      // Rewards: any company member reads (to see the store); company admins
+      // (or super) create/edit/remove them directly.
+      match /rewards/{rewardId} {
+        allow read: if inMyCompany(companyId);
+        allow write: if isSuper() || (isSignedIn() && companyId == myCompany() && isCompanyAdmin());
+      }
+    }
+
+    // ── reward redemptions (a rep claims a reward) ───────────────────────
+    match /redemptions/{redemptionId} {
+      allow read: if isSuper()
+                  || (isSignedIn() && resource.data.companyId == myCompany()
+                      && (isCompanyAdmin() || resource.data.userId == request.auth.uid));
+      allow create: if isSignedIn()
+                    && request.resource.data.companyId == myCompany()
+                    && request.resource.data.userId == request.auth.uid;
+      allow update, delete: if isSignedIn() && resource.data.companyId == myCompany() && isCompanyAdmin();
     }
 
     // ── users (accounts + hierarchy) ─────────────────────────────────────

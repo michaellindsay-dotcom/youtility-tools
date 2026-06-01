@@ -241,6 +241,39 @@ export interface AppNotification {
   createdAt: number;
 }
 
+// ── Rewards (admin-created incentives) ───────────────────────────────────────
+export type RewardKind = "benchmark" | "store"; // auto-unlock at a target vs. redeem with points
+export type RewardAudience = "individual" | "team";
+export type RewardMetric = "points" | "doors" | "conversations" | "appointments" | "sales";
+export type RewardPeriod = "weekly" | "monthly" | "alltime";
+
+export interface Reward {
+  id: string;
+  companyId: string;
+  name: string;
+  description?: string;
+  imageUrl?: string;
+  kind: RewardKind;
+  audience: RewardAudience;
+  metric: RewardMetric; // what's measured (benchmark) or the currency (store = points)
+  period: RewardPeriod; // window for an individual benchmark
+  target: number; // threshold to unlock (benchmark) OR points cost (store)
+  active?: boolean;
+  createdAt: number;
+  createdBy: string;
+}
+
+export interface Redemption {
+  id: string;
+  companyId: string;
+  rewardId: string;
+  rewardName: string;
+  userId: string;
+  userName: string;
+  status: "requested" | "fulfilled";
+  createdAt: number;
+}
+
 // ---- Knockstat normalized property record (ported from canvass-pro.html) ----
 
 export interface Person {
