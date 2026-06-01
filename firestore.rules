@@ -60,8 +60,9 @@ service cloud.firestore {
 
     // ── leads (downstream-scoped) ────────────────────────────────────────
     match /leads/{leadId} {
-      allow read: if inMyCompany(resource.data.companyId)
-                  && (isSuper() || isCompanyAdmin() || inPath(resource.data.visibilityPath));
+      allow read: if (isSignedIn() && resource.data.assignedTo == request.auth.uid)
+                  || (inMyCompany(resource.data.companyId)
+                      && (isSuper() || isCompanyAdmin() || inPath(resource.data.visibilityPath)));
       allow create: if isSignedIn()
                     && request.resource.data.companyId == myCompany()
                     && request.resource.data.createdBy == request.auth.uid
@@ -76,8 +77,9 @@ service cloud.firestore {
 
     // ── shifts (downstream-scoped, same visibilityPath pattern) ──────────
     match /shifts/{shiftId} {
-      allow read: if inMyCompany(resource.data.companyId)
-                  && (isSuper() || isCompanyAdmin() || inPath(resource.data.visibilityPath));
+      allow read: if (isSignedIn() && resource.data.userId == request.auth.uid)
+                  || (inMyCompany(resource.data.companyId)
+                      && (isSuper() || isCompanyAdmin() || inPath(resource.data.visibilityPath)));
       allow create: if isSignedIn()
                     && request.resource.data.companyId == myCompany()
                     && request.auth.uid in request.resource.data.visibilityPath;

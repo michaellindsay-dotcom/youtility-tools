@@ -156,19 +156,19 @@ export default function MapPage() {
   useEffect(() => {
     if (!companyId || !profile || !elRef.current || mapRef.current) return;
 
-    const satellite = L.tileLayer(
+    // Google satellite tiles are georeferenced to GPS (Esri imagery is offset a
+    // few meters in some areas, which made rooftop pins look misplaced).
+    const gSub = { subdomains: ["mt0", "mt1", "mt2", "mt3"], maxZoom: 21, attribution: "© Google" };
+    const hybrid = L.tileLayer("https://{s}.google.com/vt/lyrs=y&x={x}&y={y}&z={z}", gSub);
+    const satellite = L.tileLayer("https://{s}.google.com/vt/lyrs=s&x={x}&y={y}&z={z}", gSub);
+    const esri = L.tileLayer(
       "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
-      { maxZoom: 19, attribution: "Tiles © Esri — Maxar, Earthstar Geographics" }
-    );
-    const labels = L.tileLayer(
-      "https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}",
-      { maxZoom: 19 }
+      { maxZoom: 19, attribution: "Tiles © Esri" }
     );
     const street = L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 19, attribution: "© OpenStreetMap" });
-    const hybrid = L.layerGroup([satellite, labels]);
 
-    const map = L.map(elRef.current, { center: DEFAULT_CENTER, zoom: 14, layers: [hybrid] });
-    L.control.layers({ Satellite: satellite, Hybrid: hybrid, Street: street }).addTo(map);
+    const map = L.map(elRef.current, { center: DEFAULT_CENTER, zoom: 14, maxZoom: 21, layers: [hybrid] });
+    L.control.layers({ "Satellite + labels": hybrid, Satellite: satellite, "Esri imagery": esri, Street: street }).addTo(map);
     territoryLayer.current.addTo(map);
     homeLayer.current.addTo(map);
     leadLayer.current.addTo(map);
