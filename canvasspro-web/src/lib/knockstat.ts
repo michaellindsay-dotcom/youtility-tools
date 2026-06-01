@@ -61,21 +61,21 @@ export function normalizeKnockstatResponse(raw: AnyObj): PropertyRecord {
   const r: AnyObj = (raw && (raw.data || raw.result || raw.property || raw)) || {};
   return {
     address: {
-      line1: pick(r, "address.line1", "address.street", "address.formatted", "address.full", "address"),
-      city: pick(r, "address.city"),
-      state: pick(r, "address.state", "address.region"),
-      zip: pick(r, "address.zip", "address.postalCode", "address.postcode"),
-      lat: pick(r, "address.latitude", "geo.lat", "location.lat"),
-      lon: pick(r, "address.longitude", "geo.lng", "location.lon", "location.lng"),
+      line1: pick(r, "address.line1", "address.street", "address.formatted", "address.full", "propertyInfo.address.address", "propertyInfo.address.label", "address"),
+      city: pick(r, "address.city", "propertyInfo.address.city"),
+      state: pick(r, "address.state", "address.region", "propertyInfo.address.state"),
+      zip: pick(r, "address.zip", "address.postalCode", "address.postcode", "propertyInfo.address.zip"),
+      lat: pick(r, "address.latitude", "geo.lat", "location.lat", "propertyInfo.latitude", "latitude"),
+      lon: pick(r, "address.longitude", "geo.lng", "location.lon", "location.lng", "propertyInfo.longitude", "longitude"),
     },
     property: {
-      type: pick(r, "property.type", "propertyType"),
+      type: pick(r, "property.type", "propertyType", "propertyInfo.propertyUseStandardized", "propertyInfo.propertyUse", "landUseDescription"),
       subtype: pick(r, "property.subtype", "propertySubtype"),
-      yearBuilt: pick(r, "property.yearBuilt", "yearBuilt"),
-      bedrooms: pick(r, "property.bedrooms", "bedrooms"),
-      bathrooms: pick(r, "property.bathrooms", "bathrooms"),
-      livingAreaSqft: pick(r, "property.livingAreaSqft", "property.sqft", "buildingSqft", "livingArea"),
-      lotSizeSqft: pick(r, "property.lotSizeSqft", "lotSqft", "lotSize"),
+      yearBuilt: pick(r, "property.yearBuilt", "yearBuilt", "propertyInfo.yearBuilt"),
+      bedrooms: pick(r, "property.bedrooms", "bedrooms", "propertyInfo.bedrooms"),
+      bathrooms: pick(r, "property.bathrooms", "bathrooms", "propertyInfo.bathrooms"),
+      livingAreaSqft: pick(r, "property.livingAreaSqft", "property.sqft", "buildingSqft", "livingArea", "propertyInfo.livingSquareFeet"),
+      lotSizeSqft: pick(r, "property.lotSizeSqft", "lotSqft", "lotSize", "lotInfo.lotSquareFeet"),
       stories: pick(r, "property.stories", "stories"),
       units: pick(r, "property.units", "units"),
       garage: pick(r, "property.garage", "garage"),
@@ -89,11 +89,11 @@ export function normalizeKnockstatResponse(raw: AnyObj): PropertyRecord {
       hoa: pick(r, "property.hoa", "hoa"),
     },
     valuation: {
-      estimatedValue: pick(r, "valuation.estimatedValue", "estimate.value", "avm.value"),
-      estimatedLow: pick(r, "valuation.low", "estimate.low", "avm.low"),
-      estimatedHigh: pick(r, "valuation.high", "estimate.high", "avm.high"),
+      estimatedValue: pick(r, "valuation.estimatedValue", "estimate.value", "avm.value", "estimatedValue"),
+      estimatedLow: pick(r, "valuation.low", "estimate.low", "avm.low", "estimatedValueLow"),
+      estimatedHigh: pick(r, "valuation.high", "estimate.high", "avm.high", "estimatedValueHigh"),
       confidence: pick(r, "valuation.confidence", "estimate.confidence", "avm.confidence"),
-      estimatedEquity: pick(r, "valuation.equity", "equity.amount"),
+      estimatedEquity: pick(r, "valuation.equity", "equity.amount", "estimatedEquity"),
       equityPercent: pick(r, "valuation.equityPercent", "equity.percent"),
       loanToValue: pick(r, "valuation.ltv", "equity.ltv"),
       pricePerSqft: pick(r, "valuation.pricePerSqft", "estimate.pricePerSqft"),
@@ -102,14 +102,37 @@ export function normalizeKnockstatResponse(raw: AnyObj): PropertyRecord {
     },
     ownership: {
       occupancy:
-        pick(r, "ownership.occupancy", "ownerOccupied") === true
+        pick(r, "ownership.occupancy", "ownerOccupied", "ownerInfo.ownerOccupied") === true
           ? "Owner-occupied"
-          : pick(r, "ownership.occupancy", "ownerOccupied") === false
+          : pick(r, "ownership.occupancy", "ownerOccupied", "ownerInfo.ownerOccupied") === false
           ? "Absentee owner"
           : pick(r, "ownership.occupancy"),
       lengthOfOwnership: pick(r, "ownership.lengthYears", "ownership.yearsOwned"),
     },
-    owners: normalizePeople(pick(r, "owners", "ownership.owners") || [], "Owner"),
+    owners: (() => {
+      const generic = normalizePeople(pick(r, "owners", "ownership.owners") || [], "Owner");
+      if (generic.length) return generic;
+      // RealEstateAPI: ownerInfo.owner1FullName / owner2FullName (+ skip-trace contacts).
+      const oi: AnyObj = pick(r, "ownerInfo") || {};
+      const names = [oi.owner1FullName, oi.owner2FullName].filter(Boolean) as string[];
+      if (!names.length) return [];
+      const skip: AnyObj = (raw && raw._skiptrace) || {};
+      const phones = arrayify(pick(skip, "phones", "phoneNumbers", "output.phones", "output.phoneNumbers"));
+      const emails = arrayify(pick(skip, "emails", "output.emails"));
+      return names.map((name, i) => ({
+        name,
+        role: "Owner",
+        entityType: oi.ownerType,
+        ageRange: undefined,
+        gender: undefined,
+        maritalStatus: undefined,
+        lengthOfResidence: undefined,
+        phones: i === 0 ? phones : [],
+        emails: i === 0 ? emails : [],
+        mailingAddress: pick(oi, "mailAddress.label", "mailAddress.address"),
+        address: undefined,
+      }));
+    })(),
     occupants: normalizePeople(
       pick(r, "occupants", "household.members", "residents") || [],
       "Occupant"
@@ -131,10 +154,10 @@ export function normalizeKnockstatResponse(raw: AnyObj): PropertyRecord {
       };
     })(),
     sale: {
-      lastSalePrice: pick(r, "sale.lastPrice", "lastSale.price", "sales.0.price"),
-      lastSaleDate: pick(r, "sale.lastDate", "lastSale.date", "sales.0.date"),
-      priorSalePrice: pick(r, "sale.priorPrice", "sales.1.price"),
-      priorSaleDate: pick(r, "sale.priorDate", "sales.1.date"),
+      lastSalePrice: pick(r, "sale.lastPrice", "lastSale.price", "sales.0.price", "lastSale.saleAmount", "saleHistory.0.saleAmount", "lastSaleAmount"),
+      lastSaleDate: pick(r, "sale.lastDate", "lastSale.date", "sales.0.date", "lastSaleDate", "saleHistory.0.saleDate"),
+      priorSalePrice: pick(r, "sale.priorPrice", "sales.1.price", "saleHistory.1.saleAmount"),
+      priorSaleDate: pick(r, "sale.priorDate", "sales.1.date", "saleHistory.1.saleDate"),
     },
     listing: {
       status: pick(r, "listing.status", "mls.status"),
@@ -176,13 +199,13 @@ export function normalizeKnockstatResponse(raw: AnyObj): PropertyRecord {
       crimeIndex: pick(r, "hazards.crimeIndex", "crime.index"),
     },
     ids: {
-      apn: pick(r, "ids.apn", "parcel.apn", "apn"),
-      fips: pick(r, "ids.fips", "parcel.fips", "fips"),
-      county: pick(r, "ids.county", "parcel.county"),
+      apn: pick(r, "ids.apn", "parcel.apn", "apn", "lotInfo.apn", "lotInfo.legalDescription"),
+      fips: pick(r, "ids.fips", "parcel.fips", "fips", "lotInfo.fips"),
+      county: pick(r, "ids.county", "parcel.county", "lotInfo.county"),
       censusTract: pick(r, "ids.censusTract", "census.tract"),
-      subdivision: pick(r, "ids.subdivision", "parcel.subdivision"),
-      legalDescription: pick(r, "ids.legalDescription", "parcel.legalDescription"),
-      knockstatId: pick(r, "id", "knockstatId"),
+      subdivision: pick(r, "ids.subdivision", "parcel.subdivision", "lotInfo.subdivision"),
+      legalDescription: pick(r, "ids.legalDescription", "parcel.legalDescription", "lotInfo.legalDescription"),
+      knockstatId: pick(r, "id", "knockstatId", "propertyId"),
     },
   };
 }
@@ -362,7 +385,7 @@ export async function lookupAddress(
   idToken: string
 ): Promise<AnyObj> {
   const base = import.meta.env.VITE_API_BASE || "/api";
-  const res = await fetch(`${base}/knockstat?address=${encodeURIComponent(address)}`, {
+  const res = await fetch(`${base}/property?address=${encodeURIComponent(address)}`, {
     headers: { Authorization: `Bearer ${idToken}` },
   });
   if (!res.ok) {

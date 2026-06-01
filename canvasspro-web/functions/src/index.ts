@@ -7,10 +7,11 @@ import { getFirestore, FieldValue } from "firebase-admin/firestore";
 initializeApp();
 const db = getFirestore();
 
-const KNOCKSTAT = {
-  baseUrl: process.env.KNOCKSTAT_BASE_URL || "https://api.knockstat.com/v1",
-  endpoint: process.env.KNOCKSTAT_ENDPOINT || "/property",
-  addressParam: "address",
+const REAPI = {
+  baseUrl: process.env.REAL_ESTATE_API_URL || "https://api.realestateapi.com",
+  key: process.env.REAL_ESTATE_API_KEY || process.env.KNOCKSTAT_API_KEY || "",
+  // Best-effort skip-trace for owner phones/emails (extra cost per call). "0" disables.
+  skipTrace: process.env.REAL_ESTATE_SKIPTRACE !== "0",
 };
 
 type Tier = "admin" | "manager" | "user";
@@ -118,10 +119,15 @@ async function rebuildCompanyHierarchy(companyId: string) {
 }
 
 // ───────────────────────────────────────────────────────────────────────────
-// /api/knockstat — authenticated proxy (API key stays server-side).
+// /api/property — authenticated proxy to RealEstateAPI.com (key stays server-
+// side; client only sends a Firebase ID token). Returns PropertyDetail JSON
+// with best-effort owner contacts merged under `_skiptrace`.
 // ───────────────────────────────────────────────────────────────────────────
 export const api = onRequest({ cors: true }, async (req, res) => {
-  if (!req.path.endsWith("/knockstat")) { res.status(404).json({ error: "Not found" }); return; }
+  if (!(req.path.endsWith("/property") || req.path.endsWith("/knockstat"))) {
+    res.status(404).json({ error: "Not found" });
+    return;
+  }
   const match = (req.headers.authorization || "").match(/^Bearer (.+)$/);
   if (!match) { res.status(401).json({ error: "Missing bearer token" }); return; }
   try { await getAuth().verifyIdToken(match[1]); }
@@ -129,16 +135,50 @@ export const api = onRequest({ cors: true }, async (req, res) => {
 
   const address = (req.query.address as string | undefined)?.trim();
   if (!address) { res.status(400).json({ error: "address query param required" }); return; }
-  const apiKey = process.env.KNOCKSTAT_API_KEY;
-  if (!apiKey) { logger.error("KNOCKSTAT_API_KEY not set"); res.status(503).json({ error: "Lookup service not configured" }); return; }
+  if (!REAPI.key) {
+    logger.error("REAL_ESTATE_API_KEY not set");
+    res.status(503).json({ error: "Property data not configured — set REAL_ESTATE_API_KEY" });
+    return;
+  }
   try {
-    const url = new URL(KNOCKSTAT.baseUrl + KNOCKSTAT.endpoint);
-    url.searchParams.set(KNOCKSTAT.addressParam, address);
-    const upstream = await fetch(url.toString(), { headers: { Accept: "application/json", Authorization: `Bearer ${apiKey}` } });
-    const body = await upstream.text();
-    res.status(upstream.status).set("Content-Type", "application/json").send(body);
+    const detailRes = await fetch(`${REAPI.baseUrl}/v2/PropertyDetail`, {
+      method: "POST",
+      headers: { "x-api-key": REAPI.key, "Content-Type": "application/json", Accept: "application/json" },
+      body: JSON.stringify({ address }),
+    });
+    const detail: any = await detailRes.json().catch(() => ({}));
+    if (!detailRes.ok) { res.status(detailRes.status).json(detail); return; }
+
+    // Best-effort skip-trace for owner phones/emails.
+    if (REAPI.skipTrace) {
+      try {
+        const d = detail?.data || {};
+        const oi = d.ownerInfo || {};
+        const addr = d.propertyInfo?.address || d.address || {};
+        const parts = String(oi.owner1FullName || "").trim().split(/\s+/);
+        const first = parts[0] || "";
+        const last = parts.length > 1 ? parts[parts.length - 1] : "";
+        if (first && last) {
+          const stRes = await fetch(`${REAPI.baseUrl}/v1/SkipTrace`, {
+            method: "POST",
+            headers: { "x-api-key": REAPI.key, "Content-Type": "application/json", Accept: "application/json" },
+            body: JSON.stringify({
+              first_name: first, last_name: last,
+              address: addr.address || addr.label || address, city: addr.city, state: addr.state, zip: addr.zip,
+            }),
+          });
+          if (stRes.ok) {
+            const st: any = await stRes.json().catch(() => null);
+            if (st) detail._skiptrace = st.output || st.data || st;
+          }
+        }
+      } catch (e) {
+        logger.warn("Skip-trace failed (continuing with property data)", e);
+      }
+    }
+    res.status(200).json(detail);
   } catch (err) {
-    logger.error("Knockstat request failed", err);
+    logger.error("RealEstateAPI request failed", err);
     res.status(502).json({ error: "Upstream request failed" });
   }
 });
