@@ -7,11 +7,12 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
+    "build:native": "tsc --noEmit && VITE_NATIVE=1 VITE_API_BASE=https://youtilityknock.web.app/api vite build",
     "preview": "vite preview",
     "lint": "tsc --noEmit",
-    "cap:sync": "npm run build && cap sync",
-    "cap:ios": "npm run build && cap sync ios && cap open ios",
-    "cap:android": "npm run build && cap sync android && cap open android",
+    "cap:sync": "npm run build:native && cap sync",
+    "cap:ios": "npm run build:native && cap sync ios && cap open ios",
+    "cap:android": "npm run build:native && cap sync android && cap open android",
     "emulators": "firebase emulators:start",
     "deploy": "npm run build && firebase deploy"
   },
@@ -19,6 +20,7 @@
     "@capacitor/app": "^6.0.0",
     "@capacitor/core": "^6.1.2",
     "@capacitor/geolocation": "^6.0.1",
+    "@capacitor/ios": "^6.1.2",
     "firebase": "^10.13.2",
     "leaflet": "^1.9.4",
     "leaflet.markercluster": "^1.5.3",

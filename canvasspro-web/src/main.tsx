@@ -6,9 +6,13 @@ import { AuthProvider } from "./auth/AuthContext";
 import { ShiftProvider } from "./shift/ShiftContext";
 import "./index.css";
 
+// Native (Capacitor) builds run from the bundle root; the web build is served
+// under /app on Firebase Hosting.
+const basename = import.meta.env.VITE_NATIVE === "1" ? "/" : "/app";
+
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
-    <BrowserRouter basename="/app">
+    <BrowserRouter basename={basename}>
       <AuthProvider>
         <ShiftProvider>
           <App />
