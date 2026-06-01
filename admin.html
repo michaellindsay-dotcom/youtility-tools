@@ -366,6 +366,54 @@
       <tbody id="usersBody"><tr><td colspan="6" class="muted">Select a company…</td></tr></tbody>
     </table>
   </section>
+
+  <!-- Rewards (per company) -->
+  <section id="rewardsCard" class="card hidden">
+    <h2><span id="rewardsTitle">Rewards</span>
+      <button id="newRewardBtn" class="btn primary sm">+ New reward</button>
+    </h2>
+    <p class="muted" style="margin:-6px 0 14px;font-size:13px;">
+      Incentives reps see in the app. Benchmark rewards auto-unlock at a target; store rewards are redeemed with points.
+    </p>
+    <div id="rewardForm" class="hidden" style="margin-bottom:16px;">
+      <div class="grid-2">
+        <div class="field"><span>Name *</span><input id="rwName" placeholder="e.g. $100 gift card" /></div>
+        <div class="field"><span>Description</span><input id="rwDesc" placeholder="What they win" /></div>
+        <div class="field"><span>Type</span>
+          <select id="rwKind"><option value="benchmark">Benchmark — auto-unlocks at a target</option><option value="store">Store — redeem with points</option></select>
+        </div>
+        <div class="field"><span>Who for</span>
+          <select id="rwAud"><option value="individual">Individual rep</option><option value="team">Whole team (group goal)</option></select>
+        </div>
+        <div class="field" id="rwMetricField"><span>Metric</span>
+          <select id="rwMetric"><option value="sales">Closes</option><option value="appointments">Appointments</option><option value="doors">Doors</option><option value="conversations">Conversations</option><option value="points">Points</option></select>
+        </div>
+        <div class="field" id="rwPeriodField"><span>Window</span>
+          <select id="rwPeriod"><option value="weekly">Weekly</option><option value="monthly" selected>Monthly</option><option value="alltime">All-time</option></select>
+        </div>
+        <div class="field"><span id="rwTargetLbl">Target</span><input id="rwTarget" type="number" min="1" value="10" /></div>
+        <div class="field"><span>Image</span><input id="rwImage" type="file" accept="image/*" /></div>
+      </div>
+      <div class="row" style="justify-content:flex-end;">
+        <button id="rwCancel" class="btn ghost sm">Cancel</button>
+        <button id="rwSave" class="btn primary sm">Create reward</button>
+      </div>
+      <div id="rewardBanner" class="banner"></div>
+    </div>
+    <table>
+      <thead><tr><th>Reward</th><th>Type</th><th>Who</th><th>Condition</th><th>Status</th><th></th></tr></thead>
+      <tbody id="rewardsBody"><tr><td colspan="6" class="muted">Select a company…</td></tr></tbody>
+    </table>
+  </section>
+
+  <!-- Redemptions (per company) -->
+  <section id="redemptionsCard" class="card hidden">
+    <h2>Redemptions <span id="redeemPending" class="pill"></span></h2>
+    <table>
+      <thead><tr><th>Rep</th><th>Reward</th><th>When</th><th>Status</th><th></th></tr></thead>
+      <tbody id="redemptionsBody"><tr><td colspan="5" class="muted">No redemptions yet.</td></tr></tbody>
+    </table>
+  </section>
 </div>
 
 <script type="module">
@@ -383,15 +431,18 @@ const FIREBASE_CONFIG = {
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.13.2/firebase-app.js";
 import { getAuth, signInWithEmailAndPassword, onAuthStateChanged, signOut }
   from "https://www.gstatic.com/firebasejs/10.13.2/firebase-auth.js";
-import { getFirestore, collection, query, where, orderBy, getDocs, doc, getDoc }
+import { getFirestore, collection, query, where, orderBy, getDocs, doc, getDoc, addDoc, updateDoc, deleteDoc }
   from "https://www.gstatic.com/firebasejs/10.13.2/firebase-firestore.js";
 import { getFunctions, httpsCallable }
   from "https://www.gstatic.com/firebasejs/10.13.2/firebase-functions.js";
+import { getStorage, ref as sRef, uploadBytes, getDownloadURL }
+  from "https://www.gstatic.com/firebasejs/10.13.2/firebase-storage.js";
 
 const app = initializeApp(FIREBASE_CONFIG);
 const auth = getAuth(app);
 const db = getFirestore(app);
 const fns = getFunctions(app);
+const storage = getStorage(app);
 
 const $ = (id) => document.getElementById(id);
 const state = {
@@ -488,12 +539,101 @@ async function selectCompany(companyId, companyName) {
   $("teamsTitle").textContent = "Teams" + suffix;
   $("usersTitle").textContent = "Accounts" + suffix;
   $("schedulingTitle").textContent = "Scheduling" + suffix;
+  $("rewardsTitle").textContent = "Rewards" + suffix;
   $("rolesCard").classList.remove("hidden");
   $("teamsCard").classList.remove("hidden");
   $("schedulingCard").classList.remove("hidden");
-  await Promise.all([loadRoles(), loadTeams(), loadScheduling(companyId)]);
+  $("rewardsCard").classList.remove("hidden");
+  $("redemptionsCard").classList.remove("hidden");
+  await Promise.all([loadRoles(), loadTeams(), loadScheduling(companyId), loadRewards(companyId), loadRedemptions(companyId)]);
   await loadUsers();
   populateUserFormSelects();
+}
+
+// ── Rewards (per company) ────────────────────────────────────────────────
+const METRIC_LBL = { sales:"Closes", appointments:"Appointments", doors:"Doors", conversations:"Conversations", points:"Points" };
+function syncRewardForm() {
+  const store = $("rwKind").value === "store";
+  const team = $("rwAud").value === "team";
+  $("rwMetricField").style.display = store ? "none" : "";
+  $("rwPeriodField").style.display = store || team ? "none" : "";
+  $("rwTargetLbl").textContent = store ? "Cost (points)" : "Target";
+}
+$("rwKind").addEventListener("change", syncRewardForm);
+$("rwAud").addEventListener("change", syncRewardForm);
+$("newRewardBtn").addEventListener("click", () => { $("rewardForm").classList.toggle("hidden"); syncRewardForm(); });
+$("rwCancel").addEventListener("click", () => $("rewardForm").classList.add("hidden"));
+$("rwSave").addEventListener("click", async () => {
+  const companyId = state.selectedCompany; if (!companyId) return;
+  const name = $("rwName").value.trim();
+  if (!name) { banner($("rewardBanner"), "Name is required.", "error"); return; }
+  const kind = $("rwKind").value, aud = $("rwAud").value;
+  $("rwSave").disabled = true;
+  try {
+    let imageUrl = "";
+    const file = $("rwImage").files?.[0];
+    if (file) {
+      const r = sRef(storage, `rewards/${companyId}/${Date.now()}_${file.name.replace(/[^\w.-]/g,"_")}`);
+      await uploadBytes(r, file); imageUrl = await getDownloadURL(r);
+    }
+    await addDoc(collection(db, "companies", companyId, "rewards"), {
+      companyId, name, description: $("rwDesc").value.trim() || "", imageUrl,
+      kind, audience: aud,
+      metric: kind === "store" ? "points" : $("rwMetric").value,
+      period: kind === "store" || aud === "team" ? "alltime" : $("rwPeriod").value,
+      target: Number($("rwTarget").value) || 1, active: true, createdAt: Date.now(), createdBy: auth.currentUser.uid,
+    });
+    $("rwName").value = $("rwDesc").value = ""; $("rwImage").value = "";
+    $("rewardForm").classList.add("hidden");
+    banner($("banner"), "Reward created.", "good");
+    await loadRewards(companyId);
+  } catch (e) { banner($("rewardBanner"), e.message || "Could not save reward (is Storage enabled?).", "error"); }
+  finally { $("rwSave").disabled = false; }
+});
+async function loadRewards(companyId) {
+  const body = $("rewardsBody");
+  body.innerHTML = `<tr><td colspan="6" class="muted">Loading…</td></tr>`;
+  try {
+    const snap = await getDocs(collection(db, "companies", companyId, "rewards"));
+    const rows = snap.docs.map((d) => ({ id:d.id, ...d.data() }));
+    if (!rows.length) { body.innerHTML = `<tr><td colspan="6" class="muted">No rewards yet.</td></tr>`; return; }
+    body.innerHTML = "";
+    rows.forEach((r) => {
+      const active = r.active !== false;
+      const cond = r.kind === "store" ? `${(r.target||0).toLocaleString()} pts`
+        : `${(r.target||0).toLocaleString()} ${(METRIC_LBL[r.metric]||r.metric||"").toLowerCase()}${r.audience==="team" ? " (team)" : " · "+(r.period||"")}`;
+      const tr = document.createElement("tr");
+      tr.innerHTML = `<td>${esc(r.name)}</td><td>${esc(r.kind)}</td><td>${esc(r.audience)}</td><td class="muted small">${esc(cond)}</td>`+
+        `<td><span class="badge ${active?"":"disabled"}">${active?"active":"inactive"}</span></td>`+
+        `<td class="row" style="gap:6px;"><button class="btn ghost sm tgl">${active?"Deactivate":"Activate"}</button><button class="btn ghost sm del">Delete</button></td>`;
+      tr.querySelector(".tgl").addEventListener("click", async () => { await updateDoc(doc(db,"companies",companyId,"rewards",r.id), { active: !active }); loadRewards(companyId); });
+      tr.querySelector(".del").addEventListener("click", async () => { if (confirm(`Delete "${r.name}"?`)) { await deleteDoc(doc(db,"companies",companyId,"rewards",r.id)); loadRewards(companyId); } });
+      body.appendChild(tr);
+    });
+  } catch (e) { body.innerHTML = `<tr><td colspan="6" class="banner error show">${esc(e.message)}</td></tr>`; }
+}
+async function loadRedemptions(companyId) {
+  const body = $("redemptionsBody");
+  body.innerHTML = `<tr><td colspan="5" class="muted">Loading…</td></tr>`;
+  try {
+    const snap = await getDocs(query(collection(db, "redemptions"), where("companyId","==",companyId), orderBy("createdAt","desc")));
+    const rows = snap.docs.map((d) => ({ id:d.id, ...d.data() }));
+    const pending = rows.filter((r) => r.status === "requested").length;
+    $("redeemPending").textContent = pending ? `${pending} pending` : "";
+    if (!rows.length) { body.innerHTML = `<tr><td colspan="5" class="muted">No redemptions yet.</td></tr>`; return; }
+    body.innerHTML = "";
+    rows.forEach((r) => {
+      const tr = document.createElement("tr");
+      const when = r.createdAt ? new Date(r.createdAt).toLocaleDateString() : "—";
+      tr.innerHTML = `<td>${esc(r.userName||r.userId)}</td><td>${esc(r.rewardName||"")}</td><td class="muted">${when}</td>`+
+        `<td><span class="badge ${r.status==="fulfilled"?"disabled":""}">${esc(r.status||"")}</span></td>`+
+        `<td class="row" style="gap:6px;">${r.status==="requested"?'<button class="btn primary sm ful">Mark fulfilled</button>':""}<button class="btn ghost sm dis">✕</button></td>`;
+      const ful = tr.querySelector(".ful");
+      if (ful) ful.addEventListener("click", async () => { await updateDoc(doc(db,"redemptions",r.id), { status:"fulfilled" }); loadRedemptions(companyId); });
+      tr.querySelector(".dis").addEventListener("click", async () => { await deleteDoc(doc(db,"redemptions",r.id)); loadRedemptions(companyId); });
+      body.appendChild(tr);
+    });
+  } catch (e) { body.innerHTML = `<tr><td colspan="5" class="banner error show">${esc(e.message)}</td></tr>`; }
 }
 
 // ── Scheduling settings (per company) ────────────────────────────────────
