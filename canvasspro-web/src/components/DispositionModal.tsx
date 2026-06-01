@@ -298,6 +298,11 @@ export default function DispositionModal({
 
   if (!d) return null;
 
+  // Appointment booking window from company scheduling settings.
+  const sched = company?.scheduling;
+  const apptMin = sched ? toLocalInput(Date.now() + (sched.apptMinLeadHours || 0) * 3600_000) : undefined;
+  const apptMax = sched ? toLocalInput(Date.now() + (sched.apptMaxDaysOut || 30) * 86400_000) : undefined;
+
   return (
     <div className="modal-overlay" onClick={onClose}>
       <div className="dispo-card" onClick={(e) => e.stopPropagation()}>
@@ -375,12 +380,22 @@ export default function DispositionModal({
               <span>📅 Schedule {SCHEDULE_FOR[d.status].label.toLowerCase()}</span>
             </label>
             {schedule && (
-              <input
-                type="datetime-local"
-                className="dispo-sched-input"
-                value={scheduleAt}
-                onChange={(e) => setScheduleAt(e.target.value)}
-              />
+              <>
+                <input
+                  type="datetime-local"
+                  className="dispo-sched-input"
+                  value={scheduleAt}
+                  min={d.status === "appointment" ? apptMin : undefined}
+                  max={d.status === "appointment" ? apptMax : undefined}
+                  onChange={(e) => setScheduleAt(e.target.value)}
+                />
+                {d.status === "appointment" && company?.scheduling && (
+                  <div className="muted small" style={{ marginTop: 6 }}>
+                    {company.scheduling.apptDurationMin}-min appointment · book {company.scheduling.apptMinLeadHours}h+
+                    out, within {company.scheduling.apptMaxDaysOut} days
+                  </div>
+                )}
+              </>
             )}
           </div>
         )}

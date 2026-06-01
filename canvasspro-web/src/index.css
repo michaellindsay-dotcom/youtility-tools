@@ -964,6 +964,28 @@ details.raw pre {
 .photo-clear {
   align-self: center;
 }
+
+/* Calendar link rows in Settings */
+.cal-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 0;
+  border-top: 1px solid var(--line);
+}
+.cal-row:first-of-type {
+  border-top: none;
+}
+.cal-ico {
+  font-size: 22px;
+}
+.cal-info {
+  flex: 1;
+}
+.cal-name {
+  font-size: 14px;
+  font-weight: 600;
+}
 .lead-pin span {
   display: block;
   width: 16px;

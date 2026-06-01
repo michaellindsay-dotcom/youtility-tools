@@ -9,7 +9,8 @@ import {
   query,
   where,
 } from "firebase/firestore";
-import { db } from "../firebase";
+import { httpsCallable } from "firebase/functions";
+import { db, functions } from "../firebase";
 import { useAuth } from "../auth/AuthContext";
 import type { EventType, ScheduleEvent } from "../types";
 
@@ -26,7 +27,7 @@ function toLocalInput(ms: number): string {
 }
 
 export default function Schedule() {
-  const { profile, role, companyId } = useAuth();
+  const { profile, role, companyId, company } = useAuth();
   const [events, setEvents] = useState<ScheduleEvent[]>([]);
   const [type, setType] = useState<EventType>("appointment");
   const [title, setTitle] = useState("");
@@ -34,6 +35,14 @@ export default function Schedule() {
   const [when, setWhen] = useState(toLocalInput(Date.now() + 60 * 60 * 1000));
   const [notes, setNotes] = useState("");
   const [saving, setSaving] = useState(false);
+  const [autoAssign, setAutoAssign] = useState(false);
+  const [assignMsg, setAssignMsg] = useState("");
+
+  // Admins/managers can auto-route appointments when the company isn't self-gen.
+  const canAssign =
+    (role === "admin" || role === "manager") &&
+    !!company?.scheduling &&
+    company.scheduling.assignment !== "self_gen";
 
   useEffect(() => {
     if (!profile || !companyId) return;
@@ -62,23 +71,42 @@ export default function Schedule() {
     e.preventDefault();
     if (!profile || !companyId || !title.trim()) return;
     setSaving(true);
+    setAssignMsg("");
     try {
-      await addDoc(collection(db, "events"), {
-        companyId,
-        userId: profile.uid,
-        userName: profile.displayName,
-        type,
-        title: title.trim(),
-        address: address.trim() || "",
-        startAt: new Date(when).getTime(),
-        notes: notes.trim() || "",
-        visibilityPath: [profile.uid, ...(profile.managerPath ?? [])],
-        reminded: false,
-        createdAt: Date.now(),
-      });
+      // Appointment + auto-assign → route to an available rep via company policy.
+      if (type === "appointment" && canAssign && autoAssign) {
+        const r = await httpsCallable(functions, "assignAppointment")({
+          companyId,
+          startAt: new Date(when).getTime(),
+          title: title.trim(),
+          address: address.trim() || "",
+          notes: notes.trim() || "",
+        });
+        const data = r.data as { assignedName?: string };
+        setAssignMsg(`Assigned to ${data.assignedName || "an available rep"} ✓`);
+      } else {
+        await addDoc(collection(db, "events"), {
+          companyId,
+          userId: profile.uid,
+          userName: profile.displayName,
+          type,
+          title: title.trim(),
+          address: address.trim() || "",
+          startAt: new Date(when).getTime(),
+          durationMin: company?.scheduling?.apptDurationMin ?? 60,
+          endAt: new Date(when).getTime() + (company?.scheduling?.apptDurationMin ?? 60) * 60000,
+          source: "self_gen",
+          notes: notes.trim() || "",
+          visibilityPath: [profile.uid, ...(profile.managerPath ?? [])],
+          reminded: false,
+          createdAt: Date.now(),
+        });
+      }
       setTitle("");
       setAddress("");
       setNotes("");
+    } catch (err) {
+      setAssignMsg((err as Error).message || "Couldn't save the event.");
     } finally {
       setSaving(false);
     }
@@ -157,9 +185,18 @@ export default function Schedule() {
             <span>Notes</span>
             <textarea className="input" rows={2} value={notes} onChange={(e) => setNotes(e.target.value)} />
           </label>
+          {canAssign && type === "appointment" && (
+            <label className="dispo-sched-toggle" style={{ marginBottom: 4 }}>
+              <input type="checkbox" checked={autoAssign} onChange={(e) => setAutoAssign(e.target.checked)} />
+              <span>
+                Auto-assign to an available rep ({company!.scheduling!.assignment.replace("_", " ")})
+              </span>
+            </label>
+          )}
           <button className="btn primary" type="submit" disabled={saving}>
-            {saving ? "Saving…" : "Add to schedule"}
+            {saving ? "Saving…" : autoAssign ? "Assign appointment" : "Add to schedule"}
           </button>
+          {assignMsg && <div className="muted small">{assignMsg}</div>}
         </form>
 
         <div className="sched-lists">

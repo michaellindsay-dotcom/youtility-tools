@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<!--
+  OAuth popup landing page. Google / Microsoft redirect here with ?code=…
+  after the rep grants calendar access. We hand the code back to the app window
+  that opened this popup, then close. No secrets here — the code is exchanged
+  for tokens server-side by a Cloud Function.
+-->
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>Connecting calendar…</title>
+<style>
+  body { font-family: system-ui, sans-serif; background:#0a0f1a; color:#e8eef8;
+         display:grid; place-items:center; height:100vh; margin:0; text-align:center; }
+</style>
+</head>
+<body>
+<div>
+  <p id="msg">Finishing calendar connection…</p>
+  <p style="color:#6b7589;font-size:13px;">You can close this window.</p>
+</div>
+<script>
+  (function () {
+    var params = new URLSearchParams(window.location.search);
+    var code = params.get("code");
+    var error = params.get("error");
+    var state = params.get("state") || "";
+    var payload = { source: "yk-oauth", code: code, error: error, state: state };
+    try {
+      if (window.opener) {
+        window.opener.postMessage(payload, window.location.origin);
+        document.getElementById("msg").textContent = error
+          ? "Connection cancelled."
+          : "Calendar connected — closing…";
+        setTimeout(function () { window.close(); }, 800);
+      } else {
+        document.getElementById("msg").textContent =
+          "Open this from the app's Settings page.";
+      }
+    } catch (e) {
+      document.getElementById("msg").textContent = "Something went wrong: " + e.message;
+    }
+  })();
+</script>
+</body>
+</html>

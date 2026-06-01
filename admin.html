@@ -195,6 +195,35 @@
     <div id="notifyBanner" class="banner"></div>
   </section>
 
+  <!-- Calendar integrations (super-admin only) -->
+  <section id="integrationsCard" class="card hidden">
+    <h2>Calendar integrations</h2>
+    <p class="muted" style="margin:-6px 0 14px;font-size:13px;">
+      OAuth credentials so reps can link Google / Outlook calendars (two-way sync).
+      Secrets are stored server-side and never shown again. Leave a secret blank to keep it.
+    </p>
+
+    <h3 style="font-size:14px;margin-bottom:10px;">🟦 Google Calendar <span id="gcStatus" class="pill"></span></h3>
+    <div class="grid-2">
+      <div class="field"><span>OAuth Client ID</span><input id="gcClientId" placeholder="xxxx.apps.googleusercontent.com" autocomplete="off" /></div>
+      <div class="field"><span>Client secret</span><input id="gcSecret" type="password" placeholder="leave blank to keep" autocomplete="off" /></div>
+    </div>
+    <div class="row" style="justify-content:flex-end;margin-top:6px;">
+      <button id="gcSave" class="btn primary sm">Save Google</button>
+    </div>
+
+    <h3 style="font-size:14px;margin:22px 0 10px;">🟪 Microsoft / Outlook <span id="msStatus" class="pill"></span></h3>
+    <div class="grid-2">
+      <div class="field"><span>Application (client) ID</span><input id="msClientId" placeholder="00000000-0000-0000-0000-000000000000" autocomplete="off" /></div>
+      <div class="field"><span>Client secret</span><input id="msSecret" type="password" placeholder="leave blank to keep" autocomplete="off" /></div>
+      <div class="field"><span>Tenant</span><input id="msTenant" placeholder="common" /></div>
+    </div>
+    <div class="row" style="justify-content:flex-end;margin-top:6px;">
+      <button id="msSave" class="btn primary sm">Save Microsoft</button>
+    </div>
+    <div id="integBanner" class="banner"></div>
+  </section>
+
   <!-- Roles (titles on a base tier) -->
   <section id="rolesCard" class="card hidden">
     <h2><span id="rolesTitle">Roles &amp; titles</span>
@@ -239,6 +268,32 @@
       <thead><tr><th>Team</th><th>Parent</th><th></th></tr></thead>
       <tbody id="teamsBody"><tr><td colspan="3" class="muted">Select a company…</td></tr></tbody>
     </table>
+  </section>
+
+  <!-- Scheduling settings (per company) -->
+  <section id="schedulingCard" class="card hidden">
+    <h2><span id="schedulingTitle">Scheduling</span></h2>
+    <p class="muted" style="margin:-6px 0 14px;font-size:13px;">
+      Controls how appointments are booked and routed for this company.
+    </p>
+    <div class="grid-2">
+      <div class="field"><span>Minimum lead time (hours)</span><input id="schMinLead" type="number" min="0" value="1" /></div>
+      <div class="field"><span>Max days out</span><input id="schMaxDays" type="number" min="1" value="30" /></div>
+      <div class="field"><span>Appointment length (minutes)</span><input id="schDuration" type="number" min="5" step="5" value="60" /></div>
+      <div class="field"><span>Buffer between appointments (minutes)</span><input id="schBuffer" type="number" min="0" step="5" value="0" /></div>
+      <div class="field"><span>Assignment (non-self-gen appointments)</span>
+        <select id="schAssignment">
+          <option value="self_gen">Self-generated (rep books their own)</option>
+          <option value="round_robin">Round robin (rotate evenly)</option>
+          <option value="highest_production">Highest production (most sales)</option>
+          <option value="manual">Manual (pick a rep)</option>
+        </select>
+      </div>
+    </div>
+    <div class="row" style="justify-content:flex-end;margin-top:8px;">
+      <button id="schSave" class="btn primary sm">Save scheduling</button>
+    </div>
+    <div id="schBanner" class="banner"></div>
   </section>
 
   <!-- Users / accounts -->
@@ -311,6 +366,9 @@ const impersonate     = httpsCallable(fns, "impersonate");
 const getNotificationConfig   = httpsCallable(fns, "getNotificationConfig");
 const setNotificationConfig   = httpsCallable(fns, "setNotificationConfig");
 const clearNotificationProvider = httpsCallable(fns, "clearNotificationProvider");
+const setCompanySettings      = httpsCallable(fns, "setCompanySettings");
+const getIntegrationPublicConfig = httpsCallable(fns, "getIntegrationPublicConfig");
+const setIntegrationConfig    = httpsCallable(fns, "setIntegrationConfig");
 
 function banner(el, msg, kind="info") {
   el.className = "banner show " + kind;
@@ -365,8 +423,10 @@ function enterConsole() {
   if (state.isSuper) {
     $("companiesCard").classList.remove("hidden");
     $("notifyCard").classList.remove("hidden");
+    $("integrationsCard").classList.remove("hidden");
     loadCompanies();
     loadNotifyConfig();
+    loadIntegrations();
   } else {
     // Company admin: locked to their own company.
     selectCompany(state.companyId, "");
@@ -380,12 +440,82 @@ async function selectCompany(companyId, companyName) {
   $("rolesTitle").textContent = "Roles & titles" + suffix;
   $("teamsTitle").textContent = "Teams" + suffix;
   $("usersTitle").textContent = "Accounts" + suffix;
+  $("schedulingTitle").textContent = "Scheduling" + suffix;
   $("rolesCard").classList.remove("hidden");
   $("teamsCard").classList.remove("hidden");
-  await Promise.all([loadRoles(), loadTeams()]);
+  $("schedulingCard").classList.remove("hidden");
+  await Promise.all([loadRoles(), loadTeams(), loadScheduling(companyId)]);
   await loadUsers();
   populateUserFormSelects();
 }
+
+// ── Scheduling settings (per company) ────────────────────────────────────
+async function loadScheduling(companyId) {
+  try {
+    const snap = await getDoc(doc(db, "companies", companyId));
+    const s = (snap.exists() ? snap.data().scheduling : null) || {};
+    $("schMinLead").value = s.apptMinLeadHours ?? 1;
+    $("schMaxDays").value = s.apptMaxDaysOut ?? 30;
+    $("schDuration").value = s.apptDurationMin ?? 60;
+    $("schBuffer").value = s.bufferMin ?? 0;
+    $("schAssignment").value = s.assignment || "self_gen";
+  } catch (e) {
+    banner($("schBanner"), e.message || "Could not load scheduling.", "error");
+  }
+}
+$("schSave").addEventListener("click", async () => {
+  if (!state.selectedCompany) return;
+  $("schSave").disabled = true;
+  try {
+    await setCompanySettings({
+      companyId: state.selectedCompany,
+      scheduling: {
+        apptMinLeadHours: Number($("schMinLead").value),
+        apptMaxDaysOut: Number($("schMaxDays").value),
+        apptDurationMin: Number($("schDuration").value),
+        bufferMin: Number($("schBuffer").value),
+        assignment: $("schAssignment").value,
+      },
+    });
+    banner($("schBanner"), "Scheduling saved.", "good");
+  } catch (e) { banner($("schBanner"), e.message || "Save failed.", "error"); }
+  finally { $("schSave").disabled = false; }
+});
+
+// ── Calendar integrations (super-admin) ──────────────────────────────────
+async function loadIntegrations() {
+  try {
+    const { data } = await getIntegrationPublicConfig();
+    setStatusPill($("gcStatus"), data.google.configured);
+    $("gcClientId").value = data.google.clientId || "";
+    $("gcClientId").placeholder = data.google.configured ? "configured (overwrite to change)" : "xxxx.apps.googleusercontent.com";
+    setStatusPill($("msStatus"), data.microsoft.configured);
+    $("msClientId").value = data.microsoft.clientId || "";
+    $("msTenant").value = data.microsoft.tenant || "common";
+  } catch (e) {
+    banner($("integBanner"), e.message || "Could not load integrations.", "error");
+  }
+}
+$("gcSave").addEventListener("click", async () => {
+  $("gcSave").disabled = true;
+  try {
+    await setIntegrationConfig({ googleClientId: $("gcClientId").value, googleClientSecret: $("gcSecret").value });
+    $("gcSecret").value = "";
+    banner($("integBanner"), "Google credentials saved.", "good");
+    loadIntegrations();
+  } catch (e) { banner($("integBanner"), e.message || "Save failed.", "error"); }
+  finally { $("gcSave").disabled = false; }
+});
+$("msSave").addEventListener("click", async () => {
+  $("msSave").disabled = true;
+  try {
+    await setIntegrationConfig({ microsoftClientId: $("msClientId").value, microsoftClientSecret: $("msSecret").value, microsoftTenant: $("msTenant").value });
+    $("msSecret").value = "";
+    banner($("integBanner"), "Microsoft credentials saved.", "good");
+    loadIntegrations();
+  } catch (e) { banner($("integBanner"), e.message || "Save failed.", "error"); }
+  finally { $("msSave").disabled = false; }
+});
 
 // ── Notification provider keys (super-admin) ─────────────────────────────
 function setStatusPill(el, configured) {
