@@ -776,6 +776,9 @@ details.raw pre {
 }
 
 /* ── Map ─────────────────────────────────────────────────── */
+.home-pin {
+  position: relative;
+}
 .home-pin span {
   width: 28px;
   height: 28px;
@@ -784,6 +787,22 @@ details.raw pre {
   place-items: center;
   border: 2px solid #fff;
   box-shadow: 0 1px 5px rgba(0, 0, 0, 0.55);
+}
+.home-pin .pin-x {
+  position: absolute;
+  top: -3px;
+  right: -3px;
+  width: 15px;
+  height: 15px;
+  background: #ef4444;
+  color: #fff;
+  border: 1px solid #fff;
+  border-radius: 50%;
+  font-size: 9px;
+  font-style: normal;
+  line-height: 1;
+  display: grid;
+  place-items: center;
 }
 .modal-overlay {
   position: fixed;
@@ -1015,6 +1034,167 @@ details.raw pre {
 .stat-hl {
   color: var(--accent-2);
   font-weight: 700;
+}
+
+/* ── Dashboard ───────────────────────────────────────────── */
+.dash-hero {
+  background: linear-gradient(135deg, rgba(14, 165, 233, 0.22), rgba(56, 189, 248, 0.06));
+  border: 1px solid rgba(56, 189, 248, 0.25);
+  border-radius: var(--radius);
+  padding: 22px;
+  margin-bottom: 16px;
+}
+.dash-hero h1 {
+  font-family: "Space Grotesk", sans-serif;
+  font-size: 26px;
+  margin: 4px 0;
+}
+.dash-progress {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin-bottom: 16px;
+}
+.dash-2col {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+@media (max-width: 800px) {
+  .dash-2col {
+    grid-template-columns: 1fr;
+  }
+}
+.planner {
+  background: linear-gradient(135deg, #4c1d95, #6d28d9);
+  border-color: transparent;
+  position: relative;
+}
+.planner-h {
+  border: 0;
+  color: #fff;
+  padding: 0;
+}
+.planner .muted,
+.planner .planner-list span.muted {
+  color: rgba(255, 255, 255, 0.7);
+}
+.planner-list {
+  list-style: none;
+  margin: 10px 0 0;
+  display: grid;
+  gap: 6px;
+  font-size: 14px;
+  color: #fff;
+}
+.planner-ring {
+  position: absolute;
+  top: 18px;
+  right: 18px;
+  text-align: center;
+  color: #fff;
+}
+.ring-pct {
+  font-family: "Space Grotesk", sans-serif;
+  font-size: 28px;
+  font-weight: 700;
+}
+.top-list {
+  margin: 6px 0 10px;
+  padding-left: 18px;
+  display: grid;
+  gap: 6px;
+  font-size: 14px;
+}
+.top-list li {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+}
+.goal-row dd {
+  display: block;
+}
+.goal-bar {
+  height: 6px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  margin-top: 5px;
+  overflow: hidden;
+}
+.goal-bar span {
+  display: block;
+  height: 100%;
+  background: linear-gradient(90deg, var(--accent), var(--accent-2));
+}
+.quick-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 12px;
+}
+.quick-action {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.qa-icon {
+  font-size: 18px;
+  width: 22px;
+  text-align: center;
+}
+.qa-title {
+  font-weight: 600;
+}
+.me-row {
+  background: rgba(14, 165, 233, 0.12);
+}
+
+/* ── Gamify ──────────────────────────────────────────────── */
+.gamify-hero {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  flex-wrap: wrap;
+}
+.gamify-level {
+  text-align: center;
+  width: 90px;
+  height: 90px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: radial-gradient(circle, rgba(14, 165, 233, 0.25), transparent 70%);
+  border: 2px solid var(--accent);
+}
+.gamify-level .ring-pct {
+  color: var(--accent-2);
+}
+.gamify-stats {
+  flex: 1;
+  min-width: 200px;
+}
+.badge-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 12px;
+}
+.badge-card {
+  text-align: center;
+  opacity: 0.45;
+  filter: grayscale(1);
+}
+.badge-card.earned {
+  opacity: 1;
+  filter: none;
+  border-color: var(--accent);
+}
+.badge-emoji {
+  font-size: 30px;
+}
+.badge-label {
+  font-weight: 600;
+  margin-top: 4px;
 }
 
 /* ── Tables / roles ──────────────────────────────────────── */

@@ -10,6 +10,8 @@ import MapPage from "./pages/Map";
 import Team from "./pages/Team";
 import Shifts from "./pages/Shifts";
 import Stats from "./pages/Stats";
+import Leaderboard from "./pages/Leaderboard";
+import Gamify from "./pages/Gamify";
 import Settings from "./pages/Settings";
 
 export default function App() {
@@ -30,6 +32,8 @@ export default function App() {
         <Route path="team" element={<Team />} />
         <Route path="shifts" element={<Shifts />} />
         <Route path="stats" element={<Stats />} />
+        <Route path="leaderboard" element={<Leaderboard />} />
+        <Route path="gamify" element={<Gamify />} />
         <Route path="territories" element={<Territories />} />
         <Route path="settings" element={<Settings />} />
       </Route>

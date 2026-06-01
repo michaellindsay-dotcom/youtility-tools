@@ -1,11 +1,25 @@
 import { useEffect, useState } from "react";
 import { addDoc, collection, doc, updateDoc } from "firebase/firestore";
+import { Geolocation } from "@capacitor/geolocation";
 import { db, auth } from "../firebase";
 import { useAuth } from "../auth/AuthContext";
 import { DISPOSITIONS } from "../lib/dispositions";
 import { lookupAddress, normalizeKnockstatResponse, buildEnrichment } from "../lib/knockstat";
 import { bumpStats } from "../lib/stats";
 import type { LeadStatus, LeadEnrichment } from "../types";
+
+const ONSITE_FT = 100; // a knock only counts if you're within 100 ft of the home
+
+// Distance between two lat/lng points, in feet.
+function distanceFt(a: { lat: number; lng: number }, b: { lat: number; lng: number }): number {
+  const R = 20925524.9; // earth radius in feet
+  const dLat = ((b.lat - a.lat) * Math.PI) / 180;
+  const dLng = ((b.lng - a.lng) * Math.PI) / 180;
+  const s =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos((a.lat * Math.PI) / 180) * Math.cos((b.lat * Math.PI) / 180) * Math.sin(dLng / 2) ** 2;
+  return Math.round(2 * R * Math.asin(Math.sqrt(s)));
+}
 
 export interface DispoInput {
   leadId?: string;
@@ -64,6 +78,8 @@ export default function DispositionModal({
   const [enriching, setEnriching] = useState(false);
   const [saving, setSaving] = useState(false);
   const [summary, setSummary] = useState("");
+  // Geofence: distance from the rep to this home (ft) and whether it counts.
+  const [geo, setGeo] = useState<{ ft: number | null; verified: boolean }>({ ft: null, verified: true });
 
   useEffect(() => {
     if (!target) {
@@ -79,9 +95,22 @@ export default function DispositionModal({
       ...target,
     });
     setSummary(summarize(target.enrichment));
+    setGeo({ ft: null, verified: true });
     if (autoEnrich && !target.enrichment) void enrich(target.address);
+    // Check how far the rep is from the home.
+    if (target.lat != null && target.lng != null) void checkGeo(target.lat, target.lng);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [target]);
+
+  async function checkGeo(lat: number, lng: number) {
+    try {
+      const pos = await Geolocation.getCurrentPosition({ enableHighAccuracy: true, timeout: 8000 });
+      const ft = distanceFt({ lat: pos.coords.latitude, lng: pos.coords.longitude }, { lat, lng });
+      setGeo({ ft, verified: ft <= ONSITE_FT });
+    } catch {
+      setGeo({ ft: null, verified: true }); // no GPS → don't penalize
+    }
+  }
 
   async function enrich(address: string) {
     setEnriching(true);
@@ -121,6 +150,9 @@ export default function DispositionModal({
         status: d.status,
         enrichment: d.enrichment ?? null,
         enriched: !!d.enrichment,
+        verified: geo.verified,
+        distanceFt: geo.ft ?? null,
+        knockedAt: now,
         updatedAt: now,
       };
       if (d.leadId) {
@@ -180,6 +212,13 @@ export default function DispositionModal({
 
         {(summary || enriching) && (
           <div className="muted small dispo-summary">{enriching ? "Looking up home data…" : summary}</div>
+        )}
+
+        {geo.ft != null && !geo.verified && (
+          <div className="banner warn show" style={{ marginBottom: 10 }}>
+            ⚠ You're <strong>{geo.ft} ft</strong> from this home (over {ONSITE_FT} ft). This won't count toward
+            your door knocks or stats.
+          </div>
         )}
 
         <label className="field">

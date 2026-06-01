@@ -7,7 +7,9 @@ const links = [
   { to: "/leads", label: "Leads", icon: "☰" },
   { to: "/team", label: "Team", icon: "⛩" },
   { to: "/shifts", label: "Shifts", icon: "◷" },
-  { to: "/stats", label: "Stats", icon: "★" },
+  { to: "/stats", label: "Analytics", icon: "★" },
+  { to: "/leaderboard", label: "Leaderboard", icon: "🏆" },
+  { to: "/gamify", label: "Gamify", icon: "🎮" },
   { to: "/territories", label: "Territories", icon: "▰" },
   { to: "/settings", label: "Settings", icon: "⚐" },
 ];

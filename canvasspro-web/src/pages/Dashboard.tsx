@@ -1,102 +1,270 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import { collection, getCountFromServer, query, where } from "firebase/firestore";
+import { collection, getDocs, query, where, orderBy, limit } from "firebase/firestore";
 import { db } from "../firebase";
 import { useAuth } from "../auth/AuthContext";
-import { DISPOSITIONS } from "../lib/dispositions";
-import type { LeadStatus } from "../types";
+import type { Lead, Shift, UserStats } from "../types";
 
-interface Stats {
-  total: number;
-  byStatus: Partial<Record<LeadStatus, number>>;
+// Default targets (configurable later via a company `config` doc).
+const GOALS = {
+  doorsDay: 100,
+  doorsWeek: 500,
+  doorsMonth: 2000,
+  convWeek: 150,
+  convMonth: 600,
+  apptWeek: 15,
+  apptMonth: 60,
+};
+const MIN_PER_DOOR = 2;
+const CONVO = new Set(["pipeline", "appointment", "not_interested", "sold"]);
+
+function startOfToday() {
+  const d = new Date();
+  d.setHours(0, 0, 0, 0);
+  return d.getTime();
+}
+function startOfWeek() {
+  const d = new Date();
+  const day = (d.getDay() + 6) % 7; // Monday = 0
+  d.setDate(d.getDate() - day);
+  d.setHours(0, 0, 0, 0);
+  return d.getTime();
+}
+function startOfMonth() {
+  const d = new Date();
+  return new Date(d.getFullYear(), d.getMonth(), 1).getTime();
+}
+const knockTime = (l: Lead) => l.knockedAt || l.createdAt;
+
+interface Funnel {
+  doors: number;
+  conv: number;
+  appt: number;
+  closed: number;
+  hours: number;
 }
 
-const STATUS_LABELS: Record<string, string> = Object.fromEntries(
-  DISPOSITIONS.map((d) => [d.value, d.label])
-);
-
 export default function Dashboard() {
-  const { profile, role, companyId } = useAuth();
-  const [stats, setStats] = useState<Stats | null>(null);
+  const { profile } = useAuth();
+  const [leads, setLeads] = useState<Lead[]>([]);
+  const [shifts, setShifts] = useState<Shift[]>([]);
+  const [top, setTop] = useState<UserStats[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    if (!profile || !companyId) return;
+    if (!profile) return;
     let cancelled = false;
     (async () => {
       try {
-        const leads = collection(db, "leads");
-        // Company admins see the whole company; everyone else only their
-        // downstream (visibilityPath contains their uid).
-        const scope = [
-          where("companyId", "==", companyId),
-          ...(role === "admin"
-            ? []
-            : [where("visibilityPath", "array-contains", profile.uid)]),
-        ];
-        const totalSnap = await getCountFromServer(query(leads, ...scope));
-        const statuses: LeadStatus[] = DISPOSITIONS.map((d) => d.value);
-        const byStatus: Partial<Record<LeadStatus, number>> = {};
-        await Promise.all(
-          statuses.map(async (st) => {
-            const snap = await getCountFromServer(
-              query(leads, ...scope, where("status", "==", st))
-            );
-            byStatus[st] = snap.data().count;
-          })
+        const monthStart = startOfMonth();
+        const leadSnap = await getDocs(
+          query(collection(db, "leads"), where("assignedTo", "==", profile.uid), where("createdAt", ">=", monthStart))
         );
-        if (!cancelled) {
-          setStats({ total: totalSnap.data().count, byStatus });
-          setLoading(false);
+        const shiftSnap = await getDocs(
+          query(collection(db, "shifts"), where("userId", "==", profile.uid), where("startAt", ">=", monthStart))
+        );
+        let topSnap;
+        try {
+          topSnap = await getDocs(
+            query(collection(db, "userStats"), where("companyId", "==", profile.companyId), orderBy("sales", "desc"), limit(5))
+          );
+        } catch {
+          topSnap = null;
         }
-      } catch (err) {
-        console.error("Failed to load stats", err);
+        if (cancelled) return;
+        setLeads(leadSnap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<Lead, "id">) })));
+        setShifts(shiftSnap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<Shift, "id">) })));
+        setTop(topSnap ? topSnap.docs.map((d) => ({ uid: d.id, ...(d.data() as Omit<UserStats, "uid">) })) : []);
+        setLoading(false);
+      } catch (e) {
+        console.error(e);
         if (!cancelled) setLoading(false);
       }
     })();
     return () => {
       cancelled = true;
     };
-  }, [profile, role, companyId]);
+  }, [profile]);
+
+  const f = useMemo(() => {
+    const windows = { today: startOfToday(), week: startOfWeek(), month: startOfMonth() };
+    const verified = leads.filter((l) => l.verified !== false);
+    const since = (ts: number): Funnel => {
+      const ls = verified.filter((l) => knockTime(l) >= ts);
+      const hrs =
+        shifts
+          .filter((s) => s.startAt >= ts)
+          .reduce((sum, s) => sum + ((s.endAt ?? Date.now()) - s.startAt), 0) /
+        3600000;
+      return {
+        doors: ls.length,
+        conv: ls.filter((l) => CONVO.has(l.status)).length,
+        appt: ls.filter((l) => l.status === "appointment").length,
+        closed: ls.filter((l) => l.status === "sold").length,
+        hours: Math.round(hrs * 10) / 10,
+      };
+    };
+    return { today: since(windows.today), week: since(windows.week), month: since(windows.month) };
+  }, [leads, shifts]);
+
+  // Success planner — what they need to hit goals at current pace.
+  const plan = useMemo(() => {
+    const now = new Date();
+    const dim = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
+    const daysLeftWeek = Math.max(1, 7 - ((now.getDay() + 6) % 7));
+    const daysLeftMonth = Math.max(1, dim - now.getDate() + 1);
+    const todayLeft = Math.max(0, GOALS.doorsDay - f.today.doors);
+    const weekLeft = Math.max(0, GOALS.doorsWeek - f.week.doors);
+    const monthLeft = Math.max(0, GOALS.doorsMonth - f.month.doors);
+    return {
+      todayLeft,
+      todayMin: todayLeft * MIN_PER_DOOR,
+      weekPerDay: Math.ceil(weekLeft / daysLeftWeek),
+      monthPerDay: Math.ceil(monthLeft / daysLeftMonth),
+      monthlyPct: Math.min(100, Math.round((f.month.doors / GOALS.doorsMonth) * 100)),
+    };
+  }, [f]);
+
+  const pct = (n: number, d: number) => Math.min(100, Math.round((n / d) * 100));
+  const first = profile?.displayName?.split(" ")[0] ?? "there";
 
   return (
-    <div className="page-body">
-      <div className="page-head">
-        <h1>Welcome back{profile?.displayName ? `, ${profile.displayName.split(" ")[0]}` : ""}</h1>
-        <p className="page-sub">
-          {role === "user" ? "Your" : "Team"} canvassing activity at a glance.
-        </p>
+    <div className="page-body dash">
+      <div className="dash-hero">
+        <div className="muted small">YoutilityKnock</div>
+        <h1>Welcome back, {first}!</h1>
+        <p className="page-sub">Track your progress, crush your goals, and climb the leaderboard.</p>
       </div>
 
-      {loading ? (
-        <div className="muted">Loading stats…</div>
-      ) : !stats ? (
-        <div className="banner warn show">Couldn't load stats. Check Firestore configuration.</div>
-      ) : (
-        <div className="stat-grid">
-          <div className="stat-card highlight">
-            <div className="stat-value">{stats.total}</div>
-            <div className="stat-label">Total leads</div>
+      {/* Today's progress */}
+      <div className="card dash-progress">
+        <div>
+          <strong>Today's Progress</strong>
+          <div className="muted small">
+            {f.today.doors} / {GOALS.doorsDay} doors ({pct(f.today.doors, GOALS.doorsDay)}%)
           </div>
-          {(Object.keys(STATUS_LABELS) as LeadStatus[]).map((st) => (
-            <div className="stat-card" key={st}>
-              <div className="stat-value">{stats.byStatus[st] ?? 0}</div>
-              <div className="stat-label">{STATUS_LABELS[st]}</div>
-            </div>
-          ))}
         </div>
-      )}
-
-      <div className="quick-links">
-        <Link to="/lookup" className="card link-card">
-          <h2>⌖ Run an address lookup</h2>
-          <p className="muted">Pull homeowner intel before you knock.</p>
-        </Link>
-        <Link to="/leads" className="card link-card">
-          <h2>☰ Work your leads</h2>
-          <p className="muted">Update statuses and notes from the field.</p>
-        </Link>
+        <div className="row">
+          <Link to="/shifts" className="btn primary sm">▶ Start Shift</Link>
+          <Link to="/leaderboard" className="btn sm">🏆 Leaderboard</Link>
+        </div>
       </div>
+
+      <div className="dash-2col">
+        {/* Success planner */}
+        <div className="card planner">
+          <h2 className="planner-h">◎ Success Planner</h2>
+          <p className="muted small">Based on your pace, here's what you need to hit your goals:</p>
+          <ul className="planner-list">
+            <li><strong>Today:</strong> {plan.todayLeft} more doors <span className="muted">(~{plan.todayMin} min)</span></li>
+            <li><strong>This week:</strong> {plan.weekPerDay} doors/day <span className="muted">({f.week.doors}/{GOALS.doorsWeek} done)</span></li>
+            <li><strong>This month:</strong> {plan.monthPerDay} doors/day <span className="muted">({f.month.doors}/{GOALS.doorsMonth} done)</span></li>
+          </ul>
+          <div className="planner-ring">
+            <div className="ring-pct">{plan.monthlyPct}%</div>
+            <div className="muted small">monthly</div>
+          </div>
+        </div>
+
+        {/* Top performers */}
+        <div className="card">
+          <h2>🏆 Top Performers</h2>
+          {top.length === 0 ? (
+            <p className="muted small">No activity this week yet.</p>
+          ) : (
+            <ol className="top-list">
+              {top.map((t) => (
+                <li key={t.uid}>
+                  <span>{t.userName || t.uid}</span>
+                  <span className="muted">{t.sales ?? 0} sold · {t.appointments ?? 0} appts</span>
+                </li>
+              ))}
+            </ol>
+          )}
+          <Link to="/leaderboard" className="muted small">View full leaderboard →</Link>
+        </div>
+      </div>
+
+      {/* Goal progress */}
+      <h2 className="section-h">◎ Goal Progress</h2>
+      <div className="dash-2col">
+        <GoalCard title="This Week" rows={[
+          ["Doors", f.week.doors, GOALS.doorsWeek],
+          ["Conversations", f.week.conv, GOALS.convWeek],
+          ["Appointments", f.week.appt, GOALS.apptWeek],
+        ]} note={`${plan.weekPerDay} doors/day to goal`} />
+        <GoalCard title="This Month" rows={[
+          ["Doors", f.month.doors, GOALS.doorsMonth],
+          ["Conversations", f.month.conv, GOALS.convMonth],
+          ["Appointments", f.month.appt, GOALS.apptMonth],
+        ]} note={`${plan.monthPerDay} doors/day · ${f.month.hours}h logged`} />
+      </div>
+
+      {/* Today's funnel */}
+      <h2 className="section-h">Today's Funnel</h2>
+      <div className="stat-grid">
+        <FunnelCard n={f.today.doors} label="Doors Knocked" sub={`${f.today.hours}h on shift`} />
+        <FunnelCard n={f.today.conv} label="Conversations" sub={`${pct(f.today.conv, f.today.doors || 1)}% conv rate`} />
+        <FunnelCard n={f.today.appt} label="Appts Set" sub={`${pct(f.today.appt, f.today.conv || 1)}% set rate`} />
+        <FunnelCard n={f.today.closed} label="Closed" sub={`${pct(f.today.closed, f.today.appt || 1)}% close rate`} />
+      </div>
+
+      {/* Quick actions */}
+      <h2 className="section-h">Quick Actions</h2>
+      <div className="quick-grid">
+        <QuickAction to="/shifts" icon="▶" title="Start Shift" sub="Track knocks in real-time" />
+        <QuickAction to="/leads" icon="☰" title="Lead List" sub="View leads & appointments" />
+        <QuickAction to="/stats" icon="📈" title="Analytics" sub="Deep dive into metrics" />
+        <QuickAction to="/leaderboard" icon="🏆" title="Leaderboard" sub="See where you rank" />
+        <QuickAction to="/map" icon="◉" title="Map View" sub="Start canvassing" />
+        <QuickAction to="/territories" icon="▰" title="Territories" sub="Manage your zones" />
+      </div>
+
+      {loading && <p className="muted small" style={{ marginTop: 16 }}>Loading your numbers…</p>}
     </div>
+  );
+}
+
+function GoalCard({ title, rows, note }: { title: string; rows: [string, number, number][]; note: string }) {
+  return (
+    <div className="card">
+      <h2>{title}</h2>
+      <dl className="fields">
+        {rows.map(([label, n, goal]) => (
+          <div className="field-row goal-row" key={label}>
+            <dt>{label}</dt>
+            <dd>
+              {n} / {goal}
+              <div className="goal-bar">
+                <span style={{ width: `${Math.min(100, (n / goal) * 100)}%` }} />
+              </div>
+            </dd>
+          </div>
+        ))}
+      </dl>
+      <div className="muted small">{note}</div>
+    </div>
+  );
+}
+
+function FunnelCard({ n, label, sub }: { n: number; label: string; sub: string }) {
+  return (
+    <div className="stat-card">
+      <div className="stat-value">{n}</div>
+      <div className="stat-label">{label}</div>
+      <div className="muted small">{sub}</div>
+    </div>
+  );
+}
+
+function QuickAction({ to, icon, title, sub }: { to: string; icon: string; title: string; sub: string }) {
+  return (
+    <Link to={to} className="card link-card quick-action">
+      <span className="qa-icon">{icon}</span>
+      <div>
+        <div className="qa-title">{title}</div>
+        <div className="muted small">{sub}</div>
+      </div>
+    </Link>
   );
 }

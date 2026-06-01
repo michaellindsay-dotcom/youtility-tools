@@ -19,10 +19,10 @@ const NEAREST_N = 30;
 const HOUSE_SVG =
   '<svg viewBox="0 0 24 24" width="15" height="15" fill="#fff"><path d="M12 3 3 10.5h2.4V21h5.1v-6h3v6h5.1V10.5H21z"/></svg>';
 
-function homeIcon(color: string): L.DivIcon {
+function homeIcon(color: string, flagged = false): L.DivIcon {
   return L.divIcon({
     className: "home-pin",
-    html: `<span style="background:${color}">${HOUSE_SVG}</span>`,
+    html: `<span style="background:${color}">${HOUSE_SVG}</span>${flagged ? '<i class="pin-x">✕</i>' : ""}`,
     iconSize: [30, 30],
     iconAnchor: [15, 15],
   });
@@ -85,7 +85,9 @@ export default function MapPage() {
     leadMarkers.current = [];
     leads.forEach((lead) => {
       if (lead.lat == null || lead.lng == null) return;
-      const m = L.marker([lead.lat, lead.lng], { icon: homeIcon(DISP_COLOR[lead.status] || "#94A3B8") });
+      const m = L.marker([lead.lat, lead.lng], {
+        icon: homeIcon(DISP_COLOR[lead.status] || "#94A3B8", lead.verified === false),
+      });
       m.on("click", () =>
         setDispoTarget({
           leadId: lead.id, address: lead.address, lat: lead.lat, lng: lead.lng, status: lead.status,

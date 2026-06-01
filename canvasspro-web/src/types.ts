@@ -93,6 +93,10 @@ export interface Lead {
   enriched?: boolean;
   enrichedAt?: number;
   enrichment?: LeadEnrichment;
+  // Geofencing: a knock only counts toward stats if the rep was on-site.
+  verified?: boolean;
+  distanceFt?: number;
+  knockedAt?: number;
   companyId: string;
   territoryId?: string;
   assignedTo?: string; // uid (owner)
