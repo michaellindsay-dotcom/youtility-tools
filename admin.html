@@ -162,6 +162,39 @@
     </table>
   </section>
 
+  <!-- Notification provider keys (super-admin only) -->
+  <section id="notifyCard" class="card hidden">
+    <h2>Notification settings</h2>
+    <p class="muted" style="margin:-6px 0 14px;font-size:13px;">
+      Keys for the email + SMS alerts that fire when a teammate is offline. Stored
+      securely server-side and never shown again after saving. Leave a secret blank
+      to keep the current value.
+    </p>
+
+    <h3 style="font-size:14px;margin-bottom:10px;">✉️ Email — SendGrid <span id="sgStatus" class="pill"></span></h3>
+    <div class="grid-2">
+      <div class="field"><span>API key</span><input id="sgKey" type="password" placeholder="SG.xxxxx (leave blank to keep)" autocomplete="off" /></div>
+      <div class="field"><span>From email (verified sender) *</span><input id="sgFrom" type="email" placeholder="alerts@yourdomain.com" /></div>
+      <div class="field"><span>From name</span><input id="sgFromName" placeholder="YoutilityKnock" /></div>
+    </div>
+    <div class="row" style="justify-content:flex-end;gap:8px;margin-top:8px;">
+      <button id="sgClear" class="btn ghost sm">Clear keys</button>
+      <button id="sgSave" class="btn primary sm">Save email keys</button>
+    </div>
+
+    <h3 style="font-size:14px;margin:22px 0 10px;">📱 SMS — Twilio <span id="twStatus" class="pill"></span></h3>
+    <div class="grid-2">
+      <div class="field"><span>Account SID</span><input id="twSid" type="password" placeholder="ACxxxxx (leave blank to keep)" autocomplete="off" /></div>
+      <div class="field"><span>Auth token</span><input id="twToken" type="password" placeholder="leave blank to keep" autocomplete="off" /></div>
+      <div class="field"><span>From number *</span><input id="twFrom" placeholder="+15551234567" /></div>
+    </div>
+    <div class="row" style="justify-content:flex-end;gap:8px;margin-top:8px;">
+      <button id="twClear" class="btn ghost sm">Clear keys</button>
+      <button id="twSave" class="btn primary sm">Save SMS keys</button>
+    </div>
+    <div id="notifyBanner" class="banner"></div>
+  </section>
+
   <!-- Roles (titles on a base tier) -->
   <section id="rolesCard" class="card hidden">
     <h2><span id="rolesTitle">Roles &amp; titles</span>
@@ -275,6 +308,9 @@ const deleteRole      = httpsCallable(fns, "deleteRole");
 const createTeam      = httpsCallable(fns, "createTeam");
 const assignUserHierarchy = httpsCallable(fns, "assignUserHierarchy");
 const impersonate     = httpsCallable(fns, "impersonate");
+const getNotificationConfig   = httpsCallable(fns, "getNotificationConfig");
+const setNotificationConfig   = httpsCallable(fns, "setNotificationConfig");
+const clearNotificationProvider = httpsCallable(fns, "clearNotificationProvider");
 
 function banner(el, msg, kind="info") {
   el.className = "banner show " + kind;
@@ -328,7 +364,9 @@ function enterConsole() {
   $("console").classList.remove("hidden");
   if (state.isSuper) {
     $("companiesCard").classList.remove("hidden");
+    $("notifyCard").classList.remove("hidden");
     loadCompanies();
+    loadNotifyConfig();
   } else {
     // Company admin: locked to their own company.
     selectCompany(state.companyId, "");
@@ -348,6 +386,66 @@ async function selectCompany(companyId, companyName) {
   await loadUsers();
   populateUserFormSelects();
 }
+
+// ── Notification provider keys (super-admin) ─────────────────────────────
+function setStatusPill(el, configured) {
+  el.textContent = configured ? "Configured" : "Not set";
+  el.style.background = configured ? "rgba(52,211,153,.15)" : "rgba(255,255,255,.06)";
+  el.style.color = configured ? "#9ff5d4" : "var(--ink-mid)";
+}
+async function loadNotifyConfig() {
+  try {
+    const { data } = await getNotificationConfig();
+    setStatusPill($("sgStatus"), data.sendgrid.configured);
+    $("sgFrom").value = data.sendgrid.from || "";
+    $("sgFromName").value = data.sendgrid.fromName || "";
+    $("sgKey").placeholder = data.sendgrid.configured ? `${data.sendgrid.keyMask} (leave blank to keep)` : "SG.xxxxx";
+    setStatusPill($("twStatus"), data.twilio.configured);
+    $("twFrom").value = data.twilio.from || "";
+    $("twSid").placeholder = data.twilio.configured ? `${data.twilio.sidMask} (leave blank to keep)` : "ACxxxxx";
+    $("twToken").placeholder = data.twilio.configured ? `${data.twilio.tokenMask} (leave blank to keep)` : "leave blank to keep";
+  } catch (e) {
+    banner($("notifyBanner"), e.message || "Could not load notification config.", "error");
+  }
+}
+$("sgSave").addEventListener("click", async () => {
+  $("sgSave").disabled = true;
+  try {
+    await setNotificationConfig({
+      sendgridKey: $("sgKey").value, // blank → keep existing
+      sendgridFrom: $("sgFrom").value,
+      sendgridFromName: $("sgFromName").value,
+    });
+    $("sgKey").value = "";
+    banner($("notifyBanner"), "Email keys saved.", "good");
+    loadNotifyConfig();
+  } catch (e) { banner($("notifyBanner"), e.message || "Save failed.", "error"); }
+  finally { $("sgSave").disabled = false; }
+});
+$("twSave").addEventListener("click", async () => {
+  $("twSave").disabled = true;
+  try {
+    await setNotificationConfig({
+      twilioSid: $("twSid").value,
+      twilioToken: $("twToken").value,
+      twilioFrom: $("twFrom").value,
+    });
+    $("twSid").value = ""; $("twToken").value = "";
+    banner($("notifyBanner"), "SMS keys saved.", "good");
+    loadNotifyConfig();
+  } catch (e) { banner($("notifyBanner"), e.message || "Save failed.", "error"); }
+  finally { $("twSave").disabled = false; }
+});
+$("sgClear").addEventListener("click", async () => {
+  if (!confirm("Clear the SendGrid keys? Email alerts will stop until re-entered.")) return;
+  try { await clearNotificationProvider({ provider:"sendgrid" }); $("sgKey").value=""; $("sgFrom").value=""; $("sgFromName").value=""; banner($("notifyBanner"),"Email keys cleared.","good"); loadNotifyConfig(); }
+  catch (e) { banner($("notifyBanner"), e.message || "Clear failed.", "error"); }
+});
+$("twClear").addEventListener("click", async () => {
+  if (!confirm("Clear the Twilio keys? SMS alerts will stop until re-entered.")) return;
+  try { await clearNotificationProvider({ provider:"twilio" }); $("twSid").value=""; $("twToken").value=""; $("twFrom").value=""; banner($("notifyBanner"),"SMS keys cleared.","good"); loadNotifyConfig(); }
+  catch (e) { banner($("notifyBanner"), e.message || "Clear failed.", "error"); }
+});
 
 // ── Companies (super-admin) ──────────────────────────────────────────────
 $("newCompanyBtn").addEventListener("click", () => $("companyForm").classList.toggle("hidden"));

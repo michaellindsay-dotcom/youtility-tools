@@ -514,32 +514,51 @@ export const impersonate = onCall(async (request) => {
 //   • If the recipient is currently OFFLINE (no presence heartbeat in the last
 //     ONLINE_WINDOW_MS), we ALSO send email (SendGrid) and SMS (Twilio) so they
 //     hear about it before the apps are live.
-// Email/SMS are best-effort and gated on env keys — absent keys → skipped, no
-// error, so the core app works without them configured.
+// Provider keys come from the super-admin console (Firestore config/notifications),
+// falling back to env vars. Absent keys → email/SMS skipped, no error, so the
+// core app works without them configured.
 // ════════════════════════════════════════════════════════════════════════════
 
-const SENDGRID = {
-  key: process.env.SENDGRID_API_KEY || "",
-  from: process.env.SENDGRID_FROM || "",
-  fromName: process.env.SENDGRID_FROM_NAME || "YoutilityKnock",
-};
-const TWILIO = {
-  sid: process.env.TWILIO_ACCOUNT_SID || "",
-  token: process.env.TWILIO_AUTH_TOKEN || "",
-  from: process.env.TWILIO_FROM || "",
-};
+interface NotifyConfig {
+  sendgridKey: string;
+  sendgridFrom: string;
+  sendgridFromName: string;
+  twilioSid: string;
+  twilioToken: string;
+  twilioFrom: string;
+}
+
+// Read provider config: Firestore (set via super-admin console) overrides env.
+async function getNotifyConfig(): Promise<NotifyConfig> {
+  let c: Record<string, string> = {};
+  try {
+    const snap = await db.doc("config/notifications").get();
+    if (snap.exists) c = (snap.data() as Record<string, string>) || {};
+  } catch (e) {
+    logger.warn("getNotifyConfig read failed", e);
+  }
+  return {
+    sendgridKey: c.sendgridKey || process.env.SENDGRID_API_KEY || "",
+    sendgridFrom: c.sendgridFrom || process.env.SENDGRID_FROM || "",
+    sendgridFromName: c.sendgridFromName || process.env.SENDGRID_FROM_NAME || "YoutilityKnock",
+    twilioSid: c.twilioSid || process.env.TWILIO_ACCOUNT_SID || "",
+    twilioToken: c.twilioToken || process.env.TWILIO_AUTH_TOKEN || "",
+    twilioFrom: c.twilioFrom || process.env.TWILIO_FROM || "",
+  };
+}
+
 // A user is considered "online" if their presence doc was touched this recently.
 const ONLINE_WINDOW_MS = 90 * 1000;
 
-async function sendEmail(to: string, subject: string, text: string): Promise<boolean> {
-  if (!SENDGRID.key || !SENDGRID.from || !to) return false;
+async function sendEmail(cfg: NotifyConfig, to: string, subject: string, text: string): Promise<boolean> {
+  if (!cfg.sendgridKey || !cfg.sendgridFrom || !to) return false;
   try {
     const res = await fetch("https://api.sendgrid.com/v3/mail/send", {
       method: "POST",
-      headers: { Authorization: `Bearer ${SENDGRID.key}`, "Content-Type": "application/json" },
+      headers: { Authorization: `Bearer ${cfg.sendgridKey}`, "Content-Type": "application/json" },
       body: JSON.stringify({
         personalizations: [{ to: [{ email: to }] }],
-        from: { email: SENDGRID.from, name: SENDGRID.fromName },
+        from: { email: cfg.sendgridFrom, name: cfg.sendgridFromName },
         subject,
         content: [{ type: "text/plain", value: text }],
       }),
@@ -552,12 +571,12 @@ async function sendEmail(to: string, subject: string, text: string): Promise<boo
   }
 }
 
-async function sendSms(to: string, body: string): Promise<boolean> {
-  if (!TWILIO.sid || !TWILIO.token || !TWILIO.from || !to) return false;
+async function sendSms(cfg: NotifyConfig, to: string, body: string): Promise<boolean> {
+  if (!cfg.twilioSid || !cfg.twilioToken || !cfg.twilioFrom || !to) return false;
   try {
-    const form = new URLSearchParams({ To: to, From: TWILIO.from, Body: body });
-    const auth = Buffer.from(`${TWILIO.sid}:${TWILIO.token}`).toString("base64");
-    const res = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${TWILIO.sid}/Messages.json`, {
+    const form = new URLSearchParams({ To: to, From: cfg.twilioFrom, Body: body });
+    const auth = Buffer.from(`${cfg.twilioSid}:${cfg.twilioToken}`).toString("base64");
+    const res = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${cfg.twilioSid}/Messages.json`, {
       method: "POST",
       headers: { Authorization: `Basic ${auth}`, "Content-Type": "application/x-www-form-urlencoded" },
       body: form.toString(),
@@ -606,10 +625,11 @@ async function notifyUser(opts: NotifyOpts): Promise<void> {
   const userSnap = await db.doc(`users/${userId}`).get();
   if (!userSnap.exists) return;
   const u = userSnap.data()!;
+  const cfg = await getNotifyConfig();
   const line = body ? `${title}\n\n${body}` : title;
   await Promise.all([
-    u.email ? sendEmail(u.email, `YoutilityKnock — ${title}`, line) : Promise.resolve(false),
-    u.phone ? sendSms(u.phone, line) : Promise.resolve(false),
+    u.email ? sendEmail(cfg, u.email, `YoutilityKnock — ${title}`, line) : Promise.resolve(false),
+    u.phone ? sendSms(cfg, u.phone, line) : Promise.resolve(false),
   ]);
 }
 
@@ -686,4 +706,69 @@ export const eventReminders = onSchedule("every 15 minutes", async () => {
         await d.ref.update({ reminded: true });
       })
   );
+});
+
+// ── super-admin: notification provider config (SendGrid / Twilio) ────────────
+// Secrets live in Firestore config/notifications, readable ONLY by Cloud
+// Functions (rules deny client access). getNotificationConfig returns a MASKED
+// view (configured flags + non-secret fields) so the console can show status
+// without ever shipping the keys back to the browser.
+function mask(v?: string): string {
+  if (!v) return "";
+  return v.length <= 4 ? "••••" : "••••" + v.slice(-4);
+}
+
+export const getNotificationConfig = onCall(async (request) => {
+  const caller = await getCaller(request);
+  if (!caller.isSuper) throw new HttpsError("permission-denied", "Super-admins only.");
+  const snap = await db.doc("config/notifications").get();
+  const c = (snap.exists ? (snap.data() as Record<string, string>) : {}) || {};
+  return {
+    sendgrid: {
+      configured: !!c.sendgridKey,
+      keyMask: mask(c.sendgridKey),
+      from: c.sendgridFrom || "",
+      fromName: c.sendgridFromName || "",
+    },
+    twilio: {
+      configured: !!c.twilioSid && !!c.twilioToken,
+      sidMask: mask(c.twilioSid),
+      tokenMask: mask(c.twilioToken),
+      from: c.twilioFrom || "",
+    },
+  };
+});
+
+export const setNotificationConfig = onCall(async (request) => {
+  const caller = await getCaller(request);
+  if (!caller.isSuper) throw new HttpsError("permission-denied", "Super-admins only.");
+  const d = (request.data || {}) as Record<string, string>;
+  const update: Record<string, unknown> = { updatedAt: Date.now(), updatedBy: caller.uid };
+  // Secrets: only overwrite when a non-empty value is supplied (blank = keep
+  // existing). Non-secret fields are always set from the payload.
+  if (typeof d.sendgridKey === "string" && d.sendgridKey.trim()) update.sendgridKey = d.sendgridKey.trim();
+  if (typeof d.sendgridFrom === "string") update.sendgridFrom = d.sendgridFrom.trim();
+  if (typeof d.sendgridFromName === "string") update.sendgridFromName = d.sendgridFromName.trim();
+  if (typeof d.twilioSid === "string" && d.twilioSid.trim()) update.twilioSid = d.twilioSid.trim();
+  if (typeof d.twilioToken === "string" && d.twilioToken.trim()) update.twilioToken = d.twilioToken.trim();
+  if (typeof d.twilioFrom === "string") update.twilioFrom = d.twilioFrom.trim();
+  await db.doc("config/notifications").set(update, { merge: true });
+  logger.info(`notification config updated by ${caller.uid}`);
+  return { ok: true };
+});
+
+// Clear a single provider's stored secrets (super-admin only).
+export const clearNotificationProvider = onCall(async (request) => {
+  const caller = await getCaller(request);
+  if (!caller.isSuper) throw new HttpsError("permission-denied", "Super-admins only.");
+  const { provider } = (request.data || {}) as { provider?: string };
+  const ref = db.doc("config/notifications");
+  if (provider === "sendgrid") {
+    await ref.set({ sendgridKey: "", sendgridFrom: "", sendgridFromName: "" }, { merge: true });
+  } else if (provider === "twilio") {
+    await ref.set({ twilioSid: "", twilioToken: "", twilioFrom: "" }, { merge: true });
+  } else {
+    throw new HttpsError("invalid-argument", "provider must be 'sendgrid' or 'twilio'.");
+  }
+  return { ok: true };
 });

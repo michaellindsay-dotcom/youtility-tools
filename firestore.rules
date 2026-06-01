@@ -170,5 +170,13 @@ service cloud.firestore {
       allow read: if isSignedIn();
       allow write: if isSignedIn() && request.auth.uid == uid;
     }
+
+    // ── platform config (notification provider keys, etc.) ───────────────
+    // Holds secrets (SendGrid/Twilio). Cloud Functions only — never exposed to
+    // any client. The super-admin console reads/writes via callables that mask
+    // the secrets.
+    match /config/{docId} {
+      allow read, write: if false;
+    }
   }
 }
