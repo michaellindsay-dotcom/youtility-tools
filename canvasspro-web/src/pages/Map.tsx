@@ -1,6 +1,9 @@
 import { useEffect, useRef, useState } from "react";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
+import "leaflet.markercluster";
+import "leaflet.markercluster/dist/MarkerCluster.css";
+import "leaflet.markercluster/dist/MarkerCluster.Default.css";
 import { addDoc, collection, getDocs, query, where } from "firebase/firestore";
 import { Geolocation } from "@capacitor/geolocation";
 import { db, auth } from "../firebase";
@@ -11,7 +14,7 @@ import DispositionModal, { type DispoInput } from "../components/DispositionModa
 import type { Lead, Territory, LatLng } from "../types";
 
 const DEFAULT_CENTER: [number, number] = [40.34, -111.91];
-const PIN_ZOOM = 16; // only show house pins when zoomed in close (so they never look oversized)
+const NEAREST_N = 30;
 
 const HOUSE_SVG =
   '<svg viewBox="0 0 24 24" width="15" height="15" fill="#fff"><path d="M12 3 3 10.5h2.4V21h5.1v-6h3v6h5.1V10.5H21z"/></svg>';
@@ -25,13 +28,11 @@ function homeIcon(color: string): L.DivIcon {
   });
 }
 
-// Ray-casting point-in-polygon.
 function inPolygon(pt: LatLng, poly: LatLng[]): boolean {
   let inside = false;
   for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
     const xi = poly[i].lng, yi = poly[i].lat, xj = poly[j].lng, yj = poly[j].lat;
-    const intersect =
-      yi > pt.lat !== yj > pt.lat && pt.lng < ((xj - xi) * (pt.lat - yi)) / (yj - yi) + xi;
+    const intersect = yi > pt.lat !== yj > pt.lat && pt.lng < ((xj - xi) * (pt.lat - yi)) / (yj - yi) + xi;
     if (intersect) inside = !inside;
   }
   return inside;
@@ -41,10 +42,12 @@ export default function MapPage() {
   const { profile, role, companyId } = useAuth();
   const elRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<L.Map | null>(null);
-  const pinsLayer = useRef<L.LayerGroup>(L.layerGroup());
-  const homesLayer = useRef<L.LayerGroup>(L.layerGroup());
+  const cluster = useRef<L.MarkerClusterGroup | null>(null);
+  const leadMarkers = useRef<L.Marker[]>([]);
+  const homeMarkers = useRef<L.Marker[]>([]);
   const territoryLayer = useRef<L.LayerGroup>(L.layerGroup());
   const assigned = useRef<Territory[]>([]);
+  const myLoc = useRef<LatLng | null>(null);
   const drawPts = useRef<LatLng[]>([]);
   const drawLayer = useRef<L.Polygon | null>(null);
   const modeRef = useRef<"view" | "draw">("view");
@@ -57,14 +60,13 @@ export default function MapPage() {
 
   const canDraw = role === "admin" || role === "manager";
 
-  function refreshPinVisibility() {
-    const map = mapRef.current;
-    if (!map) return;
-    const show = map.getZoom() >= PIN_ZOOM;
-    [pinsLayer.current, homesLayer.current].forEach((layer) => {
-      if (show && !map.hasLayer(layer)) map.addLayer(layer);
-      else if (!show && map.hasLayer(layer)) map.removeLayer(layer);
-    });
+  // Re-populate the cluster from the current lead + home markers. Clustering
+  // shows a count bubble when zoomed out and expands to pins when zoomed in.
+  function syncCluster() {
+    const c = cluster.current;
+    if (!c) return;
+    c.clearLayers();
+    [...leadMarkers.current, ...homeMarkers.current].forEach((m) => c.addLayer(m));
   }
 
   async function fetchLeads(): Promise<Lead[]> {
@@ -79,28 +81,21 @@ export default function MapPage() {
   }
 
   async function buildPins() {
-    pinsLayer.current.clearLayers();
     const leads = await fetchLeads();
+    leadMarkers.current = [];
     leads.forEach((lead) => {
       if (lead.lat == null || lead.lng == null) return;
       const m = L.marker([lead.lat, lead.lng], { icon: homeIcon(DISP_COLOR[lead.status] || "#94A3B8") });
       m.on("click", () =>
         setDispoTarget({
-          leadId: lead.id,
-          address: lead.address,
-          lat: lead.lat,
-          lng: lead.lng,
-          status: lead.status,
-          name: lead.ownerName || "",
-          phone: lead.phone || "",
-          email: lead.email || "",
-          notes: lead.notes || "",
+          leadId: lead.id, address: lead.address, lat: lead.lat, lng: lead.lng, status: lead.status,
+          name: lead.ownerName || "", phone: lead.phone || "", email: lead.email || "", notes: lead.notes || "",
           enrichment: lead.enrichment,
         })
       );
-      pinsLayer.current.addLayer(m);
+      leadMarkers.current.push(m);
     });
-    refreshPinVisibility();
+    syncCluster();
   }
 
   async function buildTerritories() {
@@ -112,52 +107,59 @@ export default function MapPage() {
     snap.forEach((d) => {
       const t = { id: d.id, ...(d.data() as Omit<Territory, "id">) };
       if (!t.polygon || t.polygon.length < 3) return;
-      L.polygon(
-        t.polygon.map((p) => [p.lat, p.lng] as [number, number]),
-        { color: t.color || "#34D399", weight: 2, fillOpacity: 0.08 }
-      )
+      L.polygon(t.polygon.map((p) => [p.lat, p.lng] as [number, number]), {
+        color: t.color || "#34D399", weight: 2, fillOpacity: 0.08,
+      })
         .bindTooltip(t.name)
         .addTo(territoryLayer.current);
-      // "Assigned" = the territories explicitly assigned to me, or (if none
-      // assigned / I'm an admin) all company territories.
       if (!mine.length || mine.includes(t.id)) assigned.current.push(t);
     });
   }
 
-  // Auto-load every home inside the assigned territories (owner data is limited
-  // to these areas to control cost).
-  async function loadAssignedHomes() {
+  function addHomeMarker(h: { address: string; lat: number; lng: number }) {
+    const m = L.marker([h.lat, h.lng], { icon: homeIcon("#475569") });
+    m.on("click", () => setDispoTarget({ address: h.address, lat: h.lat, lng: h.lng }));
+    homeMarkers.current.push(m);
+  }
+
+  // Auto-load homes: inside the assigned territory(ies) if drawn, otherwise the
+  // nearest 30 homes to the user's current location.
+  async function loadHomes() {
     const map = mapRef.current;
     if (!map || !profile) return;
-    if (!assigned.current.length) {
-      setStatus("No assigned area yet — draw one with ✏ Draw area to auto-load homes.");
-      return;
-    }
     setLoadingHomes(true);
-    setStatus("Loading homes in your area…");
-    homesLayer.current.clearLayers();
-    let total = 0;
+    homeMarkers.current = [];
     try {
       const token = await auth.currentUser!.getIdToken();
-      for (const t of assigned.current) {
-        const poly = t.polygon!;
-        const lats = poly.map((p) => p.lat);
-        const lngs = poly.map((p) => p.lng);
-        const center = { lat: (Math.min(...lats) + Math.max(...lats)) / 2, lng: (Math.min(...lngs) + Math.max(...lngs)) / 2 };
-        const corner = L.latLng(Math.max(...lats), Math.max(...lngs));
-        const radius = Math.min(L.latLng(center.lat, center.lng).distanceTo(corner) / 1609.34, 2);
-        const raw = await lookupArea(center.lat, center.lng, Math.max(0.1, +radius.toFixed(2)), token);
-        parseAreaProperties(raw)
-          .filter((h) => inPolygon({ lat: h.lat, lng: h.lng }, poly))
-          .forEach((h) => {
-            const m = L.marker([h.lat, h.lng], { icon: homeIcon("#475569") });
-            m.on("click", () => setDispoTarget({ address: h.address, lat: h.lat, lng: h.lng }));
-            homesLayer.current.addLayer(m);
-            total++;
-          });
+      if (assigned.current.length) {
+        let total = 0;
+        for (const t of assigned.current) {
+          const poly = t.polygon!;
+          const lats = poly.map((p) => p.lat);
+          const lngs = poly.map((p) => p.lng);
+          const center = { lat: (Math.min(...lats) + Math.max(...lats)) / 2, lng: (Math.min(...lngs) + Math.max(...lngs)) / 2 };
+          const radius = Math.min(
+            L.latLng(center.lat, center.lng).distanceTo(L.latLng(Math.max(...lats), Math.max(...lngs))) / 1609.34,
+            2
+          );
+          const raw = await lookupArea(center.lat, center.lng, Math.max(0.1, +radius.toFixed(2)), token);
+          parseAreaProperties(raw)
+            .filter((h) => inPolygon({ lat: h.lat, lng: h.lng }, poly))
+            .forEach((h) => { addHomeMarker(h); total++; });
+        }
+        setStatus(`${total} homes in your area`);
+      } else {
+        // No area drawn → nearest 30 homes to the user.
+        const c = myLoc.current || { lat: map.getCenter().lat, lng: map.getCenter().lng };
+        const raw = await lookupArea(c.lat, c.lng, 0.5, token);
+        const nearest = parseAreaProperties(raw)
+          .map((h) => ({ ...h, d: L.latLng(c.lat, c.lng).distanceTo(L.latLng(h.lat, h.lng)) }))
+          .sort((a, b) => a.d - b.d)
+          .slice(0, NEAREST_N);
+        nearest.forEach((h) => addHomeMarker(h));
+        setStatus(`Nearest ${nearest.length} homes (draw an area to focus)`);
       }
-      setStatus(`${total} homes in your area — zoom in & tap a house to disposition`);
-      refreshPinVisibility();
+      syncCluster();
     } catch (e: any) {
       setStatus("Could not load homes: " + (e?.message || ""));
     } finally {
@@ -183,9 +185,13 @@ export default function MapPage() {
     const map = L.map(elRef.current, { center: DEFAULT_CENTER, zoom: 14, layers: [hybrid] });
     L.control.layers({ Satellite: satellite, Hybrid: hybrid, Street: street }).addTo(map);
     territoryLayer.current.addTo(map);
-    homesLayer.current.addTo(map);
+    cluster.current = L.markerClusterGroup({
+      maxClusterRadius: 55,
+      showCoverageOnHover: false,
+      spiderfyOnMaxZoom: true,
+    });
+    map.addLayer(cluster.current);
     mapRef.current = map;
-    map.on("zoomend", refreshPinVisibility);
 
     map.on("click", (e: L.LeafletMouseEvent) => {
       if (modeRef.current !== "draw") return;
@@ -200,8 +206,9 @@ export default function MapPage() {
     (async () => {
       try {
         const pos = await Geolocation.getCurrentPosition({ enableHighAccuracy: true, timeout: 8000 });
-        map.setView([pos.coords.latitude, pos.coords.longitude], 17);
-        L.circleMarker([pos.coords.latitude, pos.coords.longitude], {
+        myLoc.current = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+        map.setView([myLoc.current.lat, myLoc.current.lng], 17);
+        L.circleMarker([myLoc.current.lat, myLoc.current.lng], {
           radius: 7, color: "#fff", weight: 3, fillColor: "#0EA5E9", fillOpacity: 1,
         }).addTo(map).bindTooltip("You");
       } catch {
@@ -209,7 +216,7 @@ export default function MapPage() {
       }
       await buildTerritories();
       await buildPins();
-      await loadAssignedHomes(); // auto-load homes in the assigned area
+      await loadHomes();
     })();
 
     return () => {
@@ -228,7 +235,7 @@ export default function MapPage() {
           companyId, name: name.trim(), color: "#34D399", polygon: drawPts.current, managerId: profile.uid, createdAt: Date.now(),
         });
         await buildTerritories();
-        await loadAssignedHomes();
+        await loadHomes();
       } catch (e: any) {
         setStatus("Could not save: " + (e?.message || ""));
       }
@@ -249,7 +256,7 @@ export default function MapPage() {
           <p className="page-sub">{status}</p>
         </div>
         <div className="filter-bar">
-          <button className="chip-btn" onClick={loadAssignedHomes} disabled={loadingHomes}>
+          <button className="chip-btn" onClick={loadHomes} disabled={loadingHomes}>
             {loadingHomes ? "Loading…" : "⟳ Refresh homes"}
           </button>
           {canDraw && (
@@ -278,7 +285,7 @@ export default function MapPage() {
             <span className="legend-dot" style={{ background: d.color }} /> {d.label}
           </span>
         ))}
-        <span className="legend-item muted">· tap a house to disposition · pins at zoom {PIN_ZOOM}+</span>
+        <span className="legend-item muted">· zoom out for area counts · zoom in for house pins · tap a house to disposition</span>
       </div>
 
       <DispositionModal target={dispoTarget} onClose={() => setDispoTarget(null)} onSaved={buildPins} />
