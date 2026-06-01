@@ -11,8 +11,11 @@ const CONVO = new Set(["pipeline", "appointment", "not_interested", "sold"]);
 const FALLBACK = { closeRate: 0.3, apptPerDoor: 0.03, apptPerConv: 0.1, doorsPerHour: 30 };
 
 type GoalType = "closes" | "appointments";
-type Frame = "day" | "week" | "month";
-const FRAME_DAYS: Record<Frame, number> = { day: 1, week: 6, month: 26 }; // working days
+const WEEKS_PER_MONTH = 4.345; // avg, for the weekly pace breakdown
+// Conversion rates use a rolling 30-day window once the rep has that much data;
+// before then we look back at least two weeks so the sample isn't too noisy.
+const WINDOW_DAYS = 30;
+const MIN_WINDOW_DAYS = 14;
 
 interface Actuals { doors: number; conv: number; appt: number; closes: number; hours: number; }
 interface Goals {
@@ -26,8 +29,6 @@ const DEFAULT_GOALS: Goals = {
   doorsMonth: 2000, convMonth: 600, apptMonth: 60,
 };
 
-const startOfMonth = () => new Date(new Date().getFullYear(), new Date().getMonth(), 1).getTime();
-const round = (n: number) => (Number.isFinite(n) ? Math.max(0, Math.round(n)) : 0);
 const ceil = (n: number) => (Number.isFinite(n) ? Math.max(0, Math.ceil(n)) : 0);
 
 export default function GoalPlanner() {
@@ -41,7 +42,6 @@ export default function GoalPlanner() {
   const [goals, setGoals] = useState<Goals>(DEFAULT_GOALS);
   const [goalType, setGoalType] = useState<GoalType>("closes");
   const [goalCount, setGoalCount] = useState(10);
-  const [frame, setFrame] = useState<Frame>("month");
 
   // Load saved goals + rate overrides (local to this device, per the spec).
   useEffect(() => {
@@ -54,13 +54,13 @@ export default function GoalPlanner() {
     } catch { /* ignore */ }
   }, [uid]);
 
-  // Pull real numbers (this month) to seed the rate inputs.
+  // Pull real numbers (rolling 30 days) to seed the rate inputs.
   useEffect(() => {
     if (!uid) return;
     let off = false;
     (async () => {
       try {
-        const since = startOfMonth();
+        const since = Date.now() - WINDOW_DAYS * 86400000;
         const [leadSnap, shiftSnap] = await Promise.all([
           getDocs(query(collection(db, "leads"), where("assignedTo", "==", uid), where("createdAt", ">=", since))),
           getDocs(query(collection(db, "shifts"), where("userId", "==", uid), where("startAt", ">=", since))),
@@ -110,26 +110,25 @@ export default function GoalPlanner() {
     };
   }, [actuals]);
 
-  // Reverse-plan: from a goal, work backward to appts → conversations → doors → hours.
+  // Reverse-plan the MONTHLY goal: work backward to appts → conversations →
+  // doors → hours, then break the monthly totals into a realistic weekly pace.
   const plan = useMemo(() => {
     const apptsNeeded = goalType === "closes" ? goalCount / (rates.closeRate || FALLBACK.closeRate) : goalCount;
     const convNeeded = apptsNeeded / (rates.apptPerConv || FALLBACK.apptPerConv);
     const doorsNeeded = apptsNeeded / (rates.apptPerDoor || FALLBACK.apptPerDoor);
     const hoursNeeded = doorsNeeded / (rates.doorsPerHour || FALLBACK.doorsPerHour);
-    const days = FRAME_DAYS[frame];
     return {
-      closes: goalType === "closes" ? goalCount : round(apptsNeeded * rates.closeRate),
       appts: ceil(apptsNeeded),
       conv: ceil(convNeeded),
       doors: ceil(doorsNeeded),
       hours: Math.round(hoursNeeded * 10) / 10,
-      perDay: {
-        doors: ceil(doorsNeeded / days),
-        appts: Math.round((apptsNeeded / days) * 10) / 10,
-        hours: Math.round((hoursNeeded / days) * 10) / 10,
+      perWeek: {
+        doors: ceil(doorsNeeded / WEEKS_PER_MONTH),
+        appts: Math.round((apptsNeeded / WEEKS_PER_MONTH) * 10) / 10,
+        hours: Math.round((hoursNeeded / WEEKS_PER_MONTH) * 10) / 10,
       },
     };
-  }, [goalType, goalCount, frame, rates]);
+  }, [goalType, goalCount, rates]);
 
   const aField = (label: string, key: keyof Actuals, hint?: string) => (
     <label className="field">
@@ -155,17 +154,14 @@ export default function GoalPlanner() {
     </div>
   );
 
-  const pctClose = Math.round(rates.closeRate * 100);
-  const apptsPer100 = Math.round(rates.apptPerDoor * 100 * 10) / 10;
-
   return (
     <div className="planner-wrap">
-      {/* ── Reverse goal calculator ─────────────────────────── */}
+      {/* ── Monthly reverse goal calculator ─────────────────── */}
       <div className="card">
-        <h2 className="planner-h">◎ Goal Planner</h2>
+        <h2 className="planner-h">◎ Monthly Goal Planner</h2>
         <p className="muted small">
-          Enter a target and we'll work backward through <em>your</em> conversion rates to tell you the
-          appointments, doors, and hours it takes.
+          Set your monthly target and we'll work backward through <em>your</em> conversion rates to the
+          appointments, doors, and hours it takes — then break it into a weekly pace.
         </p>
 
         <div className="planner-goalbar">
@@ -179,11 +175,7 @@ export default function GoalPlanner() {
             <option value="closes">closes</option>
             <option value="appointments">appointments</option>
           </select>
-          <select className="input" value={frame} onChange={(e) => setFrame(e.target.value as Frame)}>
-            <option value="day">this day</option>
-            <option value="week">this week</option>
-            <option value="month">this month</option>
-          </select>
+          <span>this month</span>
         </div>
 
         <div className="plan-grid">
@@ -194,14 +186,8 @@ export default function GoalPlanner() {
         </div>
 
         <div className="plan-perday muted small">
-          That's about <strong>{plan.perDay.doors} doors</strong>, <strong>{plan.perDay.appts} appts</strong> and{" "}
-          <strong>{plan.perDay.hours} h</strong> per working day
-          {goalType === "closes" ? ` → ~${plan.closes} closes.` : "."}
-        </div>
-
-        <div className="plan-rates muted small">
-          Using your rates: <strong>{pctClose}%</strong> close rate · <strong>{apptsPer100}</strong> appts per 100 doors ·{" "}
-          <strong>{Math.round(rates.doorsPerHour)}</strong> doors/hour.
+          ≈ <strong>{plan.perWeek.doors} doors</strong>, <strong>{plan.perWeek.appts} appts</strong> and{" "}
+          <strong>{plan.perWeek.hours} h</strong> per week to stay on pace.
         </div>
       </div>
 
@@ -212,8 +198,9 @@ export default function GoalPlanner() {
           <button className="btn ghost sm" onClick={() => saveActuals(measured)}>Reset to my data</button>
         </div>
         <p className="muted small">
-          Auto-filled from your last 30 days ({measured.doors} doors, {measured.appt} appts, {measured.closes} closes,
-          {measured.hours}h). Tweak any number to match your real rates.
+          Auto-filled from your rolling last {WINDOW_DAYS} days ({measured.doors} doors, {measured.appt} appts,{" "}
+          {measured.closes} closes, {measured.hours}h) — the more you log (min ~{MIN_WINDOW_DAYS} days), the more
+          accurate it gets. Tweak any number to match your real rates.
         </p>
         <div className="planner-actuals">
           {aField("Doors", "doors")}
