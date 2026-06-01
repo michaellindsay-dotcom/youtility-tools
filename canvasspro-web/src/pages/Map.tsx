@@ -92,6 +92,7 @@ export default function MapPage() {
             leadId: lead.id, address: lead.address, lat: c[0], lng: c[1], status: lead.status,
             name: lead.ownerName || "", phone: lead.phone || "", email: lead.email || "", notes: lead.notes || "",
             enrichment: lead.enrichment,
+            photoHomeUrl: lead.photoHomeUrl, photoBillUrl: lead.photoBillUrl,
           })
         )
         .addTo(leadLayer.current);

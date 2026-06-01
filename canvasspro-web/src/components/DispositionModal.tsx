@@ -1,15 +1,30 @@
 import { useEffect, useState } from "react";
 import { addDoc, collection, doc, updateDoc } from "firebase/firestore";
+import { ref as storageRef, uploadBytes, getDownloadURL } from "firebase/storage";
 import { Geolocation } from "@capacitor/geolocation";
-import { db, auth } from "../firebase";
+import { db, auth, storage } from "../firebase";
 import { useAuth } from "../auth/AuthContext";
 import { DISPOSITIONS } from "../lib/dispositions";
 import { lookupAddress, normalizeKnockstatResponse, buildEnrichment } from "../lib/knockstat";
 import { bumpStats } from "../lib/stats";
 import { useShift } from "../shift/ShiftContext";
-import type { LeadStatus, LeadEnrichment } from "../types";
+import type { LeadStatus, LeadEnrichment, EventType } from "../types";
 
 const ONSITE_FT = 100; // a knock only counts if you're within 100 ft of the home
+
+// Dispositions that warrant scheduling a follow-up on the spot. Each maps to a
+// calendar event type and a sensible default lead time.
+const SCHEDULE_FOR: Record<string, { eventType: EventType; label: string; defaultLeadMs: number }> = {
+  appointment: { eventType: "appointment", label: "Appointment", defaultLeadMs: 60 * 60 * 1000 },
+  go_back: { eventType: "go_back", label: "Go-back", defaultLeadMs: 24 * 60 * 60 * 1000 },
+  pipeline: { eventType: "follow_up", label: "Follow-up", defaultLeadMs: 3 * 24 * 60 * 60 * 1000 },
+};
+
+// datetime-local helper (local time, no seconds).
+function toLocalInput(ms: number): string {
+  const d = new Date(ms - new Date().getTimezoneOffset() * 60000);
+  return d.toISOString().slice(0, 16);
+}
 
 // Distance between two lat/lng points, in feet.
 function distanceFt(a: { lat: number; lng: number }, b: { lat: number; lng: number }): number {
@@ -33,6 +48,8 @@ export interface DispoInput {
   email?: string;
   notes?: string;
   enrichment?: LeadEnrichment;
+  photoHomeUrl?: string;
+  photoBillUrl?: string;
 }
 
 interface Form {
@@ -46,6 +63,8 @@ interface Form {
   email: string;
   notes: string;
   enrichment?: LeadEnrichment;
+  photoHomeUrl?: string;
+  photoBillUrl?: string;
 }
 
 function summarize(e?: LeadEnrichment): string {
@@ -82,6 +101,11 @@ export default function DispositionModal({
   const [summary, setSummary] = useState("");
   // Geofence: distance from the rep to this home (ft) and whether it counts.
   const [geo, setGeo] = useState<{ ft: number | null; verified: boolean }>({ ft: null, verified: true });
+  // On-the-spot scheduling (shown for go-back / pipeline / appointment).
+  const [schedule, setSchedule] = useState(true);
+  const [scheduleAt, setScheduleAt] = useState("");
+  // Photo capture: front of home + utility bill (File = newly picked).
+  const [photos, setPhotos] = useState<{ home: File | null; bill: File | null }>({ home: null, bill: null });
 
   useEffect(() => {
     if (!target) {
@@ -98,11 +122,21 @@ export default function DispositionModal({
     });
     setSummary(summarize(target.enrichment));
     setGeo({ ft: null, verified: true });
+    setSchedule(true);
+    setScheduleAt("");
+    setPhotos({ home: null, bill: null });
     if (autoEnrich && !target.enrichment) void enrich(target.address);
     // Check how far the rep is from the home.
     if (target.lat != null && target.lng != null) void checkGeo(target.lat, target.lng);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [target]);
+
+  // When a schedulable disposition is chosen, prefill a sensible default time.
+  useEffect(() => {
+    const cfg = d ? SCHEDULE_FOR[d.status] : undefined;
+    if (cfg && !scheduleAt) setScheduleAt(toLocalInput(Date.now() + cfg.defaultLeadMs));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [d?.status]);
 
   async function checkGeo(lat: number, lng: number) {
     try {
@@ -139,11 +173,29 @@ export default function DispositionModal({
     }
   }
 
+  async function uploadPhoto(file: File, kind: string): Promise<string> {
+    const safe = file.name.replace(/[^\w.-]/g, "_");
+    const r = storageRef(storage, `leads/${companyId}/${Date.now()}_${kind}_${safe}`);
+    await uploadBytes(r, file);
+    return getDownloadURL(r);
+  }
+
   async function save() {
     if (!profile || !companyId || !d) return;
     setSaving(true);
     try {
       const now = Date.now();
+      // Upload any newly captured photos first, falling back to existing URLs.
+      let homeUrl = d.photoHomeUrl ?? null;
+      let billUrl = d.photoBillUrl ?? null;
+      try {
+        if (photos.home) homeUrl = await uploadPhoto(photos.home, "home");
+        if (photos.bill) billUrl = await uploadPhoto(photos.bill, "bill");
+      } catch (err) {
+        console.error("Photo upload failed", err);
+        alert("Photo upload failed. Make sure Firebase Storage is enabled — saving without the new photo.");
+      }
+
       const fields = {
         ownerName: d.name || null,
         phone: d.phone || null,
@@ -152,15 +204,18 @@ export default function DispositionModal({
         status: d.status,
         enrichment: d.enrichment ?? null,
         enriched: !!d.enrichment,
+        photoHomeUrl: homeUrl,
+        photoBillUrl: billUrl,
         verified: geo.verified,
         distanceFt: geo.ft ?? null,
         knockedAt: now,
         updatedAt: now,
       };
-      if (d.leadId) {
-        await updateDoc(doc(db, "leads", d.leadId), fields);
+      let leadId = d.leadId;
+      if (leadId) {
+        await updateDoc(doc(db, "leads", leadId), fields);
       } else {
-        await addDoc(collection(db, "leads"), {
+        const refDoc = await addDoc(collection(db, "leads"), {
           ...fields,
           address: d.address,
           lat: d.lat ?? null,
@@ -171,7 +226,28 @@ export default function DispositionModal({
           createdBy: profile.uid,
           createdAt: now,
         });
+        leadId = refDoc.id;
       }
+
+      // On-the-spot scheduling for go-back / pipeline / appointment.
+      const cfg = SCHEDULE_FOR[d.status];
+      if (cfg && schedule && scheduleAt) {
+        await addDoc(collection(db, "events"), {
+          companyId,
+          userId: profile.uid,
+          userName: profile.displayName,
+          type: cfg.eventType,
+          title: `${cfg.label}${d.name ? ` — ${d.name}` : ""}`,
+          address: d.address,
+          leadId,
+          startAt: new Date(scheduleAt).getTime(),
+          notes: d.notes || "",
+          visibilityPath: [profile.uid, ...(profile.managerPath ?? [])],
+          reminded: false,
+          createdAt: now,
+        });
+      }
+
       if (d.status === "appointment") void bumpStats(profile, { appointments: 1 });
       else if (d.status === "sold") void bumpStats(profile, { sales: 1 });
       void recordKnock(geo.verified); // counts toward the active shift if on-site
@@ -254,6 +330,45 @@ export default function DispositionModal({
           <textarea rows={2} value={d.notes} placeholder="Add notes…" onChange={(e) => setD({ ...d, notes: e.target.value })} />
         </label>
 
+        {SCHEDULE_FOR[d.status] && (
+          <div className="dispo-schedule">
+            <label className="dispo-sched-toggle">
+              <input type="checkbox" checked={schedule} onChange={(e) => setSchedule(e.target.checked)} />
+              <span>📅 Schedule {SCHEDULE_FOR[d.status].label.toLowerCase()}</span>
+            </label>
+            {schedule && (
+              <input
+                type="datetime-local"
+                className="dispo-sched-input"
+                value={scheduleAt}
+                onChange={(e) => setScheduleAt(e.target.value)}
+              />
+            )}
+          </div>
+        )}
+
+        {SCHEDULE_FOR[d.status] && (
+          <div className="dispo-photos">
+            <div className="field-label">Photos</div>
+            <div className="photo-grid">
+              <PhotoSlot
+                label="Front of home"
+                icon="🏠"
+                file={photos.home}
+                existingUrl={d.photoHomeUrl}
+                onPick={(f) => setPhotos((p) => ({ ...p, home: f }))}
+              />
+              <PhotoSlot
+                label="Utility bill"
+                icon="🧾"
+                file={photos.bill}
+                existingUrl={d.photoBillUrl}
+                onPick={(f) => setPhotos((p) => ({ ...p, bill: f }))}
+              />
+            </div>
+          </div>
+        )}
+
         <div className="dispo-foot">
           <span className="muted small mono">
             {d.lat != null && d.lng != null ? `${d.lat.toFixed(5)}, ${d.lng.toFixed(5)}` : ""}
@@ -266,6 +381,60 @@ export default function DispositionModal({
           </div>
         </div>
       </div>
+    </div>
+  );
+}
+
+// A single photo capture slot. On mobile, `capture` opens the camera directly;
+// on desktop it falls back to a file picker. Shows a thumbnail once chosen.
+function PhotoSlot({
+  label,
+  icon,
+  file,
+  existingUrl,
+  onPick,
+}: {
+  label: string;
+  icon: string;
+  file: File | null;
+  existingUrl?: string;
+  onPick: (f: File | null) => void;
+}) {
+  const [preview, setPreview] = useState<string | undefined>(existingUrl);
+  useEffect(() => {
+    if (!file) {
+      setPreview(existingUrl);
+      return;
+    }
+    const url = URL.createObjectURL(file);
+    setPreview(url);
+    return () => URL.revokeObjectURL(url);
+  }, [file, existingUrl]);
+
+  const id = `photo-${label.replace(/\s+/g, "-").toLowerCase()}`;
+  return (
+    <div className="photo-slot">
+      <input
+        id={id}
+        type="file"
+        accept="image/*"
+        capture="environment"
+        hidden
+        onChange={(e) => onPick(e.target.files?.[0] ?? null)}
+      />
+      <label htmlFor={id} className="photo-drop">
+        {preview ? (
+          <img src={preview} alt={label} className="photo-thumb" />
+        ) : (
+          <span className="photo-ico">{icon}</span>
+        )}
+        <span className="photo-label">{preview ? `${label} ✓` : `📷 ${label}`}</span>
+      </label>
+      {file && (
+        <button type="button" className="btn ghost sm photo-clear" onClick={() => onPick(null)}>
+          Remove
+        </button>
+      )}
     </div>
   );
 }

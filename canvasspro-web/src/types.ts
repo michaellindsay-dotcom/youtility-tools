@@ -91,6 +91,8 @@ export interface Lead {
   email?: string;
   status: LeadStatus;
   notes?: string;
+  photoHomeUrl?: string; // photo of the front of the home
+  photoBillUrl?: string; // photo of the utility bill
   enriched?: boolean;
   enrichedAt?: number;
   enrichment?: LeadEnrichment;

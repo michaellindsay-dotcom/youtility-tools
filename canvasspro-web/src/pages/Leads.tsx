@@ -139,6 +139,8 @@ export default function Leads() {
                     email: lead.email || "",
                     notes: lead.notes || "",
                     enrichment: lead.enrichment,
+                    photoHomeUrl: lead.photoHomeUrl,
+                    photoBillUrl: lead.photoBillUrl,
                   })
                 }
               >
