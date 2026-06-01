@@ -20,8 +20,8 @@ function homeIcon(color: string, flagged = false): L.DivIcon {
   return L.divIcon({
     className: "home-pin",
     html: `<span style="background:${color}">${HOUSE_SVG}</span>${flagged ? '<i class="pin-x">✕</i>' : ""}`,
-    iconSize: [26, 26],
-    iconAnchor: [13, 13],
+    iconSize: [30, 30],
+    iconAnchor: [15, 15],
   });
 }
 
