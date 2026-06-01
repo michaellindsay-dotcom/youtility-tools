@@ -16,7 +16,7 @@ const links = [
   { to: "/settings", label: "Settings", icon: "⚐" },
 ];
 
-export default function Sidebar() {
+export default function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
   return (
     <aside className="sidebar">
       <div className="brand">
@@ -33,6 +33,7 @@ export default function Sidebar() {
             key={l.to}
             to={l.to}
             end={l.end}
+            onClick={onNavigate}
             className={({ isActive }) => "nav-link" + (isActive ? " active" : "")}
           >
             <span className="nav-icon">{l.icon}</span>
@@ -41,7 +42,7 @@ export default function Sidebar() {
         ))}
       </nav>
       <div className="brand-sub" style={{ marginTop: "auto", padding: "8px" }}>
-        build BUILD-28
+        build BUILD-29
       </div>
     </aside>
   );

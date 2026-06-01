@@ -4,7 +4,7 @@ import { isImpersonating } from "../firebase";
 import ShiftBar from "./ShiftBar";
 import NotificationBell from "./NotificationBell";
 
-export default function Topbar() {
+export default function Topbar({ onMenu }: { onMenu?: () => void }) {
   const { profile, role, logout } = useAuth();
   const navigate = useNavigate();
 
@@ -28,6 +28,7 @@ export default function Topbar() {
           <button className="btn ghost sm" onClick={exitMirror}>Exit mirror</button>
         </div>
       )}
+      <button className="topbar-menu" onClick={onMenu} aria-label="Menu">☰</button>
       <div className="topbar-title"><ShiftBar /></div>
       <div className="topbar-user">
         <NotificationBell />

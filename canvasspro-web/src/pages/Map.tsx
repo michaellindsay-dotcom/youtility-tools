@@ -1,13 +1,16 @@
 import { useEffect, useRef, useState } from "react";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
+import { Link } from "react-router-dom";
 import { addDoc, collection, getDocs, query, where } from "firebase/firestore";
 import { Geolocation } from "@capacitor/geolocation";
 import { db, auth } from "../firebase";
 import { useAuth } from "../auth/AuthContext";
-import { DISPOSITIONS, DISP_COLOR } from "../lib/dispositions";
+import { useNav } from "../components/NavContext";
+import { DISP_COLOR } from "../lib/dispositions";
 import { lookupArea, parseAreaProperties } from "../lib/knockstat";
 import DispositionModal, { type DispoInput } from "../components/DispositionModal";
+import ShiftHud from "../components/ShiftHud";
 import type { Lead, Territory, LatLng } from "../types";
 
 const DEFAULT_CENTER: [number, number] = [40.34, -111.91];
@@ -48,6 +51,7 @@ function inPolygon(pt: LatLng, poly: LatLng[]): boolean {
 
 export default function MapPage() {
   const { profile, role, companyId } = useAuth();
+  const { openNav } = useNav();
   const elRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<L.Map | null>(null);
   const leadLayer = useRef<L.LayerGroup>(L.layerGroup());
@@ -203,12 +207,14 @@ export default function MapPage() {
     });
     const street = L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 19, attribution: "© OpenStreetMap" });
 
-    const map = L.map(elRef.current, { center: DEFAULT_CENTER, zoom: 14, maxZoom: 21, layers: [hybrid] });
-    L.control.layers({ "Esri satellite": hybrid, "Google satellite": gSat, Street: street }).addTo(map);
+    const map = L.map(elRef.current, { center: DEFAULT_CENTER, zoom: 14, maxZoom: 21, layers: [hybrid], zoomControl: false });
+    L.control.zoom({ position: "topright" }).addTo(map);
+    L.control.layers({ "Esri satellite": hybrid, "Google satellite": gSat, Street: street }, undefined, { position: "topright" }).addTo(map);
     territoryLayer.current.addTo(map);
     homeLayer.current.addTo(map);
     leadLayer.current.addTo(map);
     mapRef.current = map;
+    setTimeout(() => map.invalidateSize(), 120);
 
     map.on("click", (e: L.LeafletMouseEvent) => {
       if (modeRef.current !== "draw") return;
@@ -266,44 +272,47 @@ export default function MapPage() {
   }
 
   return (
-    <div className="page-body">
-      <div className="page-head row">
-        <div>
-          <h1>Map</h1>
-          <p className="page-sub">{status}</p>
-        </div>
-        <div className="filter-bar">
-          <button className="chip-btn" onClick={loadHomes} disabled={loadingHomes}>
-            {loadingHomes ? "Loading…" : "⟳ Refresh homes"}
+    <div className="map-screen">
+      <div ref={elRef} className="map-canvas-full" />
+
+      {/* Top-left: menu + controls */}
+      <div className="map-overlay map-tl">
+        <button className="map-fab" onClick={openNav} aria-label="Menu">☰</button>
+        <button className="map-fab" onClick={loadHomes} disabled={loadingHomes} aria-label="Refresh homes" title="Refresh homes">
+          {loadingHomes ? "…" : "⟳"}
+        </button>
+        {canDraw && (
+          <button
+            className={"map-fab" + (mode === "draw" ? " active" : "")}
+            onClick={() => setMode(mode === "draw" ? "view" : "draw")}
+            aria-label="Draw area" title="Draw area"
+          >
+            ✏
           </button>
-          {canDraw && (
-            <button className={"chip-btn" + (mode === "draw" ? " active" : "")} onClick={() => setMode(mode === "draw" ? "view" : "draw")}>
-              ✏ Draw area
-            </button>
-          )}
-        </div>
+        )}
       </div>
 
+      {/* Top-center: status pill */}
+      {status && <div className="map-status-pill">{status}</div>}
+
+      {/* Draw instructions */}
       {mode === "draw" && (
-        <div className="card route-bar">
-          <span className="muted">Tap the map to drop the corners of your area, then save.</span>
+        <div className="map-draw-bar">
+          <span>Tap to drop corners, then save your area.</span>
           <div className="row">
             <button className="btn sm" onClick={cancelDraw}>Cancel</button>
-            <button className="btn primary sm" onClick={finishDraw}>Save area</button>
+            <button className="btn primary sm" onClick={finishDraw}>Save</button>
           </div>
         </div>
       )}
 
-      <div ref={elRef} className="map-canvas" />
-
-      <div className="map-legend">
-        {DISPOSITIONS.map((d) => (
-          <span key={d.value} className="legend-item">
-            <span className="legend-dot" style={{ background: d.color }} /> {d.label}
-          </span>
-        ))}
-        <span className="legend-item muted">· tap a house to disposition · red ✕ = logged off-site</span>
+      {/* Bottom-left: shift HUD / start button */}
+      <div className="map-overlay map-bl">
+        <ShiftHud />
       </div>
+
+      {/* Bottom-right: chat FAB */}
+      <Link to="/chat" className="map-chat-fab" aria-label="Team chat">💬</Link>
 
       <DispositionModal target={dispoTarget} onClose={() => setDispoTarget(null)} onSaved={buildPins} />
     </div>
