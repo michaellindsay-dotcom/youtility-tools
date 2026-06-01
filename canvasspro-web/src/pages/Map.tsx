@@ -65,7 +65,6 @@ export default function MapPage() {
   const roamTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const youMarker = useRef<L.CircleMarker | null>(null);
   const watchId = useRef<string | null>(null);
-  const followRef = useRef(false);
   const territoryLayer = useRef<L.LayerGroup>(L.layerGroup());
   const assigned = useRef<Territory[]>([]);
   const myLoc = useRef<LatLng | null>(null);
@@ -77,9 +76,7 @@ export default function MapPage() {
   const [mode, setMode] = useState<"view" | "draw">("view");
   const [loadingHomes, setLoadingHomes] = useState(false);
   const [dispoTarget, setDispoTarget] = useState<DispoInput | null>(null);
-  const [follow, setFollow] = useState(false);
   modeRef.current = mode;
-  followRef.current = follow;
 
   const canDraw = role === "admin" || role === "manager";
 
@@ -256,26 +253,22 @@ export default function MapPage() {
     }
   }
 
-  // "Follow me": keep the map locked on the rep's GPS as they walk; recentering
-  // triggers the debounced auto-load so homes appear ahead of them (cached).
-  async function toggleFollow() {
-    if (follow) {
-      setFollow(false);
-      if (watchId.current) { await Geolocation.clearWatch({ id: watchId.current }).catch(() => {}); watchId.current = null; }
-      return;
-    }
-    setFollow(true);
-    if (myLoc.current && mapRef.current) mapRef.current.setView([myLoc.current.lat, myLoc.current.lng], Math.max(mapRef.current.getZoom(), 18));
+  // Keep the map locked on the rep's GPS as they walk. Recentering triggers the
+  // debounced auto-load so homes appear ahead of them (served from cache when
+  // already pulled). A small threshold avoids jitter from GPS noise.
+  async function startFollowing() {
+    if (watchId.current) return;
     try {
       watchId.current = await Geolocation.watchPosition({ enableHighAccuracy: true, timeout: 10000 }, (pos) => {
         if (!pos) return;
         const lat = pos.coords.latitude, lng = pos.coords.longitude;
         myLoc.current = { lat, lng };
         setYou(lat, lng);
-        if (followRef.current && mapRef.current) mapRef.current.panTo([lat, lng], { animate: true });
+        const map = mapRef.current;
+        if (map && map.getCenter().distanceTo(L.latLng(lat, lng)) > 12) map.panTo([lat, lng], { animate: true });
       });
     } catch {
-      setFollow(false);
+      /* location unavailable — map just won't follow */
     }
   }
 
@@ -336,6 +329,7 @@ export default function MapPage() {
       await buildTerritories();
       await buildPins();
       await loadHomes();
+      void startFollowing(); // keep the map on the rep as they walk
     })();
 
     return () => {
@@ -376,14 +370,6 @@ export default function MapPage() {
       {/* Top-left: menu + controls */}
       <div className="map-overlay map-tl">
         <button className="map-fab" onClick={openNav} aria-label="Menu">☰</button>
-        <button
-          className={"map-fab" + (follow ? " active" : "")}
-          onClick={toggleFollow}
-          aria-label="Follow me"
-          title={follow ? "Following you — tap to stop" : "Follow me"}
-        >
-          ◎
-        </button>
         <button className="map-fab" onClick={loadHomes} disabled={loadingHomes} aria-label="Refresh homes" title="Refresh homes">
           {loadingHomes ? "…" : "⟳"}
         </button>
