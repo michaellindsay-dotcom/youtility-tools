@@ -1,4 +1,4 @@
-import type { Person, PropertyRecord } from "../types";
+import type { Person, PropertyRecord, LeadEnrichment } from "../types";
 
 // ---------------------------------------------------------------------------
 // Knockstat response normalization, ported from canvass-pro.html.
@@ -313,6 +313,48 @@ export const DEMO_RAW: AnyObj = {
     legalDescription: "LOT 18 EVERGREEN HEIGHTS UNIT 2",
   },
 };
+
+// Condense a normalized property record into the homeowner fields stored on a
+// lead (and the convenience owner name/phone/email shown on the pin).
+export function buildEnrichment(rec: PropertyRecord): {
+  enrichment: LeadEnrichment;
+  ownerName?: string;
+  phone?: string;
+  email?: string;
+} {
+  const owners = (rec.owners || []).map((o) => ({
+    name: o.name,
+    phones: o.phones,
+    emails: o.emails,
+    ageRange: typeof o.ageRange === "string" ? o.ageRange : undefined,
+  }));
+  const p = rec.property as AnyObj;
+  const v = rec.valuation as AnyObj;
+  const s = rec.sale as AnyObj;
+  const ids = rec.ids as AnyObj;
+  const enrichment: LeadEnrichment = {
+    owners,
+    propertyType: p.type,
+    yearBuilt: p.yearBuilt,
+    beds: p.bedrooms,
+    baths: p.bathrooms,
+    sqft: p.livingAreaSqft,
+    lotSqft: p.lotSizeSqft,
+    estValue: v.estimatedValue,
+    equity: v.estimatedEquity,
+    ownerOccupied: rec.ownership?.occupancy ?? undefined,
+    lastSalePrice: s.lastSalePrice,
+    lastSaleDate: s.lastSaleDate,
+    apn: ids?.apn,
+  };
+  const first = owners[0];
+  return {
+    enrichment,
+    ownerName: first?.name,
+    phone: first?.phones?.[0],
+    email: first?.emails?.[0],
+  };
+}
 
 // Call the Knockstat proxy Cloud Function. The browser never sees the API key.
 export async function lookupAddress(

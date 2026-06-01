@@ -56,13 +56,26 @@ export interface UserProfile {
   disabled?: boolean;
 }
 
-export type LeadStatus =
-  | "new"
-  | "contacted"
-  | "appointment"
-  | "not_home"
-  | "not_interested"
-  | "sold";
+import type { LeadStatus } from "./lib/dispositions";
+export type { LeadStatus };
+
+// Homeowner / property data attached to a lead from public-records enrichment.
+export interface LeadEnrichment {
+  owners?: { name?: string; phones?: string[]; emails?: string[]; ageRange?: string }[];
+  propertyType?: string;
+  yearBuilt?: number | string;
+  beds?: number | string;
+  baths?: number | string;
+  sqft?: number | string;
+  lotSqft?: number | string;
+  estValue?: number;
+  equity?: number;
+  ownerOccupied?: string;
+  lastSalePrice?: number;
+  lastSaleDate?: string;
+  apn?: string;
+  [k: string]: unknown;
+}
 
 export interface Lead {
   id: string;
@@ -77,6 +90,9 @@ export interface Lead {
   email?: string;
   status: LeadStatus;
   notes?: string;
+  enriched?: boolean;
+  enrichedAt?: number;
+  enrichment?: LeadEnrichment;
   companyId: string;
   territoryId?: string;
   assignedTo?: string; // uid (owner)

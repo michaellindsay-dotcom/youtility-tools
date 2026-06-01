@@ -3,18 +3,12 @@ import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import { addDoc, collection, doc, getDocs, query, updateDoc, where } from "firebase/firestore";
 import { Geolocation } from "@capacitor/geolocation";
-import { db } from "../firebase";
+import { db, auth } from "../firebase";
 import { useAuth } from "../auth/AuthContext";
+import { DISPOSITIONS, DISP_COLOR, DISP_LABEL } from "../lib/dispositions";
+import { lookupAddress, normalizeKnockstatResponse, buildEnrichment } from "../lib/knockstat";
+import { bumpStats } from "../lib/stats";
 import type { Lead, Territory, LatLng } from "../types";
-
-const STATUS_COLOR: Record<string, string> = {
-  new: "#38BDF8",
-  contacted: "#A78BFA",
-  appointment: "#34D399",
-  not_home: "#F59E0B",
-  not_interested: "#F87171",
-  sold: "#22C55E",
-};
 
 const DEFAULT_CENTER: [number, number] = [40.34, -111.91]; // Utah County fallback
 const PIN_ZOOM = 13; // only show home pins at/above this zoom
@@ -22,7 +16,7 @@ const PIN_ZOOM = 13; // only show home pins at/above this zoom
 type Mode = "view" | "draw" | "route";
 
 function statusIcon(status: string): L.DivIcon {
-  const color = STATUS_COLOR[status] || "#94A3B8";
+  const color = DISP_COLOR[status] || "#94A3B8";
   return L.divIcon({
     className: "lead-pin",
     html: `<span style="background:${color}"></span>`,
@@ -181,17 +175,140 @@ export default function MapPage() {
   function addPin(lead: Lead) {
     if (lead.lat == null || lead.lng == null) return;
     const m = L.marker([lead.lat, lead.lng], { icon: statusIcon(lead.status) });
-    m.bindPopup(
-      `<strong>${lead.ownerName ?? "Lead"}</strong><br/>` +
-        `${lead.address ?? ""}<br/>` +
-        `Status: ${(lead.status ?? "new").replace("_", " ")}<br/>` +
-        (lead.phone ? `📞 ${lead.phone}<br/>` : "") +
-        (lead.notes ? `${lead.notes}` : "")
-    );
+    m.bindPopup(() => makePopupEl(lead, m), { minWidth: 250, maxWidth: 300 });
     m.on("click", () => {
-      if (modeRef.current === "route") toggleSelect(lead.id);
+      if (modeRef.current === "route") {
+        toggleSelect(lead.id);
+        m.closePopup();
+      }
     });
     pinsLayer.current.addLayer(m);
+  }
+
+  // Update a home's disposition from its pin.
+  async function setDisposition(lead: Lead, value: Lead["status"], m: L.Marker) {
+    try {
+      await updateDoc(doc(db, "leads", lead.id), { status: value, updatedAt: Date.now() });
+      lead.status = value;
+      m.setIcon(statusIcon(value));
+      if (profile && (value === "appointment" || value === "sold")) {
+        void bumpStats(profile, value === "sold" ? { sales: 1 } : { appointments: 1 });
+      }
+      m.setPopupContent(makePopupEl(lead, m));
+    } catch (e: any) {
+      setStatus("Could not update: " + (e?.message || ""));
+    }
+  }
+
+  // Pull homeowner / property data (public records via the Knockstat proxy) and
+  // attach it to the lead.
+  async function enrich(lead: Lead, m: L.Marker, btn: HTMLButtonElement) {
+    btn.disabled = true;
+    btn.textContent = "Enriching…";
+    try {
+      const token = await auth.currentUser!.getIdToken();
+      const full = [lead.address, lead.city, lead.state, lead.zip].filter(Boolean).join(", ");
+      const raw = await lookupAddress(full, token);
+      const rec = normalizeKnockstatResponse(raw);
+      const { enrichment, ownerName, phone, email } = buildEnrichment(rec);
+      lead.enrichment = enrichment;
+      lead.enriched = true;
+      lead.enrichedAt = Date.now();
+      lead.ownerName = ownerName || lead.ownerName;
+      lead.phone = phone || lead.phone;
+      lead.email = email || lead.email;
+      await updateDoc(doc(db, "leads", lead.id), {
+        enrichment,
+        enriched: true,
+        enrichedAt: lead.enrichedAt,
+        ownerName: lead.ownerName ?? null,
+        phone: lead.phone ?? null,
+        email: lead.email ?? null,
+      });
+      m.setPopupContent(makePopupEl(lead, m));
+    } catch (e: any) {
+      btn.disabled = false;
+      btn.textContent = "Retry enrich";
+      const msg = document.createElement("div");
+      msg.className = "muted small";
+      msg.style.marginTop = "6px";
+      msg.textContent = "Enrichment unavailable: " + (e?.message || "error");
+      btn.parentElement?.appendChild(msg);
+    }
+  }
+
+  // Build the interactive pin popup (homeowner data + disposition buttons).
+  function makePopupEl(lead: Lead, m: L.Marker): HTMLElement {
+    const el = document.createElement("div");
+    el.className = "pin-popup";
+    const e = lead.enrichment;
+    const ownerLine = lead.ownerName ? `<strong>${lead.ownerName}</strong>` : "<strong>Lead</strong>";
+    const contacts =
+      (lead.phone ? `📞 ${lead.phone} ` : "") + (lead.email ? `✉ ${lead.email}` : "");
+    const propBits = e
+      ? [
+          e.propertyType,
+          e.beds != null ? `${e.beds}bd` : null,
+          e.baths != null ? `${e.baths}ba` : null,
+          e.sqft != null ? `${Number(e.sqft).toLocaleString()} sqft` : null,
+          e.yearBuilt ? `built ${e.yearBuilt}` : null,
+        ]
+          .filter(Boolean)
+          .join(" · ")
+      : "";
+    const money = (n?: number) =>
+      n == null ? "" : "$" + Number(n).toLocaleString(undefined, { maximumFractionDigits: 0 });
+    const valueLine = e
+      ? [
+          e.estValue ? `Est. ${money(e.estValue)}` : null,
+          e.equity ? `Equity ${money(e.equity)}` : null,
+          e.ownerOccupied || null,
+        ]
+          .filter(Boolean)
+          .join(" · ")
+      : "";
+
+    el.innerHTML =
+      `<div class="pin-head">${ownerLine}<span class="pin-disp" style="background:${DISP_COLOR[lead.status] || "#94A3B8"}">${DISP_LABEL[lead.status] || lead.status}</span></div>` +
+      `<div class="pin-addr">${lead.address ?? ""}</div>` +
+      (contacts ? `<div class="pin-contacts">${contacts}</div>` : "") +
+      (propBits ? `<div class="pin-prop">${propBits}</div>` : "") +
+      (valueLine ? `<div class="pin-prop">${valueLine}</div>` : "") +
+      (lead.notes ? `<div class="pin-notes">${lead.notes}</div>` : "");
+
+    // Disposition buttons
+    const grid = document.createElement("div");
+    grid.className = "pin-disp-grid";
+    DISPOSITIONS.forEach((d) => {
+      const b = document.createElement("button");
+      b.className = "pin-disp-btn" + (lead.status === d.value ? " active" : "");
+      b.textContent = d.label;
+      b.style.borderColor = d.color;
+      if (lead.status === d.value) b.style.background = d.color;
+      b.onclick = () => setDisposition(lead, d.value, m);
+      grid.appendChild(b);
+    });
+    el.appendChild(grid);
+
+    // Enrich
+    if (!lead.enriched) {
+      const wrap = document.createElement("div");
+      const eb = document.createElement("button");
+      eb.className = "btn sm";
+      eb.style.marginTop = "8px";
+      eb.textContent = "＋ Homeowner data";
+      eb.onclick = () => enrich(lead, m, eb);
+      wrap.appendChild(eb);
+      el.appendChild(wrap);
+    } else if (e?.owners && e.owners.length > 1) {
+      const extra = document.createElement("div");
+      extra.className = "muted small";
+      extra.style.marginTop = "6px";
+      extra.textContent =
+        "Also: " + e.owners.slice(1).map((o) => o.name).filter(Boolean).join(", ");
+      el.appendChild(extra);
+    }
+    return el;
   }
 
   async function buildTerritories() {
@@ -387,9 +504,9 @@ export default function MapPage() {
       <div ref={elRef} className="map-canvas" />
 
       <div className="map-legend">
-        {Object.entries(STATUS_COLOR).map(([s, c]) => (
-          <span key={s} className="legend-item">
-            <span className="legend-dot" style={{ background: c }} /> {s.replace("_", " ")}
+        {DISPOSITIONS.map((d) => (
+          <span key={d.value} className="legend-item">
+            <span className="legend-dot" style={{ background: d.color }} /> {d.label}
           </span>
         ))}
         <span className="legend-item muted">· pins appear at zoom {PIN_ZOOM}+</span>

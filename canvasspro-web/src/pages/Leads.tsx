@@ -13,16 +13,10 @@ import {
 import { db } from "../firebase";
 import { useAuth } from "../auth/AuthContext";
 import { bumpStats } from "../lib/stats";
+import { DISPOSITIONS } from "../lib/dispositions";
 import type { Lead, LeadStatus } from "../types";
 
-const STATUSES: { value: LeadStatus; label: string }[] = [
-  { value: "new", label: "New" },
-  { value: "contacted", label: "Contacted" },
-  { value: "appointment", label: "Appointment" },
-  { value: "not_home", label: "Not home" },
-  { value: "not_interested", label: "Not interested" },
-  { value: "sold", label: "Sold" },
-];
+const STATUSES = DISPOSITIONS;
 
 export default function Leads() {
   const { profile, role, companyId } = useAuth();

@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import { collection, getCountFromServer, query, where } from "firebase/firestore";
 import { db } from "../firebase";
 import { useAuth } from "../auth/AuthContext";
+import { DISPOSITIONS } from "../lib/dispositions";
 import type { LeadStatus } from "../types";
 
 interface Stats {
@@ -10,14 +11,9 @@ interface Stats {
   byStatus: Partial<Record<LeadStatus, number>>;
 }
 
-const STATUS_LABELS: Record<LeadStatus, string> = {
-  new: "New",
-  contacted: "Contacted",
-  appointment: "Appointments",
-  not_home: "Not home",
-  not_interested: "Not interested",
-  sold: "Sold",
-};
+const STATUS_LABELS: Record<string, string> = Object.fromEntries(
+  DISPOSITIONS.map((d) => [d.value, d.label])
+);
 
 export default function Dashboard() {
   const { profile, role, companyId } = useAuth();
@@ -39,14 +35,7 @@ export default function Dashboard() {
             : [where("visibilityPath", "array-contains", profile.uid)]),
         ];
         const totalSnap = await getCountFromServer(query(leads, ...scope));
-        const statuses: LeadStatus[] = [
-          "new",
-          "contacted",
-          "appointment",
-          "not_home",
-          "not_interested",
-          "sold",
-        ];
+        const statuses: LeadStatus[] = DISPOSITIONS.map((d) => d.value);
         const byStatus: Partial<Record<LeadStatus, number>> = {};
         await Promise.all(
           statuses.map(async (st) => {
