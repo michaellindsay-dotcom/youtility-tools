@@ -776,15 +776,14 @@ details.raw pre {
 }
 
 /* ── Map ─────────────────────────────────────────────────── */
-.home-pin {
-  position: relative;
-}
+/* NOTE: never set position on .home-pin — Leaflet sets position:absolute on
+   marker icons; overriding it makes markers stack and drift on zoom. */
 .home-pin span {
+  display: grid;
+  place-items: center;
   width: 28px;
   height: 28px;
   border-radius: 50%;
-  display: grid;
-  place-items: center;
   border: 2px solid #fff;
   box-shadow: 0 1px 5px rgba(0, 0, 0, 0.55);
 }
