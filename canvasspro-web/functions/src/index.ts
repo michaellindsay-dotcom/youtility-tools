@@ -34,38 +34,43 @@ async function batchSkipTrace(attomJson: any, address1: string, address2: string
   const o1 = p?.assessment?.owner?.owner1 || p?.owner?.owner1 || {};
   const addr = p?.address || {};
   const m = address2.match(/^(.*?),?\s*([A-Za-z]{2})\s*(\d{5})?/) || [];
-  const body = {
-    requests: [
-      {
-        propertyAddress: {
-          street: addr.line1 || address1,
-          city: addr.locality || (m[1] || "").trim(),
-          state: addr.countrySubd || m[2] || "",
-          zip: addr.postal1 || m[3] || "",
-        },
-        name: {
-          first: o1.firstname || o1.firstName || "",
-          last: o1.lastname || o1.lastName || "",
-        },
-      },
-    ],
+  const first = String(o1.firstNameAndMi || o1.firstName || o1.firstname || "").trim().split(/\s+/)[0] || "";
+  const last = o1.lastName || o1.lastname || "";
+  const request: any = {
+    propertyAddress: {
+      street: addr.line1 || address1,
+      city: addr.locality || (m[1] || "").trim(),
+      state: addr.countrySubd || m[2] || "",
+      zip: addr.postal1 || m[3] || "",
+    },
   };
-  const res = await fetch(`${BATCH.baseUrl}/api/v1/property/skip-trace`, {
-    method: "POST",
-    headers: { Authorization: `Bearer ${BATCH.key}`, "Content-Type": "application/json", Accept: "application/json" },
-    body: JSON.stringify(body),
-  });
-  if (!res.ok) return undefined;
-  const bd: any = await res.json().catch(() => null);
-  const persons = bd?.results?.persons || bd?.persons || bd?.results?.[0]?.persons || [];
+  if (first && last) request.name = { first, last };
+
+  let httpStatus = 0;
+  let bd: any = null;
+  try {
+    const res = await fetch(`${BATCH.baseUrl}/api/v1/property/skip-trace`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${BATCH.key}`, "Content-Type": "application/json", Accept: "application/json" },
+      body: JSON.stringify({ requests: [request] }),
+    });
+    httpStatus = res.status;
+    bd = await res.json().catch(() => null);
+  } catch (e: any) {
+    return { phones: [], emails: [], debug: { error: e?.message || String(e), request } };
+  }
+
+  const persons =
+    bd?.results?.persons || bd?.persons || bd?.results?.[0]?.persons || bd?.data?.persons || [];
   const p0 = persons[0] || {};
   const phones = (p0.phoneNumbers || p0.phones || [])
-    .map((x: any) => (typeof x === "string" ? x : x.number || x.phone))
+    .map((x: any) => (typeof x === "string" ? x : x.number || x.phone || x.phoneNumber))
     .filter(Boolean);
-  const emails = (p0.emails || [])
+  const emails = (p0.emails || p0.email || [])
     .map((x: any) => (typeof x === "string" ? x : x.email))
     .filter(Boolean);
-  return { phones, emails };
+  // `debug` lets us inspect BatchData's real response shape via the Raw panel.
+  return { phones, emails, debug: { httpStatus, response: bd, request } };
 }
 
 type Tier = "admin" | "manager" | "user";
@@ -221,7 +226,8 @@ export const api = onRequest({ cors: true }, async (req, res) => {
     if (BATCH.enabled && BATCH.key) {
       try {
         const skip = await batchSkipTrace(json, address1, address2);
-        if (skip) (json as any)._skiptrace = skip;
+        (json as any)._skiptrace = { phones: skip.phones, emails: skip.emails };
+        (json as any)._skiptrace_debug = skip.debug; // remove once mapping confirmed
       } catch (e) {
         logger.warn("BatchData skip-trace failed (continuing)", e);
       }
