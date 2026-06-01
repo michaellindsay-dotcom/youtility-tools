@@ -1,21 +1,11 @@
 import { useEffect, useRef, useState } from "react";
-import { Loader } from "@googlemaps/js-api-loader";
-import {
-  addDoc,
-  collection,
-  doc,
-  getDocs,
-  query,
-  updateDoc,
-  where,
-} from "firebase/firestore";
+import L from "leaflet";
+import "leaflet/dist/leaflet.css";
+import { addDoc, collection, doc, getDocs, query, updateDoc, where } from "firebase/firestore";
 import { Geolocation } from "@capacitor/geolocation";
 import { db } from "../firebase";
 import { useAuth } from "../auth/AuthContext";
 import type { Lead, Territory, LatLng } from "../types";
-
-const MAPS_KEY =
-  import.meta.env.VITE_GOOGLE_MAPS_API_KEY || "AIzaSyAAfrLWkY_WS7yabCgW_WZJu973J5iGcBI";
 
 const STATUS_COLOR: Record<string, string> = {
   new: "#38BDF8",
@@ -26,269 +16,304 @@ const STATUS_COLOR: Record<string, string> = {
   sold: "#22C55E",
 };
 
-const US_CENTER = { lat: 39.5, lng: -98.35 };
+const DEFAULT_CENTER: [number, number] = [40.34, -111.91]; // Utah County fallback
+const PIN_ZOOM = 13; // only show home pins at/above this zoom
 
 type Mode = "view" | "draw" | "route";
 
+function statusIcon(status: string): L.DivIcon {
+  const color = STATUS_COLOR[status] || "#94A3B8";
+  return L.divIcon({
+    className: "lead-pin",
+    html: `<span style="background:${color}"></span>`,
+    iconSize: [18, 18],
+    iconAnchor: [9, 9],
+    popupAnchor: [0, -10],
+  });
+}
+
+function haversine(a: LatLng, b: LatLng): number {
+  const R = 6371;
+  const dLat = ((b.lat - a.lat) * Math.PI) / 180;
+  const dLng = ((b.lng - a.lng) * Math.PI) / 180;
+  const s =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos((a.lat * Math.PI) / 180) * Math.cos((b.lat * Math.PI) / 180) * Math.sin(dLng / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(s));
+}
+
+// Greedy nearest-neighbour ordering from a start point.
+function orderRoute(start: LatLng, stops: Lead[]): Lead[] {
+  const remaining = [...stops];
+  const out: Lead[] = [];
+  let cur = start;
+  while (remaining.length) {
+    let bi = 0;
+    let bd = Infinity;
+    remaining.forEach((l, i) => {
+      const d = haversine(cur, { lat: l.lat!, lng: l.lng! });
+      if (d < bd) { bd = d; bi = i; }
+    });
+    const next = remaining.splice(bi, 1)[0];
+    out.push(next);
+    cur = { lat: next.lat!, lng: next.lng! };
+  }
+  return out;
+}
+
+// Free geocoding via OpenStreetMap Nominatim (no key, CORS-friendly).
+async function geocode(addr: string): Promise<LatLng | null> {
+  try {
+    const res = await fetch(
+      `https://nominatim.openstreetmap.org/search?format=json&limit=1&q=${encodeURIComponent(addr)}`,
+      { headers: { Accept: "application/json" } }
+    );
+    const data = (await res.json()) as Array<{ lat: string; lon: string }>;
+    if (data?.[0]) return { lat: parseFloat(data[0].lat), lng: parseFloat(data[0].lon) };
+  } catch {
+    /* ignore */
+  }
+  return null;
+}
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
 export default function MapPage() {
   const { profile, role, companyId } = useAuth();
-  const mapEl = useRef<HTMLDivElement>(null);
-  const map = useRef<google.maps.Map | null>(null);
-  const geocoder = useRef<google.maps.Geocoder | null>(null);
-  const markers = useRef<Map<string, google.maps.Marker>>(new Map());
-  const polys = useRef<google.maps.Polygon[]>([]);
-  const drawingMgr = useRef<google.maps.drawing.DrawingManager | null>(null);
-  const dirRenderer = useRef<google.maps.DirectionsRenderer | null>(null);
+  const elRef = useRef<HTMLDivElement>(null);
+  const mapRef = useRef<L.Map | null>(null);
+  const pinsLayer = useRef<L.LayerGroup>(L.layerGroup());
+  const territoryLayer = useRef<L.LayerGroup>(L.layerGroup());
+  const routeLine = useRef<L.Polyline | null>(null);
   const myLoc = useRef<LatLng | null>(null);
   const leadsCache = useRef<Lead[]>([]);
+  const modeRef = useRef<Mode>("view");
+  const drawPts = useRef<LatLng[]>([]);
+  const drawLayer = useRef<L.Polygon | null>(null);
 
   const [status, setStatus] = useState("Loading map…");
   const [mode, setMode] = useState<Mode>("view");
   const [selected, setSelected] = useState<string[]>([]);
   const selectedRef = useRef<string[]>([]);
   selectedRef.current = selected;
+  modeRef.current = mode;
 
-  // ── Load leads (downstream-scoped) ─────────────────────────────────────────
-  async function fetchLeads(): Promise<Lead[]> {
-    if (!companyId || !profile) return [];
-    const base = collection(db, "leads");
-    const q =
-      role === "admin"
-        ? query(base, where("companyId", "==", companyId))
-        : query(
-            base,
-            where("companyId", "==", companyId),
-            where("visibilityPath", "array-contains", profile.uid)
-          );
-    const snap = await getDocs(q);
-    return snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<Lead, "id">) }));
-  }
+  const canDraw = role === "admin" || role === "manager";
 
-  function statusIcon(lead: Lead): google.maps.Symbol {
-    return {
-      path: google.maps.SymbolPath.CIRCLE,
-      scale: 8,
-      fillColor: STATUS_COLOR[lead.status] || "#94A3B8",
-      fillOpacity: 1,
-      strokeColor: "#0A0F1A",
-      strokeWeight: 1.5,
-    };
+  function refreshPinVisibility() {
+    const map = mapRef.current;
+    if (!map) return;
+    if (map.getZoom() >= PIN_ZOOM) {
+      if (!map.hasLayer(pinsLayer.current)) map.addLayer(pinsLayer.current);
+    } else if (map.hasLayer(pinsLayer.current)) {
+      map.removeLayer(pinsLayer.current);
+    }
   }
 
   function toggleSelect(id: string) {
     setSelected((cur) => (cur.includes(id) ? cur.filter((x) => x !== id) : [...cur, id]));
   }
 
-  async function placeLeadMarkers() {
-    const leads = await fetchLeads();
-    leadsCache.current = leads;
-    for (const lead of leads) {
-      let pos: LatLng | null =
-        lead.lat != null && lead.lng != null ? { lat: lead.lat, lng: lead.lng } : null;
-
-      // Geocode + persist any lead missing coordinates.
-      if (!pos && lead.address && geocoder.current) {
-        try {
-          const res = await geocoder.current.geocode({ address: [lead.address, lead.city, lead.state, lead.zip].filter(Boolean).join(", ") });
-          const loc = res.results[0]?.geometry.location;
-          if (loc) {
-            pos = { lat: loc.lat(), lng: loc.lng() };
-            await updateDoc(doc(db, "leads", lead.id), { lat: pos.lat, lng: pos.lng }).catch(() => {});
-          }
-        } catch {
-          /* geocode failed — skip pin */
-        }
-      }
-      if (!pos || !map.current) continue;
-
-      const marker = new google.maps.Marker({
-        position: pos,
-        map: map.current,
-        title: `${lead.address}${lead.ownerName ? " · " + lead.ownerName : ""} (${lead.status})`,
-        icon: statusIcon(lead),
-      });
-      marker.addListener("click", () => {
-        if (mode === "route") toggleSelect(lead.id);
-        else {
-          const url = `https://www.google.com/maps/dir/?api=1&destination=${pos!.lat},${pos!.lng}&travelmode=driving`;
-          window.open(url, "_blank");
-        }
-      });
-      markers.current.set(lead.id, marker);
-    }
-    setStatus(`${markers.current.size} leads plotted`);
+  async function fetchLeads(): Promise<Lead[]> {
+    if (!companyId || !profile) return [];
+    const base = collection(db, "leads");
+    const q =
+      role === "admin"
+        ? query(base, where("companyId", "==", companyId))
+        : query(base, where("companyId", "==", companyId), where("visibilityPath", "array-contains", profile.uid));
+    const snap = await getDocs(q);
+    return snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<Lead, "id">) }));
   }
 
-  async function loadTerritories() {
-    if (!companyId || !map.current) return;
-    const snap = await getDocs(
-      query(collection(db, "territories"), where("companyId", "==", companyId))
+  async function buildPins() {
+    pinsLayer.current.clearLayers();
+    const leads = await fetchLeads();
+    leadsCache.current = leads;
+    let plotted = 0;
+    let needGeo = leads.filter((l) => (l.lat == null || l.lng == null) && l.address);
+
+    // Plot the ones that already have coords immediately.
+    for (const lead of leads) {
+      if (lead.lat == null || lead.lng == null) continue;
+      addPin(lead);
+      plotted++;
+    }
+    setStatus(`${plotted} leads plotted${needGeo.length ? ` · geocoding ${needGeo.length}…` : ""}`);
+    refreshPinVisibility();
+
+    // Geocode the rest (rate-limited for Nominatim) and persist back.
+    for (const lead of needGeo) {
+      const full = [lead.address, lead.city, lead.state, lead.zip].filter(Boolean).join(", ");
+      const loc = await geocode(full);
+      if (loc) {
+        lead.lat = loc.lat;
+        lead.lng = loc.lng;
+        addPin(lead);
+        plotted++;
+        setStatus(`${plotted} leads plotted`);
+        refreshPinVisibility();
+        await updateDoc(doc(db, "leads", lead.id), { lat: loc.lat, lng: loc.lng }).catch(() => {});
+      }
+      await sleep(1100); // respect Nominatim ~1 req/sec
+    }
+    setStatus(`${plotted} leads plotted`);
+  }
+
+  function addPin(lead: Lead) {
+    if (lead.lat == null || lead.lng == null) return;
+    const m = L.marker([lead.lat, lead.lng], { icon: statusIcon(lead.status) });
+    m.bindPopup(
+      `<strong>${lead.ownerName ?? "Lead"}</strong><br/>` +
+        `${lead.address ?? ""}<br/>` +
+        `Status: ${(lead.status ?? "new").replace("_", " ")}<br/>` +
+        (lead.phone ? `📞 ${lead.phone}<br/>` : "") +
+        (lead.notes ? `${lead.notes}` : "")
     );
+    m.on("click", () => {
+      if (modeRef.current === "route") toggleSelect(lead.id);
+    });
+    pinsLayer.current.addLayer(m);
+  }
+
+  async function buildTerritories() {
+    territoryLayer.current.clearLayers();
+    if (!companyId) return;
+    const snap = await getDocs(query(collection(db, "territories"), where("companyId", "==", companyId)));
     snap.forEach((d) => {
       const t = { id: d.id, ...(d.data() as Omit<Territory, "id">) };
       if (!t.polygon || t.polygon.length < 3) return;
-      const poly = new google.maps.Polygon({
-        paths: t.polygon,
-        strokeColor: t.color || "#0EA5E9",
-        strokeOpacity: 0.9,
-        strokeWeight: 2,
-        fillColor: t.color || "#0EA5E9",
-        fillOpacity: 0.12,
-        map: map.current!,
-      });
-      polys.current.push(poly);
+      L.polygon(
+        t.polygon.map((p) => [p.lat, p.lng] as [number, number]),
+        { color: t.color || "#34D399", weight: 2, fillOpacity: 0.1 }
+      )
+        .bindTooltip(t.name)
+        .addTo(territoryLayer.current);
     });
   }
 
-  // ── Init ───────────────────────────────────────────────────────────────────
+  // ── Init map ────────────────────────────────────────────────────────────────
   useEffect(() => {
-    if (!MAPS_KEY) {
-      setStatus("Google Maps API key not set — add VITE_GOOGLE_MAPS_API_KEY and redeploy.");
-      return;
-    }
-    if (!companyId || !profile) return;
-    let cancelled = false;
+    if (!companyId || !profile || !elRef.current || mapRef.current) return;
+
+    const satellite = L.tileLayer(
+      "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+      { maxZoom: 19, attribution: "Tiles © Esri — Maxar, Earthstar Geographics" }
+    );
+    const labels = L.tileLayer(
+      "https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}",
+      { maxZoom: 19 }
+    );
+    const street = L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+      maxZoom: 19,
+      attribution: "© OpenStreetMap",
+    });
+    const hybrid = L.layerGroup([satellite, labels]);
+
+    const map = L.map(elRef.current, { center: DEFAULT_CENTER, zoom: 14, layers: [hybrid] });
+    L.control.layers({ Satellite: satellite, Hybrid: hybrid, Street: street }).addTo(map);
+    territoryLayer.current.addTo(map);
+    mapRef.current = map;
+
+    map.on("zoomend", refreshPinVisibility);
+
+    // Draw mode: click to add polygon vertices.
+    map.on("click", (e: L.LeafletMouseEvent) => {
+      if (modeRef.current !== "draw") return;
+      drawPts.current.push({ lat: e.latlng.lat, lng: e.latlng.lng });
+      if (drawLayer.current) drawLayer.current.remove();
+      drawLayer.current = L.polygon(
+        drawPts.current.map((p) => [p.lat, p.lng] as [number, number]),
+        { color: "#38BDF8", weight: 2, fillOpacity: 0.15 }
+      ).addTo(map);
+    });
 
     (async () => {
+      // Center on current location if available.
       try {
-        const loader = new Loader({ apiKey: MAPS_KEY, version: "weekly" });
-        const [{ Map: GMap }] = await Promise.all([
-          loader.importLibrary("maps"),
-          loader.importLibrary("marker"),
-          loader.importLibrary("drawing"),
-          loader.importLibrary("geometry"),
-          loader.importLibrary("routes"),
-        ]);
-        if (cancelled || !mapEl.current) return;
-
-        // Current location (Capacitor on native, browser on web).
-        let center = US_CENTER;
-        let zoom = 5;
-        try {
-          const pos = await Geolocation.getCurrentPosition({ enableHighAccuracy: true, timeout: 8000 });
-          center = { lat: pos.coords.latitude, lng: pos.coords.longitude };
-          myLoc.current = center;
-          zoom = 15;
-        } catch {
-          /* location denied/unavailable — fall back to US view */
-        }
-
-        const gmap = new GMap(mapEl.current, {
-          center,
-          zoom,
-          mapTypeControl: false,
-          streetViewControl: false,
-          fullscreenControl: true,
-        });
-        map.current = gmap;
-        geocoder.current = new google.maps.Geocoder();
-        dirRenderer.current = new google.maps.DirectionsRenderer({ map: gmap, suppressMarkers: true });
-
-        if (myLoc.current) {
-          new google.maps.Marker({
-            position: myLoc.current,
-            map: gmap,
-            title: "You",
-            zIndex: 999,
-            icon: {
-              path: google.maps.SymbolPath.CIRCLE,
-              scale: 7,
-              fillColor: "#0EA5E9",
-              fillOpacity: 1,
-              strokeColor: "#fff",
-              strokeWeight: 3,
-            },
-          });
-        }
-
-        // Drawing manager for territory areas (managers/admins).
-        const canDraw = role === "admin" || role === "manager";
-        if (canDraw) {
-          const dm = new google.maps.drawing.DrawingManager({
-            drawingControl: false,
-            polygonOptions: { strokeColor: "#38BDF8", fillColor: "#38BDF8", fillOpacity: 0.15, strokeWeight: 2, editable: false },
-          });
-          dm.setMap(gmap);
-          drawingMgr.current = dm;
-          google.maps.event.addListener(dm, "polygoncomplete", async (poly: google.maps.Polygon) => {
-            const path = poly.getPath().getArray().map((p) => ({ lat: p.lat(), lng: p.lng() }));
-            const name = window.prompt("Name this territory:");
-            if (!name) { poly.setMap(null); return; }
-            try {
-              await addDoc(collection(db, "territories"), {
-                companyId,
-                name: name.trim(),
-                color: "#38BDF8",
-                polygon: path,
-                managerId: profile.uid,
-                createdAt: Date.now(),
-              });
-              setStatus(`Territory “${name.trim()}” saved`);
-            } catch (e: any) {
-              setStatus("Could not save territory: " + (e?.message || ""));
-              poly.setMap(null);
-            }
-            dm.setDrawingMode(null);
-            setMode("view");
-          });
-        }
-
-        await loadTerritories();
-        await placeLeadMarkers();
-        setStatus(`${markers.current.size} leads plotted`);
-      } catch (e: any) {
-        if (!cancelled) setStatus("Map failed to load: " + (e?.message || e));
+        const pos = await Geolocation.getCurrentPosition({ enableHighAccuracy: true, timeout: 8000 });
+        myLoc.current = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+        map.setView([myLoc.current.lat, myLoc.current.lng], 16);
+        L.circleMarker([myLoc.current.lat, myLoc.current.lng], {
+          radius: 7,
+          color: "#fff",
+          weight: 3,
+          fillColor: "#0EA5E9",
+          fillOpacity: 1,
+        })
+          .addTo(map)
+          .bindTooltip("You");
+      } catch {
+        /* location denied — keep default center */
       }
+      await buildTerritories();
+      await buildPins();
     })();
 
     return () => {
-      cancelled = true;
+      map.remove();
+      mapRef.current = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [companyId, profile, role]);
 
-  // Reflect drawing mode.
-  useEffect(() => {
-    if (!drawingMgr.current) return;
-    drawingMgr.current.setDrawingMode(
-      mode === "draw" ? google.maps.drawing.OverlayType.POLYGON : null
-    );
-  }, [mode]);
-
-  // ── Route optimization ─────────────────────────────────────────────────────
-  async function optimizeRoute() {
-    if (!map.current || !dirRenderer.current) return;
-    const ids = selectedRef.current;
-    if (ids.length < 1) { setStatus("Pick at least one stop (tap leads in Route mode)."); return; }
-    const stops = ids
-      .map((id) => leadsCache.current.find((l) => l.id === id))
-      .filter((l): l is Lead => !!l && l.lat != null && l.lng != null);
-    const origin = myLoc.current || { lat: stops[0].lat!, lng: stops[0].lng! };
-    const svc = new google.maps.DirectionsService();
-    try {
-      const res = await svc.route({
-        origin,
-        destination: origin, // round trip back to start
-        waypoints: stops.map((l) => ({ location: { lat: l.lat!, lng: l.lng! }, stopover: true })),
-        optimizeWaypoints: true,
-        travelMode: google.maps.TravelMode.WALKING,
-      });
-      dirRenderer.current.setDirections(res);
-      setStatus(`Route: ${stops.length} stops optimized`);
-    } catch (e: any) {
-      setStatus("Routing failed: " + (e?.message || e));
+  // ── Draw area: finish / cancel ───────────────────────────────────────────────
+  async function finishDraw() {
+    if (drawPts.current.length < 3) { setStatus("Tap at least 3 points to make an area."); return; }
+    const name = window.prompt("Name this territory:");
+    if (name && companyId && profile) {
+      try {
+        await addDoc(collection(db, "territories"), {
+          companyId,
+          name: name.trim(),
+          color: "#34D399",
+          polygon: drawPts.current,
+          managerId: profile.uid,
+          createdAt: Date.now(),
+        });
+        setStatus(`Territory “${name.trim()}” saved`);
+        await buildTerritories();
+      } catch (e: any) {
+        setStatus("Could not save: " + (e?.message || ""));
+      }
     }
+    cancelDraw();
+  }
+  function cancelDraw() {
+    drawPts.current = [];
+    if (drawLayer.current) { drawLayer.current.remove(); drawLayer.current = null; }
+    setMode("view");
   }
 
-  function openRouteInMaps() {
-    const ids = selectedRef.current;
-    const stops = ids
+  // ── Route ─────────────────────────────────────────────────────────────────
+  function buildRoute() {
+    const map = mapRef.current;
+    if (!map) return;
+    const stops = selectedRef.current
+      .map((id) => leadsCache.current.find((l) => l.id === id))
+      .filter((l): l is Lead => !!l && l.lat != null && l.lng != null);
+    if (!stops.length) { setStatus("Tap leads on the map to add stops."); return; }
+    const start = myLoc.current || { lat: stops[0].lat!, lng: stops[0].lng! };
+    const ordered = orderRoute(start, stops);
+    const pts: [number, number][] = [
+      [start.lat, start.lng],
+      ...ordered.map((l) => [l.lat!, l.lng!] as [number, number]),
+    ];
+    if (routeLine.current) routeLine.current.remove();
+    routeLine.current = L.polyline(pts, { color: "#0EA5E9", weight: 4, dashArray: "6 6" }).addTo(map);
+    map.fitBounds(L.latLngBounds(pts), { padding: [40, 40] });
+    setStatus(`Route: ${ordered.length} stops (nearest-first)`);
+  }
+
+  function navigateRoute() {
+    const stops = selectedRef.current
       .map((id) => leadsCache.current.find((l) => l.id === id))
       .filter((l): l is Lead => !!l && l.lat != null && l.lng != null);
     if (!stops.length) return;
+    const start = myLoc.current || { lat: stops[0].lat!, lng: stops[0].lng! };
+    const ordered = orderRoute(start, stops);
     const origin = myLoc.current ? `${myLoc.current.lat},${myLoc.current.lng}` : "";
-    const dest = `${stops[stops.length - 1].lat},${stops[stops.length - 1].lng}`;
-    const waypoints = stops.slice(0, -1).map((l) => `${l.lat},${l.lng}`).join("|");
+    const dest = `${ordered[ordered.length - 1].lat},${ordered[ordered.length - 1].lng}`;
+    const waypoints = ordered.slice(0, -1).map((l) => `${l.lat},${l.lng}`).join("|");
     const url =
       `https://www.google.com/maps/dir/?api=1&travelmode=walking` +
       (origin ? `&origin=${origin}` : "") +
@@ -296,8 +321,6 @@ export default function MapPage() {
       (waypoints ? `&waypoints=${encodeURIComponent(waypoints)}` : "");
     window.open(url, "_blank");
   }
-
-  const canDraw = role === "admin" || role === "manager";
 
   return (
     <div className="page-body">
@@ -321,18 +344,28 @@ export default function MapPage() {
         </div>
       </div>
 
-      {mode === "route" && (
+      {mode === "draw" && (
         <div className="card route-bar">
-          <span className="muted">{selected.length} stop(s) selected — tap leads on the map.</span>
+          <span className="muted">Tap the map to drop area corners, then save.</span>
           <div className="row">
-            <button className="btn sm" onClick={() => setSelected([])}>Clear</button>
-            <button className="btn sm" onClick={optimizeRoute}>Optimize</button>
-            <button className="btn primary sm" onClick={openRouteInMaps}>Navigate ↗</button>
+            <button className="btn sm" onClick={cancelDraw}>Cancel</button>
+            <button className="btn primary sm" onClick={finishDraw}>Save area</button>
           </div>
         </div>
       )}
 
-      <div ref={mapEl} className="map-canvas" />
+      {mode === "route" && (
+        <div className="card route-bar">
+          <span className="muted">{selected.length} stop(s) — tap leads on the map.</span>
+          <div className="row">
+            <button className="btn sm" onClick={() => { setSelected([]); routeLine.current?.remove(); }}>Clear</button>
+            <button className="btn sm" onClick={buildRoute}>Build route</button>
+            <button className="btn primary sm" onClick={navigateRoute}>Navigate ↗</button>
+          </div>
+        </div>
+      )}
+
+      <div ref={elRef} className="map-canvas" />
 
       <div className="map-legend">
         {Object.entries(STATUS_COLOR).map(([s, c]) => (
@@ -340,6 +373,7 @@ export default function MapPage() {
             <span className="legend-dot" style={{ background: c }} /> {s.replace("_", " ")}
           </span>
         ))}
+        <span className="legend-item muted">· pins appear at zoom {PIN_ZOOM}+</span>
       </div>
     </div>
   );
