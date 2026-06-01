@@ -1,42 +1,15 @@
 import { useEffect, useState } from "react";
-import {
-  addDoc,
-  collection,
-  doc,
-  increment,
-  limit,
-  onSnapshot,
-  orderBy,
-  query,
-  updateDoc,
-  where,
-} from "firebase/firestore";
+import { collection, limit, onSnapshot, orderBy, query, where } from "firebase/firestore";
 import { db } from "../firebase";
 import { useAuth } from "../auth/AuthContext";
-import { bumpStats } from "../lib/stats";
+import { useShift, fmtElapsed } from "../shift/ShiftContext";
 import type { Shift } from "../types";
 
 export default function Shifts() {
   const { profile, role, companyId } = useAuth();
-  const [active, setActive] = useState<Shift | null>(null);
+  const { active, elapsedSec, doors, starting, startShift, stopShift } = useShift();
   const [shifts, setShifts] = useState<Shift[]>([]);
-  const [busy, setBusy] = useState(false);
 
-  // Watch my current active shift.
-  useEffect(() => {
-    if (!profile) return;
-    const q = query(
-      collection(db, "shifts"),
-      where("userId", "==", profile.uid),
-      where("status", "==", "active"),
-      limit(1)
-    );
-    return onSnapshot(q, (snap) => {
-      setActive(snap.empty ? null : ({ id: snap.docs[0].id, ...(snap.docs[0].data() as Omit<Shift, "id">) }));
-    });
-  }, [profile]);
-
-  // Recent shifts: mine + downstream (admins: whole company).
   useEffect(() => {
     if (!profile || !companyId) return;
     const base = collection(db, "shifts");
@@ -50,49 +23,12 @@ export default function Shifts() {
             orderBy("startAt", "desc"),
             limit(50)
           );
-    return onSnapshot(q, (snap) =>
-      setShifts(snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<Shift, "id">) })))
-    );
+    return onSnapshot(q, (snap) => setShifts(snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<Shift, "id">) }))));
   }, [profile, role, companyId]);
-
-  const startShift = async () => {
-    if (!profile || !companyId) return;
-    setBusy(true);
-    try {
-      await addDoc(collection(db, "shifts"), {
-        companyId,
-        userId: profile.uid,
-        userName: profile.displayName,
-        visibilityPath: [profile.uid, ...(profile.managerPath ?? [])],
-        status: "active",
-        startAt: Date.now(),
-        doorsKnocked: 0,
-      });
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const knock = async () => {
-    if (!active) return;
-    await updateDoc(doc(db, "shifts", active.id), { doorsKnocked: increment(1) });
-  };
-
-  const endShift = async () => {
-    if (!active || !profile) return;
-    setBusy(true);
-    try {
-      await updateDoc(doc(db, "shifts", active.id), { status: "ended", endAt: Date.now() });
-      void bumpStats(profile, { shifts: 1, doorsKnocked: active.doorsKnocked ?? 0 });
-    } finally {
-      setBusy(false);
-    }
-  };
 
   const fmt = (ms?: number) => (ms ? new Date(ms).toLocaleString() : "—");
   const dur = (s: Shift) => {
-    const end = s.endAt ?? Date.now();
-    const mins = Math.round((end - s.startAt) / 60000);
+    const mins = Math.round(((s.endAt ?? Date.now()) - s.startAt) / 60000);
     return mins >= 60 ? `${Math.floor(mins / 60)}h ${mins % 60}m` : `${mins}m`;
   };
 
@@ -100,25 +36,24 @@ export default function Shifts() {
     <div className="page-body">
       <div className="page-head">
         <h1>Shifts</h1>
-        <p className="page-sub">Clock your canvassing time and doors knocked.</p>
+        <p className="page-sub">Clock your canvassing time. Door knocks count automatically while on shift.</p>
       </div>
 
       <div className="card shift-control">
         {active ? (
           <>
             <div>
-              <div className="shift-live">● On shift — {dur(active)}</div>
-              <div className="muted">Doors knocked: <strong>{active.doorsKnocked ?? 0}</strong></div>
+              <div className="shift-live">● On shift — <span className="mono">{fmtElapsed(elapsedSec)}</span></div>
+              <div className="muted">Doors this shift: <strong>{doors}</strong> · auto-stops after 5 min idle</div>
             </div>
-            <div className="row">
-              <button className="btn" onClick={knock}>+1 door</button>
-              <button className="btn primary" onClick={endShift} disabled={busy}>End shift</button>
-            </div>
+            <button className="btn primary" onClick={() => stopShift()}>Stop shift</button>
           </>
         ) : (
           <>
             <div className="muted">You're not on a shift.</div>
-            <button className="btn primary" onClick={startShift} disabled={busy}>Start shift</button>
+            <button className="btn primary" onClick={() => startShift()} disabled={starting}>
+              {starting ? "Starting…" : "▶ Start shift"}
+            </button>
           </>
         )}
       </div>
@@ -139,9 +74,7 @@ export default function Shifts() {
                   <td className="muted">{fmt(s.startAt)}</td>
                   <td>{dur(s)}</td>
                   <td>{s.doorsKnocked ?? 0}</td>
-                  <td>
-                    <span className={`badge ${s.status === "active" ? "" : "disabled"}`}>{s.status}</span>
-                  </td>
+                  <td><span className={`badge ${s.status === "active" ? "" : "disabled"}`}>{s.status}</span></td>
                 </tr>
               ))}
             </tbody>

@@ -60,8 +60,9 @@ service cloud.firestore {
 
     // ── leads (downstream-scoped) ────────────────────────────────────────
     match /leads/{leadId} {
-      allow read: if inMyCompany(resource.data.companyId)
-                  && (isSuper() || isCompanyAdmin() || inPath(resource.data.visibilityPath));
+      allow read: if (isSignedIn() && resource.data.assignedTo == request.auth.uid)
+                  || (inMyCompany(resource.data.companyId)
+                      && (isSuper() || isCompanyAdmin() || inPath(resource.data.visibilityPath)));
       allow create: if isSignedIn()
                     && request.resource.data.companyId == myCompany()
                     && request.resource.data.createdBy == request.auth.uid
@@ -76,8 +77,9 @@ service cloud.firestore {
 
     // ── shifts (downstream-scoped, same visibilityPath pattern) ──────────
     match /shifts/{shiftId} {
-      allow read: if inMyCompany(resource.data.companyId)
-                  && (isSuper() || isCompanyAdmin() || inPath(resource.data.visibilityPath));
+      allow read: if (isSignedIn() && resource.data.userId == request.auth.uid)
+                  || (inMyCompany(resource.data.companyId)
+                      && (isSuper() || isCompanyAdmin() || inPath(resource.data.visibilityPath)));
       allow create: if isSignedIn()
                     && request.resource.data.companyId == myCompany()
                     && request.auth.uid in request.resource.data.visibilityPath;
@@ -118,6 +120,69 @@ service cloud.firestore {
     match /impersonationLogs/{logId} {
       allow read: if isSuper();
       allow write: if false; // written by Cloud Functions only
+    }
+
+    // ── team chat (company channel) ──────────────────────────────────────
+    match /chat/{messageId} {
+      allow read: if inMyCompany(resource.data.companyId);
+      allow create: if isSignedIn()
+                    && request.resource.data.companyId == myCompany()
+                    && request.resource.data.userId == request.auth.uid;
+      allow update, delete: if isSignedIn()
+                    && (resource.data.userId == request.auth.uid || isCompanyAdmin() || isSuper());
+    }
+
+    // ── direct messages ──────────────────────────────────────────────────
+    match /dms/{channelId} {
+      allow read: if isSignedIn() && request.auth.uid in resource.data.members;
+      allow create: if isSignedIn() && request.auth.uid in request.resource.data.members;
+      allow update: if isSignedIn() && request.auth.uid in resource.data.members;
+      match /messages/{messageId} {
+        allow read: if isSignedIn()
+          && request.auth.uid in get(/databases/$(database)/documents/dms/$(channelId)).data.members;
+        allow create: if isSignedIn()
+          && request.resource.data.userId == request.auth.uid
+          && request.auth.uid in get(/databases/$(database)/documents/dms/$(channelId)).data.members;
+      }
+    }
+
+    // ── scheduled events (appointments / go-backs / follow-ups) ──────────
+    match /events/{eventId} {
+      allow read: if (isSignedIn() && resource.data.userId == request.auth.uid)
+                  || (inMyCompany(resource.data.companyId)
+                      && (isSuper() || isCompanyAdmin() || inPath(resource.data.visibilityPath)));
+      allow create: if isSignedIn()
+                    && request.resource.data.companyId == myCompany()
+                    && request.resource.data.userId == request.auth.uid;
+      allow update, delete: if isSignedIn()
+                    && (resource.data.userId == request.auth.uid || isManagerOrAdmin());
+    }
+
+    // ── in-app notifications (created by Cloud Functions) ────────────────
+    match /notifications/{notifId} {
+      allow read: if isSignedIn() && resource.data.userId == request.auth.uid;
+      allow update, delete: if isSignedIn() && resource.data.userId == request.auth.uid;
+      allow create: if false; // server-side only
+    }
+
+    // ── presence (online heartbeat) ──────────────────────────────────────
+    match /presence/{uid} {
+      allow read: if isSignedIn();
+      allow write: if isSignedIn() && request.auth.uid == uid;
+    }
+
+    // ── platform config (notification + integration keys) ────────────────
+    // Holds secrets (SendGrid/Twilio, OAuth client secrets). Cloud Functions
+    // only — never exposed to any client. Consoles read/write via callables
+    // that mask the secrets.
+    match /config/{docId} {
+      allow read, write: if false;
+    }
+
+    // ── calendar OAuth refresh tokens (per user) ─────────────────────────
+    // Highly sensitive. Cloud Functions only.
+    match /calendarTokens/{uid} {
+      allow read, write: if false;
     }
   }
 }

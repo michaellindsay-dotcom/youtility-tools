@@ -102,6 +102,9 @@
   .hidden { display:none !important; }
   .pill { display:inline-flex; align-items:center; gap:6px; font-size:12px; padding:5px 10px; border-radius:999px;
     border:1px solid var(--line-hi); background:rgba(255,255,255,.03); color:var(--ink-mid); }
+  .day-chip { display:inline-flex; align-items:center; gap:5px; font-size:13px; padding:7px 11px; border-radius:999px;
+    border:1px solid var(--line-hi); background:rgba(255,255,255,.03); cursor:pointer; }
+  .day-chip input { width:auto; }
 </style>
 </head>
 <body>
@@ -162,6 +165,68 @@
     </table>
   </section>
 
+  <!-- Notification provider keys (super-admin only) -->
+  <section id="notifyCard" class="card hidden">
+    <h2>Notification settings</h2>
+    <p class="muted" style="margin:-6px 0 14px;font-size:13px;">
+      Keys for the email + SMS alerts that fire when a teammate is offline. Stored
+      securely server-side and never shown again after saving. Leave a secret blank
+      to keep the current value.
+    </p>
+
+    <h3 style="font-size:14px;margin-bottom:10px;">✉️ Email — SendGrid <span id="sgStatus" class="pill"></span></h3>
+    <div class="grid-2">
+      <div class="field"><span>API key</span><input id="sgKey" type="password" placeholder="SG.xxxxx (leave blank to keep)" autocomplete="off" /></div>
+      <div class="field"><span>From email (verified sender) *</span><input id="sgFrom" type="email" placeholder="alerts@yourdomain.com" /></div>
+      <div class="field"><span>From name</span><input id="sgFromName" placeholder="YoutilityKnock" /></div>
+    </div>
+    <div class="row" style="justify-content:flex-end;gap:8px;margin-top:8px;">
+      <button id="sgClear" class="btn ghost sm">Clear keys</button>
+      <button id="sgSave" class="btn primary sm">Save email keys</button>
+    </div>
+
+    <h3 style="font-size:14px;margin:22px 0 10px;">📱 SMS — Twilio <span id="twStatus" class="pill"></span></h3>
+    <div class="grid-2">
+      <div class="field"><span>Account SID</span><input id="twSid" type="password" placeholder="ACxxxxx (leave blank to keep)" autocomplete="off" /></div>
+      <div class="field"><span>Auth token</span><input id="twToken" type="password" placeholder="leave blank to keep" autocomplete="off" /></div>
+      <div class="field"><span>From number *</span><input id="twFrom" placeholder="+15551234567" /></div>
+    </div>
+    <div class="row" style="justify-content:flex-end;gap:8px;margin-top:8px;">
+      <button id="twClear" class="btn ghost sm">Clear keys</button>
+      <button id="twSave" class="btn primary sm">Save SMS keys</button>
+    </div>
+    <div id="notifyBanner" class="banner"></div>
+  </section>
+
+  <!-- Calendar integrations (super-admin only) -->
+  <section id="integrationsCard" class="card hidden">
+    <h2>Calendar integrations</h2>
+    <p class="muted" style="margin:-6px 0 14px;font-size:13px;">
+      OAuth credentials so reps can link Google / Outlook calendars (two-way sync).
+      Secrets are stored server-side and never shown again. Leave a secret blank to keep it.
+    </p>
+
+    <h3 style="font-size:14px;margin-bottom:10px;">🟦 Google Calendar <span id="gcStatus" class="pill"></span></h3>
+    <div class="grid-2">
+      <div class="field"><span>OAuth Client ID</span><input id="gcClientId" placeholder="xxxx.apps.googleusercontent.com" autocomplete="off" /></div>
+      <div class="field"><span>Client secret</span><input id="gcSecret" type="password" placeholder="leave blank to keep" autocomplete="off" /></div>
+    </div>
+    <div class="row" style="justify-content:flex-end;margin-top:6px;">
+      <button id="gcSave" class="btn primary sm">Save Google</button>
+    </div>
+
+    <h3 style="font-size:14px;margin:22px 0 10px;">🟪 Microsoft / Outlook <span id="msStatus" class="pill"></span></h3>
+    <div class="grid-2">
+      <div class="field"><span>Application (client) ID</span><input id="msClientId" placeholder="00000000-0000-0000-0000-000000000000" autocomplete="off" /></div>
+      <div class="field"><span>Client secret</span><input id="msSecret" type="password" placeholder="leave blank to keep" autocomplete="off" /></div>
+      <div class="field"><span>Tenant</span><input id="msTenant" placeholder="common" /></div>
+    </div>
+    <div class="row" style="justify-content:flex-end;margin-top:6px;">
+      <button id="msSave" class="btn primary sm">Save Microsoft</button>
+    </div>
+    <div id="integBanner" class="banner"></div>
+  </section>
+
   <!-- Roles (titles on a base tier) -->
   <section id="rolesCard" class="card hidden">
     <h2><span id="rolesTitle">Roles &amp; titles</span>
@@ -208,6 +273,71 @@
     </table>
   </section>
 
+  <!-- Scheduling settings (per company) -->
+  <section id="schedulingCard" class="card hidden">
+    <h2><span id="schedulingTitle">Scheduling</span></h2>
+    <p class="muted" style="margin:-6px 0 14px;font-size:13px;">
+      How appointments are booked, formatted, and routed for this company. Reps book
+      from the Map / Leads screens; these rules shape what times they can pick.
+    </p>
+
+    <h3 style="font-size:13px;color:var(--ink-mid);text-transform:uppercase;letter-spacing:.5px;margin-bottom:10px;">Booking window</h3>
+    <div class="grid-2">
+      <div class="field"><span>Minimum lead time (hours)</span><input id="schMinLead" type="number" min="0" value="1" /></div>
+      <div class="field"><span>Max days out</span><input id="schMaxDays" type="number" min="1" value="30" /></div>
+      <div class="field"><span>Appointment length (minutes)</span><input id="schDuration" type="number" min="5" step="5" value="60" /></div>
+      <div class="field"><span>Buffer between appointments (minutes)</span><input id="schBuffer" type="number" min="0" step="5" value="0" /></div>
+      <div class="field"><span>Booking granularity (minutes)</span>
+        <select id="schSlot"><option value="15">15</option><option value="30">30</option><option value="60">60</option></select>
+      </div>
+    </div>
+
+    <h3 style="font-size:13px;color:var(--ink-mid);text-transform:uppercase;letter-spacing:.5px;margin:18px 0 10px;">Business hours</h3>
+    <div class="grid-2">
+      <div class="field"><span>Earliest start</span><input id="schDayStart" type="time" value="09:00" /></div>
+      <div class="field"><span>Latest start</span><input id="schDayEnd" type="time" value="20:00" /></div>
+      <div class="field"><span>Time zone</span>
+        <select id="schTz">
+          <option value="America/New_York">Eastern</option>
+          <option value="America/Chicago">Central</option>
+          <option value="America/Denver">Mountain</option>
+          <option value="America/Phoenix">Arizona (no DST)</option>
+          <option value="America/Los_Angeles">Pacific</option>
+          <option value="America/Anchorage">Alaska</option>
+          <option value="Pacific/Honolulu">Hawaii</option>
+        </select>
+      </div>
+    </div>
+    <div class="field" style="margin-top:6px;">
+      <span>Working days</span>
+      <div id="schDays" class="row" style="gap:6px;">
+        <label class="day-chip"><input type="checkbox" value="0" /> Sun</label>
+        <label class="day-chip"><input type="checkbox" value="1" /> Mon</label>
+        <label class="day-chip"><input type="checkbox" value="2" /> Tue</label>
+        <label class="day-chip"><input type="checkbox" value="3" /> Wed</label>
+        <label class="day-chip"><input type="checkbox" value="4" /> Thu</label>
+        <label class="day-chip"><input type="checkbox" value="5" /> Fri</label>
+        <label class="day-chip"><input type="checkbox" value="6" /> Sat</label>
+      </div>
+    </div>
+
+    <h3 style="font-size:13px;color:var(--ink-mid);text-transform:uppercase;letter-spacing:.5px;margin:18px 0 10px;">Assignment</h3>
+    <div class="field" style="max-width:520px;">
+      <span>How non-self-generated appointments are routed</span>
+      <select id="schAssignment">
+        <option value="self_gen">Self-generated (rep books their own)</option>
+        <option value="round_robin">Round robin (rotate evenly)</option>
+        <option value="highest_production">Highest production (most sales)</option>
+        <option value="manual">Manual (pick a rep)</option>
+      </select>
+    </div>
+
+    <div class="row" style="justify-content:flex-end;margin-top:14px;">
+      <button id="schSave" class="btn primary sm">Save scheduling</button>
+    </div>
+    <div id="schBanner" class="banner"></div>
+  </section>
+
   <!-- Users / accounts -->
   <section id="usersCard" class="card">
     <h2><span id="usersTitle">Accounts</span>
@@ -217,15 +347,19 @@
       <div class="grid-2">
         <div class="field"><span>Name *</span><input id="userName" /></div>
         <div class="field"><span>Email *</span><input id="userEmail" type="email" /></div>
-        <div class="field"><span>Temporary password *</span><input id="userPassword" type="text" placeholder="min 6 chars" /></div>
+        <div class="field"><span id="pwLabel">Temporary password *</span><input id="userPassword" type="text" placeholder="min 6 chars" /></div>
         <div class="field"><span>Role / title</span><select id="userRole"></select></div>
         <div class="field"><span>Reports to (manager)</span><select id="userManager"><option value="">— none —</option></select></div>
         <div class="field"><span>Team</span><select id="userTeam"><option value="">— none —</option></select></div>
       </div>
-      <div class="row" style="justify-content:flex-end;">
+      <label class="day-chip" style="margin-top:4px;">
+        <input id="userInvite" type="checkbox" checked /> Send magic-link invite email (they set their own password)
+      </label>
+      <div class="row" style="justify-content:flex-end;margin-top:10px;">
         <button id="userCancel" class="btn ghost sm">Cancel</button>
-        <button id="userSave" class="btn primary sm">Create account</button>
+        <button id="userSave" class="btn primary sm">Send invite</button>
       </div>
+      <div id="inviteLinkBox" class="banner" style="word-break:break-all;"></div>
     </div>
     <table>
       <thead><tr><th>Name</th><th>Email</th><th>Role / title</th><th>Reports to</th><th>Status</th><th></th></tr></thead>
@@ -268,6 +402,7 @@ const state = {
 // callables
 const createCompany   = httpsCallable(fns, "createCompany");
 const createUser      = httpsCallable(fns, "createUser");
+const inviteUser      = httpsCallable(fns, "inviteUser");
 const setUserDisabled = httpsCallable(fns, "setUserDisabled");
 const setUserRole     = httpsCallable(fns, "setUserRole");
 const createRole      = httpsCallable(fns, "createRole");
@@ -275,6 +410,12 @@ const deleteRole      = httpsCallable(fns, "deleteRole");
 const createTeam      = httpsCallable(fns, "createTeam");
 const assignUserHierarchy = httpsCallable(fns, "assignUserHierarchy");
 const impersonate     = httpsCallable(fns, "impersonate");
+const getNotificationConfig   = httpsCallable(fns, "getNotificationConfig");
+const setNotificationConfig   = httpsCallable(fns, "setNotificationConfig");
+const clearNotificationProvider = httpsCallable(fns, "clearNotificationProvider");
+const setCompanySettings      = httpsCallable(fns, "setCompanySettings");
+const getIntegrationPublicConfig = httpsCallable(fns, "getIntegrationPublicConfig");
+const setIntegrationConfig    = httpsCallable(fns, "setIntegrationConfig");
 
 function banner(el, msg, kind="info") {
   el.className = "banner show " + kind;
@@ -328,7 +469,11 @@ function enterConsole() {
   $("console").classList.remove("hidden");
   if (state.isSuper) {
     $("companiesCard").classList.remove("hidden");
+    $("notifyCard").classList.remove("hidden");
+    $("integrationsCard").classList.remove("hidden");
     loadCompanies();
+    loadNotifyConfig();
+    loadIntegrations();
   } else {
     // Company admin: locked to their own company.
     selectCompany(state.companyId, "");
@@ -342,12 +487,156 @@ async function selectCompany(companyId, companyName) {
   $("rolesTitle").textContent = "Roles & titles" + suffix;
   $("teamsTitle").textContent = "Teams" + suffix;
   $("usersTitle").textContent = "Accounts" + suffix;
+  $("schedulingTitle").textContent = "Scheduling" + suffix;
   $("rolesCard").classList.remove("hidden");
   $("teamsCard").classList.remove("hidden");
-  await Promise.all([loadRoles(), loadTeams()]);
+  $("schedulingCard").classList.remove("hidden");
+  await Promise.all([loadRoles(), loadTeams(), loadScheduling(companyId)]);
   await loadUsers();
   populateUserFormSelects();
 }
+
+// ── Scheduling settings (per company) ────────────────────────────────────
+const minToTime = (m) => `${String(Math.floor((m ?? 0)/60)).padStart(2,"0")}:${String((m ?? 0)%60).padStart(2,"0")}`;
+const timeToMin = (t) => { const [h,m] = (t||"0:0").split(":").map(Number); return (h||0)*60 + (m||0); };
+async function loadScheduling(companyId) {
+  try {
+    const snap = await getDoc(doc(db, "companies", companyId));
+    const s = (snap.exists() ? snap.data().scheduling : null) || {};
+    $("schMinLead").value = s.apptMinLeadHours ?? 1;
+    $("schMaxDays").value = s.apptMaxDaysOut ?? 30;
+    $("schDuration").value = s.apptDurationMin ?? 60;
+    $("schBuffer").value = s.bufferMin ?? 0;
+    $("schSlot").value = String(s.slotMin ?? 30);
+    $("schDayStart").value = minToTime(s.dayStartMin ?? 540);
+    $("schDayEnd").value = minToTime(s.dayEndMin ?? 1200);
+    $("schTz").value = s.timezone || "America/Denver";
+    const days = Array.isArray(s.workDays) ? s.workDays : [1,2,3,4,5,6];
+    $("schDays").querySelectorAll("input").forEach((cb) => { cb.checked = days.includes(Number(cb.value)); });
+    $("schAssignment").value = s.assignment || "self_gen";
+  } catch (e) {
+    banner($("schBanner"), e.message || "Could not load scheduling.", "error");
+  }
+}
+$("schSave").addEventListener("click", async () => {
+  if (!state.selectedCompany) return;
+  const workDays = [...$("schDays").querySelectorAll("input")].filter((cb) => cb.checked).map((cb) => Number(cb.value));
+  $("schSave").disabled = true;
+  try {
+    await setCompanySettings({
+      companyId: state.selectedCompany,
+      scheduling: {
+        apptMinLeadHours: Number($("schMinLead").value),
+        apptMaxDaysOut: Number($("schMaxDays").value),
+        apptDurationMin: Number($("schDuration").value),
+        bufferMin: Number($("schBuffer").value),
+        slotMin: Number($("schSlot").value),
+        dayStartMin: timeToMin($("schDayStart").value),
+        dayEndMin: timeToMin($("schDayEnd").value),
+        timezone: $("schTz").value,
+        workDays,
+        assignment: $("schAssignment").value,
+      },
+    });
+    banner($("schBanner"), "Scheduling saved.", "good");
+  } catch (e) { banner($("schBanner"), e.message || "Save failed.", "error"); }
+  finally { $("schSave").disabled = false; }
+});
+
+// ── Calendar integrations (super-admin) ──────────────────────────────────
+async function loadIntegrations() {
+  try {
+    const { data } = await getIntegrationPublicConfig();
+    setStatusPill($("gcStatus"), data.google.configured);
+    $("gcClientId").value = data.google.clientId || "";
+    $("gcClientId").placeholder = data.google.configured ? "configured (overwrite to change)" : "xxxx.apps.googleusercontent.com";
+    setStatusPill($("msStatus"), data.microsoft.configured);
+    $("msClientId").value = data.microsoft.clientId || "";
+    $("msTenant").value = data.microsoft.tenant || "common";
+  } catch (e) {
+    banner($("integBanner"), e.message || "Could not load integrations.", "error");
+  }
+}
+$("gcSave").addEventListener("click", async () => {
+  $("gcSave").disabled = true;
+  try {
+    await setIntegrationConfig({ googleClientId: $("gcClientId").value, googleClientSecret: $("gcSecret").value });
+    $("gcSecret").value = "";
+    banner($("integBanner"), "Google credentials saved.", "good");
+    loadIntegrations();
+  } catch (e) { banner($("integBanner"), e.message || "Save failed.", "error"); }
+  finally { $("gcSave").disabled = false; }
+});
+$("msSave").addEventListener("click", async () => {
+  $("msSave").disabled = true;
+  try {
+    await setIntegrationConfig({ microsoftClientId: $("msClientId").value, microsoftClientSecret: $("msSecret").value, microsoftTenant: $("msTenant").value });
+    $("msSecret").value = "";
+    banner($("integBanner"), "Microsoft credentials saved.", "good");
+    loadIntegrations();
+  } catch (e) { banner($("integBanner"), e.message || "Save failed.", "error"); }
+  finally { $("msSave").disabled = false; }
+});
+
+// ── Notification provider keys (super-admin) ─────────────────────────────
+function setStatusPill(el, configured) {
+  el.textContent = configured ? "Configured" : "Not set";
+  el.style.background = configured ? "rgba(52,211,153,.15)" : "rgba(255,255,255,.06)";
+  el.style.color = configured ? "#9ff5d4" : "var(--ink-mid)";
+}
+async function loadNotifyConfig() {
+  try {
+    const { data } = await getNotificationConfig();
+    setStatusPill($("sgStatus"), data.sendgrid.configured);
+    $("sgFrom").value = data.sendgrid.from || "";
+    $("sgFromName").value = data.sendgrid.fromName || "";
+    $("sgKey").placeholder = data.sendgrid.configured ? `${data.sendgrid.keyMask} (leave blank to keep)` : "SG.xxxxx";
+    setStatusPill($("twStatus"), data.twilio.configured);
+    $("twFrom").value = data.twilio.from || "";
+    $("twSid").placeholder = data.twilio.configured ? `${data.twilio.sidMask} (leave blank to keep)` : "ACxxxxx";
+    $("twToken").placeholder = data.twilio.configured ? `${data.twilio.tokenMask} (leave blank to keep)` : "leave blank to keep";
+  } catch (e) {
+    banner($("notifyBanner"), e.message || "Could not load notification config.", "error");
+  }
+}
+$("sgSave").addEventListener("click", async () => {
+  $("sgSave").disabled = true;
+  try {
+    await setNotificationConfig({
+      sendgridKey: $("sgKey").value, // blank → keep existing
+      sendgridFrom: $("sgFrom").value,
+      sendgridFromName: $("sgFromName").value,
+    });
+    $("sgKey").value = "";
+    banner($("notifyBanner"), "Email keys saved.", "good");
+    loadNotifyConfig();
+  } catch (e) { banner($("notifyBanner"), e.message || "Save failed.", "error"); }
+  finally { $("sgSave").disabled = false; }
+});
+$("twSave").addEventListener("click", async () => {
+  $("twSave").disabled = true;
+  try {
+    await setNotificationConfig({
+      twilioSid: $("twSid").value,
+      twilioToken: $("twToken").value,
+      twilioFrom: $("twFrom").value,
+    });
+    $("twSid").value = ""; $("twToken").value = "";
+    banner($("notifyBanner"), "SMS keys saved.", "good");
+    loadNotifyConfig();
+  } catch (e) { banner($("notifyBanner"), e.message || "Save failed.", "error"); }
+  finally { $("twSave").disabled = false; }
+});
+$("sgClear").addEventListener("click", async () => {
+  if (!confirm("Clear the SendGrid keys? Email alerts will stop until re-entered.")) return;
+  try { await clearNotificationProvider({ provider:"sendgrid" }); $("sgKey").value=""; $("sgFrom").value=""; $("sgFromName").value=""; banner($("notifyBanner"),"Email keys cleared.","good"); loadNotifyConfig(); }
+  catch (e) { banner($("notifyBanner"), e.message || "Clear failed.", "error"); }
+});
+$("twClear").addEventListener("click", async () => {
+  if (!confirm("Clear the Twilio keys? SMS alerts will stop until re-entered.")) return;
+  try { await clearNotificationProvider({ provider:"twilio" }); $("twSid").value=""; $("twToken").value=""; $("twFrom").value=""; banner($("notifyBanner"),"SMS keys cleared.","good"); loadNotifyConfig(); }
+  catch (e) { banner($("notifyBanner"), e.message || "Clear failed.", "error"); }
+});
 
 // ── Companies (super-admin) ──────────────────────────────────────────────
 $("newCompanyBtn").addEventListener("click", () => $("companyForm").classList.toggle("hidden"));
@@ -483,27 +772,53 @@ function populateUserFormSelects() {
 
 $("newUserBtn").addEventListener("click", () => {
   if (!state.selectedCompany) { banner($("banner"), "Select a company first.", "error"); return; }
+  $("inviteLinkBox").className = "banner";
   $("userForm").classList.toggle("hidden");
 });
 $("userCancel").addEventListener("click", () => $("userForm").classList.add("hidden"));
+// Toggle the password field based on invite mode.
+function syncInviteMode() {
+  const invite = $("userInvite").checked;
+  $("userPassword").parentElement.style.display = invite ? "none" : "";
+  $("pwLabel").textContent = invite ? "" : "Temporary password *";
+  $("userSave").textContent = invite ? "Send invite" : "Create account";
+}
+$("userInvite").addEventListener("change", syncInviteMode);
+syncInviteMode();
+
 $("userSave").addEventListener("click", async () => {
   const name = $("userName").value.trim();
   const email = $("userEmail").value.trim();
+  const invite = $("userInvite").checked;
   const password = $("userPassword").value;
-  if (!name || !email || password.length < 6) {
-    banner($("banner"), "Name, email, and a 6+ char password are required.", "error"); return;
-  }
+  if (!name || !email) { banner($("banner"), "Name and email are required.", "error"); return; }
+  if (!invite && password.length < 6) { banner($("banner"), "Set a 6+ char password, or use the invite option.", "error"); return; }
+
   const roleVal = $("userRole").value; // "role:<id>" or "tier:admin"
-  const payload = { companyId: state.selectedCompany, name, email, password,
+  const payload = { companyId: state.selectedCompany, name, email,
     managerId: $("userManager").value || null, teamId: $("userTeam").value || null };
+  if (!invite) payload.password = password;
   if (roleVal.startsWith("role:")) payload.roleId = roleVal.slice(5);
   else if (roleVal.startsWith("tier:")) payload.tier = roleVal.slice(5);
+
   $("userSave").disabled = true;
   try {
-    await createUser(payload);
-    $("userName").value = $("userEmail").value = $("userPassword").value = "";
-    $("userForm").classList.add("hidden");
-    banner($("banner"), "Account created.", "good");
+    if (invite) {
+      const { data } = await inviteUser(payload);
+      $("userName").value = $("userEmail").value = $("userPassword").value = "";
+      banner($("banner"), data.emailed ? "Invite emailed." : "Account created — email not configured, copy the link below.", "good");
+      if (!data.emailed && data.inviteLink) {
+        $("inviteLinkBox").className = "banner show info";
+        $("inviteLinkBox").innerHTML = `Invite link for ${esc(email)} (send it to them):<br><a href="${data.inviteLink}">${esc(data.inviteLink)}</a>`;
+      } else {
+        $("userForm").classList.add("hidden");
+      }
+    } else {
+      await createUser(payload);
+      $("userName").value = $("userEmail").value = $("userPassword").value = "";
+      $("userForm").classList.add("hidden");
+      banner($("banner"), "Account created.", "good");
+    }
     await loadUsers(); populateUserFormSelects();
   } catch (e) { banner($("banner"), e.message || "Failed to create account.", "error"); }
   finally { $("userSave").disabled = false; }

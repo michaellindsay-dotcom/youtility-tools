@@ -4,12 +4,53 @@
 // these base tiers (see CompanyRole.baseTier).
 export type Role = "superadmin" | "admin" | "manager" | "user";
 
+// How company appointments (that a rep didn't self-generate) get routed.
+export type AssignmentMethod = "self_gen" | "round_robin" | "highest_production" | "manual";
+
+export interface SchedulingSettings {
+  apptMinLeadHours: number; // earliest bookable = now + this many hours
+  apptMaxDaysOut: number; // latest bookable = now + this many days
+  apptDurationMin: number; // appointment length, minutes
+  bufferMin: number; // required gap between a rep's appointments, minutes
+  assignment: AssignmentMethod; // routing for non-self-gen appointments
+  timezone: string; // IANA tz the business hours are expressed in
+  dayStartMin: number; // earliest time of day to book, minutes from midnight
+  dayEndMin: number; // latest time of day to book, minutes from midnight
+  workDays: number[]; // bookable weekdays, 0=Sun … 6=Sat
+  slotMin: number; // booking granularity, minutes
+}
+
+export const DEFAULT_SCHEDULING: SchedulingSettings = {
+  apptMinLeadHours: 1,
+  apptMaxDaysOut: 30,
+  apptDurationMin: 60,
+  bufferMin: 0,
+  assignment: "self_gen",
+  timezone: "America/Denver",
+  dayStartMin: 9 * 60, // 9:00 AM
+  dayEndMin: 20 * 60, // 8:00 PM
+  workDays: [1, 2, 3, 4, 5, 6], // Mon–Sat
+  slotMin: 30,
+};
+
 export interface Company {
   id: string;
   name: string;
   plan?: string;
   status?: string;
+  scheduling?: SchedulingSettings;
   createdAt?: number;
+}
+
+// A rep's linked external calendars (status only — tokens live server-side).
+export interface CalendarLink {
+  connected: boolean;
+  email?: string;
+  connectedAt?: number;
+}
+export interface CalendarLinks {
+  google?: CalendarLink;
+  microsoft?: CalendarLink;
 }
 
 export interface LatLng {
@@ -45,6 +86,8 @@ export interface UserProfile {
   email: string;
   displayName: string;
   role: Role; // base access tier
+  phone?: string; // for SMS notification fallback when offline
+  calendar?: CalendarLinks; // linked external calendars (status)
   companyId: string;
   roleId?: string; // -> companies/{companyId}/roles/{roleId}
   title?: string; // denormalized role title for display
@@ -90,9 +133,15 @@ export interface Lead {
   email?: string;
   status: LeadStatus;
   notes?: string;
+  photoHomeUrl?: string; // photo of the front of the home
+  photoBillUrl?: string; // photo of the utility bill
   enriched?: boolean;
   enrichedAt?: number;
   enrichment?: LeadEnrichment;
+  // Geofencing: a knock only counts toward stats if the rep was on-site.
+  verified?: boolean;
+  distanceFt?: number;
+  knockedAt?: number;
   companyId: string;
   territoryId?: string;
   assignedTo?: string; // uid (owner)
@@ -139,6 +188,57 @@ export interface UserStats {
   doorsKnocked?: number;
   shifts?: number;
   updatedAt?: number;
+}
+
+export interface ChatMessage {
+  id: string;
+  companyId?: string;
+  channelId?: string;
+  userId: string;
+  userName: string;
+  text?: string;
+  imageUrl?: string;
+  createdAt: number;
+}
+
+export interface DmChannel {
+  id: string;
+  members: string[];
+  memberNames: Record<string, string>;
+  lastMessage?: string;
+  lastAt?: number;
+}
+
+export type EventType = "appointment" | "go_back" | "follow_up";
+
+export interface ScheduleEvent {
+  id: string;
+  companyId: string;
+  userId: string;
+  userName?: string;
+  type: EventType;
+  title: string;
+  address?: string;
+  leadId?: string;
+  startAt: number;
+  endAt?: number;
+  durationMin?: number;
+  assignedBy?: string; // uid of the admin/manager who routed this (if not self-gen)
+  source?: "self_gen" | "assigned";
+  notes?: string;
+  visibilityPath: string[];
+  createdAt: number;
+}
+
+export interface AppNotification {
+  id: string;
+  userId: string;
+  type: string;
+  title: string;
+  body?: string;
+  link?: string;
+  read?: boolean;
+  createdAt: number;
 }
 
 // ---- Knockstat normalized property record (ported from canvass-pro.html) ----

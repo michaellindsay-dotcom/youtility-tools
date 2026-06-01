@@ -12,13 +12,14 @@ import {
   signOut,
   type User,
 } from "firebase/auth";
-import { doc, getDoc } from "firebase/firestore";
+import { doc, getDoc, onSnapshot } from "firebase/firestore";
 import { auth, db, googleProvider } from "../firebase";
-import type { Role, UserProfile } from "../types";
+import type { Company, Role, UserProfile } from "../types";
 
 interface AuthState {
   user: User | null;
   profile: UserProfile | null;
+  company: Company | null;
   role: Role | null;
   companyId: string | null;
   /** Signed in but has no provisioned company/profile (no access). */
@@ -44,8 +45,21 @@ async function loadProfile(user: User): Promise<UserProfile | null> {
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [profile, setProfile] = useState<UserProfile | null>(null);
+  const [company, setCompany] = useState<Company | null>(null);
   const [noAccess, setNoAccess] = useState(false);
   const [loading, setLoading] = useState(true);
+
+  // Keep the company doc (incl. scheduling settings) live for the current user.
+  useEffect(() => {
+    const cid = profile?.companyId;
+    if (!cid) {
+      setCompany(null);
+      return;
+    }
+    return onSnapshot(doc(db, "companies", cid), (snap) =>
+      setCompany(snap.exists() ? ({ id: snap.id, ...(snap.data() as Omit<Company, "id">) }) : null)
+    );
+  }, [profile?.companyId]);
 
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, async (u) => {
@@ -82,6 +96,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const value: AuthState = {
     user,
     profile,
+    company,
     role: profile?.role ?? null,
     companyId: profile?.companyId ?? null,
     noAccess,

@@ -1,0 +1,156 @@
+import { useEffect, useState } from "react";
+import { collection, deleteDoc, doc, onSnapshot, orderBy, query, where } from "firebase/firestore";
+import { db } from "../firebase";
+import { useAuth } from "../auth/AuthContext";
+import { Link } from "react-router-dom";
+import type { EventType, ScheduleEvent } from "../types";
+
+const META: Record<EventType, { label: string; icon: string }> = {
+  appointment: { label: "Appointment", icon: "📅" },
+  go_back: { label: "Go-back", icon: "↩" },
+  follow_up: { label: "Follow-up", icon: "🔁" },
+};
+
+// Group events by calendar day for a clean agenda view.
+function dayKey(ms: number): string {
+  return new Date(ms).toLocaleDateString([], { weekday: "long", month: "long", day: "numeric" });
+}
+
+export default function Schedule() {
+  const { profile, role, companyId } = useAuth();
+  const [events, setEvents] = useState<ScheduleEvent[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [filter, setFilter] = useState<"all" | EventType>("all");
+
+  useEffect(() => {
+    if (!profile || !companyId) return;
+    // Own events + (for managers/admins) downstream via visibilityPath.
+    const q =
+      role === "admin" || role === "manager"
+        ? query(
+            collection(db, "events"),
+            where("companyId", "==", companyId),
+            where("visibilityPath", "array-contains", profile.uid),
+            orderBy("startAt", "asc")
+          )
+        : query(collection(db, "events"), where("userId", "==", profile.uid), orderBy("startAt", "asc"));
+    return onSnapshot(
+      q,
+      (snap) => {
+        setEvents(snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<ScheduleEvent, "id">) })));
+        setLoading(false);
+      },
+      (err) => {
+        console.error("events query", err);
+        setLoading(false);
+      }
+    );
+  }, [profile, role, companyId]);
+
+  const now = Date.now();
+  const visible = events.filter((e) => filter === "all" || e.type === filter);
+  const upcoming = visible.filter((e) => e.startAt >= now - 60 * 60 * 1000);
+  const past = visible.filter((e) => e.startAt < now - 60 * 60 * 1000).reverse();
+
+  const fmtTime = (ms: number) =>
+    new Date(ms).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+
+  const canRemove = (e: ScheduleEvent) =>
+    e.userId === profile?.uid || role === "admin" || role === "manager";
+
+  const item = (e: ScheduleEvent) => (
+    <li key={e.id} className="sched-item">
+      <span className="sched-ico">{META[e.type]?.icon || "•"}</span>
+      <div className="sched-body">
+        <div className="sched-title">
+          {e.title}
+          <span className="role-badge">{META[e.type]?.label || e.type}</span>
+          {e.source === "assigned" && <span className="role-badge role-manager">assigned</span>}
+        </div>
+        <div className="muted small">
+          {fmtTime(e.startAt)}
+          {e.durationMin ? ` · ${e.durationMin} min` : ""}
+          {e.address ? ` · ${e.address}` : ""}
+          {role !== "user" && e.userId !== profile?.uid && e.userName ? ` · ${e.userName}` : ""}
+        </div>
+        {e.notes && <div className="muted small">{e.notes}</div>}
+      </div>
+      {canRemove(e) && (
+        <button
+          className="btn ghost sm"
+          title="Cancel"
+          onClick={() => {
+            if (confirm("Cancel this scheduled item?")) deleteDoc(doc(db, "events", e.id)).catch(() => {});
+          }}
+        >
+          ✕
+        </button>
+      )}
+    </li>
+  );
+
+  // Render upcoming grouped by day.
+  const groups: { day: string; items: ScheduleEvent[] }[] = [];
+  for (const e of upcoming) {
+    const k = dayKey(e.startAt);
+    const g = groups.find((x) => x.day === k);
+    if (g) g.items.push(e);
+    else groups.push({ day: k, items: [e] });
+  }
+
+  return (
+    <div className="page-body">
+      <div className="page-head">
+        <h1>Schedule</h1>
+        <p className="page-sub">
+          Your appointments, go-backs and follow-ups. You'll get an alert before each one.
+        </p>
+      </div>
+
+      <div className="type-pills" style={{ marginBottom: 16 }}>
+        {(["all", "appointment", "go_back", "follow_up"] as const).map((t) => (
+          <button
+            key={t}
+            className={"pill" + (filter === t ? " active" : "")}
+            onClick={() => setFilter(t)}
+          >
+            {t === "all" ? "All" : `${META[t].icon} ${META[t].label}`}
+          </button>
+        ))}
+      </div>
+
+      <div className="card" style={{ marginBottom: 16, display: "flex", gap: 10, alignItems: "center" }}>
+        <span style={{ fontSize: 18 }}>📍</span>
+        <div className="muted small">
+          New appointments, go-backs and follow-ups are booked while you're at the home —
+          from the <Link to="/map">Map</Link> or <Link to="/leads">Leads</Link> screen. This page is your agenda.
+        </div>
+      </div>
+
+      {loading ? (
+        <div className="muted">Loading…</div>
+      ) : (
+        <>
+          <h3>Upcoming</h3>
+          {groups.length === 0 ? (
+            <div className="empty">Nothing scheduled.</div>
+          ) : (
+            groups.map((g) => (
+              <div key={g.day} style={{ marginBottom: 14 }}>
+                <div className="muted small" style={{ margin: "6px 0", fontWeight: 600 }}>{g.day}</div>
+                <ul className="sched-list">{g.items.map(item)}</ul>
+              </div>
+            ))
+          )}
+
+          {past.length > 0 && (
+            <>
+              <h3 style={{ marginTop: 18 }}>Past</h3>
+              <ul className="sched-list past">{past.slice(0, 30).map(item)}</ul>
+            </>
+          )}
+        </>
+      )}
+    </div>
+  );
+}

@@ -14,6 +14,7 @@ import { db } from "../firebase";
 import { useAuth } from "../auth/AuthContext";
 import { bumpStats } from "../lib/stats";
 import { DISPOSITIONS } from "../lib/dispositions";
+import DispositionModal, { type DispoInput } from "../components/DispositionModal";
 import type { Lead, LeadStatus } from "../types";
 
 const STATUSES = DISPOSITIONS;
@@ -24,6 +25,7 @@ export default function Leads() {
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<LeadStatus | "all">("all");
   const [showAdd, setShowAdd] = useState(false);
+  const [dispoTarget, setDispoTarget] = useState<DispoInput | null>(null);
 
   useEffect(() => {
     if (!profile || !companyId) return;
@@ -68,6 +70,13 @@ export default function Leads() {
     if (confirm("Delete this lead?")) await deleteDoc(doc(db, "leads", id));
   };
 
+  const clearAll = async () => {
+    if (!confirm(`Delete ALL ${leads.length} leads? This cannot be undone.`)) return;
+    for (const lead of leads) {
+      await deleteDoc(doc(db, "leads", lead.id)).catch(() => {});
+    }
+  };
+
   return (
     <div className="page-body">
       <div className="page-head row">
@@ -75,9 +84,16 @@ export default function Leads() {
           <h1>Leads</h1>
           <p className="page-sub">{shown.length} shown</p>
         </div>
-        <button className="btn primary" onClick={() => setShowAdd((s) => !s)}>
-          {showAdd ? "Close" : "+ New lead"}
-        </button>
+        <div className="row">
+          {(role === "admin" || role === "manager") && leads.length > 0 && (
+            <button className="btn ghost sm danger" onClick={clearAll}>
+              Clear all ({leads.length})
+            </button>
+          )}
+          <button className="btn primary" onClick={() => setShowAdd((s) => !s)}>
+            {showAdd ? "Close" : "+ New lead"}
+          </button>
+        </div>
       </div>
 
       {showAdd && <AddLead onDone={() => setShowAdd(false)} />}
@@ -108,7 +124,26 @@ export default function Leads() {
         <div className="lead-list">
           {shown.map((lead) => (
             <div className="lead-row card" key={lead.id}>
-              <div className="lead-main">
+              <div
+                className="lead-main"
+                title="Double-click to view home & owner details"
+                onDoubleClick={() =>
+                  setDispoTarget({
+                    leadId: lead.id,
+                    address: lead.address,
+                    lat: lead.lat,
+                    lng: lead.lng,
+                    status: lead.status,
+                    name: lead.ownerName || "",
+                    phone: lead.phone || "",
+                    email: lead.email || "",
+                    notes: lead.notes || "",
+                    enrichment: lead.enrichment,
+                    photoHomeUrl: lead.photoHomeUrl,
+                    photoBillUrl: lead.photoBillUrl,
+                  })
+                }
+              >
                 <div className="lead-addr">{lead.address}</div>
                 <div className="lead-sub muted">
                   {[lead.city, lead.state, lead.zip].filter(Boolean).join(", ")}
@@ -138,6 +173,8 @@ export default function Leads() {
           ))}
         </div>
       )}
+
+      <DispositionModal target={dispoTarget} onClose={() => setDispoTarget(null)} />
     </div>
   );
 }

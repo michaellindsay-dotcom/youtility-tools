@@ -13,7 +13,8 @@
     "deploy:hosting": "npm run build && firebase deploy --only hosting",
     "emulators": "npm run build && firebase emulators:start",
     "bootstrap:superadmin": "node scripts/bootstrap-superadmin.mjs",
-    "seed:company": "node scripts/seed-company.mjs"
+    "seed:company": "node scripts/seed-company.mjs",
+    "clear:leads": "node scripts/clear-leads.mjs"
   },
   "devDependencies": {
     "firebase-admin": "^12.5.0",
