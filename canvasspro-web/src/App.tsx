@@ -1,6 +1,8 @@
-import { Routes, Route } from "react-router-dom";
+import { Routes, Route, Navigate } from "react-router-dom";
 import ProtectedRoute from "./auth/ProtectedRoute";
 import Layout from "./components/Layout";
+import { useAuth } from "./auth/AuthContext";
+import { hasFeature, type FeatureKey } from "./lib/features";
 import Login from "./pages/Login";
 import Dashboard from "./pages/Dashboard";
 import Lookup from "./pages/Lookup";
@@ -17,6 +19,12 @@ import Working from "./pages/Working";
 import Chat from "./pages/Chat";
 import Schedule from "./pages/Schedule";
 import Settings from "./pages/Settings";
+
+// Blocks a route (by direct URL) when the company's plan doesn't include it.
+function Gated({ feature, children }: { feature: FeatureKey; children: React.ReactNode }) {
+  const { company } = useAuth();
+  return hasFeature(company, feature) ? <>{children}</> : <Navigate to="/" replace />;
+}
 
 export default function App() {
   return (
@@ -35,13 +43,13 @@ export default function App() {
         <Route path="map" element={<MapPage />} />
         <Route path="team" element={<Team />} />
         <Route path="shifts" element={<Shifts />} />
-        <Route path="stats" element={<Stats />} />
-        <Route path="leaderboard" element={<Leaderboard />} />
-        <Route path="gamify" element={<Gamify />} />
-        <Route path="rewards" element={<Rewards />} />
-        <Route path="working" element={<Working />} />
-        <Route path="chat" element={<Chat />} />
-        <Route path="schedule" element={<Schedule />} />
+        <Route path="stats" element={<Gated feature="analytics"><Stats /></Gated>} />
+        <Route path="leaderboard" element={<Gated feature="rewards"><Leaderboard /></Gated>} />
+        <Route path="gamify" element={<Gated feature="rewards"><Gamify /></Gated>} />
+        <Route path="rewards" element={<Gated feature="rewards"><Rewards /></Gated>} />
+        <Route path="working" element={<Gated feature="chat"><Working /></Gated>} />
+        <Route path="chat" element={<Gated feature="chat"><Chat /></Gated>} />
+        <Route path="schedule" element={<Gated feature="scheduling"><Schedule /></Gated>} />
         <Route path="territories" element={<Territories />} />
         <Route path="settings" element={<Settings />} />
       </Route>

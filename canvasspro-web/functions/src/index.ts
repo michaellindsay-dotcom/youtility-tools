@@ -5,6 +5,7 @@ import * as logger from "firebase-functions/logger";
 import { initializeApp } from "firebase-admin/app";
 import { getAuth } from "firebase-admin/auth";
 import { getFirestore, FieldValue } from "firebase-admin/firestore";
+import Stripe from "stripe";
 
 initializeApp();
 const db = getFirestore();
@@ -1526,8 +1527,136 @@ export const setCompanyPlan = onCall(async (request) => {
   const { companyId, plan, status } = (request.data || {}) as { companyId?: string; plan?: string; status?: string };
   if (!companyId) throw new HttpsError("invalid-argument", "companyId required.");
   const u: Record<string, unknown> = { updatedAt: Date.now() };
-  if (typeof plan === "string") u.plan = plan;
   if (typeof status === "string") u.status = status;
+  if (typeof plan === "string") {
+    u.plan = plan;
+    // Copy the plan's feature set + limits onto the company so the app can gate.
+    const ps = await db.collection("plans").where("name", "==", plan).limit(1).get();
+    if (!ps.empty) {
+      const p = ps.docs[0].data();
+      u.planId = ps.docs[0].id;
+      u.features = Array.isArray(p.features) ? p.features : [];
+      u.maxUsers = Number(p.maxUsers) || 0;
+      u.planPrice = Number(p.priceMonthly) || 0;
+    }
+  }
   await db.doc(`companies/${companyId}`).set(u, { merge: true });
   return { ok: true };
+});
+
+// ════════════════════════════════════════════════════════════════════════════
+// STRIPE BILLING — checkout, billing portal, and a webhook that flips a
+// company's status from the live subscription state. Keys live in config/billing
+// (set in the super-admin screen).
+// ════════════════════════════════════════════════════════════════════════════
+async function stripeClient() {
+  const c = ((await db.doc("config/billing").get()).data() as Record<string, string>) || {};
+  if (!c.stripeSecretKey) throw new HttpsError("failed-precondition", "Stripe isn't configured. Add keys in the admin console.");
+  return new Stripe(c.stripeSecretKey);
+}
+
+// Map a Stripe subscription status → our company status vocabulary.
+function mapSubStatus(s: string): string {
+  switch (s) {
+    case "active": return "active";
+    case "trialing": return "trial";
+    case "past_due": case "unpaid": return "past_due";
+    case "canceled": case "incomplete_expired": return "suspended";
+    default: return "trial";
+  }
+}
+
+// Start a Checkout session for a company + plan; returns the hosted URL.
+export const createCheckoutSession = onCall(async (request) => {
+  const caller = await getCaller(request);
+  const { companyId, planId } = (request.data || {}) as { companyId?: string; planId?: string };
+  authorizeForCompany(caller, companyId);
+  if (!planId) throw new HttpsError("invalid-argument", "planId required.");
+  const planSnap = await db.doc(`plans/${planId}`).get();
+  if (!planSnap.exists) throw new HttpsError("not-found", "Plan not found.");
+  const plan = planSnap.data()!;
+  if (!plan.stripePriceId) throw new HttpsError("failed-precondition", `Plan "${plan.name}" has no Stripe Price ID.`);
+  const company = (await db.doc(`companies/${companyId}`).get()).data() || {};
+  const stripe = await stripeClient();
+  const session = await stripe.checkout.sessions.create({
+    mode: "subscription",
+    line_items: [{ price: plan.stripePriceId as string, quantity: 1 }],
+    customer: (company.stripeCustomerId as string) || undefined,
+    success_url: `${APP_URL}/admin.html?billing=success`,
+    cancel_url: `${APP_URL}/admin.html?billing=cancel`,
+    metadata: { companyId: companyId!, planId, planName: (plan.name as string) || "" },
+    subscription_data: { metadata: { companyId: companyId!, planId } },
+  });
+  return { url: session.url };
+});
+
+// Open the Stripe billing portal for an already-subscribed company.
+export const createBillingPortalSession = onCall(async (request) => {
+  const caller = await getCaller(request);
+  const { companyId } = (request.data || {}) as { companyId?: string };
+  authorizeForCompany(caller, companyId);
+  const company = (await db.doc(`companies/${companyId}`).get()).data() || {};
+  if (!company.stripeCustomerId) throw new HttpsError("failed-precondition", "No subscription yet for this company.");
+  const stripe = await stripeClient();
+  const session = await stripe.billingPortal.sessions.create({
+    customer: company.stripeCustomerId as string,
+    return_url: `${APP_URL}/admin.html`,
+  });
+  return { url: session.url };
+});
+
+// Stripe webhook (Hosting rewrites /stripe/** here). Verifies the signature and
+// syncs the company's subscription state. Configure the URL + signing secret in
+// the Stripe Dashboard, then paste the signing secret in the admin console.
+export const stripeWebhook = onRequest({ cors: false }, async (req, res) => {
+  const c = ((await db.doc("config/billing").get()).data() as Record<string, string>) || {};
+  if (!c.stripeSecretKey || !c.stripeWebhookSecret) { res.status(503).send("Stripe not configured"); return; }
+  const stripe = new Stripe(c.stripeSecretKey);
+  let event: { type: string; data: { object: any } };
+  try {
+    const sig = req.headers["stripe-signature"] as string;
+    event = stripe.webhooks.constructEvent((req as unknown as { rawBody: Buffer }).rawBody, sig, c.stripeWebhookSecret);
+  } catch (e: any) {
+    logger.warn("Stripe webhook signature failed", e?.message);
+    res.status(400).send(`Webhook Error: ${e?.message}`);
+    return;
+  }
+
+  try {
+    const obj = event.data.object as any;
+    if (event.type === "checkout.session.completed") {
+      const companyId = obj.metadata?.companyId;
+      if (companyId) {
+        const u: Record<string, unknown> = {
+          stripeCustomerId: obj.customer, stripeSubscriptionId: obj.subscription,
+          status: "active", updatedAt: Date.now(),
+        };
+        const planId = obj.metadata?.planId;
+        if (planId) {
+          const p = await db.doc(`plans/${planId}`).get();
+          if (p.exists) {
+            const pd = p.data()!;
+            u.plan = pd.name; u.planId = planId;
+            u.features = Array.isArray(pd.features) ? pd.features : [];
+            u.maxUsers = Number(pd.maxUsers) || 0;
+            u.planPrice = Number(pd.priceMonthly) || 0;
+          }
+        }
+        await db.doc(`companies/${companyId}`).set(u, { merge: true });
+      }
+    } else if (event.type.startsWith("customer.subscription.")) {
+      const status = mapSubStatus(obj.status);
+      const companyId = obj.metadata?.companyId;
+      if (companyId) {
+        await db.doc(`companies/${companyId}`).set({ status, updatedAt: Date.now() }, { merge: true });
+      } else if (obj.customer) {
+        const snap = await db.collection("companies").where("stripeCustomerId", "==", obj.customer).limit(1).get();
+        if (!snap.empty) await snap.docs[0].ref.set({ status, updatedAt: Date.now() }, { merge: true });
+      }
+    }
+    res.json({ received: true });
+  } catch (e: any) {
+    logger.error("Stripe webhook handler error", e);
+    res.status(500).send("handler error");
+  }
 });

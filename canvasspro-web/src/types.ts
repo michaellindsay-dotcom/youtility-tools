@@ -37,7 +37,13 @@ export interface Company {
   id: string;
   name: string;
   plan?: string;
+  planId?: string;
   status?: string;
+  features?: string[]; // enabled feature keys from the plan (undefined = all on)
+  maxUsers?: number;
+  planPrice?: number;
+  stripeCustomerId?: string;
+  stripeSubscriptionId?: string;
   scheduling?: SchedulingSettings;
   createdAt?: number;
 }
