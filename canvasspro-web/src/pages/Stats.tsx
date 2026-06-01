@@ -3,6 +3,7 @@ import { collection, onSnapshot, query, where } from "firebase/firestore";
 import { db } from "../firebase";
 import { useAuth } from "../auth/AuthContext";
 import GoalPlanner from "../components/GoalPlanner";
+import ShiftsPanel from "../components/ShiftsPanel";
 import type { UserStats } from "../types";
 
 type Metric = keyof Pick<UserStats, "sales" | "appointments" | "leadsCreated" | "doorsKnocked">;
@@ -61,6 +62,9 @@ export default function Stats() {
       </div>
 
       <GoalPlanner />
+
+      <h2 className="section-h">Shifts</h2>
+      <ShiftsPanel />
 
       <h2 className="section-h">Leaderboard</h2>
 
