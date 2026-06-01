@@ -52,6 +52,7 @@ export default function MapPage() {
   const mapRef = useRef<L.Map | null>(null);
   const leadLayer = useRef<L.LayerGroup>(L.layerGroup());
   const homeLayer = useRef<L.LayerGroup>(L.layerGroup());
+  const leadsRef = useRef<Lead[]>([]);
   const territoryLayer = useRef<L.LayerGroup>(L.layerGroup());
   const assigned = useRef<Territory[]>([]);
   const myLoc = useRef<LatLng | null>(null);
@@ -81,11 +82,13 @@ export default function MapPage() {
   async function buildPins() {
     leadLayer.current.clearLayers();
     const leads = await fetchLeads();
+    leadsRef.current = leads;
     leads.forEach((lead) => {
       const c = validCoord(lead.lat, lead.lng);
       if (!c) return;
       L.marker(c, {
         icon: homeIcon(DISP_COLOR[lead.status] || "#94A3B8", lead.verified === false),
+        zIndexOffset: 1000, // always above generic home pins
       })
         .on("click", () =>
           setDispoTarget({
@@ -117,10 +120,26 @@ export default function MapPage() {
     });
   }
 
-  function addHomeMarker(h: { address: string; lat: number; lng: number }) {
+  // A loaded home is "already a lead" if it matches a saved lead by address or
+  // sits within ~25 m of one — so we never paint a blank house over a knocked
+  // lead (which would hide its disposition + the off-site ✕).
+  function isExistingLead(h: { address: string; lat: number; lng: number }): boolean {
+    const norm = (a?: string) => (a || "").toLowerCase().replace(/[^a-z0-9]/g, "").slice(0, 24);
+    const ha = norm(h.address);
+    const here = L.latLng(h.lat, h.lng);
+    return leadsRef.current.some((l) => {
+      if (ha && norm(l.address) === ha) return true;
+      const c = validCoord(l.lat, l.lng);
+      return !!c && here.distanceTo(L.latLng(c[0], c[1])) < 25;
+    });
+  }
+
+  function addHomeMarker(h: { address: string; lat: number; lng: number }): boolean {
+    if (isExistingLead(h)) return false; // keep the existing lead pin, don't recreate
     L.marker([h.lat, h.lng], { icon: homeIcon("#475569") })
       .on("click", () => setDispoTarget({ address: h.address, lat: h.lat, lng: h.lng }))
       .addTo(homeLayer.current);
+    return true;
   }
 
   // Auto-load homes: inside the assigned territory(ies), or nearest 30 if none.
@@ -145,7 +164,7 @@ export default function MapPage() {
           const raw = await lookupArea(center.lat, center.lng, Math.max(0.1, +radius.toFixed(2)), token);
           parseAreaProperties(raw)
             .filter((h) => inPolygon({ lat: h.lat, lng: h.lng }, poly))
-            .forEach((h) => { addHomeMarker(h); total++; });
+            .forEach((h) => { if (addHomeMarker(h)) total++; });
         }
         setStatus(`${total} homes in your area`);
       } else {
@@ -155,8 +174,8 @@ export default function MapPage() {
           .map((h) => ({ ...h, d: L.latLng(c.lat, c.lng).distanceTo(L.latLng(h.lat, h.lng)) }))
           .sort((a, b) => a.d - b.d)
           .slice(0, NEAREST_N);
-        nearest.forEach((h) => addHomeMarker(h));
-        setStatus(`Nearest ${nearest.length} homes (draw an area to focus)`);
+        const shown = nearest.filter((h) => addHomeMarker(h)).length;
+        setStatus(`Nearest ${shown} homes (draw an area to focus)`);
       }
     } catch (e: any) {
       setStatus("Could not load homes: " + (e?.message || ""));
