@@ -1,9 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
-import "leaflet.markercluster";
-import "leaflet.markercluster/dist/MarkerCluster.css";
-import "leaflet.markercluster/dist/MarkerCluster.Default.css";
 import { addDoc, collection, getDocs, query, where } from "firebase/firestore";
 import { Geolocation } from "@capacitor/geolocation";
 import { db, auth } from "../firebase";
@@ -17,14 +14,14 @@ const DEFAULT_CENTER: [number, number] = [40.34, -111.91];
 const NEAREST_N = 30;
 
 const HOUSE_SVG =
-  '<svg viewBox="0 0 24 24" width="15" height="15" fill="#fff"><path d="M12 3 3 10.5h2.4V21h5.1v-6h3v6h5.1V10.5H21z"/></svg>';
+  '<svg viewBox="0 0 24 24" width="14" height="14" fill="#fff"><path d="M12 3 3 10.5h2.4V21h5.1v-6h3v6h5.1V10.5H21z"/></svg>';
 
 function homeIcon(color: string, flagged = false): L.DivIcon {
   return L.divIcon({
     className: "home-pin",
     html: `<span style="background:${color}">${HOUSE_SVG}</span>${flagged ? '<i class="pin-x">✕</i>' : ""}`,
-    iconSize: [30, 30],
-    iconAnchor: [15, 15],
+    iconSize: [26, 26],
+    iconAnchor: [13, 13],
   });
 }
 
@@ -42,9 +39,8 @@ export default function MapPage() {
   const { profile, role, companyId } = useAuth();
   const elRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<L.Map | null>(null);
-  const cluster = useRef<L.MarkerClusterGroup | null>(null);
-  const leadMarkers = useRef<L.Marker[]>([]);
-  const homeMarkers = useRef<L.Marker[]>([]);
+  const leadLayer = useRef<L.LayerGroup>(L.layerGroup());
+  const homeLayer = useRef<L.LayerGroup>(L.layerGroup());
   const territoryLayer = useRef<L.LayerGroup>(L.layerGroup());
   const assigned = useRef<Territory[]>([]);
   const myLoc = useRef<LatLng | null>(null);
@@ -60,15 +56,6 @@ export default function MapPage() {
 
   const canDraw = role === "admin" || role === "manager";
 
-  // Re-populate the cluster from the current lead + home markers. Clustering
-  // shows a count bubble when zoomed out and expands to pins when zoomed in.
-  function syncCluster() {
-    const c = cluster.current;
-    if (!c) return;
-    c.clearLayers();
-    [...leadMarkers.current, ...homeMarkers.current].forEach((m) => c.addLayer(m));
-  }
-
   async function fetchLeads(): Promise<Lead[]> {
     if (!companyId || !profile) return [];
     const base = collection(db, "leads");
@@ -81,23 +68,22 @@ export default function MapPage() {
   }
 
   async function buildPins() {
+    leadLayer.current.clearLayers();
     const leads = await fetchLeads();
-    leadMarkers.current = [];
     leads.forEach((lead) => {
       if (lead.lat == null || lead.lng == null) return;
-      const m = L.marker([lead.lat, lead.lng], {
+      L.marker([lead.lat, lead.lng], {
         icon: homeIcon(DISP_COLOR[lead.status] || "#94A3B8", lead.verified === false),
-      });
-      m.on("click", () =>
-        setDispoTarget({
-          leadId: lead.id, address: lead.address, lat: lead.lat, lng: lead.lng, status: lead.status,
-          name: lead.ownerName || "", phone: lead.phone || "", email: lead.email || "", notes: lead.notes || "",
-          enrichment: lead.enrichment,
-        })
-      );
-      leadMarkers.current.push(m);
+      })
+        .on("click", () =>
+          setDispoTarget({
+            leadId: lead.id, address: lead.address, lat: lead.lat, lng: lead.lng, status: lead.status,
+            name: lead.ownerName || "", phone: lead.phone || "", email: lead.email || "", notes: lead.notes || "",
+            enrichment: lead.enrichment,
+          })
+        )
+        .addTo(leadLayer.current);
     });
-    syncCluster();
   }
 
   async function buildTerritories() {
@@ -119,18 +105,17 @@ export default function MapPage() {
   }
 
   function addHomeMarker(h: { address: string; lat: number; lng: number }) {
-    const m = L.marker([h.lat, h.lng], { icon: homeIcon("#475569") });
-    m.on("click", () => setDispoTarget({ address: h.address, lat: h.lat, lng: h.lng }));
-    homeMarkers.current.push(m);
+    L.marker([h.lat, h.lng], { icon: homeIcon("#475569") })
+      .on("click", () => setDispoTarget({ address: h.address, lat: h.lat, lng: h.lng }))
+      .addTo(homeLayer.current);
   }
 
-  // Auto-load homes: inside the assigned territory(ies) if drawn, otherwise the
-  // nearest 30 homes to the user's current location.
+  // Auto-load homes: inside the assigned territory(ies), or nearest 30 if none.
   async function loadHomes() {
     const map = mapRef.current;
     if (!map || !profile) return;
     setLoadingHomes(true);
-    homeMarkers.current = [];
+    homeLayer.current.clearLayers();
     try {
       const token = await auth.currentUser!.getIdToken();
       if (assigned.current.length) {
@@ -151,7 +136,6 @@ export default function MapPage() {
         }
         setStatus(`${total} homes in your area`);
       } else {
-        // No area drawn → nearest 30 homes to the user.
         const c = myLoc.current || { lat: map.getCenter().lat, lng: map.getCenter().lng };
         const raw = await lookupArea(c.lat, c.lng, 0.5, token);
         const nearest = parseAreaProperties(raw)
@@ -161,7 +145,6 @@ export default function MapPage() {
         nearest.forEach((h) => addHomeMarker(h));
         setStatus(`Nearest ${nearest.length} homes (draw an area to focus)`);
       }
-      syncCluster();
     } catch (e: any) {
       setStatus("Could not load homes: " + (e?.message || ""));
     } finally {
@@ -187,12 +170,8 @@ export default function MapPage() {
     const map = L.map(elRef.current, { center: DEFAULT_CENTER, zoom: 14, layers: [hybrid] });
     L.control.layers({ Satellite: satellite, Hybrid: hybrid, Street: street }).addTo(map);
     territoryLayer.current.addTo(map);
-    cluster.current = L.markerClusterGroup({
-      maxClusterRadius: 55,
-      showCoverageOnHover: false,
-      spiderfyOnMaxZoom: true,
-    });
-    map.addLayer(cluster.current);
+    homeLayer.current.addTo(map);
+    leadLayer.current.addTo(map);
     mapRef.current = map;
 
     map.on("click", (e: L.LeafletMouseEvent) => {
@@ -209,7 +188,7 @@ export default function MapPage() {
       try {
         const pos = await Geolocation.getCurrentPosition({ enableHighAccuracy: true, timeout: 8000 });
         myLoc.current = { lat: pos.coords.latitude, lng: pos.coords.longitude };
-        map.setView([myLoc.current.lat, myLoc.current.lng], 17);
+        map.setView([myLoc.current.lat, myLoc.current.lng], 18);
         L.circleMarker([myLoc.current.lat, myLoc.current.lng], {
           radius: 7, color: "#fff", weight: 3, fillColor: "#0EA5E9", fillOpacity: 1,
         }).addTo(map).bindTooltip("You");
@@ -287,7 +266,7 @@ export default function MapPage() {
             <span className="legend-dot" style={{ background: d.color }} /> {d.label}
           </span>
         ))}
-        <span className="legend-item muted">· zoom out for area counts · zoom in for house pins · tap a house to disposition</span>
+        <span className="legend-item muted">· tap a house to disposition · red ✕ = logged off-site</span>
       </div>
 
       <DispositionModal target={dispoTarget} onClose={() => setDispoTarget(null)} onSaved={buildPins} />
