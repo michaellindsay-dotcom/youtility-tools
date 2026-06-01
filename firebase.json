@@ -31,7 +31,7 @@
   },
   "functions": {
     "source": "canvasspro-web/functions",
-    "runtime": "nodejs20"
+    "runtime": "nodejs22"
   },
   "emulators": {
     "auth": { "port": 9099 },

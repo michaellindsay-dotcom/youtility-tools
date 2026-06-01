@@ -5,7 +5,7 @@
   "description": "Cloud Functions for YoutilityKnock: Knockstat proxy + company/account management.",
   "main": "lib/index.js",
   "engines": {
-    "node": "20"
+    "node": "22"
   },
   "scripts": {
     "build": "tsc",
@@ -13,8 +13,8 @@
     "deploy": "firebase deploy --only functions"
   },
   "dependencies": {
-    "firebase-admin": "^12.5.0",
-    "firebase-functions": "^5.0.1"
+    "firebase-admin": "^13.0.0",
+    "firebase-functions": "^6.0.0"
   },
   "devDependencies": {
     "typescript": "^5.5.4"
