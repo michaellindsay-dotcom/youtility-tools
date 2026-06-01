@@ -146,7 +146,7 @@ export default function Dashboard() {
             {f.today.doors} / {GOALS.doorsDay} doors ({pct(f.today.doors, GOALS.doorsDay)}%)
           </div>
         </div>
-        <div className="row">
+        <div className="row dash-progress-actions">
           {shift.active ? (
             <div className="shift-live-bar">
               <span className="shift-dot" />
@@ -155,9 +155,7 @@ export default function Dashboard() {
               <button className="btn sm" onClick={() => shift.stopShift()}>Stop</button>
             </div>
           ) : (
-            <button className="btn primary sm" onClick={() => shift.startShift()} disabled={shift.starting}>
-              ▶ {shift.starting ? "Starting…" : "Start Shift"}
-            </button>
+            <Link to="/map" className="btn primary sm">▶ Start Shift</Link>
           )}
           <Link to="/leaderboard" className="btn sm">🏆 Leaderboard</Link>
         </div>
@@ -225,11 +223,10 @@ export default function Dashboard() {
       {/* Quick actions */}
       <h2 className="section-h">Quick Actions</h2>
       <div className="quick-grid">
-        <QuickAction to="/shifts" icon="▶" title="Start Shift" sub="Track knocks in real-time" />
+        <QuickAction to="/map" icon="◉" title="Map View" sub="Start canvassing" />
         <QuickAction to="/leads" icon="☰" title="Lead List" sub="View leads & appointments" />
         <QuickAction to="/stats" icon="📈" title="Analytics" sub="Deep dive into metrics" />
         <QuickAction to="/leaderboard" icon="🏆" title="Leaderboard" sub="See where you rank" />
-        <QuickAction to="/map" icon="◉" title="Map View" sub="Start canvassing" />
         <QuickAction to="/territories" icon="▰" title="Territories" sub="Manage your zones" />
       </div>
 
