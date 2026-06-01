@@ -120,6 +120,17 @@ service cloud.firestore {
                    && (request.auth.uid == userId || isSuper());
     }
 
+    // ── season stats (resetting week/month/year buckets) ─────────────────
+    // Same downstream visibility as userStats; a user writes only their own.
+    match /seasonStats/{docId} {
+      allow read: if isSuper()
+                  || (isSignedIn() && resource.data.uid == request.auth.uid)
+                  || (isSignedIn() && resource.data.companyId == myCompany()
+                      && (isCompanyAdmin() || request.auth.uid in resource.data.managerPath));
+      allow write: if isSignedIn()
+                   && (request.resource.data.uid == request.auth.uid || isSuper());
+    }
+
     // ── territories (company-wide) ───────────────────────────────────────
     match /territories/{territoryId} {
       allow read: if inMyCompany(resource.data.companyId);

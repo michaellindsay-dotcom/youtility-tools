@@ -188,6 +188,10 @@ export interface UserStats {
   doorsKnocked?: number;
   shifts?: number;
   updatedAt?: number;
+  // Present on seasonStats docs (resetting week/month/year buckets).
+  period?: string;
+  kind?: "week" | "month" | "year";
+  joinedAt?: number | null;
 }
 
 export interface ChatMessage {

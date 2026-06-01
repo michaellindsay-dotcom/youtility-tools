@@ -1092,6 +1092,12 @@ details.raw pre {
   border: 1px solid var(--line);
 }
 .lb-how-chip strong { color: var(--accent-2); }
+.lb-prorate-note {
+  margin-bottom: 16px;
+  font-size: 13px;
+  border-left: 3px solid var(--accent);
+  background: rgba(56, 189, 248, 0.06);
+}
 
 /* Your standing hero */
 .lb-hero {

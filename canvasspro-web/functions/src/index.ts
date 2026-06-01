@@ -1388,42 +1388,60 @@ function pointsOf(s: any): number {
   );
 }
 
+// ISO-week key matching the client (lib/season.ts) so the recap reads the same
+// weekly bucket the leaderboard shows.
+function isoWeekKey(d: Date): string {
+  const dt = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
+  const day = dt.getUTCDay() || 7;
+  dt.setUTCDate(dt.getUTCDate() + 4 - day);
+  const ys = new Date(Date.UTC(dt.getUTCFullYear(), 0, 1));
+  const wk = Math.ceil(((dt.getTime() - ys.getTime()) / 86400000 + 1) / 7);
+  return `${dt.getUTCFullYear()}-W${String(wk).padStart(2, "0")}`;
+}
+
+async function weekPoints(companyId: string, weekKey: string): Promise<Map<string, { name: string; points: number }>> {
+  const snap = await db.collection("seasonStats")
+    .where("companyId", "==", companyId).where("period", "==", weekKey).get();
+  const m = new Map<string, { name: string; points: number }>();
+  snap.forEach((d) => {
+    const s = d.data();
+    m.set(s.uid || d.id, { name: (s.userName as string) || "Rep", points: pointsOf(s) });
+  });
+  return m;
+}
+
 export const weeklyRecap = onSchedule({ schedule: "0 17 * * 5", timeZone: "America/Denver" }, async () => {
+  const thisWeek = isoWeekKey(new Date());
+  const lastWeek = isoWeekKey(new Date(Date.now() - 7 * 86400000));
   const companies = await db.collection("companies").get();
+
   for (const co of companies.docs) {
     const companyId = co.id;
-    const statsSnap = await db.collection("userStats").where("companyId", "==", companyId).get();
-    if (statsSnap.empty) continue;
-
-    const cur = statsSnap.docs.map((d) => {
-      const s = d.data();
-      return { uid: d.id, name: (s.userName as string) || "Rep", points: pointsOf(s) };
-    });
-    const top = [...cur].sort((a, b) => b.points - a.points).slice(0, 3).filter((t) => t.points > 0);
+    const cur = await weekPoints(companyId, thisWeek);
+    const top = [...cur.entries()]
+      .map(([uid, v]) => ({ uid, ...v }))
+      .filter((t) => t.points > 0)
+      .sort((a, b) => b.points - a.points)
+      .slice(0, 3);
     if (!top.length) continue;
 
-    // Biggest climber vs. the last snapshot.
-    const snapRef = db.doc(`companies/${companyId}/recap/last`);
-    const prev = ((await snapRef.get()).data()?.points as Record<string, number>) || {};
+    // Most improved vs. last week's bucket.
+    const prev = await weekPoints(companyId, lastWeek);
     let climber: { name: string; delta: number } | null = null;
-    for (const u of cur) {
-      const delta = u.points - (Number(prev[u.uid]) || 0);
-      if (delta > 0 && (!climber || delta > climber.delta)) climber = { name: u.name, delta };
+    for (const [uid, v] of cur.entries()) {
+      const delta = v.points - (prev.get(uid)?.points || 0);
+      if (delta > 0 && (!climber || delta > climber.delta)) climber = { name: v.name, delta };
     }
 
     const medals = ["🥇", "🥈", "🥉"];
-    let msg = "🏆 Weekly Recap — new season, fresh board!\n\nTop performers:\n";
+    let msg = "🏆 Weekly Recap — the board resets, fresh season starts now!\n\nThis week's top performers:\n";
     top.forEach((t, i) => { msg += `${medals[i]} ${t.name} — ${t.points.toLocaleString()} pts\n`; });
-    if (climber) msg += `\n🚀 Biggest climber: ${climber.name} (+${climber.delta.toLocaleString()} pts this week)`;
-    msg += "\n\nLet's get out there and run it back this week! 💪";
+    if (climber) msg += `\n🚀 Most improved: ${climber.name} (+${climber.delta.toLocaleString()} pts vs last week)`;
+    msg += "\n\nNew week, clean slate — let's get out there and run it back! 💪";
 
     await db.collection("chat").add({
       companyId, userId: "system", userName: "🏆 Weekly Recap", text: msg, createdAt: Date.now(),
     });
-
-    const points: Record<string, number> = {};
-    cur.forEach((u) => { points[u.uid] = u.points; });
-    await snapRef.set({ points, at: Date.now() });
     logger.info(`weekly recap posted for ${companyId}`);
   }
 });
