@@ -457,8 +457,9 @@ export function parseAreaProperties(
     .map((p) => {
       const a = p.address || {};
       const loc = p.location || {};
-      const lat = Number(a.latitude ?? loc.latitude);
-      const lng = Number(a.longitude ?? loc.longitude);
+      // Prefer the rooftop `location` coordinates; only fall back to address.
+      const lat = Number(loc.latitude ?? a.latitude);
+      const lng = Number(loc.longitude ?? a.longitude);
       return {
         id: String(pick(p, "identifier.attomId", "identifier.obPropId", "identifier.Id") ?? `${lat},${lng}`),
         address: a.oneLine || [a.line1, a.line2].filter(Boolean).join(", ") || "Unknown address",
