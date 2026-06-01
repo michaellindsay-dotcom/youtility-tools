@@ -51,6 +51,10 @@ a {
 
 /* ── Buttons ─────────────────────────────────────────────── */
 .btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
   font-family: inherit;
   font-weight: 600;
   font-size: 14px;
@@ -63,6 +67,7 @@ a {
   cursor: pointer;
   transition: transform 0.05s, background 0.15s, border-color 0.15s;
   white-space: nowrap;
+  text-decoration: none;
 }
 .btn:hover {
   background: rgba(255, 255, 255, 0.08);
