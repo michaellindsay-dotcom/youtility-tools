@@ -2,20 +2,17 @@ import { useEffect, useMemo, useState } from "react";
 import { collection, onSnapshot, query, where } from "firebase/firestore";
 import { db } from "../firebase";
 import { useAuth } from "../auth/AuthContext";
+import {
+  PTS, LEVEL_PTS, computePoints, levelInfo, tierFor, initials, avatarColor, pointLines,
+} from "../lib/points";
 import type { UserStats } from "../types";
 
-type Metric = "sales" | "appointments" | "doorsKnocked" | "leadsCreated";
-const METRICS: { key: Metric; label: string }[] = [
-  { key: "sales", label: "Sales" },
-  { key: "appointments", label: "Appointments" },
-  { key: "doorsKnocked", label: "Doors" },
-  { key: "leadsCreated", label: "Leads" },
-];
+interface Ranked extends UserStats { points: number; rank: number; }
 
 export default function Leaderboard() {
   const { profile, role, companyId } = useAuth();
   const [rows, setRows] = useState<UserStats[]>([]);
-  const [sortBy, setSortBy] = useState<Metric>("sales");
+  const [showHow, setShowHow] = useState(false);
 
   useEffect(() => {
     if (!profile || !companyId) return;
@@ -29,69 +26,153 @@ export default function Leaderboard() {
     );
   }, [profile, role, companyId]);
 
-  const ranked = useMemo(() => [...rows].sort((a, b) => (b[sortBy] ?? 0) - (a[sortBy] ?? 0)), [rows, sortBy]);
-  const myRank = ranked.findIndex((r) => r.uid === profile?.uid);
-  const me = myRank >= 0 ? ranked[myRank] : null;
-  const rate = (n?: number, d?: number) => (d ? Math.round(((n ?? 0) / d) * 100) : 0);
+  const ranked: Ranked[] = useMemo(
+    () =>
+      [...rows]
+        .map((r) => ({ ...r, points: computePoints(r), rank: 0 }))
+        .sort((a, b) => b.points - a.points)
+        .map((r, i) => ({ ...r, rank: i + 1 })),
+    [rows]
+  );
+
+  const leaderPts = ranked[0]?.points || 1;
+  const me = ranked.find((r) => r.uid === profile?.uid);
+  const podium = ranked.slice(0, 3);
+  const rest = ranked.slice(3);
 
   return (
-    <div className="page-body">
+    <div className="page-body lb">
       <div className="page-head row">
         <div>
-          <h1>Leaderboard</h1>
-          <p className="page-sub">{role === "admin" ? "Company" : "Your team"} rankings.</p>
+          <h1>🏆 Leaderboard</h1>
+          <p className="page-sub">{role === "admin" ? "Company" : "Your team"} rankings · all-time points</p>
         </div>
-        <div className="filter-bar">
-          {METRICS.map((m) => (
-            <button key={m.key} className={"chip-btn" + (sortBy === m.key ? " active" : "")} onClick={() => setSortBy(m.key)}>
-              {m.label}
-            </button>
-          ))}
-        </div>
+        <button className="chip-btn" onClick={() => setShowHow((v) => !v)}>
+          {showHow ? "Hide" : "How points work"}
+        </button>
       </div>
 
-      {me && (
-        <div className="card dash-progress" style={{ marginBottom: 16 }}>
-          <div>
-            <strong>Your rank: #{myRank + 1}</strong>
-            <div className="muted small">
-              {me.sales ?? 0} sold · {me.appointments ?? 0} appts · {me.doorsKnocked ?? 0} doors ·{" "}
-              {rate(me.sales, me.leadsCreated)}% close
-            </div>
-          </div>
+      {showHow && (
+        <div className="card lb-how">
+          {pointLines({}).map((l) => (
+            <span key={l.key} className="lb-how-chip">
+              {l.emoji} {l.label} <strong>+{l.per}</strong>
+            </span>
+          ))}
+          <span className="muted small">Closes are worth {PTS.sale}× a door — book and close to rocket up.</span>
+        </div>
+      )}
+
+      {me && <StandingHero me={me} total={ranked.length} />}
+
+      {podium.length > 0 && (
+        <div className="podium">
+          {/* 2nd · 1st · 3rd for the classic podium silhouette */}
+          {[podium[1], podium[0], podium[2]].map((p, i) =>
+            p ? (
+              <PodiumSpot key={p.uid} r={p} you={p.uid === profile?.uid} />
+            ) : (
+              <div key={`empty-${i}`} className="podium-empty" />
+            )
+          )}
         </div>
       )}
 
       {ranked.length === 0 ? (
-        <div className="empty">No stats yet — they build up as the team works leads and shifts.</div>
+        <div className="empty">No points yet — they pile up as the team knocks, books, and closes. 🚪→💰</div>
       ) : (
-        <div className="card table-card">
-          <table className="data-table">
-            <thead>
-              <tr>
-                <th>#</th>
-                <th>Rep</th>
-                <th>Doors</th>
-                <th>Appts</th>
-                <th>Sales</th>
-                <th>Close %</th>
-              </tr>
-            </thead>
-            <tbody>
-              {ranked.map((r, i) => (
-                <tr key={r.uid} className={r.uid === profile?.uid ? "me-row" : undefined}>
-                  <td className="muted">{i + 1}</td>
-                  <td>{r.userName || r.uid}</td>
-                  <td>{r.doorsKnocked ?? 0}</td>
-                  <td>{r.appointments ?? 0}</td>
-                  <td className={sortBy === "sales" ? "stat-hl" : undefined}>{r.sales ?? 0}</td>
-                  <td>{rate(r.sales, r.leadsCreated)}%</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+        <div className="lb-list">
+          {rest.map((r) => (
+            <RankRow key={r.uid} r={r} you={r.uid === profile?.uid} leaderPts={leaderPts} />
+          ))}
         </div>
       )}
+    </div>
+  );
+}
+
+function StandingHero({ me, total }: { me: Ranked; total: number }) {
+  const lvl = levelInfo(me.points);
+  const tier = tierFor(lvl.level);
+  const lines = pointLines(me).filter((l) => l.count > 0);
+  return (
+    <div className="lb-hero card" style={{ ["--tier" as string]: tier.color }}>
+      <div className="lb-hero-rank">
+        <div className="lb-hero-rank-n">#{me.rank}</div>
+        <div className="muted small">of {total}</div>
+      </div>
+      <div className="lb-hero-mid">
+        <div className="lb-hero-name">{me.userName || "You"}</div>
+        <div className="lb-tier" style={{ background: tier.color }}>{tier.emoji} {tier.name} · L{lvl.level}</div>
+        <div className="lb-xp">
+          <div className="lb-xp-bar"><span style={{ width: `${lvl.pct}%` }} /></div>
+          <div className="muted small">{lvl.into}/{LEVEL_PTS} XP · {lvl.toNext} to L{lvl.level + 1}</div>
+        </div>
+        <div className="lb-hero-chips">
+          {lines.map((l) => (
+            <span key={l.key} className="lb-chip" title={`${l.count} × ${l.per} = ${l.total}`}>{l.emoji} {l.count}</span>
+          ))}
+        </div>
+      </div>
+      <div className="lb-hero-pts">
+        <div className="lb-hero-pts-n">{me.points.toLocaleString()}</div>
+        <div className="muted small">points</div>
+      </div>
+    </div>
+  );
+}
+
+function PodiumSpot({ r, you }: { r: Ranked; you: boolean }) {
+  const place = r.rank; // 1, 2, or 3
+  const lvl = levelInfo(r.points);
+  const tier = tierFor(lvl.level);
+  const medal = place === 1 ? "🥇" : place === 2 ? "🥈" : "🥉";
+  return (
+    <div className={`podium-spot place-${place}` + (you ? " you" : "")}>
+      {place === 1 && <div className="podium-crown">👑</div>}
+      <div className="podium-avatar" style={{ background: avatarColor(r.uid) }}>
+        {initials(r.userName)}
+        <span className="podium-medal">{medal}</span>
+      </div>
+      <div className="podium-name">
+        {r.userName || "—"}
+        {you && <span className="you-pill">YOU</span>}
+      </div>
+      <div className="podium-tier" style={{ color: tier.color }}>{tier.emoji} L{lvl.level}</div>
+      <div className="podium-pts">{r.points.toLocaleString()}</div>
+      <div className={`podium-base base-${place}`}>
+        <span className="podium-base-n">{place}</span>
+      </div>
+      <div className="muted small podium-sub">{r.sales ?? 0}💰 · {r.appointments ?? 0}📅</div>
+    </div>
+  );
+}
+
+function RankRow({ r, you, leaderPts }: { r: Ranked; you: boolean; leaderPts: number }) {
+  const lvl = levelInfo(r.points);
+  const tier = tierFor(lvl.level);
+  const barPct = Math.max(4, Math.round((r.points / leaderPts) * 100));
+  return (
+    <div className={"lb-row card" + (you ? " you" : "")}>
+      <div className="lb-row-rank">{r.rank}</div>
+      <div className="lb-avatar" style={{ background: avatarColor(r.uid) }}>{initials(r.userName)}</div>
+      <div className="lb-row-main">
+        <div className="lb-row-top">
+          <span className="lb-row-name">
+            {r.userName || r.uid}
+            {you && <span className="you-pill">YOU</span>}
+          </span>
+          <span className="lb-row-tier" style={{ color: tier.color }}>{tier.emoji} {tier.name} · L{lvl.level}</span>
+        </div>
+        <div className="lb-row-bar"><span style={{ width: `${barPct}%`, background: tier.color }} /></div>
+        <div className="lb-row-stats muted small">
+          {r.sales ?? 0} 💰 · {r.appointments ?? 0} 📅 · {r.doorsKnocked ?? 0} 🚪 · {r.shifts ?? 0} ⏱️
+        </div>
+      </div>
+      <div className="lb-row-pts">
+        <div className="lb-row-pts-n">{r.points.toLocaleString()}</div>
+        <div className="muted small">pts</div>
+      </div>
     </div>
   );
 }

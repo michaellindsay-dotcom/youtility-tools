@@ -1073,6 +1073,214 @@ details.raw pre {
   text-align: right;
   padding: 7px 10px;
 }
+
+/* ════════════════════════════════════════════════════════════
+   GAMIFIED LEADERBOARD
+   ════════════════════════════════════════════════════════════ */
+.lb-how {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 16px;
+}
+.lb-how-chip {
+  font-size: 13px;
+  padding: 6px 12px;
+  border-radius: 999px;
+  background: var(--panel-hi);
+  border: 1px solid var(--line);
+}
+.lb-how-chip strong { color: var(--accent-2); }
+
+/* Your standing hero */
+.lb-hero {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  margin-bottom: 22px;
+  position: relative;
+  overflow: hidden;
+  border-color: color-mix(in srgb, var(--tier) 45%, var(--line));
+  background:
+    radial-gradient(600px 200px at 100% -40%, color-mix(in srgb, var(--tier) 22%, transparent), transparent 70%),
+    var(--panel);
+}
+.lb-hero-rank { text-align: center; min-width: 70px; }
+.lb-hero-rank-n {
+  font-family: "Space Grotesk", sans-serif;
+  font-size: 40px;
+  font-weight: 700;
+  line-height: 1;
+  background: linear-gradient(135deg, #fff, var(--tier));
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+.lb-hero-mid { flex: 1; min-width: 0; }
+.lb-hero-name { font-size: 18px; font-weight: 700; font-family: "Space Grotesk", sans-serif; }
+.lb-tier {
+  display: inline-block;
+  margin: 4px 0 8px;
+  padding: 3px 11px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 700;
+  color: #06121f;
+}
+.lb-xp { max-width: 360px; }
+.lb-xp-bar {
+  height: 8px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.1);
+  overflow: hidden;
+}
+.lb-xp-bar > span {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, var(--tier), #fff6);
+  transition: width 0.9s cubic-bezier(0.22, 1, 0.36, 1);
+}
+.lb-hero-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+.lb-chip {
+  font-size: 12px;
+  padding: 4px 9px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid var(--line);
+}
+.lb-hero-pts { text-align: center; min-width: 90px; }
+.lb-hero-pts-n {
+  font-family: "Space Grotesk", sans-serif;
+  font-size: 30px;
+  font-weight: 700;
+  color: var(--tier);
+}
+
+/* Podium */
+.podium {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  align-items: end;
+  gap: 12px;
+  margin-bottom: 26px;
+}
+.podium-empty { min-height: 1px; }
+.podium-spot { text-align: center; position: relative; animation: rise 0.6s cubic-bezier(0.22, 1, 0.36, 1) both; }
+.podium-spot.place-1 { animation-delay: 0.1s; }
+.podium-spot.place-2 { animation-delay: 0s; }
+.podium-spot.place-3 { animation-delay: 0.2s; }
+@keyframes rise { from { opacity: 0; transform: translateY(24px); } to { opacity: 1; transform: none; } }
+.podium-crown { font-size: 26px; animation: bob 2.4s ease-in-out infinite; }
+@keyframes bob { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-5px); } }
+.podium-avatar {
+  width: 64px; height: 64px;
+  border-radius: 50%;
+  margin: 4px auto 8px;
+  display: grid;
+  place-items: center;
+  font-weight: 800;
+  font-size: 22px;
+  color: #fff;
+  position: relative;
+  border: 3px solid rgba(255, 255, 255, 0.85);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.4);
+}
+.place-1 .podium-avatar {
+  width: 78px; height: 78px; font-size: 26px;
+  border-color: #FBBF24;
+  box-shadow: 0 0 0 4px rgba(251, 191, 36, 0.25), 0 8px 24px rgba(251, 191, 36, 0.4);
+  animation: glow 2.2s ease-in-out infinite;
+}
+@keyframes glow {
+  0%, 100% { box-shadow: 0 0 0 4px rgba(251, 191, 36, 0.2), 0 8px 24px rgba(251, 191, 36, 0.35); }
+  50% { box-shadow: 0 0 0 6px rgba(251, 191, 36, 0.35), 0 10px 30px rgba(251, 191, 36, 0.6); }
+}
+.podium-medal { position: absolute; bottom: -6px; right: -6px; font-size: 22px; }
+.podium-name { font-weight: 700; font-size: 14px; }
+.podium-tier { font-size: 12px; font-weight: 600; }
+.podium-pts { font-family: "Space Grotesk", sans-serif; font-weight: 700; font-size: 18px; margin-top: 2px; }
+.podium-sub { margin-top: 2px; }
+.podium-base {
+  margin: 8px auto 0;
+  width: 78%;
+  border-radius: 10px 10px 0 0;
+  display: grid;
+  place-items: center;
+  font-family: "Space Grotesk", sans-serif;
+  font-size: 28px;
+  font-weight: 800;
+  color: rgba(255, 255, 255, 0.55);
+}
+.base-1 { height: 78px; background: linear-gradient(180deg, rgba(251, 191, 36, 0.5), rgba(251, 191, 36, 0.12)); border: 1px solid rgba(251,191,36,.4); }
+.base-2 { height: 56px; background: linear-gradient(180deg, rgba(203, 213, 225, 0.45), rgba(203, 213, 225, 0.1)); border: 1px solid rgba(203,213,225,.35); }
+.base-3 { height: 40px; background: linear-gradient(180deg, rgba(217, 119, 66, 0.45), rgba(217, 119, 66, 0.1)); border: 1px solid rgba(217,119,66,.35); }
+.podium-spot.you .podium-name { color: var(--accent-2); }
+
+/* Ranked rows */
+.lb-list { display: grid; gap: 10px; }
+.lb-row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 12px 16px;
+}
+.lb-row.you {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent), 0 0 24px rgba(14, 165, 233, 0.25);
+}
+.lb-row-rank {
+  font-family: "Space Grotesk", sans-serif;
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--ink-dim);
+  min-width: 28px;
+  text-align: center;
+}
+.lb-avatar {
+  width: 42px; height: 42px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  font-weight: 800;
+  color: #fff;
+  flex-shrink: 0;
+}
+.lb-row-main { flex: 1; min-width: 0; }
+.lb-row-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.lb-row-name { font-weight: 700; font-size: 14px; }
+.lb-row-tier { font-size: 12px; font-weight: 600; white-space: nowrap; }
+.lb-row-bar {
+  height: 6px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  margin: 7px 0;
+  overflow: hidden;
+}
+.lb-row-bar > span {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  transition: width 0.9s cubic-bezier(0.22, 1, 0.36, 1);
+}
+.lb-row-pts { text-align: right; min-width: 64px; }
+.lb-row-pts-n { font-family: "Space Grotesk", sans-serif; font-size: 20px; font-weight: 700; }
+.you-pill {
+  margin-left: 8px;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.6px;
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: var(--accent);
+  color: #06121f;
+  vertical-align: middle;
+}
+@media (max-width: 560px) {
+  .lb-row-tier { display: none; }
+  .lb-hero { flex-wrap: wrap; }
+}
 .lead-pin span {
   display: block;
   width: 16px;

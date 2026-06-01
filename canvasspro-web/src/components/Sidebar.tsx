@@ -41,7 +41,7 @@ export default function Sidebar() {
         ))}
       </nav>
       <div className="brand-sub" style={{ marginTop: "auto", padding: "8px" }}>
-        build BUILD-20
+        build BUILD-21
       </div>
     </aside>
   );
