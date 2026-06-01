@@ -45,6 +45,7 @@ export interface UserProfile {
   email: string;
   displayName: string;
   role: Role; // base access tier
+  phone?: string; // for SMS notification fallback when offline
   companyId: string;
   roleId?: string; // -> companies/{companyId}/roles/{roleId}
   title?: string; // denormalized role title for display
@@ -143,6 +144,53 @@ export interface UserStats {
   doorsKnocked?: number;
   shifts?: number;
   updatedAt?: number;
+}
+
+export interface ChatMessage {
+  id: string;
+  companyId?: string;
+  channelId?: string;
+  userId: string;
+  userName: string;
+  text?: string;
+  imageUrl?: string;
+  createdAt: number;
+}
+
+export interface DmChannel {
+  id: string;
+  members: string[];
+  memberNames: Record<string, string>;
+  lastMessage?: string;
+  lastAt?: number;
+}
+
+export type EventType = "appointment" | "go_back" | "follow_up";
+
+export interface ScheduleEvent {
+  id: string;
+  companyId: string;
+  userId: string;
+  userName?: string;
+  type: EventType;
+  title: string;
+  address?: string;
+  leadId?: string;
+  startAt: number;
+  notes?: string;
+  visibilityPath: string[];
+  createdAt: number;
+}
+
+export interface AppNotification {
+  id: string;
+  userId: string;
+  type: string;
+  title: string;
+  body?: string;
+  link?: string;
+  read?: boolean;
+  createdAt: number;
 }
 
 // ---- Knockstat normalized property record (ported from canvass-pro.html) ----

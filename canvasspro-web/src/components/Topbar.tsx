@@ -2,6 +2,7 @@ import { useNavigate } from "react-router-dom";
 import { useAuth } from "../auth/AuthContext";
 import { isImpersonating } from "../firebase";
 import ShiftBar from "./ShiftBar";
+import NotificationBell from "./NotificationBell";
 
 export default function Topbar() {
   const { profile, role, logout } = useAuth();
@@ -29,6 +30,7 @@ export default function Topbar() {
       )}
       <div className="topbar-title"><ShiftBar /></div>
       <div className="topbar-user">
+        <NotificationBell />
         <div className="topbar-user-info">
           <div className="topbar-user-name">{profile?.displayName ?? "User"}</div>
           <div className="topbar-user-role">{role ?? ""}</div>

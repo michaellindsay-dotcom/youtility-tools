@@ -9,6 +9,7 @@ import {
 } from "firebase/auth";
 import { getFirestore, connectFirestoreEmulator } from "firebase/firestore";
 import { getFunctions, connectFunctionsEmulator } from "firebase/functions";
+import { getStorage } from "firebase/storage";
 
 // Public client identifiers for the youtilityknock Firebase project. These
 // are safe to ship in the bundle — security is enforced by Firebase Auth +
@@ -39,6 +40,7 @@ export const app = initializeApp(firebaseConfig, isImpersonating ? "impersonatio
 export const auth = getAuth(app);
 export const db = getFirestore(app);
 export const functions = getFunctions(app);
+export const storage = getStorage(app);
 export const googleProvider = new GoogleAuthProvider();
 
 if (isImpersonating && impToken) {

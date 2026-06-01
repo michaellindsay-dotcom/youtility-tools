@@ -12,6 +12,8 @@ import Shifts from "./pages/Shifts";
 import Stats from "./pages/Stats";
 import Leaderboard from "./pages/Leaderboard";
 import Gamify from "./pages/Gamify";
+import Chat from "./pages/Chat";
+import Schedule from "./pages/Schedule";
 import Settings from "./pages/Settings";
 
 export default function App() {
@@ -34,6 +36,8 @@ export default function App() {
         <Route path="stats" element={<Stats />} />
         <Route path="leaderboard" element={<Leaderboard />} />
         <Route path="gamify" element={<Gamify />} />
+        <Route path="chat" element={<Chat />} />
+        <Route path="schedule" element={<Schedule />} />
         <Route path="territories" element={<Territories />} />
         <Route path="settings" element={<Settings />} />
       </Route>

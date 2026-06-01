@@ -1,4 +1,6 @@
 import { onRequest, onCall, HttpsError, CallableRequest } from "firebase-functions/v2/https";
+import { onDocumentCreated } from "firebase-functions/v2/firestore";
+import { onSchedule } from "firebase-functions/v2/scheduler";
 import * as logger from "firebase-functions/logger";
 import { initializeApp } from "firebase-admin/app";
 import { getAuth } from "firebase-admin/auth";
@@ -501,4 +503,187 @@ export const impersonate = onCall(async (request) => {
   });
   logger.warn(`IMPERSONATION: ${caller.uid} -> ${targetUid} (log ${log.id})`);
   return { ok: true, token, logId: log.id, targetEmail: target.email || null };
+});
+
+// ════════════════════════════════════════════════════════════════════════════
+// NOTIFICATIONS — in-app + email + SMS fallback for chat / DMs / scheduler.
+//
+// Delivery policy (per the product spec):
+//   • An in-app notification doc is ALWAYS written (drives the bell + badge and
+//     becomes a native push once the mobile apps ship).
+//   • If the recipient is currently OFFLINE (no presence heartbeat in the last
+//     ONLINE_WINDOW_MS), we ALSO send email (SendGrid) and SMS (Twilio) so they
+//     hear about it before the apps are live.
+// Email/SMS are best-effort and gated on env keys — absent keys → skipped, no
+// error, so the core app works without them configured.
+// ════════════════════════════════════════════════════════════════════════════
+
+const SENDGRID = {
+  key: process.env.SENDGRID_API_KEY || "",
+  from: process.env.SENDGRID_FROM || "",
+  fromName: process.env.SENDGRID_FROM_NAME || "YoutilityKnock",
+};
+const TWILIO = {
+  sid: process.env.TWILIO_ACCOUNT_SID || "",
+  token: process.env.TWILIO_AUTH_TOKEN || "",
+  from: process.env.TWILIO_FROM || "",
+};
+// A user is considered "online" if their presence doc was touched this recently.
+const ONLINE_WINDOW_MS = 90 * 1000;
+
+async function sendEmail(to: string, subject: string, text: string): Promise<boolean> {
+  if (!SENDGRID.key || !SENDGRID.from || !to) return false;
+  try {
+    const res = await fetch("https://api.sendgrid.com/v3/mail/send", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${SENDGRID.key}`, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        personalizations: [{ to: [{ email: to }] }],
+        from: { email: SENDGRID.from, name: SENDGRID.fromName },
+        subject,
+        content: [{ type: "text/plain", value: text }],
+      }),
+    });
+    if (!res.ok) logger.warn(`SendGrid ${res.status}: ${await res.text().catch(() => "")}`);
+    return res.ok;
+  } catch (e) {
+    logger.error("sendEmail failed", e);
+    return false;
+  }
+}
+
+async function sendSms(to: string, body: string): Promise<boolean> {
+  if (!TWILIO.sid || !TWILIO.token || !TWILIO.from || !to) return false;
+  try {
+    const form = new URLSearchParams({ To: to, From: TWILIO.from, Body: body });
+    const auth = Buffer.from(`${TWILIO.sid}:${TWILIO.token}`).toString("base64");
+    const res = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${TWILIO.sid}/Messages.json`, {
+      method: "POST",
+      headers: { Authorization: `Basic ${auth}`, "Content-Type": "application/x-www-form-urlencoded" },
+      body: form.toString(),
+    });
+    if (!res.ok) logger.warn(`Twilio ${res.status}: ${await res.text().catch(() => "")}`);
+    return res.ok;
+  } catch (e) {
+    logger.error("sendSms failed", e);
+    return false;
+  }
+}
+
+async function isOnline(uid: string): Promise<boolean> {
+  try {
+    const snap = await db.doc(`presence/${uid}`).get();
+    const last = snap.exists ? Number(snap.data()?.lastSeen || 0) : 0;
+    return Date.now() - last < ONLINE_WINDOW_MS;
+  } catch {
+    return false;
+  }
+}
+
+interface NotifyOpts {
+  userId: string;
+  type: string;
+  title: string;
+  body?: string;
+  link?: string;
+}
+
+// Write the in-app notification, then email + SMS the user iff they're offline.
+async function notifyUser(opts: NotifyOpts): Promise<void> {
+  const { userId, type, title, body = "", link = "" } = opts;
+  await db.collection("notifications").add({
+    userId,
+    type,
+    title,
+    body,
+    link,
+    read: false,
+    createdAt: Date.now(),
+  });
+
+  if (await isOnline(userId)) return; // in-app/push is enough when they're active
+
+  const userSnap = await db.doc(`users/${userId}`).get();
+  if (!userSnap.exists) return;
+  const u = userSnap.data()!;
+  const line = body ? `${title}\n\n${body}` : title;
+  await Promise.all([
+    u.email ? sendEmail(u.email, `YoutilityKnock — ${title}`, line) : Promise.resolve(false),
+    u.phone ? sendSms(u.phone, line) : Promise.resolve(false),
+  ]);
+}
+
+// ── trigger: new company-channel chat message → notify the rest of the company
+export const onChatMessage = onDocumentCreated("chat/{messageId}", async (event) => {
+  const msg = event.data?.data();
+  if (!msg?.companyId) return;
+  const preview = msg.text ? String(msg.text).slice(0, 140) : msg.imageUrl ? "📷 Photo" : "";
+  const members = await db.collection("users").where("companyId", "==", msg.companyId).get();
+  await Promise.all(
+    members.docs
+      .filter((d) => d.id !== msg.userId && d.data()?.disabled !== true)
+      .map((d) =>
+        notifyUser({
+          userId: d.id,
+          type: "chat",
+          title: `${msg.userName || "Teammate"} in Team Chat`,
+          body: preview,
+          link: "/app/chat",
+        })
+      )
+  );
+});
+
+// ── trigger: new DM → notify the other member(s) of that channel
+export const onDmMessage = onDocumentCreated("dms/{channelId}/messages/{messageId}", async (event) => {
+  const msg = event.data?.data();
+  const channelId = event.params.channelId;
+  if (!msg) return;
+  const chanSnap = await db.doc(`dms/${channelId}`).get();
+  const members: string[] = chanSnap.exists ? chanSnap.data()?.members || [] : [];
+  const preview = msg.text ? String(msg.text).slice(0, 140) : msg.imageUrl ? "📷 Photo" : "";
+  await Promise.all(
+    members
+      .filter((m) => m !== msg.userId)
+      .map((m) =>
+        notifyUser({
+          userId: m,
+          type: "dm",
+          title: `New message from ${msg.userName || "a teammate"}`,
+          body: preview,
+          link: "/app/chat",
+        })
+      )
+  );
+});
+
+// ── scheduled: remind owners of upcoming events (appointments/go-backs/follow-ups)
+// Runs every 15 min; fires once per event when it falls inside the next 30-min
+// window. `reminded` flag guards against double-sends.
+export const eventReminders = onSchedule("every 15 minutes", async () => {
+  const now = Date.now();
+  const windowEnd = now + 30 * 60 * 1000;
+  const due = await db
+    .collection("events")
+    .where("startAt", ">=", now)
+    .where("startAt", "<=", windowEnd)
+    .get();
+  await Promise.all(
+    due.docs
+      .filter((d) => d.data()?.reminded !== true)
+      .map(async (d) => {
+        const ev = d.data();
+        const when = new Date(ev.startAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+        const label =
+          ev.type === "appointment" ? "Appointment" : ev.type === "go_back" ? "Go-back" : "Follow-up";
+        await notifyUser({
+          userId: ev.userId,
+          type: "event",
+          title: `${label} at ${when}`,
+          body: [ev.title, ev.address].filter(Boolean).join(" — "),
+          link: "/app/schedule",
+        });
+        await d.ref.update({ reminded: true });
+      })
+  );
 });

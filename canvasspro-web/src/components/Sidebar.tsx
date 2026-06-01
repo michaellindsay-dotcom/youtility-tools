@@ -5,6 +5,8 @@ const links = [
   { to: "/lookup", label: "Address Lookup", icon: "⌖" },
   { to: "/map", label: "Map", icon: "◉" },
   { to: "/leads", label: "Leads", icon: "☰" },
+  { to: "/chat", label: "Team Chat", icon: "💬" },
+  { to: "/schedule", label: "Schedule", icon: "📅" },
   { to: "/team", label: "Team", icon: "⛩" },
   { to: "/shifts", label: "Shifts", icon: "◷" },
   { to: "/stats", label: "Analytics", icon: "★" },
@@ -39,7 +41,7 @@ export default function Sidebar() {
         ))}
       </nav>
       <div className="brand-sub" style={{ marginTop: "auto", padding: "8px" }}>
-        build BUILD-12
+        build BUILD-13
       </div>
     </aside>
   );
