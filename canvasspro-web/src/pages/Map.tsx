@@ -8,6 +8,7 @@ import { useAuth } from "../auth/AuthContext";
 import { useNav } from "../components/NavContext";
 import { DISP_COLOR } from "../lib/dispositions";
 import { lookupArea, parseAreaProperties } from "../lib/knockstat";
+import { getTile, putTile, nearbyCachedHomes } from "../lib/homeCache";
 import DispositionModal, { type DispoInput } from "../components/DispositionModal";
 import ShiftHud from "../components/ShiftHud";
 import type { Lead, Territory, LatLng } from "../types";
@@ -62,6 +63,9 @@ export default function MapPage() {
   const lastLoadCenter = useRef<L.LatLng | null>(null);
   const loadingRef = useRef(false);
   const roamTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const youMarker = useRef<L.CircleMarker | null>(null);
+  const watchId = useRef<string | null>(null);
+  const followRef = useRef(false);
   const territoryLayer = useRef<L.LayerGroup>(L.layerGroup());
   const assigned = useRef<Territory[]>([]);
   const myLoc = useRef<LatLng | null>(null);
@@ -73,7 +77,9 @@ export default function MapPage() {
   const [mode, setMode] = useState<"view" | "draw">("view");
   const [loadingHomes, setLoadingHomes] = useState(false);
   const [dispoTarget, setDispoTarget] = useState<DispoInput | null>(null);
+  const [follow, setFollow] = useState(false);
   modeRef.current = mode;
+  followRef.current = follow;
 
   const canDraw = role === "admin" || role === "manager";
 
@@ -155,16 +161,24 @@ export default function MapPage() {
     return true;
   }
 
-  // Pull the nearest ~200 homes around a center and drop pins (dedupes against
-  // what's already shown; does NOT clear, so it accumulates as the rep moves).
+  // Nearest ~200 homes around a center → pins (dedupes against what's shown;
+  // accumulates). Serves from the local cache when this tile was already pulled,
+  // so walking/panning back over loaded ground costs no ATTOM call.
   async function fetchNearby(center: LatLng) {
+    const cached = getTile(center.lat, center.lng);
+    if (cached) {
+      cached.forEach((h) => addHomeMarker(h));
+      return;
+    }
     const token = await auth.currentUser!.getIdToken();
     const raw = await lookupArea(center.lat, center.lng, 0.5, token);
-    parseAreaProperties(raw)
-      .map((h) => ({ ...h, d: L.latLng(center.lat, center.lng).distanceTo(L.latLng(h.lat, h.lng)) }))
+    const homes = parseAreaProperties(raw)
+      .map((h) => ({ address: h.address, lat: h.lat, lng: h.lng, d: L.latLng(center.lat, center.lng).distanceTo(L.latLng(h.lat, h.lng)) }))
       .sort((a, b) => a.d - b.d)
       .slice(0, NEAREST_N)
-      .forEach((h) => addHomeMarker(h));
+      .map(({ address, lat, lng }) => ({ address, lat, lng }));
+    putTile(center.lat, center.lng, homes);
+    homes.forEach((h) => addHomeMarker(h));
   }
 
   // Manual / initial load: assigned territory(ies), or nearest 200 around the rep.
@@ -233,6 +247,38 @@ export default function MapPage() {
     }
   }
 
+  function setYou(lat: number, lng: number) {
+    if (youMarker.current) youMarker.current.setLatLng([lat, lng]);
+    else if (mapRef.current) {
+      youMarker.current = L.circleMarker([lat, lng], {
+        radius: 7, color: "#fff", weight: 3, fillColor: "#0EA5E9", fillOpacity: 1,
+      }).addTo(mapRef.current).bindTooltip("You");
+    }
+  }
+
+  // "Follow me": keep the map locked on the rep's GPS as they walk; recentering
+  // triggers the debounced auto-load so homes appear ahead of them (cached).
+  async function toggleFollow() {
+    if (follow) {
+      setFollow(false);
+      if (watchId.current) { await Geolocation.clearWatch({ id: watchId.current }).catch(() => {}); watchId.current = null; }
+      return;
+    }
+    setFollow(true);
+    if (myLoc.current && mapRef.current) mapRef.current.setView([myLoc.current.lat, myLoc.current.lng], Math.max(mapRef.current.getZoom(), 18));
+    try {
+      watchId.current = await Geolocation.watchPosition({ enableHighAccuracy: true, timeout: 10000 }, (pos) => {
+        if (!pos) return;
+        const lat = pos.coords.latitude, lng = pos.coords.longitude;
+        myLoc.current = { lat, lng };
+        setYou(lat, lng);
+        if (followRef.current && mapRef.current) mapRef.current.panTo([lat, lng], { animate: true });
+      });
+    } catch {
+      setFollow(false);
+    }
+  }
+
   // ── Init ────────────────────────────────────────────────────────────────────
   useEffect(() => {
     if (!companyId || !profile || !elRef.current || mapRef.current) return;
@@ -281,9 +327,9 @@ export default function MapPage() {
         const pos = await Geolocation.getCurrentPosition({ enableHighAccuracy: true, timeout: 8000 });
         myLoc.current = { lat: pos.coords.latitude, lng: pos.coords.longitude };
         map.setView([myLoc.current.lat, myLoc.current.lng], 18);
-        L.circleMarker([myLoc.current.lat, myLoc.current.lng], {
-          radius: 7, color: "#fff", weight: 3, fillColor: "#0EA5E9", fillOpacity: 1,
-        }).addTo(map).bindTooltip("You");
+        setYou(myLoc.current.lat, myLoc.current.lng);
+        // Instantly repaint homes we've cached nearby (no network), then refresh.
+        nearbyCachedHomes(myLoc.current.lat, myLoc.current.lng).forEach((h) => addHomeMarker(h));
       } catch {
         /* location denied */
       }
@@ -294,6 +340,7 @@ export default function MapPage() {
 
     return () => {
       if (roamTimer.current) clearTimeout(roamTimer.current);
+      if (watchId.current) { Geolocation.clearWatch({ id: watchId.current }).catch(() => {}); watchId.current = null; }
       map.remove();
       mapRef.current = null;
     };
@@ -329,6 +376,14 @@ export default function MapPage() {
       {/* Top-left: menu + controls */}
       <div className="map-overlay map-tl">
         <button className="map-fab" onClick={openNav} aria-label="Menu">☰</button>
+        <button
+          className={"map-fab" + (follow ? " active" : "")}
+          onClick={toggleFollow}
+          aria-label="Follow me"
+          title={follow ? "Following you — tap to stop" : "Follow me"}
+        >
+          ◎
+        </button>
         <button className="map-fab" onClick={loadHomes} disabled={loadingHomes} aria-label="Refresh homes" title="Refresh homes">
           {loadingHomes ? "…" : "⟳"}
         </button>
