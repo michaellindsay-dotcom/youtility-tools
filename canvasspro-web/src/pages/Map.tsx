@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
-import { Link } from "react-router-dom";
 import { addDoc, collection, getDocs, query, where } from "firebase/firestore";
 import { Geolocation } from "@capacitor/geolocation";
 import { db, auth } from "../firebase";
@@ -311,8 +310,7 @@ export default function MapPage() {
         <ShiftHud />
       </div>
 
-      {/* Bottom-right: chat FAB */}
-      <Link to="/chat" className="map-chat-fab" aria-label="Team chat">💬</Link>
+      {/* Chat FAB is rendered globally by Layout (with unread alert). */}
 
       <DispositionModal target={dispoTarget} onClose={() => setDispoTarget(null)} onSaved={buildPins} />
     </div>

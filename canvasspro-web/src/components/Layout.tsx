@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Outlet } from "react-router-dom";
 import Sidebar from "./Sidebar";
 import Topbar from "./Topbar";
+import ChatFab from "./ChatFab";
 import { usePresenceHeartbeat } from "../lib/presence";
 import { NavContext } from "./NavContext";
 
@@ -20,6 +21,7 @@ export default function Layout() {
             <Outlet />
           </main>
         </div>
+        <ChatFab />
       </div>
     </NavContext.Provider>
   );
