@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { collection, onSnapshot, query, where } from "firebase/firestore";
 import { db } from "../firebase";
 import { useAuth } from "../auth/AuthContext";
+import GoalPlanner from "../components/GoalPlanner";
 import type { UserStats } from "../types";
 
 type Metric = keyof Pick<UserStats, "sales" | "appointments" | "leadsCreated" | "doorsKnocked">;
@@ -58,6 +59,10 @@ export default function Stats() {
           ))}
         </div>
       </div>
+
+      <GoalPlanner />
+
+      <h2 className="section-h">Leaderboard</h2>
 
       {sorted.length === 0 ? (
         <div className="empty">No stats yet — they build up as the team works leads and shifts.</div>
