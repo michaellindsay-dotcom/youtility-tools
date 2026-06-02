@@ -1673,6 +1673,28 @@ details.raw pre {
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
 }
 
+/* Save-area panel (name the drawn area + assign it to a rep) */
+.map-save-panel {
+  position: absolute;
+  top: 64px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 1200;
+  width: min(340px, calc(100vw - 24px));
+  background: rgba(10, 15, 26, 0.96);
+  border: 1px solid var(--line-hi);
+  border-radius: 14px;
+  padding: 14px 16px;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.55);
+}
+.map-save-panel .msp-title {
+  font-weight: 700;
+  font-size: 14px;
+  margin-bottom: 10px;
+}
+.map-save-panel .field { margin-bottom: 10px; }
+.map-save-panel .row.end { display: flex; justify-content: flex-end; gap: 8px; margin-top: 4px; }
+
 /* Global floating Team Chat button (all pages, over the full-screen map too) */
 .chat-fab-global {
   position: fixed;
