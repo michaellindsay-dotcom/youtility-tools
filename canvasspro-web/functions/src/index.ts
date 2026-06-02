@@ -1702,14 +1702,15 @@ export const setCrmConfig = onCall(async (request) => {
   return { ok: true };
 });
 
-// ── Per-company CRM link (the 4 fields) ──────────────────────────────────────
-interface CompanyCrm { enabled: boolean; crmCompanyId: string; webhookUrl: string; apiSecret: string; }
+// ── Per-company CRM link (the config fields) ─────────────────────────────────
+interface CompanyCrm { enabled: boolean; crmCompanyId: string; webhookUrl: string; appointmentWebhookUrl: string; apiSecret: string; }
 async function companyCrm(companyId: string): Promise<CompanyCrm> {
   const c = ((await db.doc(`crmLinks/${companyId}`).get()).data() as Record<string, any>) || {};
   return {
     enabled: !!c.enabled,
     crmCompanyId: c.crmCompanyId || "",
     webhookUrl: c.webhookUrl || "",
+    appointmentWebhookUrl: c.appointmentWebhookUrl || "",
     apiSecret: c.apiSecret || "",
   };
 }
@@ -1720,7 +1721,8 @@ export const getCompanyCrm = onCall(async (request) => {
   const companyId = authorizeForCompany(caller, (request.data || {}).companyId);
   const c = await companyCrm(companyId);
   return {
-    enabled: c.enabled, crmCompanyId: c.crmCompanyId, webhookUrl: c.webhookUrl,
+    enabled: c.enabled, crmCompanyId: c.crmCompanyId,
+    webhookUrl: c.webhookUrl, appointmentWebhookUrl: c.appointmentWebhookUrl,
     secretConfigured: !!c.apiSecret, secretMask: mask(c.apiSecret),
   };
 });
@@ -1735,6 +1737,7 @@ export const setCompanyCrm = onCall(async (request) => {
   if (typeof d.enabled === "boolean") u.enabled = d.enabled;
   if (typeof d.crmCompanyId === "string") u.crmCompanyId = d.crmCompanyId.trim();
   if (typeof d.webhookUrl === "string") u.webhookUrl = d.webhookUrl.trim();
+  if (typeof d.appointmentWebhookUrl === "string") u.appointmentWebhookUrl = d.appointmentWebhookUrl.trim();
   if (typeof d.apiSecret === "string" && d.apiSecret.trim()) u.apiSecret = d.apiSecret.trim();
   await db.doc(`crmLinks/${companyId}`).set(u, { merge: true });
   const mirror: Record<string, unknown> = {};
@@ -1757,12 +1760,17 @@ async function crmAuth(sent: string, companyId?: string): Promise<boolean> {
 }
 
 // Push a changed lead / appointment to that company's CRM webhook (best-effort).
+// Leads and appointments have separate endpoints in the CRM add-on.
 async function pushToCrm(kind: "lead" | "event", companyId: string, id: string, data: any) {
   if (data?._syncedFrom === "crm") return; // came from the CRM — don't echo back
   const link = await companyCrm(companyId);
-  if (!link.enabled || !link.webhookUrl) return; // not linked / sync paused
+  if (!link.enabled) return; // sync paused
+  const url = kind === "event"
+    ? (link.appointmentWebhookUrl || link.webhookUrl)
+    : link.webhookUrl;
+  if (!url) return; // no endpoint configured for this kind
   try {
-    await fetch(link.webhookUrl, {
+    await fetch(url, {
       method: "POST",
       headers: { "Content-Type": "application/json", "x-crm-secret": link.apiSecret },
       body: JSON.stringify({ type: kind, companyId, crmCompanyId: link.crmCompanyId, id, data }),
@@ -1791,7 +1799,7 @@ export const crmApi = onRequest({ cors: true }, async (req, res) => {
     if (req.method === "POST" && path.endsWith("/provision")) {
       // Bootstrap runs before the company exists → master key only.
       if (!(await crmAuth(sent))) { res.status(401).json({ error: "Unauthorized" }); return; }
-      const { name, crmCompanyId, adminEmail, adminName, plan, webhookUrl, apiSecret } =
+      const { name, crmCompanyId, adminEmail, adminName, plan, webhookUrl, appointmentWebhookUrl, apiSecret } =
         (req.body || {}) as Record<string, string>;
       if (!name || !adminEmail) { res.status(400).json({ error: "name and adminEmail required" }); return; }
 
@@ -1820,7 +1828,8 @@ export const crmApi = onRequest({ cors: true }, async (req, res) => {
         "yk_" + Math.random().toString(36).slice(2) + Math.random().toString(36).slice(2);
       await db.doc(`crmLinks/${companyId}`).set({
         companyId, enabled: true, crmCompanyId: crmCompanyId || "",
-        webhookUrl: (webhookUrl || "").trim(), apiSecret: companySecret, updatedAt: Date.now(),
+        webhookUrl: (webhookUrl || "").trim(), appointmentWebhookUrl: (appointmentWebhookUrl || "").trim(),
+        apiSecret: companySecret, updatedAt: Date.now(),
       }, { merge: true });
 
       // Create the company admin (or reuse), then a magic sign-in link.

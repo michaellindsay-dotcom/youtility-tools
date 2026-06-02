@@ -50,8 +50,12 @@ are the scheduler events.
 → upserts by `crmLeadId`, assigns to a company admin, tags `_syncedFrom:"crm"`.
 
 ## Knock → CRM (real-time webhook)
-Knock POSTs to your configured webhook URL whenever a lead or appointment
-changes (for CRM-linked companies):
+Leads and appointments POST to **separate** endpoints (the CRM add-on exposes a
+Lead webhook URL and an Appointment webhook URL — set both on the company card):
+- `type:"lead"` → **Lead webhook URL**
+- `type:"event"` (appointment) → **Appointment webhook URL** (falls back to the
+  lead URL if the appointment URL is left blank)
+
 ```json
 { "type": "lead" | "event", "companyId": "...", "crmCompanyId": "...",
   "id": "...", "data": { ...full document... } }
