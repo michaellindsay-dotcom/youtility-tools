@@ -508,7 +508,7 @@ const FIREBASE_CONFIG = {
 };
 
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.13.2/firebase-app.js";
-import { getAuth, signInWithEmailAndPassword, onAuthStateChanged, signOut }
+import { getAuth, signInWithEmailAndPassword, onAuthStateChanged, signOut, sendPasswordResetEmail }
   from "https://www.gstatic.com/firebasejs/10.13.2/firebase-auth.js";
 import { getFirestore, collection, query, where, orderBy, getDocs, doc, getDoc, addDoc, updateDoc, deleteDoc }
   from "https://www.gstatic.com/firebasejs/10.13.2/firebase-firestore.js";
@@ -1193,7 +1193,18 @@ async function loadUsers() {
         <td><select class="mgrSel">${mgrOptions}</select></td>
         <td>${u.disabled ? '<span class="badge disabled">disabled</span>' : '<span class="badge">active</span>'}</td>
         <td><div class="row">${mirrorBtn}
+          <button class="btn sm resetBtn" title="Email a password-reset link">Reset PW</button>
           <button class="btn sm ${u.disabled?'':'danger'} disBtn">${u.disabled ? "Enable" : "Disable"}</button></div></td>`;
+
+      tr.querySelector(".resetBtn").addEventListener("click", async (ev) => {
+        if (!u.email) return;
+        ev.target.disabled = true;
+        try {
+          await sendPasswordResetEmail(auth, u.email);
+          banner($("banner"), `Password-reset link sent to ${u.email}.`, "good");
+        } catch (e) { banner($("banner"), e.message || "Could not send reset.", "error"); }
+        finally { ev.target.disabled = false; }
+      });
 
       tr.querySelector(".roleSel").addEventListener("change", async (ev) => {
         const v = ev.target.value;
