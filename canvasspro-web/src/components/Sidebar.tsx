@@ -5,6 +5,7 @@ import { hasFeature, type FeatureKey } from "../lib/features";
 const links: { to: string; label: string; icon: string; end?: boolean; feat?: FeatureKey }[] = [
   { to: "/", label: "Dashboard", icon: "▦", end: true },
   { to: "/map", label: "Map", icon: "◉" },
+  { to: "/movers", label: "Movers", icon: "🚚" },
   { to: "/leads", label: "Leads", icon: "☰" },
   { to: "/chat", label: "Team Chat", icon: "💬", feat: "chat" },
   { to: "/schedule", label: "Schedule", icon: "📅", feat: "scheduling" },

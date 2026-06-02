@@ -476,3 +476,73 @@ export function parseAreaProperties(
         !(x.lat === 0 && x.lng === 0)
     );
 }
+
+// A recently-moved-in home (a sale inside the lookback window) for the Movers map.
+export interface MoverHome {
+  id: string;
+  address: string;
+  lat: number;
+  lng: number;
+  saleDate: string; // ISO-ish date the home last sold (≈ when they moved in)
+  salePrice: number | null;
+}
+
+// Fetch recent home sales (move-ins) within `radius` miles of (lat,lng) over the
+// last `days` days via the /api/movers proxy.
+export async function lookupMovers(
+  lat: number,
+  lng: number,
+  radius: number,
+  days: number,
+  idToken: string
+): Promise<AnyObj> {
+  const base = import.meta.env.VITE_API_BASE || "/api";
+  const res = await fetch(`${base}/movers?lat=${lat}&lng=${lng}&radius=${radius}&days=${days}`, {
+    headers: { Authorization: `Bearer ${idToken}` },
+  });
+  if (!res.ok) {
+    const body = await res.text().catch(() => "");
+    const err = new Error(`Movers lookup failed (${res.status})${body ? ": " + body.slice(0, 200) : ""}`);
+    (err as any).code = "HTTP_" + res.status;
+    throw err;
+  }
+  return res.json();
+}
+
+// Mover pin records from an ATTOM sale-snapshot response. Only homes that carry
+// a usable sale date are kept (that date is what we surface as the move-in date).
+export function parseMovers(raw: AnyObj): MoverHome[] {
+  const list: AnyObj[] = Array.isArray(raw?.property) ? raw.property : [];
+  return list
+    .map((p) => {
+      const a = p.address || {};
+      const loc = p.location || {};
+      const lat = Number(loc.latitude ?? a.latitude);
+      const lng = Number(loc.longitude ?? a.longitude);
+      const saleDate = pick(
+        p,
+        "sale.saleTransDate",
+        "sale.saleSearchDate",
+        "sale.amount.saleRecDate",
+        "sale.saleRecDate"
+      );
+      const salePrice = pick(p, "sale.amount.saleAmt", "sale.saleAmt", "sale.amount.saleAmtCurr");
+      return {
+        id: String(pick(p, "identifier.attomId", "identifier.obPropId", "identifier.Id") ?? `${lat},${lng}`),
+        address: a.oneLine || [a.line1, a.line2].filter(Boolean).join(", ") || "Unknown address",
+        lat,
+        lng,
+        saleDate: saleDate ? String(saleDate) : "",
+        salePrice: salePrice != null && salePrice !== "" ? Number(salePrice) : null,
+      };
+    })
+    .filter(
+      (x) =>
+        !!x.saleDate &&
+        isFinite(x.lat) &&
+        isFinite(x.lng) &&
+        Math.abs(x.lat) <= 90 &&
+        Math.abs(x.lng) <= 180 &&
+        !(x.lat === 0 && x.lng === 0)
+    );
+}

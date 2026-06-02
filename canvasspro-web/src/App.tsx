@@ -9,6 +9,7 @@ import Lookup from "./pages/Lookup";
 import Leads from "./pages/Leads";
 import Territories from "./pages/Territories";
 import MapPage from "./pages/Map";
+import Movers from "./pages/Movers";
 import Team from "./pages/Team";
 import Shifts from "./pages/Shifts";
 import Stats from "./pages/Stats";
@@ -41,6 +42,7 @@ export default function App() {
         <Route path="lookup" element={<Lookup />} />
         <Route path="leads" element={<Leads />} />
         <Route path="map" element={<MapPage />} />
+        <Route path="movers" element={<Movers />} />
         <Route path="team" element={<Team />} />
         <Route path="shifts" element={<Shifts />} />
         <Route path="stats" element={<Gated feature="analytics"><Stats /></Gated>} />

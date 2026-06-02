@@ -203,7 +203,8 @@ async function rebuildCompanyHierarchy(companyId: string) {
 export const api = onRequest({ cors: true }, async (req, res) => {
   const isProperty = req.path.endsWith("/property") || req.path.endsWith("/knockstat");
   const isArea = req.path.endsWith("/area");
-  if (!isProperty && !isArea) { res.status(404).json({ error: "Not found" }); return; }
+  const isMovers = req.path.endsWith("/movers");
+  if (!isProperty && !isArea && !isMovers) { res.status(404).json({ error: "Not found" }); return; }
 
   const match = (req.headers.authorization || "").match(/^Bearer (.+)$/);
   if (!match) { res.status(401).json({ error: "Missing bearer token" }); return; }
@@ -219,6 +220,31 @@ export const api = onRequest({ cors: true }, async (req, res) => {
   }
 
   try {
+    if (isMovers) {
+      // Recent move-ins = homes that sold inside the lookback window. ATTOM's
+      // sale snapshot returns every sale in a radius between two dates, which we
+      // surface as "movers" pins on the map (newest = freshest door to knock).
+      const lat = req.query.lat as string | undefined;
+      const lng = req.query.lng as string | undefined;
+      const radius = (req.query.radius as string | undefined) || "1"; // miles
+      const days = Math.min(Math.max(parseInt((req.query.days as string) || "90", 10) || 90, 1), 366);
+      if (!lat || !lng) { res.status(400).json({ error: "lat & lng required" }); return; }
+      const fmt = (d: Date) =>
+        `${d.getFullYear()}/${String(d.getMonth() + 1).padStart(2, "0")}/${String(d.getDate()).padStart(2, "0")}`;
+      const end = new Date();
+      const start = new Date(end.getTime() - days * 86400000);
+      const { ok, status, json } = await attomGet("/sale/snapshot", {
+        latitude: lat,
+        longitude: lng,
+        radius,
+        startsalesearchdate: fmt(start),
+        endsalesearchdate: fmt(end),
+        pagesize: 200,
+      });
+      res.status(ok ? 200 : status).json(json);
+      return;
+    }
+
     if (isArea) {
       const lat = req.query.lat as string | undefined;
       const lng = req.query.lng as string | undefined;
