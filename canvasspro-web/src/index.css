@@ -323,6 +323,20 @@ a {
   top: 0;
   z-index: 10;
 }
+/* Hamburger — hidden on desktop, shown on mobile (see media query below). */
+.nav-toggle {
+  display: none;
+  background: none;
+  border: 0;
+  color: var(--ink);
+  font-size: 22px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 4px 10px 4px 0;
+}
+.sidebar-backdrop {
+  display: none;
+}
 .topbar-user {
   display: flex;
   align-items: center;
@@ -1701,4 +1715,33 @@ details.raw pre {
   .sched-grid {
     grid-template-columns: 1fr;
   }
+
+  /* ── Mobile nav: sidebar becomes an off-canvas drawer ───────────── */
+  .nav-toggle { display: inline-flex; align-items: center; }
+
+  .sidebar {
+    position: fixed;
+    left: 0;
+    top: 0;
+    height: 100vh;
+    z-index: 50;
+    transform: translateX(-100%);
+    transition: transform 0.22s ease;
+    box-shadow: 0 0 40px rgba(0, 0, 0, 0.5);
+  }
+  .sidebar.open {
+    transform: translateX(0);
+  }
+  .sidebar-backdrop {
+    display: block;
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.55);
+    z-index: 40;
+  }
+
+  /* Reclaim horizontal space now that the sidebar is off-canvas. */
+  .app-content { padding: 16px 14px 80px; }
+  .topbar { padding: 12px 14px; }
+  .topbar-user-info { display: none; }
 }

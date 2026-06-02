@@ -16,9 +16,9 @@ const links = [
   { to: "/settings", label: "Settings", icon: "⚐" },
 ];
 
-export default function Sidebar() {
+export default function Sidebar({ open = false, onClose }: { open?: boolean; onClose?: () => void }) {
   return (
-    <aside className="sidebar">
+    <aside className={"sidebar" + (open ? " open" : "")}>
       <div className="brand">
         <div className="brand-mark">YK</div>
         <div>
@@ -33,6 +33,7 @@ export default function Sidebar() {
             key={l.to}
             to={l.to}
             end={l.end}
+            onClick={onClose}
             className={({ isActive }) => "nav-link" + (isActive ? " active" : "")}
           >
             <span className="nav-icon">{l.icon}</span>
@@ -41,7 +42,7 @@ export default function Sidebar() {
         ))}
       </nav>
       <div className="brand-sub" style={{ marginTop: "auto", padding: "8px" }}>
-        build BUILD-18
+        build BUILD-19
       </div>
     </aside>
   );
