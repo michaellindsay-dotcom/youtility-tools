@@ -489,9 +489,10 @@
       <label class="day-chip" style="display:inline-flex;"><input type="checkbox" id="crmCoEnabled" /> Sync enabled</label>
     </div>
     <div class="grid-2">
-      <div class="field"><span>CRM company ID</span><input id="crmCoCompanyId" placeholder="company id in youtilitycrm.us" /></div>
-      <div class="field"><span>Webhook URL (Knock → CRM)</span><input id="crmCoWebhook" placeholder="https://youtilitycrm.us/api/knock-webhook" /></div>
+      <div class="field"><span>CRM org ID</span><input id="crmCoCompanyId" placeholder="CRM org ID from youtilitycrm.us" /></div>
       <div class="field"><span>Shared secret (this company)</span><input id="crmCoSecret" type="password" placeholder="leave blank to keep" autocomplete="off" /></div>
+      <div class="field"><span>Lead webhook URL (Knock → CRM)</span><input id="crmCoWebhook" placeholder="https://www.youtilitycrm.us/api/youtility-knock/webhook/lead" /></div>
+      <div class="field"><span>Appointment webhook URL (Knock → CRM)</span><input id="crmCoApptWebhook" placeholder="https://www.youtilitycrm.us/api/youtility-knock/webhook/appointment" /></div>
     </div>
     <div class="row" style="justify-content:flex-end;margin-top:14px;">
       <button id="crmCoSave" class="btn primary sm">Save CRM link</button>
@@ -1045,6 +1046,7 @@ async function loadCompanyCrm(companyId) {
     $("crmCoEnabled").checked = !!data.enabled;
     $("crmCoCompanyId").value = data.crmCompanyId || "";
     $("crmCoWebhook").value = data.webhookUrl || "";
+    $("crmCoApptWebhook").value = data.appointmentWebhookUrl || "";
     $("crmCoSecret").value = "";
     $("crmCoSecret").placeholder = data.secretConfigured ? `${data.secretMask} (leave blank to keep)` : "shared secret";
   } catch (e) { banner($("crmCoBanner"), e.message || "Could not load CRM link.", "error"); }
@@ -1058,6 +1060,7 @@ $("crmCoSave").addEventListener("click", async () => {
       enabled: $("crmCoEnabled").checked,
       crmCompanyId: $("crmCoCompanyId").value,
       webhookUrl: $("crmCoWebhook").value,
+      appointmentWebhookUrl: $("crmCoApptWebhook").value,
       apiSecret: $("crmCoSecret").value,
     });
     banner($("crmCoBanner"), "CRM link saved.", "good");
