@@ -1466,14 +1466,15 @@ function splitName(full?: string): { firstName: string; lastName: string } {
   return { firstName: parts[0], lastName: parts.slice(1).join(" ") };
 }
 
-// Best-effort display name for the rep who owns a record (for "Knocked by").
-async function repDisplayName(uid?: string): Promise<string> {
-  if (!uid) return "";
+// Best-effort name + email for the rep who owns a record. The CRM matches the
+// email to a CRM user to assign the lead/appointment to "the rep who set it".
+async function repInfo(uid?: string): Promise<{ name: string; email: string }> {
+  if (!uid) return { name: "", email: "" };
   try {
-    const snap = await db.doc(`users/${uid}`).get();
-    return (snap.data()?.displayName as string) || "";
+    const d = (await db.doc(`users/${uid}`).get()).data() || {};
+    return { name: (d.displayName as string) || "", email: (d.email as string) || "" };
   } catch {
-    return "";
+    return { name: "", email: "" };
   }
 }
 
@@ -1516,11 +1517,12 @@ export const onLeadWriteSyncCrm = onDocumentWritten("leads/{leadId}", async (eve
   if (!cfg || !cfg.leadWebhookUrl) return;
 
   const contact = crmContactFromLead(lead);
-  const repName = await repDisplayName(lead.assignedTo || lead.createdBy);
+  const rep = await repInfo(lead.assignedTo || lead.createdBy);
   const payload = {
     ...contact,
     disposition: CRM_STATUS_LABEL[status] || status,
-    repName,
+    repName: rep.name,
+    repEmail: rep.email,
     knockId: event.params.leadId,
     source: "YoutilityKnock",
     notes: lead.notes || "",
@@ -1564,12 +1566,14 @@ export const onEventCreateSyncCrm = onDocumentCreated("events/{eventId}", async 
 
   const startMs = Number(ev.startAt) || Date.now();
   const endMs = Number(ev.endAt) || startMs + (Number(ev.durationMin) || 60) * 60000;
+  const rep = await repInfo(ev.userId);
   const payload = {
     start: new Date(startMs).toISOString(),
     end: new Date(endMs).toISOString(),
     title: ev.title || "Solar Consultation",
     location: ev.address || "",
-    repName: ev.userName || (await repDisplayName(ev.userId)),
+    repName: ev.userName || rep.name,
+    repEmail: rep.email,
     notes: ev.notes || "",
     contact,
   };
