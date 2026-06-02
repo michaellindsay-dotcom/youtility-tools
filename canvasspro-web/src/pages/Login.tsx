@@ -3,6 +3,7 @@ import { useNavigate, useLocation, Navigate } from "react-router-dom";
 import {
   isSignInWithEmailLink,
   signInWithEmailLink,
+  sendPasswordResetEmail,
   updatePassword,
 } from "firebase/auth";
 import { auth } from "../firebase";
@@ -25,6 +26,7 @@ export default function Login() {
   const [newPw, setNewPw] = useState("");
   const [newPw2, setNewPw2] = useState("");
   const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
   const [busy, setBusy] = useState(false);
 
   // If the link sign-in email was stored on this device, finish automatically.
@@ -81,6 +83,24 @@ export default function Login() {
       navigate(from, { replace: true });
     } catch (err: any) {
       setError(err?.message || "Google sign-in failed.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const forgotPassword = async () => {
+    setError("");
+    setNotice("");
+    if (!email.trim()) {
+      setError("Enter your email above first, then tap “Forgot password”.");
+      return;
+    }
+    setBusy(true);
+    try {
+      await sendPasswordResetEmail(auth, email.trim());
+      setNotice(`Reset link sent to ${email.trim()} — check your inbox to set a new password.`);
+    } catch (err: any) {
+      setError(prettyError(err?.code) || err?.message || "Couldn't send the reset email.");
     } finally {
       setBusy(false);
     }
@@ -168,9 +188,13 @@ export default function Login() {
               </label>
 
               {error && <div className="banner error show">{error}</div>}
+              {notice && <div className="banner good show">{notice}</div>}
 
               <button className="btn primary block" type="submit" disabled={busy}>
                 {busy ? "Please wait…" : "Sign in"}
+              </button>
+              <button type="button" className="link-btn" onClick={forgotPassword} disabled={busy}>
+                Forgot password?
               </button>
             </form>
 

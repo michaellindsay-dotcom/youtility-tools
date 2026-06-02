@@ -523,6 +523,29 @@ a {
   border: 1px solid rgba(248, 113, 113, 0.35);
   color: #ffd3d3;
 }
+.banner.good {
+  background: rgba(52, 211, 153, 0.1);
+  border: 1px solid rgba(52, 211, 153, 0.35);
+  color: #bbf7d0;
+}
+.link-btn {
+  background: none;
+  border: none;
+  color: var(--accent-2);
+  font: inherit;
+  cursor: pointer;
+  padding: 8px 0 0;
+  width: 100%;
+  text-align: center;
+}
+.link-btn:hover { text-decoration: underline; }
+.link-btn[disabled] { opacity: 0.6; cursor: default; }
+.pw-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 10px;
+  max-width: 620px;
+}
 
 /* ── Property result grid ────────────────────────────────── */
 .result-grid {

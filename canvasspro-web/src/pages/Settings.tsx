@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { httpsCallable } from "firebase/functions";
-import { functions } from "../firebase";
+import { EmailAuthProvider, reauthenticateWithCredential, updatePassword } from "firebase/auth";
+import { auth, functions } from "../firebase";
 import { useAuth } from "../auth/AuthContext";
 import type { CalendarLinks } from "../types";
 
@@ -50,6 +51,35 @@ export default function Settings() {
   const [cfg, setCfg] = useState<PublicConfig | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [calMsg, setCalMsg] = useState("");
+  const [curPw, setCurPw] = useState("");
+  const [newPw, setNewPw] = useState("");
+  const [newPw2, setNewPw2] = useState("");
+  const [pwMsg, setPwMsg] = useState("");
+  const [pwBusy, setPwBusy] = useState(false);
+  const hasPassword = auth.currentUser?.providerData.some((p) => p.providerId === "password") ?? true;
+
+  async function changePassword() {
+    setPwMsg("");
+    if (newPw.length < 6) return setPwMsg("New password must be at least 6 characters.");
+    if (newPw !== newPw2) return setPwMsg("New passwords don't match.");
+    const user = auth.currentUser;
+    if (!user?.email) return setPwMsg("No account loaded.");
+    setPwBusy(true);
+    try {
+      await reauthenticateWithCredential(user, EmailAuthProvider.credential(user.email, curPw));
+      await updatePassword(user, newPw);
+      setCurPw(""); setNewPw(""); setNewPw2("");
+      setPwMsg("Password updated ✓");
+    } catch (e: any) {
+      setPwMsg(
+        e?.code === "auth/wrong-password" || e?.code === "auth/invalid-credential"
+          ? "Current password is incorrect."
+          : e?.message || "Couldn't update password."
+      );
+    } finally {
+      setPwBusy(false);
+    }
+  }
 
   useEffect(() => {
     setPhone(profile?.phone || "");
@@ -208,6 +238,33 @@ export default function Settings() {
           </button>
           {phoneMsg && <span className="muted small">{phoneMsg}</span>}
         </div>
+      </div>
+
+      <div className="card">
+        <h3 style={{ marginBottom: 4 }}>Change password</h3>
+        {hasPassword ? (
+          <>
+            <p className="muted small" style={{ marginBottom: 12 }}>
+              Enter your current password, then a new one.
+            </p>
+            <div className="pw-grid">
+              <input className="input" type="password" placeholder="Current password" autoComplete="current-password"
+                value={curPw} onChange={(e) => setCurPw(e.target.value)} />
+              <input className="input" type="password" placeholder="New password" autoComplete="new-password"
+                value={newPw} onChange={(e) => setNewPw(e.target.value)} />
+              <input className="input" type="password" placeholder="Confirm new password" autoComplete="new-password"
+                value={newPw2} onChange={(e) => setNewPw2(e.target.value)} />
+            </div>
+            <div className="row" style={{ marginTop: 10, alignItems: "center" }}>
+              <button className="btn primary sm" onClick={changePassword} disabled={pwBusy}>
+                {pwBusy ? "Updating…" : "Update password"}
+              </button>
+              {pwMsg && <span className="muted small">{pwMsg}</span>}
+            </div>
+          </>
+        ) : (
+          <p className="muted small">You sign in with Google — manage your password in your Google account.</p>
+        )}
       </div>
 
       <div className="card">
