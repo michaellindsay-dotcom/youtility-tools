@@ -1,10 +1,11 @@
 import { onRequest, onCall, HttpsError, CallableRequest } from "firebase-functions/v2/https";
-import { onDocumentCreated } from "firebase-functions/v2/firestore";
+import { onDocumentCreated, onDocumentWritten } from "firebase-functions/v2/firestore";
 import { onSchedule } from "firebase-functions/v2/scheduler";
 import * as logger from "firebase-functions/logger";
 import { initializeApp } from "firebase-admin/app";
 import { getAuth } from "firebase-admin/auth";
 import { getFirestore, FieldValue } from "firebase-admin/firestore";
+import { createHmac } from "crypto";
 
 initializeApp();
 const db = getFirestore();
@@ -1370,4 +1371,254 @@ export const assignAppointment = onCall(async (request) => {
   });
 
   return { ok: true, eventId: ref.id, assignedTo: chosen.uid, assignedName: chosen.displayName || "" };
+});
+
+// ════════════════════════════════════════════════════════════════════════════
+// YOUTILITYCRM INTEGRATION (outbound)
+// ────────────────────────────────────────────────────────────────────────────
+// The other half of the YoutilityKnock ⇆ YoutilityCRM link. When a rep
+// dispositions a door as interested (status appointment/pipeline/sold) or
+// books an on-the-spot appointment, we push that lead / appointment into the
+// company's YoutilityCRM via the receiver shipped in
+// FMSNate/youtility-crm (routes/youtilityKnock.js):
+//
+//   POST <leadWebhookUrl>         /api/youtility-knock/webhook/lead
+//   POST <appointmentWebhookUrl>  /api/youtility-knock/webhook/appointment
+//
+// Per-company credentials live in crmConfig/{companyId} — a SERVER-ONLY
+// collection (no Firestore rule grants client access, so it defaults to
+// deny). The admin pastes the key + webhook URLs the CRM hands back from its
+// /provision endpoint via setCrmIntegration. Every push is signed with
+// X-Knock-Signature (HMAC-SHA256 of the raw body, keyed by the shared key)
+// and also carries X-API-Key so the CRM can resolve the org either way.
+// ════════════════════════════════════════════════════════════════════════════
+
+interface CrmConfig {
+  enabled: boolean;
+  leadWebhookUrl: string;
+  appointmentWebhookUrl: string;
+  apiKey: string;
+  orgId: string;
+}
+
+// Lead dispositions worth a CRM push — interested homeowners only. "Not home",
+// "not interested", "dnc", and bare "new" stay in the field app.
+const CRM_PUSHABLE_STATUSES = new Set(["appointment", "pipeline", "sold"]);
+
+const CRM_STATUS_LABEL: Record<string, string> = {
+  appointment: "Appointment",
+  pipeline: "Pipeline",
+  sold: "Sold",
+  go_back: "Go Back",
+};
+
+async function loadCrmConfig(companyId: string | undefined): Promise<CrmConfig | null> {
+  if (!companyId) return null;
+  try {
+    const snap = await db.doc(`crmConfig/${companyId}`).get();
+    if (!snap.exists) return null;
+    const c = snap.data() as Partial<CrmConfig>;
+    if (!c.enabled || !c.apiKey) return null;
+    return {
+      enabled: true,
+      leadWebhookUrl: c.leadWebhookUrl || "",
+      appointmentWebhookUrl: c.appointmentWebhookUrl || "",
+      apiKey: c.apiKey,
+      orgId: c.orgId || "",
+    };
+  } catch (e) {
+    logger.warn("loadCrmConfig failed", e);
+    return null;
+  }
+}
+
+// Sign + POST a JSON payload to a CRM webhook. Returns { ok, status }.
+async function crmPush(
+  cfg: CrmConfig,
+  url: string,
+  payload: Record<string, unknown>
+): Promise<{ ok: boolean; status: number }> {
+  if (!url) return { ok: false, status: 0 };
+  const raw = JSON.stringify(payload);
+  const signature = "sha256=" + createHmac("sha256", cfg.apiKey).update(raw).digest("hex");
+  try {
+    const res = await fetch(url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-API-Key": cfg.apiKey,
+        "X-Knock-Signature": signature,
+        ...(cfg.orgId ? { "X-Org-Id": cfg.orgId } : {}),
+      },
+      body: raw,
+    });
+    return { ok: res.ok, status: res.status };
+  } catch (e) {
+    logger.warn("crmPush request failed", e);
+    return { ok: false, status: 0 };
+  }
+}
+
+// Split a stored "First Last" owner name into parts for the CRM contact.
+function splitName(full?: string): { firstName: string; lastName: string } {
+  const parts = String(full || "").trim().split(/\s+/).filter(Boolean);
+  if (!parts.length) return { firstName: "", lastName: "" };
+  return { firstName: parts[0], lastName: parts.slice(1).join(" ") };
+}
+
+// Best-effort display name for the rep who owns a record (for "Knocked by").
+async function repDisplayName(uid?: string): Promise<string> {
+  if (!uid) return "";
+  try {
+    const snap = await db.doc(`users/${uid}`).get();
+    return (snap.data()?.displayName as string) || "";
+  } catch {
+    return "";
+  }
+}
+
+// Build the CRM contact block from a lead document.
+function crmContactFromLead(lead: Record<string, any>): Record<string, unknown> {
+  const { firstName, lastName } = splitName(lead.ownerName);
+  // Fall back to skip-traced owner contact when the rep didn't capture one.
+  const owner = Array.isArray(lead?.enrichment?.owners) ? lead.enrichment.owners[0] : null;
+  return {
+    firstName,
+    lastName,
+    email: lead.email || owner?.emails?.[0] || "",
+    phone: lead.phone || owner?.phones?.[0] || "",
+    address: {
+      street: lead.address || "",
+      city: lead.city || "",
+      state: lead.state || "",
+      zip: lead.zip || "",
+    },
+  };
+}
+
+// ── trigger: lead reaches an interested disposition → push to the CRM ────────
+// Fires on create AND update so a re-disposition (e.g. "not home" → "appointment")
+// still syncs. Idempotent: a `crmSync` stamp on the lead records the last
+// status we successfully pushed, so the write-back doesn't loop and an
+// unchanged status isn't pushed twice.
+export const onLeadWriteSyncCrm = onDocumentWritten("leads/{leadId}", async (event) => {
+  const after = event.data?.after;
+  if (!after?.exists) return; // deletion — nothing to push
+  const lead = after.data() as Record<string, any>;
+  const status = String(lead.status || "");
+  if (!CRM_PUSHABLE_STATUSES.has(status)) return;
+
+  // Already pushed this exact status successfully? Skip (also breaks the
+  // write-back re-trigger loop).
+  if (lead.crmSync?.pushedStatus === status && lead.crmSync?.result === "ok") return;
+
+  const cfg = await loadCrmConfig(lead.companyId);
+  if (!cfg || !cfg.leadWebhookUrl) return;
+
+  const contact = crmContactFromLead(lead);
+  const repName = await repDisplayName(lead.assignedTo || lead.createdBy);
+  const payload = {
+    ...contact,
+    disposition: CRM_STATUS_LABEL[status] || status,
+    repName,
+    knockId: event.params.leadId,
+    source: "YoutilityKnock",
+    notes: lead.notes || "",
+  };
+
+  const { ok, status: httpStatus } = await crmPush(cfg, cfg.leadWebhookUrl, payload);
+  await after.ref.update({
+    crmSync: {
+      pushedStatus: status,
+      result: ok ? "ok" : "error",
+      httpStatus,
+      at: Date.now(),
+    },
+  });
+  logger.info(`CRM lead push ${ok ? "ok" : "FAILED"} lead=${event.params.leadId} status=${status} http=${httpStatus}`);
+});
+
+// ── trigger: appointment booked → push to the CRM ────────────────────────────
+// Only "appointment" events sync (go-backs / follow-ups stay internal).
+// Idempotent via a `crmSynced` flag; onDocumentCreated never re-fires on the
+// flag write, so no loop guard beyond that is needed.
+export const onEventCreateSyncCrm = onDocumentCreated("events/{eventId}", async (event) => {
+  const ev = event.data?.data() as Record<string, any> | undefined;
+  if (!ev || ev.type !== "appointment") return;
+  if (ev.crmSynced === true) return;
+
+  const cfg = await loadCrmConfig(ev.companyId);
+  if (!cfg || !cfg.appointmentWebhookUrl) return;
+
+  // Enrich the contact from the linked lead when present; otherwise fall back
+  // to whatever the event itself carries.
+  let contact: Record<string, unknown> = { address: { street: ev.address || "" } };
+  if (ev.leadId) {
+    try {
+      const leadSnap = await db.doc(`leads/${ev.leadId}`).get();
+      if (leadSnap.exists) contact = crmContactFromLead(leadSnap.data() as Record<string, any>);
+    } catch (e) {
+      logger.warn("CRM appointment: lead lookup failed", e);
+    }
+  }
+
+  const startMs = Number(ev.startAt) || Date.now();
+  const endMs = Number(ev.endAt) || startMs + (Number(ev.durationMin) || 60) * 60000;
+  const payload = {
+    start: new Date(startMs).toISOString(),
+    end: new Date(endMs).toISOString(),
+    title: ev.title || "Solar Consultation",
+    location: ev.address || "",
+    repName: ev.userName || (await repDisplayName(ev.userId)),
+    notes: ev.notes || "",
+    contact,
+  };
+
+  const { ok, status: httpStatus } = await crmPush(cfg, cfg.appointmentWebhookUrl, payload);
+  await event.data!.ref.update({ crmSynced: ok, crmSyncHttp: httpStatus, crmSyncAt: Date.now() });
+  logger.info(`CRM appointment push ${ok ? "ok" : "FAILED"} event=${event.params.eventId} http=${httpStatus}`);
+});
+
+// ── company admin: read the CRM integration status (masked) ──────────────────
+export const getCrmIntegration = onCall(async (request) => {
+  const caller = await getCaller(request);
+  const { companyId } = (request.data || {}) as { companyId?: string };
+  authorizeForCompany(caller, companyId);
+  const snap = await db.doc(`crmConfig/${companyId}`).get();
+  const c = (snap.exists ? (snap.data() as Record<string, string>) : {}) || {};
+  return {
+    enabled: !!c.enabled,
+    leadWebhookUrl: c.leadWebhookUrl || "",
+    appointmentWebhookUrl: c.appointmentWebhookUrl || "",
+    orgId: c.orgId || "",
+    configured: !!c.apiKey,
+    keyMask: mask(c.apiKey),
+  };
+});
+
+// ── company admin: set the CRM integration (enable + URLs + shared key) ───────
+// The admin pastes the values YoutilityCRM returns from its /provision call.
+// The key is a secret: only overwritten when a non-blank value is supplied.
+export const setCrmIntegration = onCall(async (request) => {
+  const caller = await getCaller(request);
+  const d = (request.data || {}) as {
+    companyId?: string;
+    enabled?: boolean;
+    leadWebhookUrl?: string;
+    appointmentWebhookUrl?: string;
+    apiKey?: string;
+    orgId?: string;
+  };
+  authorizeForCompany(caller, d.companyId);
+
+  const update: Record<string, unknown> = { updatedAt: Date.now(), updatedBy: caller.uid };
+  if (typeof d.enabled === "boolean") update.enabled = d.enabled;
+  if (typeof d.leadWebhookUrl === "string") update.leadWebhookUrl = d.leadWebhookUrl.trim();
+  if (typeof d.appointmentWebhookUrl === "string") update.appointmentWebhookUrl = d.appointmentWebhookUrl.trim();
+  if (typeof d.orgId === "string") update.orgId = d.orgId.trim();
+  if (typeof d.apiKey === "string" && d.apiKey.trim()) update.apiKey = d.apiKey.trim();
+
+  await db.doc(`crmConfig/${d.companyId}`).set(update, { merge: true });
+  logger.info(`CRM integration updated company=${d.companyId} by ${caller.uid}`);
+  return { ok: true };
 });
