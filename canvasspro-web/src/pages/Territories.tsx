@@ -8,6 +8,7 @@ import {
   onSnapshot,
   orderBy,
   query,
+  updateDoc,
   where,
 } from "firebase/firestore";
 import { db } from "../firebase";
@@ -94,6 +95,15 @@ export default function Territories() {
     if (confirm("Delete this territory?")) await deleteDoc(doc(db, "territories", id));
   };
 
+  // Reassign an existing area to a rep (downstream / company, self included).
+  const reassign = async (id: string, uid: string) => {
+    const rep = reps.find((r) => r.uid === uid);
+    await updateDoc(doc(db, "territories", id), {
+      assignedTo: rep ? rep.uid : null,
+      assignedToName: rep ? rep.displayName || rep.email || null : null,
+    });
+  };
+
   return (
     <div className="page-body">
       <div className="page-head">
@@ -161,9 +171,26 @@ export default function Territories() {
               <div className="territory-body">
                 <div className="territory-name">{t.name}</div>
                 {t.description && <div className="muted">{t.description}</div>}
-                <div className="muted small">
-                  {t.assignedToName ? `Assigned to ${t.assignedToName}` : "Unassigned"}
-                </div>
+                {canManage ? (
+                  <label className="field" style={{ marginTop: 6, marginBottom: 0 }}>
+                    <span>Assign to</span>
+                    <select
+                      value={t.assignedTo || ""}
+                      onChange={(e) => reassign(t.id, e.target.value)}
+                    >
+                      <option value="">— Unassigned —</option>
+                      {reps.map((r) => (
+                        <option key={r.uid} value={r.uid}>
+                          {(r.displayName || r.email) + (r.uid === profile?.uid ? " (me)" : "")}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                ) : (
+                  <div className="muted small">
+                    {t.assignedToName ? `Assigned to ${t.assignedToName}` : "Unassigned"}
+                  </div>
+                )}
               </div>
               {canManage && (
                 <button className="btn ghost sm" onClick={() => remove(t.id)}>
