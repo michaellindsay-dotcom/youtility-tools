@@ -169,6 +169,8 @@ export interface Territory {
   color?: string;
   companyId: string;
   managerId?: string; // uid
+  assignedTo?: string | null; // uid of the rep this area is assigned to
+  assignedToName?: string | null; // denormalized name for display
   polygon?: LatLng[]; // map boundary
   createdAt: number;
 }

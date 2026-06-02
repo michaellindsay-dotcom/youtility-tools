@@ -11,7 +11,9 @@ import { lookupArea, parseAreaProperties } from "../lib/knockstat";
 import { getTile, putTile, nearbyCachedHomes } from "../lib/homeCache";
 import DispositionModal, { type DispoInput } from "../components/DispositionModal";
 import ShiftHud from "../components/ShiftHud";
-import type { Lead, Territory, LatLng } from "../types";
+import type { Lead, Territory, LatLng, UserProfile } from "../types";
+
+type MapMode = "view" | "draw" | "drop";
 
 const DEFAULT_CENTER: [number, number] = [40.34, -111.91];
 const NEAREST_N = 200;
@@ -70,12 +72,17 @@ export default function MapPage() {
   const myLoc = useRef<LatLng | null>(null);
   const drawPts = useRef<LatLng[]>([]);
   const drawLayer = useRef<L.Polygon | null>(null);
-  const modeRef = useRef<"view" | "draw">("view");
+  const modeRef = useRef<MapMode>("view");
 
   const [status, setStatus] = useState("Loading map…");
-  const [mode, setMode] = useState<"view" | "draw">("view");
+  const [mode, setMode] = useState<MapMode>("view");
   const [loadingHomes, setLoadingHomes] = useState(false);
   const [dispoTarget, setDispoTarget] = useState<DispoInput | null>(null);
+  // Save panel shown after an area is drawn: name it + assign it to a rep.
+  const [savePanel, setSavePanel] = useState(false);
+  const [drawName, setDrawName] = useState("");
+  const [drawAssignee, setDrawAssignee] = useState("");
+  const [reps, setReps] = useState<UserProfile[]>([]);
   modeRef.current = mode;
 
   const canDraw = role === "admin" || role === "manager";
@@ -119,16 +126,22 @@ export default function MapPage() {
     assigned.current = [];
     if (!companyId) return;
     const snap = await getDocs(query(collection(db, "territories"), where("companyId", "==", companyId)));
-    const mine = profile?.territoryIds || [];
+    const mineIds = profile?.territoryIds || [];
     snap.forEach((d) => {
       const t = { id: d.id, ...(d.data() as Omit<Territory, "id">) };
       if (!t.polygon || t.polygon.length < 3) return;
+      const label = t.assignedToName ? `${t.name} · ${t.assignedToName}` : t.name;
       L.polygon(t.polygon.map((p) => [p.lat, p.lng] as [number, number]), {
         color: t.color || "#34D399", weight: 2, fillOpacity: 0.08,
       })
-        .bindTooltip(t.name)
+        .bindTooltip(label)
         .addTo(territoryLayer.current);
-      if (!mine.length || mine.includes(t.id)) assigned.current.push(t);
+      // A rep's working area is the one assigned to them. If an area has no
+      // assignee, fall back to the legacy territoryIds membership (or show-all).
+      const isMine = t.assignedTo
+        ? t.assignedTo === profile?.uid
+        : !mineIds.length || mineIds.includes(t.id);
+      if (isMine) assigned.current.push(t);
     });
   }
 
@@ -300,8 +313,19 @@ export default function MapPage() {
     setTimeout(() => map.invalidateSize(), 120);
 
     map.on("click", (e: L.LeafletMouseEvent) => {
+      const { lat, lng } = e.latlng;
+      // Drop-a-pin mode: place a home pin where there isn't one, then open the
+      // knock form so the rep can disposition it right away.
+      if (modeRef.current === "drop") {
+        L.marker([lat, lng], { icon: homeIcon("#475569") })
+          .on("click", () => setDispoTarget({ address: "", lat, lng }))
+          .addTo(homeLayer.current);
+        setDispoTarget({ address: "", lat, lng });
+        setMode("view");
+        return;
+      }
       if (modeRef.current !== "draw") return;
-      drawPts.current.push({ lat: e.latlng.lat, lng: e.latlng.lng });
+      drawPts.current.push({ lat, lng });
       if (drawLayer.current) drawLayer.current.remove();
       drawLayer.current = L.polygon(
         drawPts.current.map((p) => [p.lat, p.lng] as [number, number]),
@@ -341,25 +365,65 @@ export default function MapPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [companyId, profile, role]);
 
-  async function finishDraw() {
-    if (drawPts.current.length < 3) { setStatus("Tap at least 3 points to make an area."); return; }
-    const name = window.prompt("Name this territory:");
-    if (name && companyId && profile) {
+  // Load the reps this manager/admin can assign areas to (their downstream).
+  useEffect(() => {
+    if (!companyId || !profile || !canDraw) return;
+    let cancelled = false;
+    (async () => {
       try {
-        await addDoc(collection(db, "territories"), {
-          companyId, name: name.trim(), color: "#34D399", polygon: drawPts.current, managerId: profile.uid, createdAt: Date.now(),
-        });
-        await buildTerritories();
-        await loadHomes();
-      } catch (e: any) {
-        setStatus("Could not save: " + (e?.message || ""));
+        const base = collection(db, "users");
+        const q =
+          role === "admin"
+            ? query(base, where("companyId", "==", companyId))
+            : query(base, where("companyId", "==", companyId), where("managerPath", "array-contains", profile.uid));
+        const snap = await getDocs(q);
+        let list = snap.docs.map((d) => ({ uid: d.id, ...(d.data() as Omit<UserProfile, "uid">) }));
+        if (!list.some((u) => u.uid === profile.uid)) list = [profile as UserProfile, ...list];
+        list = list.filter((u) => !u.disabled).sort((a, b) => (a.displayName || "").localeCompare(b.displayName || ""));
+        if (!cancelled) setReps(list);
+      } catch (e) {
+        console.error("load reps failed", e);
       }
+    })();
+    return () => { cancelled = true; };
+  }, [companyId, profile, role, canDraw]);
+
+  // Drawing finished → open the save panel (name + assignee), don't save yet.
+  function finishDraw() {
+    if (drawPts.current.length < 3) { setStatus("Tap at least 3 points to make an area."); return; }
+    setDrawName("");
+    setDrawAssignee(profile?.uid || "");
+    setSavePanel(true);
+  }
+
+  async function saveArea() {
+    if (!companyId || !profile) return;
+    if (drawPts.current.length < 3) { cancelDraw(); return; }
+    const rep = reps.find((r) => r.uid === drawAssignee);
+    try {
+      await addDoc(collection(db, "territories"), {
+        companyId,
+        name: drawName.trim() || "New area",
+        color: "#34D399",
+        polygon: drawPts.current,
+        managerId: profile.uid,
+        assignedTo: rep ? rep.uid : null,
+        assignedToName: rep ? rep.displayName || rep.email || null : null,
+        createdAt: Date.now(),
+      });
+      setStatus(rep ? `Area assigned to ${rep.displayName || rep.email}.` : "Area saved.");
+      await buildTerritories();
+      await loadHomes();
+    } catch (e: any) {
+      setStatus("Could not save: " + (e?.message || ""));
     }
     cancelDraw();
   }
+
   function cancelDraw() {
     drawPts.current = [];
     if (drawLayer.current) { drawLayer.current.remove(); drawLayer.current = null; }
+    setSavePanel(false);
     setMode("view");
   }
 
@@ -372,6 +436,13 @@ export default function MapPage() {
         <button className="map-fab" onClick={openNav} aria-label="Menu">☰</button>
         <button className="map-fab" onClick={loadHomes} disabled={loadingHomes} aria-label="Refresh homes" title="Refresh homes">
           {loadingHomes ? "…" : "⟳"}
+        </button>
+        <button
+          className={"map-fab" + (mode === "drop" ? " active" : "")}
+          onClick={() => setMode(mode === "drop" ? "view" : "drop")}
+          aria-label="Drop a home pin" title="Drop a home pin"
+        >
+          📍
         </button>
         {canDraw && (
           <button
@@ -387,13 +458,47 @@ export default function MapPage() {
       {/* Top-center: status pill */}
       {status && <div className="map-status-pill">{status}</div>}
 
+      {/* Drop-pin instructions */}
+      {mode === "drop" && (
+        <div className="map-draw-bar">
+          <span>Tap the home to drop a pin and knock it.</span>
+          <button className="btn sm" onClick={() => setMode("view")}>Cancel</button>
+        </div>
+      )}
+
       {/* Draw instructions */}
-      {mode === "draw" && (
+      {mode === "draw" && !savePanel && (
         <div className="map-draw-bar">
           <span>Tap to drop corners, then save your area.</span>
           <div className="row">
             <button className="btn sm" onClick={cancelDraw}>Cancel</button>
             <button className="btn primary sm" onClick={finishDraw}>Save</button>
+          </div>
+        </div>
+      )}
+
+      {/* Save panel: name the area + assign it to a rep */}
+      {savePanel && (
+        <div className="map-save-panel">
+          <div className="msp-title">Save area</div>
+          <label className="field">
+            <span>Area name</span>
+            <input value={drawName} onChange={(e) => setDrawName(e.target.value)} placeholder="e.g. Maple Heights" autoFocus />
+          </label>
+          <label className="field">
+            <span>Assign to</span>
+            <select value={drawAssignee} onChange={(e) => setDrawAssignee(e.target.value)}>
+              <option value="">— Unassigned —</option>
+              {reps.map((r) => (
+                <option key={r.uid} value={r.uid}>
+                  {(r.displayName || r.email) + (r.uid === profile?.uid ? " (me)" : "")}
+                </option>
+              ))}
+            </select>
+          </label>
+          <div className="row end">
+            <button className="btn sm" onClick={cancelDraw}>Cancel</button>
+            <button className="btn primary sm" onClick={saveArea}>Save area</button>
           </div>
         </div>
       )}
