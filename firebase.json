@@ -5,6 +5,7 @@
     "rewrites": [
       { "source": "/api/**", "function": "api" },
       { "source": "/stripe/**", "function": "stripeWebhook" },
+      { "source": "/crm/**", "function": "crmApi" },
       { "source": "/app/**", "destination": "/app/index.html" }
     ],
     "headers": [

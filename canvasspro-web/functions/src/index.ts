@@ -1,5 +1,5 @@
 import { onRequest, onCall, HttpsError, CallableRequest } from "firebase-functions/v2/https";
-import { onDocumentCreated } from "firebase-functions/v2/firestore";
+import { onDocumentCreated, onDocumentWritten } from "firebase-functions/v2/firestore";
 import { onSchedule } from "firebase-functions/v2/scheduler";
 import * as logger from "firebase-functions/logger";
 import { initializeApp } from "firebase-admin/app";
@@ -1658,5 +1658,178 @@ export const stripeWebhook = onRequest({ cors: false }, async (req, res) => {
   } catch (e: any) {
     logger.error("Stripe webhook handler error", e);
     res.status(500).send("handler error");
+  }
+});
+
+// ════════════════════════════════════════════════════════════════════════════
+// YOUTILITYCRM INTEGRATION — provision a Knock company as a CRM add-on, sync
+// leads + appointments + customer data both ways, and keep schedules linked.
+// External calls authenticate with a shared secret (config/crm.apiSecret),
+// passed in the `x-crm-secret` header. Hosting rewrites /crm/** here.
+// ════════════════════════════════════════════════════════════════════════════
+interface CrmConfig { webhookUrl: string; apiSecret: string; }
+async function crmConfig(): Promise<CrmConfig> {
+  const c = ((await db.doc("config/crm").get()).data() as Record<string, string>) || {};
+  return { webhookUrl: c.webhookUrl || "", apiSecret: c.apiSecret || "" };
+}
+
+export const getCrmConfig = onCall(async (request) => {
+  const caller = await getCaller(request);
+  if (!caller.isSuper) throw new HttpsError("permission-denied", "Super-admins only.");
+  const c = await crmConfig();
+  return { webhookUrl: c.webhookUrl, secretConfigured: !!c.apiSecret, secretMask: mask(c.apiSecret) };
+});
+
+export const setCrmConfig = onCall(async (request) => {
+  const caller = await getCaller(request);
+  if (!caller.isSuper) throw new HttpsError("permission-denied", "Super-admins only.");
+  const d = (request.data || {}) as Record<string, string>;
+  const u: Record<string, unknown> = { updatedAt: Date.now() };
+  if (typeof d.webhookUrl === "string") u.webhookUrl = d.webhookUrl.trim();
+  if (typeof d.apiSecret === "string" && d.apiSecret.trim()) u.apiSecret = d.apiSecret.trim();
+  await db.doc("config/crm").set(u, { merge: true });
+  return { ok: true };
+});
+
+// Push a changed lead / appointment to the CRM webhook (best-effort, real-time).
+async function pushToCrm(kind: "lead" | "event", companyId: string, id: string, data: any) {
+  if (data?._syncedFrom === "crm") return; // came from the CRM — don't echo back
+  const cfg = await crmConfig();
+  if (!cfg.webhookUrl) return;
+  const co = (await db.doc(`companies/${companyId}`).get()).data();
+  if (!co?.crmCompanyId) return; // company isn't linked to the CRM
+  try {
+    await fetch(cfg.webhookUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-crm-secret": cfg.apiSecret },
+      body: JSON.stringify({ type: kind, companyId, crmCompanyId: co.crmCompanyId, id, data }),
+    });
+  } catch (e) { logger.warn(`pushToCrm ${kind} failed`, e); }
+}
+
+export const onLeadSync = onDocumentWritten("leads/{id}", async (event) => {
+  const after = event.data?.after?.data();
+  if (!after?.companyId) return;
+  await pushToCrm("lead", after.companyId, event.params.id, after);
+});
+
+export const onEventSync = onDocumentWritten("events/{id}", async (event) => {
+  const after = event.data?.after?.data();
+  if (!after?.companyId) return;
+  await pushToCrm("event", after.companyId, event.params.id, after);
+});
+
+// ── /crm/** router (provision · export · ingest) ─────────────────────────────
+export const crmApi = onRequest({ cors: true }, async (req, res) => {
+  const cfg = await crmConfig();
+  if (!cfg.apiSecret || req.get("x-crm-secret") !== cfg.apiSecret) {
+    res.status(401).json({ error: "Unauthorized" });
+    return;
+  }
+  const path = req.path;
+  try {
+    // ── Provision a Knock company (the add-on toggle) ──
+    if (req.method === "POST" && path.endsWith("/provision")) {
+      const { name, crmCompanyId, adminEmail, adminName, plan } = (req.body || {}) as Record<string, string>;
+      if (!name || !adminEmail) { res.status(400).json({ error: "name and adminEmail required" }); return; }
+
+      // Reuse an existing linked company if this CRM company was already provisioned.
+      const existing = crmCompanyId
+        ? await db.collection("companies").where("crmCompanyId", "==", crmCompanyId).limit(1).get()
+        : null;
+      let companyId: string;
+      if (existing && !existing.empty) {
+        companyId = existing.docs[0].id;
+      } else {
+        const ref = await db.collection("companies").add({
+          name, plan: plan || "knock", status: "active", addons: ["knock"],
+          crmCompanyId: crmCompanyId || null, createdAt: Date.now(), createdBy: "crm",
+        });
+        companyId = ref.id;
+        const roles = ref.collection("roles");
+        await roles.add({ companyId, title: "Manager", baseTier: "manager", rank: 100, isDefault: true, createdAt: Date.now() });
+        await roles.add({ companyId, title: "User", baseTier: "user", rank: 10, isDefault: true, createdAt: Date.now() });
+        await ref.collection("teams").add({ companyId, name: "Company", parentTeamId: null, createdAt: Date.now() });
+      }
+
+      // Create the company admin (or reuse), then a magic sign-in link.
+      let uid: string;
+      try {
+        const u = await getAuth().getUserByEmail(adminEmail);
+        uid = u.uid;
+      } catch {
+        const u = await getAuth().createUser({
+          email: adminEmail, password: "Yk-" + Math.random().toString(36).slice(2, 10) + "A9!",
+          displayName: adminName || adminEmail.split("@")[0],
+        });
+        uid = u.uid;
+      }
+      await getAuth().setCustomUserClaims(uid, { role: "admin", companyId });
+      await db.doc(`users/${uid}`).set({
+        uid, email: adminEmail, displayName: adminName || adminEmail.split("@")[0],
+        role: "admin", companyId, managerPath: [], disabled: false, createdAt: Date.now(), createdBy: "crm",
+      }, { merge: true });
+
+      let inviteLink = "";
+      try {
+        inviteLink = await getAuth().generateSignInWithEmailLink(adminEmail, { url: `${APP_URL}/app/login?invite=1`, handleCodeInApp: true });
+      } catch (e) { logger.warn("provision invite link failed", e); }
+
+      res.json({ ok: true, companyId, adminEmail, inviteLink, appUrl: `${APP_URL}/app` });
+      return;
+    }
+
+    // ── Export a company's leads + appointments + users (CRM pull) ──
+    if (req.method === "GET" && path.endsWith("/export")) {
+      const companyId = req.query.companyId as string;
+      if (!companyId) { res.status(400).json({ error: "companyId required" }); return; }
+      const [company, usersSnap, leadsSnap, eventsSnap] = await Promise.all([
+        db.doc(`companies/${companyId}`).get(),
+        db.collection("users").where("companyId", "==", companyId).get(),
+        db.collection("leads").where("companyId", "==", companyId).get(),
+        db.collection("events").where("companyId", "==", companyId).get(),
+      ]);
+      res.json({
+        company: company.exists ? { id: company.id, ...company.data() } : null,
+        users: usersSnap.docs.map((d) => ({ id: d.id, ...d.data() })),
+        leads: leadsSnap.docs.map((d) => ({ id: d.id, ...d.data() })),
+        appointments: eventsSnap.docs.map((d) => ({ id: d.id, ...d.data() })),
+      });
+      return;
+    }
+
+    // ── Ingest / upsert a lead from the CRM (push into Knock) ──
+    if (req.method === "POST" && path.endsWith("/ingest")) {
+      const { companyId, lead } = (req.body || {}) as { companyId?: string; lead?: any };
+      if (!companyId || !lead) { res.status(400).json({ error: "companyId and lead required" }); return; }
+      // Default owner = a company admin, so the lead is visible in the app.
+      const adminSnap = await db.collection("users").where("companyId", "==", companyId).where("role", "==", "admin").limit(1).get();
+      const ownerUid = adminSnap.empty ? null : adminSnap.docs[0].id;
+      const now = Date.now();
+      const fields: any = {
+        companyId, address: lead.address || "", city: lead.city || null, state: lead.state || null, zip: lead.zip || null,
+        ownerName: lead.ownerName || lead.name || null, phone: lead.phone || null, email: lead.email || null,
+        status: lead.status || "new", notes: lead.notes || null,
+        lat: typeof lead.lat === "number" ? lead.lat : null, lng: typeof lead.lng === "number" ? lead.lng : null,
+        crmLeadId: lead.crmLeadId || null, _syncedFrom: "crm",
+        assignedTo: ownerUid, visibilityPath: ownerUid ? [ownerUid] : [], createdBy: ownerUid || "crm", updatedAt: now,
+      };
+      // Upsert by crmLeadId when provided.
+      let existing = null;
+      if (lead.crmLeadId) {
+        const q = await db.collection("leads").where("companyId", "==", companyId).where("crmLeadId", "==", lead.crmLeadId).limit(1).get();
+        if (!q.empty) existing = q.docs[0];
+      }
+      let id: string;
+      if (existing) { await existing.ref.set(fields, { merge: true }); id = existing.id; }
+      else { const ref = await db.collection("leads").add({ ...fields, createdAt: now }); id = ref.id; }
+      res.json({ ok: true, leadId: id });
+      return;
+    }
+
+    res.status(404).json({ error: "Unknown CRM endpoint" });
+  } catch (e: any) {
+    logger.error("crmApi error", e);
+    res.status(500).json({ error: e?.message || "internal" });
   }
 });

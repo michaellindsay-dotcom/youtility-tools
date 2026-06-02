@@ -306,6 +306,28 @@
     <div id="billingBanner" class="banner"></div>
   </section>
 
+  <!-- YoutilityCRM integration (super-admin only) -->
+  <section id="crmCard" class="card hidden">
+    <h2>YoutilityCRM integration</h2>
+    <p class="muted" style="margin:-6px 0 14px;font-size:13px;">
+      Links Knock to youtilitycrm.us. The CRM provisions companies and pulls leads + appointments via
+      <span class="mono">/crm/**</span>; Knock pushes changes to your webhook in real time. Both authenticate with the shared secret.
+    </p>
+    <div class="grid-2">
+      <div class="field"><span>CRM webhook URL (Knock → CRM)</span><input id="crmWebhook" placeholder="https://youtilitycrm.us/api/knock-webhook" /></div>
+      <div class="field"><span>Shared API secret</span><input id="crmSecret" type="password" placeholder="leave blank to keep" autocomplete="off" /></div>
+    </div>
+    <p class="muted small" style="margin-top:6px;">
+      CRM endpoints (send header <span class="mono">x-crm-secret</span>):
+      <span class="mono">POST /crm/provision</span> · <span class="mono">GET /crm/export?companyId=</span> · <span class="mono">POST /crm/ingest</span>
+      &nbsp;at&nbsp;<span class="mono">https://youtilityknock.web.app</span>
+    </p>
+    <div class="row" style="justify-content:flex-end;margin-top:10px;">
+      <button id="crmSave" class="btn primary sm">Save CRM keys</button>
+    </div>
+    <div id="crmBanner" class="banner"></div>
+  </section>
+
   <!-- Roles (titles on a base tier) -->
   <section id="rolesCard" class="card hidden">
     <h2><span id="rolesTitle">Roles &amp; titles</span>
@@ -553,6 +575,8 @@ const setStripeConfig = httpsCallable(fns, "setStripeConfig");
 const setCompanyPlan  = httpsCallable(fns, "setCompanyPlan");
 const createCheckoutSession = httpsCallable(fns, "createCheckoutSession");
 const createBillingPortalSession = httpsCallable(fns, "createBillingPortalSession");
+const getCrmConfig    = httpsCallable(fns, "getCrmConfig");
+const setCrmConfig    = httpsCallable(fns, "setCrmConfig");
 
 function banner(el, msg, kind="info") {
   el.className = "banner show " + kind;
@@ -605,13 +629,14 @@ function enterConsole() {
   $("loginScreen").classList.add("hidden");
   $("console").classList.remove("hidden");
   if (state.isSuper) {
-    ["companiesCard","notifyCard","integrationsCard","apiKeysCard","plansCard","billingCard"]
+    ["companiesCard","notifyCard","integrationsCard","apiKeysCard","plansCard","billingCard","crmCard"]
       .forEach((id) => $(id).classList.remove("hidden"));
     loadPlans().then(loadCompanies);
     loadNotifyConfig();
     loadIntegrations();
     loadApiKeys();
     loadStripe();
+    loadCrm();
   } else {
     // Company admin: locked to their own company.
     selectCompany(state.companyId, "");
@@ -855,6 +880,25 @@ async function loadPlans() {
     body.appendChild(tr);
   });
 }
+
+// ── YoutilityCRM integration (super-admin) ───────────────────────────────
+async function loadCrm() {
+  try {
+    const { data } = await getCrmConfig();
+    $("crmWebhook").value = data.webhookUrl || "";
+    $("crmSecret").placeholder = data.secretConfigured ? `${data.secretMask} (leave blank to keep)` : "shared secret";
+  } catch (e) { banner($("crmBanner"), e.message || "Could not load CRM config.", "error"); }
+}
+$("crmSave").addEventListener("click", async () => {
+  $("crmSave").disabled = true;
+  try {
+    await setCrmConfig({ webhookUrl: $("crmWebhook").value, apiSecret: $("crmSecret").value });
+    $("crmSecret").value = "";
+    banner($("crmBanner"), "CRM keys saved.", "good");
+    loadCrm();
+  } catch (e) { banner($("crmBanner"), e.message || "Save failed.", "error"); }
+  finally { $("crmSave").disabled = false; }
+});
 
 // ── Calendar integrations (super-admin) ──────────────────────────────────
 async function loadIntegrations() {
