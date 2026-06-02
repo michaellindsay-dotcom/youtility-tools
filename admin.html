@@ -338,6 +338,30 @@
     <div id="schBanner" class="banner"></div>
   </section>
 
+  <!-- YoutilityCRM integration (per company, super-admin only) -->
+  <section id="crmCard" class="card hidden">
+    <h2><span id="crmTitle">YoutilityCRM integration</span> <span id="crmStatus" class="pill"></span></h2>
+    <p class="muted" style="margin:-6px 0 14px;font-size:13px;">
+      Push this company's interested leads + booked appointments into YoutilityCRM.
+      A YoutilityCRM <strong>super-admin</strong> enables this company in the CRM
+      (SuperAdmin → org → YoutilityKnock), which issues the two webhook URLs + a
+      shared key — paste them here.
+    </p>
+    <div class="grid-2">
+      <div class="field"><span>Lead webhook URL</span><input id="crmLeadUrl" type="text" placeholder="https://www.youtilitycrm.us/api/youtility-knock/webhook/lead" /></div>
+      <div class="field"><span>Appointment webhook URL</span><input id="crmApptUrl" type="text" placeholder="https://www.youtilitycrm.us/api/youtility-knock/webhook/appointment" /></div>
+      <div class="field"><span>CRM org ID</span><input id="crmOrgId" type="text" placeholder="From the CRM YoutilityKnock panel" /></div>
+      <div class="field"><span>Shared key <span id="crmKeyHint" class="muted"></span></span><input id="crmApiKey" type="password" placeholder="Paste the key from YoutilityCRM" /></div>
+    </div>
+    <label class="row" style="gap:8px;margin-top:10px;align-items:center;">
+      <input id="crmEnabled" type="checkbox" /> <span>Sync this company to YoutilityCRM</span>
+    </label>
+    <div class="row" style="justify-content:flex-end;margin-top:14px;">
+      <button id="crmSave" class="btn primary sm">Save CRM integration</button>
+    </div>
+    <div id="crmBanner" class="banner"></div>
+  </section>
+
   <!-- Users / accounts -->
   <section id="usersCard" class="card">
     <h2><span id="usersTitle">Accounts</span>
@@ -416,6 +440,8 @@ const clearNotificationProvider = httpsCallable(fns, "clearNotificationProvider"
 const setCompanySettings      = httpsCallable(fns, "setCompanySettings");
 const getIntegrationPublicConfig = httpsCallable(fns, "getIntegrationPublicConfig");
 const setIntegrationConfig    = httpsCallable(fns, "setIntegrationConfig");
+const getCrmIntegration       = httpsCallable(fns, "getCrmIntegration");
+const setCrmIntegration       = httpsCallable(fns, "setCrmIntegration");
 
 function banner(el, msg, kind="info") {
   el.className = "banner show " + kind;
@@ -488,13 +514,63 @@ async function selectCompany(companyId, companyName) {
   $("teamsTitle").textContent = "Teams" + suffix;
   $("usersTitle").textContent = "Accounts" + suffix;
   $("schedulingTitle").textContent = "Scheduling" + suffix;
+  $("crmTitle").textContent = "YoutilityCRM integration" + suffix;
   $("rolesCard").classList.remove("hidden");
   $("teamsCard").classList.remove("hidden");
   $("schedulingCard").classList.remove("hidden");
-  await Promise.all([loadRoles(), loadTeams(), loadScheduling(companyId)]);
+  // YoutilityCRM integration is provisioned + configured by super-admins only.
+  const tasks = [loadRoles(), loadTeams(), loadScheduling(companyId)];
+  if (state.isSuper) {
+    $("crmCard").classList.remove("hidden");
+    tasks.push(loadCrm(companyId));
+  } else {
+    $("crmCard").classList.add("hidden");
+  }
+  await Promise.all(tasks);
   await loadUsers();
   populateUserFormSelects();
 }
+
+// ── YoutilityCRM integration (per company) ───────────────────────────────
+async function loadCrm(companyId) {
+  try {
+    const { data } = await getCrmIntegration({ companyId });
+    $("crmLeadUrl").value = data.leadWebhookUrl || "";
+    $("crmApptUrl").value = data.appointmentWebhookUrl || "";
+    $("crmOrgId").value   = data.orgId || "";
+    $("crmApiKey").value  = "";
+    $("crmEnabled").checked = !!data.enabled;
+    $("crmKeyHint").textContent = data.configured
+      ? `(saved: ${data.keyMask || "••••"} — leave blank to keep)` : "";
+    const pill = $("crmStatus");
+    pill.textContent = data.enabled ? "Syncing" : data.configured ? "Configured (off)" : "Not connected";
+    pill.style.color = data.enabled ? "#34D399" : data.configured ? "#FBBF24" : "";
+  } catch (e) {
+    banner($("crmBanner"), e.message || "Could not load CRM integration.", "error");
+  }
+}
+$("crmSave").addEventListener("click", async () => {
+  if (!state.selectedCompany) return;
+  $("crmSave").disabled = true;
+  try {
+    const apiKey = $("crmApiKey").value.trim();
+    await setCrmIntegration({
+      companyId: state.selectedCompany,
+      enabled: $("crmEnabled").checked,
+      leadWebhookUrl: $("crmLeadUrl").value.trim(),
+      appointmentWebhookUrl: $("crmApptUrl").value.trim(),
+      orgId: $("crmOrgId").value.trim(),
+      // Only send the key when a new one was typed (blank = keep existing).
+      ...(apiKey ? { apiKey } : {}),
+    });
+    banner($("crmBanner"), "Saved ✓", "good");
+    await loadCrm(state.selectedCompany);
+  } catch (e) {
+    banner($("crmBanner"), e.message || "Save failed.", "error");
+  } finally {
+    $("crmSave").disabled = false;
+  }
+});
 
 // ── Scheduling settings (per company) ────────────────────────────────────
 const minToTime = (m) => `${String(Math.floor((m ?? 0)/60)).padStart(2,"0")}:${String((m ?? 0)%60).padStart(2,"0")}`;

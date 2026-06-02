@@ -1579,11 +1579,14 @@ export const onEventCreateSyncCrm = onDocumentCreated("events/{eventId}", async 
   logger.info(`CRM appointment push ${ok ? "ok" : "FAILED"} event=${event.params.eventId} http=${httpStatus}`);
 });
 
-// ── company admin: read the CRM integration status (masked) ──────────────────
+// ── super-admin: read the CRM integration status (masked) ────────────────────
+// YoutilityCRM provisioning is a super-admin-only operation on both sides, so
+// only super-admins can read or write a company's CRM credentials.
 export const getCrmIntegration = onCall(async (request) => {
   const caller = await getCaller(request);
+  if (!caller.isSuper) throw new HttpsError("permission-denied", "Super-admins only.");
   const { companyId } = (request.data || {}) as { companyId?: string };
-  authorizeForCompany(caller, companyId);
+  if (!companyId) throw new HttpsError("invalid-argument", "companyId is required.");
   const snap = await db.doc(`crmConfig/${companyId}`).get();
   const c = (snap.exists ? (snap.data() as Record<string, string>) : {}) || {};
   return {
@@ -1596,11 +1599,13 @@ export const getCrmIntegration = onCall(async (request) => {
   };
 });
 
-// ── company admin: set the CRM integration (enable + URLs + shared key) ───────
-// The admin pastes the values YoutilityCRM returns from its /provision call.
-// The key is a secret: only overwritten when a non-blank value is supplied.
+// ── super-admin: set the CRM integration (enable + URLs + shared key) ─────────
+// The super-admin pastes the values YoutilityCRM issues from its SuperAdmin →
+// YoutilityKnock panel. The key is a secret: only overwritten when a non-blank
+// value is supplied.
 export const setCrmIntegration = onCall(async (request) => {
   const caller = await getCaller(request);
+  if (!caller.isSuper) throw new HttpsError("permission-denied", "Super-admins only.");
   const d = (request.data || {}) as {
     companyId?: string;
     enabled?: boolean;
@@ -1609,7 +1614,7 @@ export const setCrmIntegration = onCall(async (request) => {
     apiKey?: string;
     orgId?: string;
   };
-  authorizeForCompany(caller, d.companyId);
+  if (!d.companyId) throw new HttpsError("invalid-argument", "companyId is required.");
 
   const update: Record<string, unknown> = { updatedAt: Date.now(), updatedBy: caller.uid };
   if (typeof d.enabled === "boolean") update.enabled = d.enabled;

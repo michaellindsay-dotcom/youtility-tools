@@ -13,15 +13,6 @@ type PublicConfig = {
   microsoft: { clientId: string; tenant: string; configured: boolean };
 };
 
-type CrmStatus = {
-  enabled: boolean;
-  leadWebhookUrl: string;
-  appointmentWebhookUrl: string;
-  orgId: string;
-  configured: boolean;
-  keyMask: string;
-};
-
 // Open a provider's consent screen in a popup and resolve with the auth code
 // that /oauth-callback.html posts back.
 function oauthPopup(url: string): Promise<string> {
@@ -60,13 +51,6 @@ export default function Settings() {
   const [busy, setBusy] = useState<string | null>(null);
   const [calMsg, setCalMsg] = useState("");
 
-  const isAdmin = role === "admin" || role === "superadmin";
-  const companyId = profile?.companyId;
-  const [crm, setCrm] = useState<CrmStatus | null>(null);
-  const [crmForm, setCrmForm] = useState({ leadWebhookUrl: "", appointmentWebhookUrl: "", orgId: "", apiKey: "" });
-  const [crmSaving, setCrmSaving] = useState(false);
-  const [crmMsg, setCrmMsg] = useState("");
-
   useEffect(() => {
     setPhone(profile?.phone || "");
     setCal(profile?.calendar || {});
@@ -77,48 +61,6 @@ export default function Settings() {
       .then((r) => setCfg(r.data as PublicConfig))
       .catch(() => setCfg(null));
   }, []);
-
-  useEffect(() => {
-    if (!isAdmin || !companyId) return;
-    httpsCallable(functions, "getCrmIntegration")({ companyId })
-      .then((r) => {
-        const s = r.data as CrmStatus;
-        setCrm(s);
-        setCrmForm({
-          leadWebhookUrl: s.leadWebhookUrl || "",
-          appointmentWebhookUrl: s.appointmentWebhookUrl || "",
-          orgId: s.orgId || "",
-          apiKey: "",
-        });
-      })
-      .catch(() => setCrm(null));
-  }, [isAdmin, companyId]);
-
-  async function saveCrm(nextEnabled?: boolean) {
-    if (!companyId) return;
-    setCrmSaving(true);
-    setCrmMsg("");
-    try {
-      await httpsCallable(functions, "setCrmIntegration")({
-        companyId,
-        ...(typeof nextEnabled === "boolean" ? { enabled: nextEnabled } : {}),
-        leadWebhookUrl: crmForm.leadWebhookUrl,
-        appointmentWebhookUrl: crmForm.appointmentWebhookUrl,
-        orgId: crmForm.orgId,
-        // Only send the key when the admin typed a new one (blank = keep).
-        ...(crmForm.apiKey.trim() ? { apiKey: crmForm.apiKey.trim() } : {}),
-      });
-      const r = await httpsCallable(functions, "getCrmIntegration")({ companyId });
-      const s = r.data as CrmStatus;
-      setCrm(s);
-      setCrmForm((f) => ({ ...f, apiKey: "" }));
-      setCrmMsg("Saved ✓");
-    } catch (e) {
-      setCrmMsg((e as Error).message || "Save failed.");
-    } finally {
-      setCrmSaving(false);
-    }
-  }
 
   const redirectUri = window.location.origin + "/oauth-callback.html";
 
@@ -283,77 +225,6 @@ export default function Settings() {
           </div>
         )}
       </div>
-
-      {isAdmin && (
-        <div className="card">
-          <h3 style={{ marginBottom: 4 }}>YoutilityCRM integration</h3>
-          <p className="muted small" style={{ marginBottom: 12 }}>
-            Push interested leads (Appointment / Pipeline / Sold) and booked
-            appointments straight into your YoutilityCRM. In the CRM, open
-            <strong> Settings → Connect YoutilityKnock</strong> to generate the
-            key + webhook URLs, then paste them here.
-          </p>
-
-          <label className="muted small">Lead webhook URL</label>
-          <input
-            className="input"
-            style={{ width: "100%", marginBottom: 10 }}
-            placeholder="https://www.youtilitycrm.us/api/youtility-knock/webhook/lead"
-            value={crmForm.leadWebhookUrl}
-            onChange={(e) => setCrmForm((f) => ({ ...f, leadWebhookUrl: e.target.value }))}
-          />
-
-          <label className="muted small">Appointment webhook URL</label>
-          <input
-            className="input"
-            style={{ width: "100%", marginBottom: 10 }}
-            placeholder="https://www.youtilitycrm.us/api/youtility-knock/webhook/appointment"
-            value={crmForm.appointmentWebhookUrl}
-            onChange={(e) => setCrmForm((f) => ({ ...f, appointmentWebhookUrl: e.target.value }))}
-          />
-
-          <label className="muted small">CRM org ID (optional)</label>
-          <input
-            className="input"
-            style={{ width: "100%", marginBottom: 10 }}
-            placeholder="From the CRM's provision response"
-            value={crmForm.orgId}
-            onChange={(e) => setCrmForm((f) => ({ ...f, orgId: e.target.value }))}
-          />
-
-          <label className="muted small">
-            Shared key {crm?.configured ? `(saved: ${crm.keyMask} — leave blank to keep)` : ""}
-          </label>
-          <input
-            className="input"
-            type="password"
-            style={{ width: "100%", marginBottom: 12 }}
-            placeholder={crm?.configured ? "••••••••" : "Paste the key from YoutilityCRM"}
-            value={crmForm.apiKey}
-            onChange={(e) => setCrmForm((f) => ({ ...f, apiKey: e.target.value }))}
-          />
-
-          <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
-            <button className="btn" disabled={crmSaving} onClick={() => saveCrm()}>
-              {crmSaving ? "Saving…" : "Save"}
-            </button>
-            {crm?.configured && (
-              <button
-                className="btn"
-                disabled={crmSaving}
-                onClick={() => saveCrm(!crm.enabled)}
-                style={{ background: crm.enabled ? "#F87171" : "#34D399" }}
-              >
-                {crm.enabled ? "Disable sync" : "Enable sync"}
-              </button>
-            )}
-            <span className="muted small">
-              {crm?.enabled ? "🟢 Syncing" : crm?.configured ? "⚪ Configured (off)" : "Not connected"}
-            </span>
-          </div>
-          {crmMsg && <div className="muted small" style={{ marginTop: 10 }}>{crmMsg}</div>}
-        </div>
-      )}
 
       <p className="muted small">Need a role change? Ask an admin from the Admin · Users screen.</p>
     </div>
