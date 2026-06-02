@@ -46,6 +46,7 @@ export interface Company {
   stripeSubscriptionId?: string;
   addons?: string[]; // e.g. ["knock"] when provisioned as a CRM add-on
   crmCompanyId?: string; // link to the company record in YoutilityCRM
+  billingExempt?: boolean; // comped — full features, not charged
   scheduling?: SchedulingSettings;
   createdAt?: number;
 }

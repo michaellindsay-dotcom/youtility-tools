@@ -961,16 +961,21 @@ export const setCompanySettings = onCall(async (request) => {
 // ── self-service: a user sets their own phone (calendar handled via OAuth) ───
 export const setMyProfile = onCall(async (request) => {
   const caller = await getCaller(request);
-  const { phone } = (request.data || {}) as { phone?: string };
+  const { phone, displayName, email } = (request.data || {}) as { phone?: string; displayName?: string; email?: string };
   const update: Record<string, unknown> = {};
   if (typeof phone === "string") {
     const trimmed = phone.trim();
     // Light E.164-ish normalization for the SMS fallback.
     update.phone = trimmed ? (trimmed.startsWith("+") ? trimmed : trimmed.replace(/[^\d]/g, "").replace(/^/, "+1").slice(0, 12)) : "";
   }
+  if (typeof displayName === "string" && displayName.trim()) update.displayName = displayName.trim();
+  if (typeof email === "string" && email.trim()) update.email = email.trim(); // keep users doc in sync with auth email
   if (Object.keys(update).length === 0) throw new HttpsError("invalid-argument", "Nothing to update.");
   await db.doc(`users/${caller.uid}`).set(update, { merge: true });
-  return { ok: true, phone: update.phone };
+  if (typeof update.displayName === "string") {
+    try { await getAuth().updateUser(caller.uid, { displayName: update.displayName as string }); } catch { /* non-fatal */ }
+  }
+  return { ok: true, ...update };
 });
 
 // ── integration credentials (OAuth client id/secret) — super-admin only ──────
@@ -1524,10 +1529,11 @@ export const setStripeConfig = onCall(async (request) => {
 export const setCompanyPlan = onCall(async (request) => {
   const caller = await getCaller(request);
   if (!caller.isSuper) throw new HttpsError("permission-denied", "Super-admins only.");
-  const { companyId, plan, status } = (request.data || {}) as { companyId?: string; plan?: string; status?: string };
+  const { companyId, plan, status, billingExempt } = (request.data || {}) as { companyId?: string; plan?: string; status?: string; billingExempt?: boolean };
   if (!companyId) throw new HttpsError("invalid-argument", "companyId required.");
   const u: Record<string, unknown> = { updatedAt: Date.now() };
   if (typeof status === "string") u.status = status;
+  if (typeof billingExempt === "boolean") u.billingExempt = billingExempt;
   if (typeof plan === "string") {
     u.plan = plan;
     // Copy the plan's feature set + limits onto the company so the app can gate.

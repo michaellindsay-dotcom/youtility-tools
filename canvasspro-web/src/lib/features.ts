@@ -9,6 +9,7 @@ export type FeatureKey = (typeof FEATURES)[number];
 // a plan is assigned. A suspended company loses everything but the basics.
 export function hasFeature(company: Company | null | undefined, key: FeatureKey): boolean {
   if (!company) return true;
+  if (company.billingExempt) return true; // comped → everything on
   if (company.status === "suspended" && key !== "map") return false;
   if (!Array.isArray(company.features)) return true;
   return company.features.includes(key);

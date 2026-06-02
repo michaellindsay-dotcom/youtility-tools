@@ -105,6 +105,11 @@
   .day-chip { display:inline-flex; align-items:center; gap:5px; font-size:13px; padding:7px 11px; border-radius:999px;
     border:1px solid var(--line-hi); background:rgba(255,255,255,.03); cursor:pointer; }
   .day-chip input { width:auto; }
+  .tabbar { display:flex; flex-wrap:wrap; gap:8px; margin:18px 0 4px; }
+  .tab { font-family:inherit; font-weight:600; font-size:14px; padding:9px 16px; border-radius:999px;
+    border:1px solid var(--line-hi); background:rgba(255,255,255,.03); color:var(--ink-mid); cursor:pointer; }
+  .tab:hover { color:var(--ink); border-color:var(--accent); }
+  .tab.active { background:linear-gradient(135deg,var(--accent),var(--accent-2)); border-color:transparent; color:#06121F; }
 </style>
 </head>
 <body>
@@ -140,7 +145,39 @@
     </div>
   </header>
 
+  <!-- Super-admin tab bar (hidden for company admins) -->
+  <nav id="tabBar" class="tabbar hidden">
+    <button class="tab active" data-tab="companies">🏢 Companies</button>
+    <button class="tab" data-tab="payments">💳 Payments</button>
+    <button class="tab" data-tab="notifications">🔔 Notifications</button>
+    <button class="tab" data-tab="apis">🔌 Integrations &amp; APIs</button>
+    <button class="tab" data-tab="account">👤 My Account</button>
+  </nav>
+
   <div id="banner" class="banner"></div>
+
+  <!-- My Account (super-admin self-service) -->
+  <section id="myAccountCard" class="card hidden">
+    <h2>My account</h2>
+    <p class="muted" style="margin:-6px 0 14px;font-size:13px;">Update your own super-admin contact info and password.</p>
+    <div class="grid-2">
+      <div class="field"><span>Name</span><input id="myName" /></div>
+      <div class="field"><span>Mobile number</span><input id="myPhone" placeholder="(555) 123-4567" /></div>
+      <div class="field"><span>Email</span><input id="myEmail" type="email" /></div>
+    </div>
+    <div class="row" style="justify-content:flex-end;gap:8px;">
+      <button id="mySaveProfile" class="btn primary sm">Save profile</button>
+    </div>
+    <h3 style="font-size:14px;margin:18px 0 10px;">Change password</h3>
+    <div class="grid-2">
+      <div class="field"><span>Current password</span><input id="myCurPw" type="password" autocomplete="current-password" /></div>
+      <div class="field"><span>New password</span><input id="myNewPw" type="password" autocomplete="new-password" /></div>
+    </div>
+    <div class="row" style="justify-content:flex-end;">
+      <button id="mySavePw" class="btn primary sm">Update password</button>
+    </div>
+    <div id="myAccountBanner" class="banner"></div>
+  </section>
 
   <!-- Companies (super-admin only) -->
   <section id="companiesCard" class="card hidden">
@@ -530,7 +567,8 @@ const FIREBASE_CONFIG = {
 };
 
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.13.2/firebase-app.js";
-import { getAuth, signInWithEmailAndPassword, onAuthStateChanged, signOut, sendPasswordResetEmail }
+import { getAuth, signInWithEmailAndPassword, onAuthStateChanged, signOut, sendPasswordResetEmail,
+  updatePassword, updateEmail, EmailAuthProvider, reauthenticateWithCredential }
   from "https://www.gstatic.com/firebasejs/10.13.2/firebase-auth.js";
 import { getFirestore, collection, query, where, orderBy, getDocs, doc, getDoc, addDoc, updateDoc, deleteDoc }
   from "https://www.gstatic.com/firebasejs/10.13.2/firebase-firestore.js";
@@ -577,6 +615,7 @@ const createCheckoutSession = httpsCallable(fns, "createCheckoutSession");
 const createBillingPortalSession = httpsCallable(fns, "createBillingPortalSession");
 const getCrmConfig    = httpsCallable(fns, "getCrmConfig");
 const setCrmConfig    = httpsCallable(fns, "setCrmConfig");
+const setMyProfile    = httpsCallable(fns, "setMyProfile");
 
 function banner(el, msg, kind="info") {
   el.className = "banner show " + kind;
@@ -625,20 +664,47 @@ function showLogin() {
   $("console").classList.add("hidden");
   $("loginScreen").classList.remove("hidden");
 }
+// ── Tabs (super-admin) ────────────────────────────────────────────────────
+const TAB_CARDS = {
+  companies: ["companiesCard","schedulingCard","rolesCard","teamsCard","rewardsCard","redemptionsCard","usersCard"],
+  payments: ["plansCard","billingCard"],
+  notifications: ["notifyCard"],
+  apis: ["apiKeysCard","integrationsCard","crmCard"],
+  account: ["myAccountCard"],
+};
+const COMPANY_ONLY = new Set(["schedulingCard","rolesCard","teamsCard","rewardsCard","redemptionsCard","usersCard"]);
+const ALL_TAB_CARDS = Object.values(TAB_CARDS).flat();
+
+function renderTab() {
+  const tab = state.currentTab || "companies";
+  ALL_TAB_CARDS.forEach((id) => {
+    const el = $(id); if (!el) return;
+    const inTab = (TAB_CARDS[tab] || []).includes(id);
+    const show = inTab && (!COMPANY_ONLY.has(id) || !!state.selectedCompany);
+    el.classList.toggle("hidden", !show);
+  });
+  document.querySelectorAll("#tabBar .tab").forEach((b) => b.classList.toggle("active", b.dataset.tab === tab));
+}
+function showTab(name) { state.currentTab = name; renderTab(); }
+$("tabBar").addEventListener("click", (e) => { const t = e.target.closest(".tab"); if (t) showTab(t.dataset.tab); });
+
 function enterConsole() {
   $("loginScreen").classList.add("hidden");
   $("console").classList.remove("hidden");
   if (state.isSuper) {
-    ["companiesCard","notifyCard","integrationsCard","apiKeysCard","plansCard","billingCard","crmCard"]
-      .forEach((id) => $(id).classList.remove("hidden"));
+    $("tabBar").classList.remove("hidden");
+    state.currentTab = "companies";
     loadPlans().then(loadCompanies);
     loadNotifyConfig();
     loadIntegrations();
     loadApiKeys();
     loadStripe();
     loadCrm();
+    loadMyAccount();
+    renderTab();
   } else {
-    // Company admin: locked to their own company.
+    // Company admin: no tabs, just their own company's cards.
+    $("tabBar").classList.add("hidden");
     selectCompany(state.companyId, "");
   }
 }
@@ -652,15 +718,61 @@ async function selectCompany(companyId, companyName) {
   $("usersTitle").textContent = "Accounts" + suffix;
   $("schedulingTitle").textContent = "Scheduling" + suffix;
   $("rewardsTitle").textContent = "Rewards" + suffix;
-  $("rolesCard").classList.remove("hidden");
-  $("teamsCard").classList.remove("hidden");
-  $("schedulingCard").classList.remove("hidden");
-  $("rewardsCard").classList.remove("hidden");
-  $("redemptionsCard").classList.remove("hidden");
+  if (state.isSuper) {
+    state.currentTab = "companies";
+    renderTab();
+  } else {
+    ["schedulingCard","rolesCard","teamsCard","rewardsCard","redemptionsCard","usersCard"].forEach((id) => $(id).classList.remove("hidden"));
+  }
   await Promise.all([loadRoles(), loadTeams(), loadScheduling(companyId), loadRewards(companyId), loadRedemptions(companyId)]);
   await loadUsers();
   populateUserFormSelects();
 }
+
+// ── My account (super-admin self-service) ─────────────────────────────────
+async function loadMyAccount() {
+  try {
+    const snap = await getDoc(doc(db, "users", auth.currentUser.uid));
+    const me = snap.exists() ? snap.data() : {};
+    $("myName").value = me.displayName || auth.currentUser.displayName || "";
+    $("myPhone").value = me.phone || "";
+    $("myEmail").value = auth.currentUser.email || "";
+  } catch (e) { banner($("myAccountBanner"), e.message || "Could not load account.", "error"); }
+}
+$("mySaveProfile").addEventListener("click", async () => {
+  $("mySaveProfile").disabled = true;
+  try {
+    await setMyProfile({ displayName: $("myName").value, phone: $("myPhone").value });
+    const newEmail = $("myEmail").value.trim();
+    if (newEmail && newEmail !== auth.currentUser.email) {
+      const cur = $("myCurPw").value;
+      if (!cur) { banner($("myAccountBanner"), "To change email, enter your current password below first.", "error"); }
+      else {
+        await reauthenticateWithCredential(auth.currentUser, EmailAuthProvider.credential(auth.currentUser.email, cur));
+        await updateEmail(auth.currentUser, newEmail);
+        await setMyProfile({ email: newEmail });
+        banner($("myAccountBanner"), "Profile + email updated.", "good");
+      }
+    } else {
+      banner($("myAccountBanner"), "Profile saved.", "good");
+    }
+    $("whoLabel").textContent = auth.currentUser.email;
+  } catch (e) { banner($("myAccountBanner"), e.message || "Save failed.", "error"); }
+  finally { $("mySaveProfile").disabled = false; }
+});
+$("mySavePw").addEventListener("click", async () => {
+  const cur = $("myCurPw").value, nw = $("myNewPw").value;
+  if (!cur || nw.length < 6) { banner($("myAccountBanner"), "Enter your current password and a 6+ char new one.", "error"); return; }
+  $("mySavePw").disabled = true;
+  try {
+    await reauthenticateWithCredential(auth.currentUser, EmailAuthProvider.credential(auth.currentUser.email, cur));
+    await updatePassword(auth.currentUser, nw);
+    $("myCurPw").value = ""; $("myNewPw").value = "";
+    banner($("myAccountBanner"), "Password updated.", "good");
+  } catch (e) {
+    banner($("myAccountBanner"), e.code === "auth/invalid-credential" || e.code === "auth/wrong-password" ? "Current password is incorrect." : (e.message || "Update failed."), "error");
+  } finally { $("mySavePw").disabled = false; }
+});
 
 // ── Rewards (per company) ────────────────────────────────────────────────
 const METRIC_LBL = { sales:"Closes", appointments:"Appointments", doors:"Doors", conversations:"Conversations", points:"Points" };
@@ -1030,10 +1142,16 @@ async function loadCompanies() {
         <td><select class="planSel">${planOpts.join("")}</select></td>
         <td><select class="statusSel">${statusOpts.join("")}</select></td>
         <td class="row" style="gap:6px;">
+          <label class="day-chip" title="Off = comped: full features, no charge"><input type="checkbox" class="chargeChk" ${c.billingExempt ? "" : "checked"} /> Charge</label>
           <button class="btn sm mng">Manage →</button>
           <button class="btn ghost sm chk" title="Start Stripe checkout for the selected plan">💳 Checkout</button>
           ${c.stripeCustomerId ? '<button class="btn ghost sm prt" title="Open Stripe billing portal">Portal</button>' : ""}
         </td>`;
+      tr.querySelector(".chargeChk").addEventListener("change", async (ev) => {
+        try { await setCompanyPlan({ companyId: d.id, billingExempt: !ev.target.checked });
+          banner($("banner"), ev.target.checked ? `${esc(c.name)} will be charged.` : `${esc(c.name)} comped — full features, no charge.`, "good"); }
+        catch (e) { banner($("banner"), e.message || "Update failed.", "error"); }
+      });
       tr.querySelector(".mng").addEventListener("click", () => {
         selectCompany(d.id, c.name);
         $("rolesCard").scrollIntoView({ behavior:"smooth" });
