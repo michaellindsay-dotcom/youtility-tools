@@ -831,6 +831,102 @@ details.raw pre {
   display: grid;
   place-items: center;
 }
+
+/* ── Movers map: distinctive teardrop "drop-pin" with a pulsing halo so new
+   move-ins really stand out against the satellite map (and the gray homes). */
+.mover-pin { position: relative; }
+.mover-pin .mp-drop {
+  position: absolute;
+  left: 2px;
+  top: 0;
+  width: 30px;
+  height: 30px;
+  display: grid;
+  place-items: center;
+  border-radius: 50% 50% 50% 0;
+  transform: rotate(-45deg);
+  border: 2.5px solid #fff;
+  box-shadow: 0 3px 9px rgba(0, 0, 0, 0.55);
+}
+.mover-pin .mp-drop > svg { transform: rotate(45deg); }
+.mover-pin .mp-halo {
+  position: absolute;
+  left: 50%;
+  top: 14px;
+  width: 28px;
+  height: 28px;
+  margin-left: -14px;
+  border-radius: 50%;
+  opacity: 0.55;
+  animation: mover-pulse 1.9s ease-out infinite;
+  pointer-events: none;
+}
+@keyframes mover-pulse {
+  0% { transform: scale(0.6); opacity: 0.55; }
+  80%, 100% { transform: scale(2); opacity: 0; }
+}
+
+.mover-pop .mp-addr { font-weight: 700; margin-bottom: 6px; }
+.mover-pop .mp-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 14px;
+  color: var(--ink-mid);
+  line-height: 1.7;
+}
+.mover-pop .mp-row b { color: var(--ink); }
+
+/* Window selector (last 30 / 60 / 90 days) */
+.movers-window {
+  position: absolute;
+  top: max(12px, env(safe-area-inset-top));
+  right: max(64px, calc(env(safe-area-inset-right) + 64px));
+  z-index: 1100;
+  display: flex;
+  gap: 6px;
+  background: rgba(10, 15, 26, 0.82);
+  backdrop-filter: blur(6px);
+  border: 1px solid var(--line-hi);
+  border-radius: 12px;
+  padding: 5px;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.45);
+}
+.movers-window .mw-btn {
+  border: none;
+  background: transparent;
+  color: var(--ink-mid);
+  font-size: 13px;
+  font-weight: 600;
+  padding: 6px 11px;
+  border-radius: 8px;
+  cursor: pointer;
+}
+.movers-window .mw-btn.active { background: var(--accent); color: #06121f; }
+
+/* Color legend */
+.movers-legend {
+  position: absolute;
+  bottom: max(16px, env(safe-area-inset-bottom));
+  right: max(12px, env(safe-area-inset-right));
+  z-index: 1100;
+  background: rgba(10, 15, 26, 0.82);
+  backdrop-filter: blur(6px);
+  border: 1px solid var(--line-hi);
+  border-radius: 12px;
+  padding: 10px 12px;
+  font-size: 12px;
+  color: var(--ink-mid);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.45);
+}
+.movers-legend .ml-title { font-weight: 700; color: var(--ink); margin-bottom: 7px; }
+.movers-legend .ml-row { display: flex; align-items: center; gap: 8px; line-height: 1.9; }
+.movers-legend .ml-dot {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  border: 1.5px solid #fff;
+  flex: none;
+}
 .modal-overlay {
   position: fixed;
   inset: 0;
