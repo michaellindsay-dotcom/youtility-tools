@@ -230,5 +230,12 @@ service cloud.firestore {
     match /calendarTokens/{uid} {
       allow read, write: if false;
     }
+
+    // ── per-company YoutilityCRM link (holds each tenant's CRM secret) ───
+    // Cloud Functions only. Consoles read/write via getCompanyCrm/
+    // setCompanyCrm callables, which mask the secret.
+    match /crmLinks/{companyId} {
+      allow read, write: if false;
+    }
   }
 }

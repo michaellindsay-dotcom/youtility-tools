@@ -1670,20 +1670,26 @@ export const stripeWebhook = onRequest({ cors: false }, async (req, res) => {
 // ════════════════════════════════════════════════════════════════════════════
 // YOUTILITYCRM INTEGRATION — provision a Knock company as a CRM add-on, sync
 // leads + appointments + customer data both ways, and keep schedules linked.
-// External calls authenticate with a shared secret (config/crm.apiSecret),
-// passed in the `x-crm-secret` header. Hosting rewrites /crm/** here.
+//
+// The link is configured PER COMPANY (crmLinks/{companyId}): each tenant in the
+// CRM has its own company login, so each gets its own 4 settings —
+//   enabled · crmCompanyId · webhookUrl (Knock→CRM) · apiSecret.
+// External calls send the company's secret in the `x-crm-secret` header.
+// A single global "master" secret (config/crm.apiSecret) authenticates the
+// /provision bootstrap (run before any company exists) and is accepted as a
+// fallback. Hosting rewrites /crm/** here.
 // ════════════════════════════════════════════════════════════════════════════
-interface CrmConfig { webhookUrl: string; apiSecret: string; }
-async function crmConfig(): Promise<CrmConfig> {
+async function crmMasterSecret(): Promise<string> {
   const c = ((await db.doc("config/crm").get()).data() as Record<string, string>) || {};
-  return { webhookUrl: c.webhookUrl || "", apiSecret: c.apiSecret || "" };
+  return c.apiSecret || "";
 }
 
+// Master provisioning key (super-admin only) — the CRM↔Knock platform key.
 export const getCrmConfig = onCall(async (request) => {
   const caller = await getCaller(request);
   if (!caller.isSuper) throw new HttpsError("permission-denied", "Super-admins only.");
-  const c = await crmConfig();
-  return { webhookUrl: c.webhookUrl, secretConfigured: !!c.apiSecret, secretMask: mask(c.apiSecret) };
+  const secret = await crmMasterSecret();
+  return { secretConfigured: !!secret, secretMask: mask(secret) };
 });
 
 export const setCrmConfig = onCall(async (request) => {
@@ -1691,24 +1697,75 @@ export const setCrmConfig = onCall(async (request) => {
   if (!caller.isSuper) throw new HttpsError("permission-denied", "Super-admins only.");
   const d = (request.data || {}) as Record<string, string>;
   const u: Record<string, unknown> = { updatedAt: Date.now() };
-  if (typeof d.webhookUrl === "string") u.webhookUrl = d.webhookUrl.trim();
   if (typeof d.apiSecret === "string" && d.apiSecret.trim()) u.apiSecret = d.apiSecret.trim();
   await db.doc("config/crm").set(u, { merge: true });
   return { ok: true };
 });
 
-// Push a changed lead / appointment to the CRM webhook (best-effort, real-time).
+// ── Per-company CRM link (the 4 fields) ──────────────────────────────────────
+interface CompanyCrm { enabled: boolean; crmCompanyId: string; webhookUrl: string; apiSecret: string; }
+async function companyCrm(companyId: string): Promise<CompanyCrm> {
+  const c = ((await db.doc(`crmLinks/${companyId}`).get()).data() as Record<string, any>) || {};
+  return {
+    enabled: !!c.enabled,
+    crmCompanyId: c.crmCompanyId || "",
+    webhookUrl: c.webhookUrl || "",
+    apiSecret: c.apiSecret || "",
+  };
+}
+
+// Read one company's link (super-admin, or that company's own admin).
+export const getCompanyCrm = onCall(async (request) => {
+  const caller = await getCaller(request);
+  const companyId = authorizeForCompany(caller, (request.data || {}).companyId);
+  const c = await companyCrm(companyId);
+  return {
+    enabled: c.enabled, crmCompanyId: c.crmCompanyId, webhookUrl: c.webhookUrl,
+    secretConfigured: !!c.apiSecret, secretMask: mask(c.apiSecret),
+  };
+});
+
+// Save one company's link. Mirrors non-secret fields onto the company doc so
+// the app/console can see CRM status without reading the server-only secret.
+export const setCompanyCrm = onCall(async (request) => {
+  const caller = await getCaller(request);
+  const d = (request.data || {}) as Record<string, any>;
+  const companyId = authorizeForCompany(caller, d.companyId);
+  const u: Record<string, unknown> = { companyId, updatedAt: Date.now() };
+  if (typeof d.enabled === "boolean") u.enabled = d.enabled;
+  if (typeof d.crmCompanyId === "string") u.crmCompanyId = d.crmCompanyId.trim();
+  if (typeof d.webhookUrl === "string") u.webhookUrl = d.webhookUrl.trim();
+  if (typeof d.apiSecret === "string" && d.apiSecret.trim()) u.apiSecret = d.apiSecret.trim();
+  await db.doc(`crmLinks/${companyId}`).set(u, { merge: true });
+  const mirror: Record<string, unknown> = {};
+  if ("enabled" in u) mirror.crmEnabled = u.enabled;
+  if ("crmCompanyId" in u) mirror.crmCompanyId = (u.crmCompanyId as string) || null;
+  if (Object.keys(mirror).length) await db.doc(`companies/${companyId}`).set(mirror, { merge: true });
+  return { ok: true };
+});
+
+// Authenticate a CRM request: prefer the company's own secret, fall back to the
+// global master key (covers the provision bootstrap before a company exists).
+async function crmAuth(sent: string, companyId?: string): Promise<boolean> {
+  if (!sent) return false;
+  if (companyId) {
+    const link = await companyCrm(companyId);
+    if (link.apiSecret && sent === link.apiSecret) return true;
+  }
+  const master = await crmMasterSecret();
+  return !!master && sent === master;
+}
+
+// Push a changed lead / appointment to that company's CRM webhook (best-effort).
 async function pushToCrm(kind: "lead" | "event", companyId: string, id: string, data: any) {
   if (data?._syncedFrom === "crm") return; // came from the CRM — don't echo back
-  const cfg = await crmConfig();
-  if (!cfg.webhookUrl) return;
-  const co = (await db.doc(`companies/${companyId}`).get()).data();
-  if (!co?.crmCompanyId) return; // company isn't linked to the CRM
+  const link = await companyCrm(companyId);
+  if (!link.enabled || !link.webhookUrl) return; // not linked / sync paused
   try {
-    await fetch(cfg.webhookUrl, {
+    await fetch(link.webhookUrl, {
       method: "POST",
-      headers: { "Content-Type": "application/json", "x-crm-secret": cfg.apiSecret },
-      body: JSON.stringify({ type: kind, companyId, crmCompanyId: co.crmCompanyId, id, data }),
+      headers: { "Content-Type": "application/json", "x-crm-secret": link.apiSecret },
+      body: JSON.stringify({ type: kind, companyId, crmCompanyId: link.crmCompanyId, id, data }),
     });
   } catch (e) { logger.warn(`pushToCrm ${kind} failed`, e); }
 }
@@ -1727,16 +1784,15 @@ export const onEventSync = onDocumentWritten("events/{id}", async (event) => {
 
 // ── /crm/** router (provision · export · ingest) ─────────────────────────────
 export const crmApi = onRequest({ cors: true }, async (req, res) => {
-  const cfg = await crmConfig();
-  if (!cfg.apiSecret || req.get("x-crm-secret") !== cfg.apiSecret) {
-    res.status(401).json({ error: "Unauthorized" });
-    return;
-  }
+  const sent = req.get("x-crm-secret") || "";
   const path = req.path;
   try {
     // ── Provision a Knock company (the add-on toggle) ──
     if (req.method === "POST" && path.endsWith("/provision")) {
-      const { name, crmCompanyId, adminEmail, adminName, plan } = (req.body || {}) as Record<string, string>;
+      // Bootstrap runs before the company exists → master key only.
+      if (!(await crmAuth(sent))) { res.status(401).json({ error: "Unauthorized" }); return; }
+      const { name, crmCompanyId, adminEmail, adminName, plan, webhookUrl, apiSecret } =
+        (req.body || {}) as Record<string, string>;
       if (!name || !adminEmail) { res.status(400).json({ error: "name and adminEmail required" }); return; }
 
       // Reuse an existing linked company if this CRM company was already provisioned.
@@ -1749,7 +1805,7 @@ export const crmApi = onRequest({ cors: true }, async (req, res) => {
       } else {
         const ref = await db.collection("companies").add({
           name, plan: plan || "knock", status: "active", addons: ["knock"],
-          crmCompanyId: crmCompanyId || null, createdAt: Date.now(), createdBy: "crm",
+          crmCompanyId: crmCompanyId || null, crmEnabled: true, createdAt: Date.now(), createdBy: "crm",
         });
         companyId = ref.id;
         const roles = ref.collection("roles");
@@ -1757,6 +1813,15 @@ export const crmApi = onRequest({ cors: true }, async (req, res) => {
         await roles.add({ companyId, title: "User", baseTier: "user", rank: 10, isDefault: true, createdAt: Date.now() });
         await ref.collection("teams").add({ companyId, name: "Company", parentTeamId: null, createdAt: Date.now() });
       }
+
+      // Establish this company's own CRM link. Use the secret the CRM sent, or
+      // mint one and hand it back so the CRM can store it for future calls.
+      const companySecret = (apiSecret && apiSecret.trim()) ||
+        "yk_" + Math.random().toString(36).slice(2) + Math.random().toString(36).slice(2);
+      await db.doc(`crmLinks/${companyId}`).set({
+        companyId, enabled: true, crmCompanyId: crmCompanyId || "",
+        webhookUrl: (webhookUrl || "").trim(), apiSecret: companySecret, updatedAt: Date.now(),
+      }, { merge: true });
 
       // Create the company admin (or reuse), then a magic sign-in link.
       let uid: string;
@@ -1781,7 +1846,7 @@ export const crmApi = onRequest({ cors: true }, async (req, res) => {
         inviteLink = await getAuth().generateSignInWithEmailLink(adminEmail, { url: `${APP_URL}/app/login?invite=1`, handleCodeInApp: true });
       } catch (e) { logger.warn("provision invite link failed", e); }
 
-      res.json({ ok: true, companyId, adminEmail, inviteLink, appUrl: `${APP_URL}/app` });
+      res.json({ ok: true, companyId, adminEmail, apiSecret: companySecret, inviteLink, appUrl: `${APP_URL}/app` });
       return;
     }
 
@@ -1789,6 +1854,7 @@ export const crmApi = onRequest({ cors: true }, async (req, res) => {
     if (req.method === "GET" && path.endsWith("/export")) {
       const companyId = req.query.companyId as string;
       if (!companyId) { res.status(400).json({ error: "companyId required" }); return; }
+      if (!(await crmAuth(sent, companyId))) { res.status(401).json({ error: "Unauthorized" }); return; }
       const [company, usersSnap, leadsSnap, eventsSnap] = await Promise.all([
         db.doc(`companies/${companyId}`).get(),
         db.collection("users").where("companyId", "==", companyId).get(),
@@ -1808,6 +1874,7 @@ export const crmApi = onRequest({ cors: true }, async (req, res) => {
     if (req.method === "POST" && path.endsWith("/ingest")) {
       const { companyId, lead } = (req.body || {}) as { companyId?: string; lead?: any };
       if (!companyId || !lead) { res.status(400).json({ error: "companyId and lead required" }); return; }
+      if (!(await crmAuth(sent, companyId))) { res.status(401).json({ error: "Unauthorized" }); return; }
       // Default owner = a company admin, so the lead is visible in the app.
       const adminSnap = await db.collection("users").where("companyId", "==", companyId).where("role", "==", "admin").limit(1).get();
       const ownerUid = adminSnap.empty ? null : adminSnap.docs[0].id;

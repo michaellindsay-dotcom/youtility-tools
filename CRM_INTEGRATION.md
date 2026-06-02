@@ -4,10 +4,19 @@ Knock exposes a small API so **youtilitycrm.us** can offer "YoutilityKnock" as a
 billable add-on, provision companies, and keep leads + appointments in sync.
 
 **Base URL:** `https://youtilityknock.web.app`
-**Auth:** every request sends header `x-crm-secret: <shared secret>`.
-Set the secret + your webhook URL in the Knock super-admin console
-(*YoutilityCRM integration* card). The same secret signs Knock's outbound
-webhooks back to the CRM.
+
+**Auth (per company):** every request sends header `x-crm-secret: <secret>`.
+The link is configured **per company** — each tenant in the CRM has its own
+company login, so each gets its own 4 settings on the Knock company card
+(Manage → *YoutilityCRM link*): **enabled · crmCompanyId · webhookUrl · secret**.
+`/crm/export` and `/crm/ingest` authenticate with **that company's** secret.
+
+`/crm/provision` runs *before* a company exists, so it authenticates with a
+single platform-level **master key** (super-admin console → *YoutilityCRM —
+master provisioning key*). Provision mints (or accepts) a per-company
+`apiSecret` and returns it — the CRM stores it and uses it for that company
+thereafter. The master key is also accepted as a fallback on export/ingest.
+Each company's own secret signs Knock's outbound webhooks back to the CRM.
 
 ## CRM → Knock
 
@@ -19,9 +28,13 @@ webhooks back to the CRM.
 → creates (or reuses) the Knock company, seeds roles/teams, creates the company
 admin, and returns a magic sign-in link:
 ```json
-{ "ok": true, "companyId": "...", "adminEmail": "...",
+{ "ok": true, "companyId": "...", "adminEmail": "...", "apiSecret": "yk_…",
   "inviteLink": "https://youtilityknock.web.app/app/login?...", "appUrl": ".../app" }
 ```
+`apiSecret` is this company's freshly minted per-company secret — store it and
+send it as `x-crm-secret` on subsequent `/crm/export` + `/crm/ingest` calls for
+this company. Pass `webhookUrl` (and optionally your own `apiSecret`) in the
+provision body to set them up front; otherwise set them later on the company card.
 
 ### `GET /crm/export?companyId=...`  (pull everything)
 → `{ company, users, leads, appointments }` — leads include all customer info
