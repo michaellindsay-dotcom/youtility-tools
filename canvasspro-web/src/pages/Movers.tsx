@@ -6,38 +6,19 @@ import { auth } from "../firebase";
 import { useAuth } from "../auth/AuthContext";
 import { useNav } from "../components/NavContext";
 import { lookupMovers, parseMovers, type MoverHome } from "../lib/knockstat";
+import {
+  MOVER_BUCKETS,
+  MOVER_DAYS,
+  moverIcon,
+  moverColor,
+  moverPopupHtml,
+  daysAgo,
+} from "../lib/movers";
 import type { LatLng } from "../types";
 
 const DEFAULT_CENTER: [number, number] = [40.34, -111.91];
 const ROAM_THRESHOLD_M = 700; // reload movers once the map drifts ~0.43 mi
 const PIN_CAP = 800; // accumulate up to this many mover pins, then reset
-
-type Window = 30 | 60 | 90;
-
-// Color per move-in age bucket. Newest movers stand out brightest — these are
-// the freshest doors to knock — fading to amber, then red as they age out.
-const BUCKETS: { max: Window; color: string; label: string }[] = [
-  { max: 30, color: "#22C55E", label: "0–30 days" },
-  { max: 60, color: "#F59E0B", label: "31–60 days" },
-  { max: 90, color: "#EF4444", label: "61–90 days" },
-];
-
-const HOUSE_SVG =
-  '<svg viewBox="0 0 24 24" width="15" height="15" fill="#fff"><path d="M12 3 3 10.5h2.4V21h5.1v-6h3v6h5.1V10.5H21z"/></svg>';
-
-// Distinctive teardrop "drop-pin" with a house glyph and a pulsing halo — built
-// to pop off the satellite map (and stand apart from the round gray home pins).
-function moverIcon(color: string): L.DivIcon {
-  return L.divIcon({
-    className: "mover-pin",
-    html:
-      `<span class="mp-halo" style="background:${color}"></span>` +
-      `<span class="mp-drop" style="background:${color}">${HOUSE_SVG}</span>`,
-    iconSize: [34, 44],
-    iconAnchor: [17, 40],
-    popupAnchor: [0, -38],
-  });
-}
 
 function validCoord(lat: unknown, lng: unknown): [number, number] | null {
   const la = Number(lat);
@@ -46,29 +27,6 @@ function validCoord(lat: unknown, lng: unknown): [number, number] | null {
   if (la === 0 && ln === 0) return null;
   if (Math.abs(la) > 90 || Math.abs(ln) > 180) return null;
   return [la, ln];
-}
-
-// Whole days between the sale date and today; Infinity if unparseable.
-function daysAgo(dateStr: string): number {
-  const t = Date.parse(dateStr.replace(/\//g, "-"));
-  if (isNaN(t)) return Infinity;
-  return Math.floor((Date.now() - t) / 86400000);
-}
-
-function bucketColor(d: number): string | null {
-  for (const b of BUCKETS) if (d <= b.max) return b.color;
-  return null; // older than the widest window — not a "mover"
-}
-
-function fmtDate(dateStr: string): string {
-  const t = Date.parse(dateStr.replace(/\//g, "-"));
-  if (isNaN(t)) return dateStr;
-  return new Date(t).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
-}
-
-function fmtMoney(n: number | null): string {
-  if (n == null || !isFinite(n) || n <= 0) return "";
-  return "$" + Math.round(n).toLocaleString();
 }
 
 export default function MoversPage() {
@@ -83,41 +41,30 @@ export default function MoversPage() {
   const roamTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const youMarker = useRef<L.CircleMarker | null>(null);
   const watchId = useRef<string | null>(null);
-  const windowRef = useRef<Window>(90);
 
   const [status, setStatus] = useState("Loading movers…");
   const [loading, setLoading] = useState(false);
-  const [days, setDays] = useState<Window>(90);
   const [count, setCount] = useState(0);
-  windowRef.current = days;
 
   function addMover(m: MoverHome): boolean {
     const c = validCoord(m.lat, m.lng);
     if (!c) return false;
     const d = daysAgo(m.saleDate);
-    if (d > windowRef.current) return false; // outside the chosen window
-    const color = bucketColor(d);
-    if (!color) return false;
+    const color = moverColor(d);
+    if (!color) return false; // older than 90 days — not a mover
     const key = `${c[0].toFixed(5)},${c[1].toFixed(5)}`;
     if (keys.current.has(key)) return false;
     keys.current.add(key);
-    const price = fmtMoney(m.salePrice);
     L.marker(c, { icon: moverIcon(color) })
-      .bindPopup(
-        `<div class="mover-pop">` +
-          `<div class="mp-addr">${m.address}</div>` +
-          `<div class="mp-row"><span>Moved in</span><b>${fmtDate(m.saleDate)}</b></div>` +
-          `<div class="mp-row"><span>${d} day${d === 1 ? "" : "s"} ago</span>${price ? `<b>${price}</b>` : ""}</div>` +
-          `</div>`
-      )
+      .bindPopup(moverPopupHtml(m))
       .addTo(moverLayer.current);
     return true;
   }
 
-  // Pull recent move-ins around a center and drop pins (dedupes + accumulates).
+  // Pull recent move-ins (last 90 days) around a center and drop pins.
   async function fetchMovers(center: LatLng) {
     const token = await auth.currentUser!.getIdToken();
-    const raw = await lookupMovers(center.lat, center.lng, 1, windowRef.current, token);
+    const raw = await lookupMovers(center.lat, center.lng, 1, MOVER_DAYS, token);
     parseMovers(raw).forEach((m) => addMover(m));
   }
 
@@ -134,7 +81,7 @@ export default function MoversPage() {
       lastLoadCenter.current = L.latLng(c.lat, c.lng);
       const n = moverLayer.current.getLayers().length;
       setCount(n);
-      setStatus(n ? `${n} move-in${n === 1 ? "" : "s"} in the last ${days} days` : `No move-ins in the last ${days} days here`);
+      setStatus(n ? `${n} move-in${n === 1 ? "" : "s"} in the last ${MOVER_DAYS} days` : `No move-ins in the last ${MOVER_DAYS} days here`);
     } catch (e: any) {
       setStatus("Could not load movers: " + (e?.message || ""));
     } finally {
@@ -224,16 +171,6 @@ export default function MoversPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [companyId, profile]);
 
-  // Switching the 30/60/90 window re-pulls around the current center.
-  function pickWindow(w: Window) {
-    if (w === days) return;
-    setDays(w);
-    windowRef.current = w;
-    lastLoadCenter.current = null;
-    // loadMovers reads windowRef, so run it on the next tick after state set.
-    setTimeout(() => void loadMovers(), 0);
-  }
-
   return (
     <div className="map-screen">
       <div ref={elRef} className="map-canvas-full" />
@@ -249,23 +186,10 @@ export default function MoversPage() {
       {/* Status pill */}
       {status && <div className="map-status-pill">{status}</div>}
 
-      {/* Window selector: last 30 / 60 / 90 days */}
-      <div className="movers-window">
-        {([30, 60, 90] as Window[]).map((w) => (
-          <button
-            key={w}
-            className={"mw-btn" + (days === w ? " active" : "")}
-            onClick={() => pickWindow(w)}
-          >
-            {w}d
-          </button>
-        ))}
-      </div>
-
-      {/* Legend: color = how recently they moved in */}
+      {/* Legend: color = how recently they moved in (last 90 days) */}
       <div className="movers-legend">
         <div className="ml-title">New move-ins{count ? ` · ${count}` : ""}</div>
-        {BUCKETS.map((b) => (
+        {MOVER_BUCKETS.map((b) => (
           <div key={b.max} className="ml-row">
             <span className="ml-dot" style={{ background: b.color }} />
             {b.label}

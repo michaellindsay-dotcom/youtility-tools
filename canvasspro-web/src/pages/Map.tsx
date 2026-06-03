@@ -7,7 +7,8 @@ import { db, auth } from "../firebase";
 import { useAuth } from "../auth/AuthContext";
 import { useNav } from "../components/NavContext";
 import { DISP_COLOR } from "../lib/dispositions";
-import { lookupArea, parseAreaProperties } from "../lib/knockstat";
+import { lookupArea, parseAreaProperties, lookupMovers, parseMovers, type MoverHome } from "../lib/knockstat";
+import { moverIcon, moverColor, moverPopupHtml, daysAgo, MOVER_DAYS } from "../lib/movers";
 import { getTile, putTile, nearbyCachedHomes } from "../lib/homeCache";
 import DispositionModal, { type DispoInput } from "../components/DispositionModal";
 import ShiftHud from "../components/ShiftHud";
@@ -19,6 +20,7 @@ const DEFAULT_CENTER: [number, number] = [40.34, -111.91];
 const NEAREST_N = 200;
 const ROAM_THRESHOLD_M = 450; // reload nearby homes once you've moved ~0.28 mi
 const HOME_CAP = 700; // accumulate up to this many roaming pins, then reset
+const MOVER_CAP = 500; // accumulate up to this many roaming mover pins, then reset
 
 const HOUSE_SVG =
   '<svg viewBox="0 0 24 24" width="14" height="14" fill="#fff"><path d="M12 3 3 10.5h2.4V21h5.1v-6h3v6h5.1V10.5H21z"/></svg>';
@@ -60,8 +62,10 @@ export default function MapPage() {
   const mapRef = useRef<L.Map | null>(null);
   const leadLayer = useRef<L.LayerGroup>(L.layerGroup());
   const homeLayer = useRef<L.LayerGroup>(L.layerGroup());
+  const moverLayer = useRef<L.LayerGroup>(L.layerGroup());
   const leadsRef = useRef<Lead[]>([]);
   const homeKeys = useRef<Set<string>>(new Set()); // dedupe accumulated home pins
+  const moverKeys = useRef<Set<string>>(new Set()); // dedupe accumulated mover pins
   const lastLoadCenter = useRef<L.LatLng | null>(null);
   const loadingRef = useRef(false);
   const roamTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -77,6 +81,11 @@ export default function MapPage() {
   const [status, setStatus] = useState("Loading map…");
   const [mode, setMode] = useState<MapMode>("view");
   const [loadingHomes, setLoadingHomes] = useState(false);
+  // "Movers only" hides the lead + gray home pins so just the recent move-ins
+  // show. The ref lets the async roam loop read the current toggle state.
+  const [moversOnly, setMoversOnly] = useState(false);
+  const moversOnlyRef = useRef(false);
+  moversOnlyRef.current = moversOnly;
   const [dispoTarget, setDispoTarget] = useState<DispoInput | null>(null);
   // Save panel shown after an area is drawn: name it + assign it to a rep.
   const [savePanel, setSavePanel] = useState(false);
@@ -191,6 +200,64 @@ export default function MapPage() {
     homes.forEach((h) => addHomeMarker(h));
   }
 
+  // ── Movers (recent move-ins) ────────────────────────────────────────────────
+  // Mover pins ride on their own layer above the leads/homes, colored by how
+  // recently the home sold. They load automatically for the rep's assigned area
+  // (or around their live location) alongside the regular home pins.
+  function addMoverMarker(m: MoverHome): boolean {
+    const c = validCoord(m.lat, m.lng);
+    if (!c) return false;
+    const d = daysAgo(m.saleDate);
+    const color = moverColor(d);
+    if (!color) return false; // older than the widest window — not a mover
+    const key = `${c[0].toFixed(5)},${c[1].toFixed(5)}`;
+    if (moverKeys.current.has(key)) return false;
+    moverKeys.current.add(key);
+    L.marker(c, { icon: moverIcon(color), zIndexOffset: 2000 }) // sit above lead pins
+      .bindPopup(moverPopupHtml(m))
+      .addTo(moverLayer.current);
+    return true;
+  }
+
+  async function fetchNearbyMovers(center: LatLng) {
+    const token = await auth.currentUser!.getIdToken();
+    const raw = await lookupMovers(center.lat, center.lng, 1, MOVER_DAYS, token);
+    parseMovers(raw).forEach((m) => addMoverMarker(m));
+  }
+
+  // Load movers for the assigned area(s), or nearest around the rep — mirrors
+  // loadHomes so the two paint together.
+  async function loadMovers() {
+    const map = mapRef.current;
+    if (!map || !profile) return;
+    moverLayer.current.clearLayers();
+    moverKeys.current.clear();
+    try {
+      const token = await auth.currentUser!.getIdToken();
+      if (assigned.current.length) {
+        for (const t of assigned.current) {
+          const poly = t.polygon!;
+          const lats = poly.map((p) => p.lat);
+          const lngs = poly.map((p) => p.lng);
+          const center = { lat: (Math.min(...lats) + Math.max(...lats)) / 2, lng: (Math.min(...lngs) + Math.max(...lngs)) / 2 };
+          const radius = Math.min(
+            L.latLng(center.lat, center.lng).distanceTo(L.latLng(Math.max(...lats), Math.max(...lngs))) / 1609.34,
+            2
+          );
+          const raw = await lookupMovers(center.lat, center.lng, Math.max(0.1, +radius.toFixed(2)), MOVER_DAYS, token);
+          parseMovers(raw)
+            .filter((m) => inPolygon({ lat: m.lat, lng: m.lng }, poly))
+            .forEach((m) => addMoverMarker(m));
+        }
+      } else {
+        const c = myLoc.current || { lat: map.getCenter().lat, lng: map.getCenter().lng };
+        await fetchNearbyMovers(c);
+      }
+    } catch {
+      /* silent — movers are supplemental to the home pins */
+    }
+  }
+
   // Manual / initial load: assigned territory(ies), or nearest 200 around the rep.
   async function loadHomes() {
     const map = mapRef.current;
@@ -242,19 +309,55 @@ export default function MapPage() {
     loadingRef.current = true;
     setLoadingHomes(true);
     try {
-      if (homeLayer.current.getLayers().length > HOME_CAP) {
-        homeLayer.current.clearLayers();
-        homeKeys.current.clear();
+      if (moverLayer.current.getLayers().length > MOVER_CAP) {
+        moverLayer.current.clearLayers();
+        moverKeys.current.clear();
       }
-      await fetchNearby({ lat: ctr.lat, lng: ctr.lng });
+      // Skip the gray home pulls while isolating movers — saves the ATTOM call.
+      if (!moversOnlyRef.current) {
+        if (homeLayer.current.getLayers().length > HOME_CAP) {
+          homeLayer.current.clearLayers();
+          homeKeys.current.clear();
+        }
+        await fetchNearby({ lat: ctr.lat, lng: ctr.lng });
+      }
+      await fetchNearbyMovers({ lat: ctr.lat, lng: ctr.lng });
       lastLoadCenter.current = ctr;
-      setStatus(`${homeLayer.current.getLayers().length} homes loaded · keep moving`);
+      setStatus(
+        moversOnlyRef.current
+          ? `${moverLayer.current.getLayers().length} recent movers · keep moving`
+          : `${homeLayer.current.getLayers().length} homes loaded · keep moving`
+      );
     } catch {
       /* silent — keep what's already shown */
     } finally {
       loadingRef.current = false;
       setLoadingHomes(false);
     }
+  }
+
+  // Toggle "movers only": detach the lead + home pin layers (leaving just the
+  // mover pins), or restore them. Used by the 🚚 FAB under the pencil.
+  function toggleMoversOnly() {
+    const map = mapRef.current;
+    if (!map) return;
+    const next = !moversOnly;
+    setMoversOnly(next);
+    moversOnlyRef.current = next;
+    if (next) {
+      map.removeLayer(homeLayer.current);
+      map.removeLayer(leadLayer.current);
+      setStatus(`${moverLayer.current.getLayers().length} recent movers · other pins hidden`);
+    } else {
+      homeLayer.current.addTo(map);
+      leadLayer.current.addTo(map);
+    }
+  }
+
+  // Refresh button: reload movers always, and the homes/leads too unless hidden.
+  async function refresh() {
+    if (!moversOnly) await loadHomes();
+    await loadMovers();
   }
 
   function setYou(lat: number, lng: number) {
@@ -309,6 +412,7 @@ export default function MapPage() {
     territoryLayer.current.addTo(map);
     homeLayer.current.addTo(map);
     leadLayer.current.addTo(map);
+    moverLayer.current.addTo(map); // always on; sits above the other pins
     mapRef.current = map;
     setTimeout(() => map.invalidateSize(), 120);
 
@@ -353,6 +457,7 @@ export default function MapPage() {
       await buildTerritories();
       await buildPins();
       await loadHomes();
+      void loadMovers(); // drop recent move-in pins for the area / live location
       void startFollowing(); // keep the map on the rep as they walk
     })();
 
@@ -434,7 +539,7 @@ export default function MapPage() {
       {/* Top-left: menu + controls */}
       <div className="map-overlay map-tl">
         <button className="map-fab" onClick={openNav} aria-label="Menu">☰</button>
-        <button className="map-fab" onClick={loadHomes} disabled={loadingHomes} aria-label="Refresh homes" title="Refresh homes">
+        <button className="map-fab" onClick={refresh} disabled={loadingHomes} aria-label="Refresh homes" title="Refresh homes & movers">
           {loadingHomes ? "…" : "⟳"}
         </button>
         <button
@@ -453,6 +558,14 @@ export default function MapPage() {
             ✏
           </button>
         )}
+        {/* Movers: isolate recent move-in pins (hide leads + gray homes). */}
+        <button
+          className={"map-fab" + (moversOnly ? " active" : "")}
+          onClick={toggleMoversOnly}
+          aria-label="Show movers only" title="Movers — recent move-ins only"
+        >
+          🚚
+        </button>
       </div>
 
       {/* Top-center: status pill */}
