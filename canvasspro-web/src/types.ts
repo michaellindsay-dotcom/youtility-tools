@@ -276,6 +276,7 @@ export interface Reward {
   active?: boolean;
   startsAt?: number; // when it becomes available (ms); unset = immediately
   expiresAt?: number; // when it stops (ms); unset = never
+  crmRewardId?: string; // set when synced from YoutilityCRM
   createdAt: number;
   createdBy: string;
 }
