@@ -10,7 +10,7 @@ interface Props {
 }
 
 export default function ProtectedRoute({ children, roles }: Props) {
-  const { user, role, company, noAccess, loading, logout } = useAuth();
+  const { user, role, company, companyLoaded, noAccess, loading, logout } = useAuth();
   const location = useLocation();
 
   if (loading) {
@@ -36,20 +36,21 @@ export default function ProtectedRoute({ children, roles }: Props) {
       </div>
     );
   }
-  // Suspended company → the account is paused (an expired trial or overdue
-  // payment). Lock the app until they subscribe; their data stays untouched and
-  // access restores automatically once payment flips the status back to active.
-  if (company?.status === "suspended") {
-    const trialEnded = company.trialExpired === true;
+  // Inactive or removed company → no access. (AuthContext also signs these
+  // accounts out, landing them on the login screen with the same message; this
+  // branch just avoids any flash of the app in the meantime.) Data is never
+  // deleted — access restores automatically once the company is active again.
+  const status = String(company?.status || "active").toLowerCase();
+  const companyInactive = company
+    ? status === "suspended" || status === "inactive"
+    : companyLoaded; // company doc missing once loaded = removed
+  if (companyInactive) {
     return (
       <div className="auth-wrap">
         <div className="auth-card card" style={{ textAlign: "center" }}>
-          <h2 style={{ border: 0 }}>{trialEnded ? "Trial ended" : "Account paused"}</h2>
+          <h2 style={{ border: 0 }}>Account inactive</h2>
           <p className="muted">
-            {trialEnded
-              ? "Your free trial has ended and the account is paused. Your data is safe — subscribe to a plan to pick up right where you left off."
-              : "This account is paused. Your data is safe — once payment is received, access is restored automatically."}{" "}
-            Contact your administrator or billing to reactivate.
+            This account is no longer active. Please contact your system administrator.
           </p>
           <button className="btn block" style={{ marginTop: 16 }} onClick={() => logout()}>
             Sign out

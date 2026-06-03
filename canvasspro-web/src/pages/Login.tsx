@@ -12,7 +12,7 @@ import { useAuth } from "../auth/AuthContext";
 type Mode = "login" | "invite" | "setpw";
 
 export default function Login() {
-  const { user, login, loginWithGoogle, loading } = useAuth();
+  const { user, login, loginWithGoogle, loading, blockedReason, clearBlocked } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
   const from = (location.state as { from?: Location })?.from?.pathname || "/";
@@ -37,8 +37,9 @@ export default function Login() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Only auto-redirect a normal returning sign-in — never mid-invite.
-  if (!loading && user && mode === "login") return <Navigate to={from} replace />;
+  // Only auto-redirect a normal returning sign-in — never mid-invite, and never
+  // a deactivated account (which AuthContext signs out with a blockedReason).
+  if (!loading && user && mode === "login" && !blockedReason) return <Navigate to={from} replace />;
 
   async function completeLink(addr: string) {
     setError("");
@@ -64,6 +65,7 @@ export default function Login() {
   const submit = async (e: FormEvent) => {
     e.preventDefault();
     setError("");
+    clearBlocked();
     setBusy(true);
     try {
       await login(email, password);
@@ -77,6 +79,7 @@ export default function Login() {
 
   const google = async () => {
     setError("");
+    clearBlocked();
     setBusy(true);
     try {
       await loginWithGoogle();
@@ -187,7 +190,7 @@ export default function Login() {
                 <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="current-password" required />
               </label>
 
-              {error && <div className="banner error show">{error}</div>}
+              {(error || blockedReason) && <div className="banner error show">{error || blockedReason}</div>}
               {notice && <div className="banner good show">{notice}</div>}
 
               <button className="btn primary block" type="submit" disabled={busy}>
