@@ -1,0 +1,52 @@
+name: Deploy to Firebase
+
+# Auto-deploys Hosting + Functions to the youtilityknock Firebase project on
+# every push to main, so merges go live without the manual Cloud Shell dance.
+# Can also be run on demand from the Actions tab (workflow_dispatch).
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# Never let two deploys race; queue them instead.
+concurrency:
+  group: firebase-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      # Root devDeps include firebase-tools; the build scripts install the
+      # web-app and functions deps under canvasspro-web themselves.
+      - name: Install tooling (firebase-tools)
+        run: npm install
+
+      - name: Build web app + assemble public/
+        run: npm run build
+
+      - name: Build Cloud Functions
+        run: npm run build:functions
+
+      # Authenticate the Firebase CLI with a service-account key stored as a
+      # repo secret. The key never appears in logs.
+      - name: Write service-account key
+        run: |
+          install -m 600 /dev/null "$RUNNER_TEMP/gcp-sa.json"
+          printf '%s' "$FIREBASE_SERVICE_ACCOUNT" > "$RUNNER_TEMP/gcp-sa.json"
+        env:
+          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+
+      - name: Deploy Hosting + Functions
+        run: npx firebase-tools deploy --only hosting,functions --project youtilityknock --non-interactive --force
+        env:
+          GOOGLE_APPLICATION_CREDENTIALS: ${{ runner.temp }}/gcp-sa.json
