@@ -337,9 +337,11 @@
     <div id="planForm" class="hidden" style="margin-bottom:16px;">
       <div class="grid-2">
         <div class="field"><span>Plan name *</span><input id="planName" placeholder="e.g. Pro" /></div>
-        <div class="field"><span>Price / month (USD)</span><input id="planPrice" type="number" min="0" value="0" /></div>
-        <div class="field"><span>Max users (0 = unlimited)</span><input id="planMaxUsers" type="number" min="0" value="0" /></div>
+        <div class="field"><span>Minimum monthly fee ($)</span><input id="planBaseFee" type="number" min="0" value="0" title="Base fee billed every cycle, covering the included users" /></div>
+        <div class="field"><span>Users included at that fee</span><input id="planIncludedUsers" type="number" min="0" value="0" title="How many users the minimum fee covers" /></div>
+        <div class="field"><span>Price per additional user ($)</span><input id="planPerUser" type="number" min="0" value="0" title="Charged for each user beyond the included count" /></div>
         <label class="day-chip" style="align-self:center;" title="Enterprise tier: hide the price and show 'Contact for pricing'"><input id="planContact" type="checkbox" /> Contact for pricing (hide price)</label>
+        <div class="field"><span>Hard user cap (0 = none)</span><input id="planMaxUsers" type="number" min="0" value="0" title="Optional: block adding users past this many" /></div>
         <div class="field"><span>Stripe Price ID (optional)</span><input id="planStripeId" placeholder="price_..." /></div>
       </div>
       <div class="field"><span>What this tier includes</span>
@@ -1095,11 +1097,19 @@ async function loadBilling(companyId, companyName) {
   $("companyBillingTitle").textContent = "Billing & invoices" + (companyName ? ` · ${companyName}` : "");
   let c = {};
   try { const snap = await getDoc(doc(db, "companies", companyId)); c = snap.exists() ? snap.data() : {}; } catch {}
-  const price = Number(c.planPrice) || 0;
-  $("billTotal").innerHTML = c.billingExempt ? 'Comped<small> — not billed</small>' : `$${price}<small>/mo</small>`;
+  // Two-part price: base fee (covers included users) + per-user beyond that.
+  const base = Number(c.baseFee ?? c.planPrice) || 0;
+  const incl = Number(c.includedUsers) || 0;
+  const per = Number(c.perUserPrice) || 0;
+  const activeUsers = (state.users || []).filter((u) => !u.disabled).length;
+  const extra = Math.max(0, activeUsers - incl);
+  const total = base + extra * per;
+  $("billTotal").innerHTML = c.billingExempt ? 'Comped<small> — not billed</small>' : `$${total}<small>/mo</small>`;
   const SVC_LABEL = Object.fromEntries(SERVICES);
   const feats = Array.isArray(c.features) ? c.features : SERVICES.map((s) => s[0]);
-  $("billServices").textContent = "Billed services: " + (feats.map((k) => SVC_LABEL[k] || k).join(", ") || "—");
+  const breakdown = c.billingExempt ? "" :
+    ` · $${base} base (incl ${incl} users)${per ? ` + ${extra} extra × $${per}` : ""} · ${activeUsers} active user${activeUsers === 1 ? "" : "s"}`;
+  $("billServices").textContent = "Billed services: " + (feats.map((k) => SVC_LABEL[k] || k).join(", ") || "—") + breakdown;
   $("cardStatus").textContent = c.cardLast4 ? `${c.cardBrand || "card"} •••• ${c.cardLast4}` : "none on file";
   $("nextBill").textContent = c.nextBillingAt ? `Next charge ${fmtDate(c.nextBillingAt)}` : (c.billingExempt ? "Comped" : "No card on file yet");
 
@@ -1234,10 +1244,17 @@ $("planSave").addEventListener("click", async () => {
   if (!name) { banner($("planBanner"), "Plan name required.", "error"); return; }
   const features = [...document.querySelectorAll(".planFeat")].filter((c) => c.checked).map((c) => c.value);
   const custom = $("planContact").checked;
+  const baseFee = Number($("planBaseFee").value) || 0;
+  const includedUsers = Number($("planIncludedUsers").value) || 0;
+  const perUserPrice = Number($("planPerUser").value) || 0;
   $("planSave").disabled = true;
   try {
     await addDoc(collection(db, "plans"), {
-      name, priceMonthly: custom ? 0 : (Number($("planPrice").value) || 0),
+      name,
+      baseFee: custom ? 0 : baseFee,
+      includedUsers: custom ? 0 : includedUsers,
+      perUserPrice: custom ? 0 : perUserPrice,
+      priceMonthly: custom ? 0 : baseFee, // legacy/min — the base fee
       custom, // true = "Contact for pricing" (Enterprise)
       maxUsers: Number($("planMaxUsers").value) || 0,
       stripePriceId: $("planStripeId").value.trim() || "",
@@ -1245,6 +1262,7 @@ $("planSave").addEventListener("click", async () => {
       createdAt: Date.now(),
     });
     $("planName").value = $("planDesc").value = $("planStripeId").value = "";
+    $("planBaseFee").value = $("planIncludedUsers").value = $("planPerUser").value = $("planMaxUsers").value = "0";
     $("planContact").checked = false;
     $("planForm").classList.add("hidden");
     banner($("banner"), "Plan created.", "good");
@@ -1254,16 +1272,17 @@ $("planSave").addEventListener("click", async () => {
 });
 
 // One-click: create the standard packages (skips any that already exist by name).
+// baseFee = minimum monthly fee (covers includedUsers); perUserPrice = each extra user.
 const DEFAULT_PACKAGES = [
-  { name: "Canvass", priceMonthly: 29, custom: false, maxUsers: 0, features: ["map"],
+  { name: "Canvass", baseFee: 29, includedUsers: 3, perUserPrice: 10, priceMonthly: 29, custom: false, maxUsers: 0, features: ["map"],
     description: "Bare-bones canvassing — map, leads, territories, and movers." },
-  { name: "Pro", priceMonthly: 59, custom: false, maxUsers: 0,
+  { name: "Pro", baseFee: 59, includedUsers: 5, perUserPrice: 12, priceMonthly: 59, custom: false, maxUsers: 0,
     features: ["map","scheduling","calendar","chat","analytics"],
     description: "Everything in Canvass plus scheduling, calendar sync, team chat, and analytics." },
-  { name: "Elite", priceMonthly: 89, custom: false, maxUsers: 0,
+  { name: "Elite", baseFee: 89, includedUsers: 10, perUserPrice: 15, priceMonthly: 89, custom: false, maxUsers: 0,
     features: ["map","scheduling","calendar","chat","analytics","rewards","skiptrace","planner"],
     description: "Full platform — adds rewards/gamify, skip-trace, and the Success Planner." },
-  { name: "Enterprise", priceMonthly: 0, custom: true, maxUsers: 0,
+  { name: "Enterprise", baseFee: 0, includedUsers: 0, perUserPrice: 0, priceMonthly: 0, custom: true, maxUsers: 0,
     features: ["map","skiptrace","scheduling","calendar","rewards","analytics","chat","planner"],
     description: "Everything, tailored to your organization. Contact for pricing." },
 ];
@@ -1292,8 +1311,12 @@ async function loadPlans() {
   body.innerHTML = "";
   state.plans.forEach((p) => {
     const tr = document.createElement("tr");
+    const base = Number(p.baseFee ?? p.priceMonthly) || 0;
+    const priceCell = p.custom
+      ? '<span class="pill">Contact</span>'
+      : `$${base}/mo<div class="muted small">incl ${p.includedUsers || 0} users · +$${p.perUserPrice || 0}/extra user</div>`;
     tr.innerHTML = `<td><strong>${esc(p.name)}</strong>${p.description?`<div class="muted small">${esc(p.description)}</div>`:""}</td>`+
-      `<td>${p.custom ? '<span class="pill">Contact</span>' : '$'+(p.priceMonthly||0)+'/mo'}</td><td>${p.maxUsers?p.maxUsers:"∞"}</td>`+
+      `<td>${priceCell}</td><td>${p.maxUsers?p.maxUsers:"∞"}</td>`+
       `<td class="muted small">${(p.features||[]).join(", ")||"—"}</td>`+
       `<td><button class="btn ghost sm del">Delete</button></td>`;
     tr.querySelector(".del").addEventListener("click", async () => { if (confirm(`Delete plan "${p.name}"?`)) { await deleteDoc(doc(db,"plans",p.id)); await loadPlans(); loadCompanies(); } });
@@ -1484,7 +1507,7 @@ async function loadCompanies() {
     snap.forEach((d) => {
       const c = d.data();
       const planOpts = ['<option value="">— plan —</option>']
-        .concat(state.plans.map((p) => `<option value="${esc(p.name)}" ${c.plan===p.name?"selected":""}>${esc(p.name)} ($${p.priceMonthly||0}/mo)</option>`));
+        .concat(state.plans.map((p) => `<option value="${esc(p.name)}" ${c.plan===p.name?"selected":""}>${esc(p.name)} ${p.custom?"(Contact)":"($"+(Number(p.baseFee ?? p.priceMonthly)||0)+"/mo)"}</option>`));
       if (c.plan && !state.plans.some((p) => p.name === c.plan)) planOpts.splice(1, 0, `<option value="${esc(c.plan)}" selected>${esc(c.plan)}</option>`);
       const statusOpts = ["active","trial","suspended"].map((s) => `<option value="${s}" ${(c.status||"active")===s?"selected":""}>${s}</option>`);
       const tr = document.createElement("tr");
