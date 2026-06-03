@@ -39,6 +39,8 @@ export interface Company {
   plan?: string;
   planId?: string;
   status?: string;
+  trialEndsAt?: number; // epoch ms a "trial" plan converts to a paused account
+  trialExpired?: boolean; // true once a trial lapsed and the account was paused
   features?: string[]; // enabled feature keys from the plan (undefined = all on)
   maxUsers?: number;
   planPrice?: number;

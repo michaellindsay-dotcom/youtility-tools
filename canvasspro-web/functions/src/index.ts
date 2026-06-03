@@ -10,6 +10,13 @@ import Stripe from "stripe";
 initializeApp();
 const db = getFirestore();
 
+// A "trial" plan grants full access for a short window, then the account is
+// paused (status → suspended) until they subscribe. No data is ever deleted, so
+// a paying conversion picks up exactly where the trial left off.
+const TRIAL_DAYS = 3;
+const TRIAL_MS = TRIAL_DAYS * 86400000;
+const isTrialPlan = (plan?: string) => (plan || "").trim().toLowerCase() === "trial";
+
 const ATTOM = {
   baseUrl: process.env.ATTOM_API_URL || "https://api.gateway.attomdata.com/propertyapi/v1.0.0",
   key: process.env.ATTOM_API_KEY || "",
@@ -295,8 +302,13 @@ export const createCompany = onCall(async (request) => {
   const { name, plan } = request.data as { name?: string; plan?: string };
   if (!name?.trim()) throw new HttpsError("invalid-argument", "Company name required.");
 
+  // A trial company starts in "trial" status with a 3-day countdown; a scheduled
+  // job (trialExpiry) pauses it when the window elapses, keeping all its data.
+  const trial = isTrialPlan(plan);
   const ref = await db.collection("companies").add({
-    name: name.trim(), plan: plan || "standard", status: "active",
+    name: name.trim(), plan: plan || "standard",
+    status: trial ? "trial" : "active",
+    ...(trial ? { trialEndsAt: Date.now() + TRIAL_MS, trialExpired: false } : {}),
     createdAt: Date.now(), createdBy: caller.uid,
   });
   // Standard seed roles.
@@ -1565,6 +1577,18 @@ export const setCompanyPlan = onCall(async (request) => {
   if (typeof billingExempt === "boolean") u.billingExempt = billingExempt;
   if (typeof plan === "string") {
     u.plan = plan;
+    if (isTrialPlan(plan)) {
+      // Put the company on a 3-day trial with full access. Keep an in-progress
+      // trial's existing end date; otherwise start a fresh window. Trial wins as
+      // the status unless the admin explicitly set one in the same change.
+      const cur = (await db.doc(`companies/${companyId}`).get()).data() || {};
+      const curEnd = Number(cur.trialEndsAt) || 0;
+      u.trialEndsAt = curEnd > Date.now() ? curEnd : Date.now() + TRIAL_MS;
+      u.trialExpired = false;
+      if (typeof status !== "string") u.status = "trial";
+      // Trial = the full product: drop any feature restriction (undefined = all on).
+      u.features = FieldValue.delete();
+    }
     // Copy the plan's feature set + limits onto the company so the app can gate.
     const ps = await db.collection("plans").where("name", "==", plan).limit(1).get();
     if (!ps.empty) {
@@ -1717,7 +1741,7 @@ export const stripeWebhook = onRequest({ cors: false }, async (req, res) => {
       if (companyId) {
         const u: Record<string, unknown> = {
           stripeCustomerId: obj.customer, stripeSubscriptionId: obj.subscription,
-          status: "active", updatedAt: Date.now(),
+          status: "active", trialEndsAt: 0, trialExpired: false, updatedAt: Date.now(),
         };
         const planId = obj.metadata?.planId;
         if (planId) {
@@ -1903,6 +1927,27 @@ export const billingDunning = onSchedule("every 24 hours", async () => {
     for (const to of await companyAdminEmails(d.id)) {
       await sendEmail(cfg, to, "Account paused — payment overdue",
         `Your YoutilityKnock account has been paused because payment is more than 3 days overdue. Update the card on file to restore access immediately.`);
+    }
+  }
+});
+
+// ───────────────────────────────────────────────────────────────────────────
+// trialExpiry — pause companies whose 3-day trial has elapsed. Suspending only
+// gates access; every lead, shift, and setting they entered is preserved, so
+// subscribing later resumes them exactly where they left off.
+// ───────────────────────────────────────────────────────────────────────────
+export const trialExpiry = onSchedule("every 1 hours", async () => {
+  const now = Date.now();
+  const snap = await db.collection("companies").where("status", "==", "trial").get();
+  const cfg = await getNotifyConfig();
+  for (const d of snap.docs) {
+    const c = d.data();
+    const end = Number(c.trialEndsAt) || 0;
+    if (!end || end > now) continue; // still inside the trial window
+    await d.ref.set({ status: "suspended", trialExpired: true, updatedAt: now }, { merge: true });
+    for (const to of await companyAdminEmails(d.id)) {
+      await sendEmail(cfg, to, "Trial ended — account paused",
+        `Your YoutilityKnock ${TRIAL_DAYS}-day trial has ended, so the account is now paused. All of your data is saved — subscribe to a plan to pick up right where you left off.`);
     }
   }
 });
