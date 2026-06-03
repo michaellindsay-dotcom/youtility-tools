@@ -20,10 +20,15 @@ interface AuthState {
   user: User | null;
   profile: UserProfile | null;
   company: Company | null;
+  /** True once the company doc has resolved at least once (exists or not). */
+  companyLoaded: boolean;
   role: Role | null;
   companyId: string | null;
   /** Signed in but has no provisioned company/profile (no access). */
   noAccess: boolean;
+  /** Why a deactivated/removed account was refused; shown on the login screen. */
+  blockedReason: string | null;
+  clearBlocked: () => void;
   loading: boolean;
   login: (email: string, password: string) => Promise<void>;
   loginWithGoogle: () => Promise<void>;
@@ -46,7 +51,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [company, setCompany] = useState<Company | null>(null);
+  const [companyLoaded, setCompanyLoaded] = useState(false);
   const [noAccess, setNoAccess] = useState(false);
+  const [blockedReason, setBlockedReason] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
   // Keep the company doc (incl. scheduling settings) live for the current user.
@@ -54,12 +61,38 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const cid = profile?.companyId;
     if (!cid) {
       setCompany(null);
+      setCompanyLoaded(false);
       return;
     }
-    return onSnapshot(doc(db, "companies", cid), (snap) =>
-      setCompany(snap.exists() ? ({ id: snap.id, ...(snap.data() as Omit<Company, "id">) }) : null)
-    );
+    setCompanyLoaded(false);
+    return onSnapshot(doc(db, "companies", cid), (snap) => {
+      setCompany(snap.exists() ? ({ id: snap.id, ...(snap.data() as Omit<Company, "id">) }) : null);
+      setCompanyLoaded(true);
+    });
   }, [profile?.companyId]);
+
+  // Refuse access to deactivated or removed accounts: sign them out and stash a
+  // message the login screen shows. Disabled *users* are already blocked by
+  // Firebase Auth; this additionally covers a suspended/inactive/removed
+  // *company* (whose users would otherwise still authenticate).
+  useEffect(() => {
+    if (!user || !profile) return;
+    let reason: string | null = null;
+    if (profile.disabled) {
+      reason = "Your account has been deactivated. Please contact your system administrator.";
+    } else if (companyLoaded) {
+      const status = String(company?.status || "active").toLowerCase();
+      if (!company) {
+        reason = "Your company account is no longer active. Please contact your system administrator.";
+      } else if (status === "suspended" || status === "inactive") {
+        reason = "Your company account is inactive. Please contact your system administrator.";
+      }
+    }
+    if (reason) {
+      setBlockedReason(reason);
+      void signOut(auth);
+    }
+  }, [user, profile, company, companyLoaded]);
 
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, async (u) => {
@@ -97,9 +130,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     user,
     profile,
     company,
+    companyLoaded,
     role: profile?.role ?? null,
     companyId: profile?.companyId ?? null,
     noAccess,
+    blockedReason,
+    clearBlocked: () => setBlockedReason(null),
     loading,
     login,
     loginWithGoogle,
