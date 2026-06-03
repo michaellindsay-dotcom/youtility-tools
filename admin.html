@@ -110,6 +110,18 @@
     border:1px solid var(--line-hi); background:rgba(255,255,255,.03); color:var(--ink-mid); cursor:pointer; }
   .tab:hover { color:var(--ink); border-color:var(--accent); }
   .tab.active { background:linear-gradient(135deg,var(--accent),var(--accent-2)); border-color:transparent; color:#06121F; }
+  /* Console home: big button hub */
+  .home-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(220px,1fr)); gap:14px; }
+  .home-btn { font-family:inherit; text-align:left; cursor:pointer; display:flex; flex-direction:column; gap:6px;
+    padding:18px; border-radius:16px; border:1px solid var(--line-hi); background:rgba(255,255,255,.03); color:var(--ink); transition:.15s; }
+  .home-btn:hover { border-color:var(--accent); transform:translateY(-2px); background:rgba(255,255,255,.06); }
+  .home-btn .hb-ico { font-size:26px; }
+  .home-btn b { font-size:15px; }
+  .home-btn small { color:var(--ink-mid); font-size:12px; line-height:1.4; }
+  /* Per-company services panel */
+  .svc-row > td { background:rgba(255,255,255,.02); }
+  .svc-panel { padding:6px 2px 10px; }
+  .svc-grid { display:flex; flex-wrap:wrap; gap:8px; }
 </style>
 </head>
 <body>
@@ -147,14 +159,28 @@
 
   <!-- Super-admin tab bar (hidden for company admins) -->
   <nav id="tabBar" class="tabbar hidden">
-    <button class="tab active" data-tab="companies">🏢 Companies</button>
-    <button class="tab" data-tab="payments">💳 Payments</button>
+    <button class="tab active" data-tab="home">🏠 Home</button>
+    <button class="tab" data-tab="companies">🏢 Companies</button>
+    <button class="tab" data-tab="payments">💳 Pricing</button>
     <button class="tab" data-tab="notifications">🔔 Notifications</button>
     <button class="tab" data-tab="apis">🔌 Integrations &amp; APIs</button>
     <button class="tab" data-tab="account">👤 My Account</button>
   </nav>
 
   <div id="banner" class="banner"></div>
+
+  <!-- Console home: simple button hub to every settings area (super-admin) -->
+  <section id="consoleHome" class="card hidden">
+    <h2>Super Admin Console</h2>
+    <p class="muted" style="margin:-6px 0 16px;font-size:13px;">Pick a settings area to manage.</p>
+    <div class="home-grid">
+      <button class="home-btn" data-go="companies"><span class="hb-ico">🏢</span><b>Companies</b><small>Create companies, assign packages, toggle services, status &amp; billing</small></button>
+      <button class="home-btn" data-go="payments"><span class="hb-ico">💳</span><b>Pricing &amp; Packages</b><small>Build tiers &amp; prices, load defaults, connect Stripe billing</small></button>
+      <button class="home-btn" data-go="apis"><span class="hb-ico">🔌</span><b>Integrations &amp; APIs</b><small>ATTOM, BatchData, Google/Microsoft calendars, CRM keys</small></button>
+      <button class="home-btn" data-go="notifications"><span class="hb-ico">🔔</span><b>Notifications</b><small>SendGrid email &amp; Twilio SMS providers</small></button>
+      <button class="home-btn" data-go="account"><span class="hb-ico">👤</span><b>My Account</b><small>Update your super-admin profile &amp; password</small></button>
+    </div>
+  </section>
 
   <!-- My Account (super-admin self-service) -->
   <section id="myAccountCard" class="card hidden">
@@ -289,17 +315,22 @@
 
   <!-- Plans & pricing (super-admin only) -->
   <section id="plansCard" class="card hidden">
-    <h2>Plans &amp; pricing
-      <button id="newPlanBtn" class="btn primary sm">+ New plan</button>
+    <h2>Pricing &amp; packages
+      <span style="float:right;display:flex;gap:8px;">
+        <button id="seedPlansBtn" class="btn ghost sm" title="Create the standard Canvass / Pro / Elite / Enterprise packages">✨ Load default packages</button>
+        <button id="newPlanBtn" class="btn primary sm">+ New plan</button>
+      </span>
     </h2>
     <p class="muted" style="margin:-6px 0 14px;font-size:13px;">
-      Subscription tiers and what each unlocks. Assign a plan to each company in the Companies list.
+      Subscription tiers and what each unlocks. Assign a package to each company in Companies, or toggle
+      individual services per company there. Enterprise shows “Contact for pricing.”
     </p>
     <div id="planForm" class="hidden" style="margin-bottom:16px;">
       <div class="grid-2">
         <div class="field"><span>Plan name *</span><input id="planName" placeholder="e.g. Pro" /></div>
         <div class="field"><span>Price / month (USD)</span><input id="planPrice" type="number" min="0" value="0" /></div>
         <div class="field"><span>Max users (0 = unlimited)</span><input id="planMaxUsers" type="number" min="0" value="0" /></div>
+        <label class="day-chip" style="align-self:center;" title="Enterprise tier: hide the price and show 'Contact for pricing'"><input id="planContact" type="checkbox" /> Contact for pricing (hide price)</label>
         <div class="field"><span>Stripe Price ID (optional)</span><input id="planStripeId" placeholder="price_..." /></div>
       </div>
       <div class="field"><span>What this tier includes</span>
@@ -311,6 +342,7 @@
           <label class="day-chip"><input type="checkbox" class="planFeat" value="rewards" /> Rewards &amp; gamify</label>
           <label class="day-chip"><input type="checkbox" class="planFeat" value="analytics" /> Advanced analytics</label>
           <label class="day-chip"><input type="checkbox" class="planFeat" value="chat" /> Team chat</label>
+          <label class="day-chip"><input type="checkbox" class="planFeat" value="planner" /> Success Planner (time keeper, goals, projections)</label>
         </div>
       </div>
       <div class="field"><span>Description</span><input id="planDesc" placeholder="Short summary reps/admins see" /></div>
@@ -702,7 +734,8 @@ const COMPANY_ONLY = new Set(["schedulingCard","crmCompanyCard","rolesCard","tea
 const ALL_TAB_CARDS = Object.values(TAB_CARDS).flat();
 
 function renderTab() {
-  const tab = state.currentTab || "companies";
+  const tab = state.currentTab || "home";
+  $("consoleHome").classList.toggle("hidden", tab !== "home");
   ALL_TAB_CARDS.forEach((id) => {
     const el = $(id); if (!el) return;
     const inTab = (TAB_CARDS[tab] || []).includes(id);
@@ -711,15 +744,17 @@ function renderTab() {
   });
   document.querySelectorAll("#tabBar .tab").forEach((b) => b.classList.toggle("active", b.dataset.tab === tab));
 }
-function showTab(name) { state.currentTab = name; renderTab(); }
+function showTab(name) { state.currentTab = name; renderTab(); window.scrollTo({ top: 0, behavior: "smooth" }); }
 $("tabBar").addEventListener("click", (e) => { const t = e.target.closest(".tab"); if (t) showTab(t.dataset.tab); });
+// Home hub: each big button jumps to that settings tab.
+$("consoleHome").addEventListener("click", (e) => { const b = e.target.closest(".home-btn"); if (b) showTab(b.dataset.go); });
 
 function enterConsole() {
   $("loginScreen").classList.add("hidden");
   $("console").classList.remove("hidden");
   if (state.isSuper) {
     $("tabBar").classList.remove("hidden");
-    state.currentTab = "companies";
+    state.currentTab = "home";
     loadPlans().then(loadCompanies);
     loadNotifyConfig();
     loadIntegrations();
@@ -985,21 +1020,54 @@ $("planSave").addEventListener("click", async () => {
   const name = $("planName").value.trim();
   if (!name) { banner($("planBanner"), "Plan name required.", "error"); return; }
   const features = [...document.querySelectorAll(".planFeat")].filter((c) => c.checked).map((c) => c.value);
+  const custom = $("planContact").checked;
   $("planSave").disabled = true;
   try {
     await addDoc(collection(db, "plans"), {
-      name, priceMonthly: Number($("planPrice").value) || 0,
+      name, priceMonthly: custom ? 0 : (Number($("planPrice").value) || 0),
+      custom, // true = "Contact for pricing" (Enterprise)
       maxUsers: Number($("planMaxUsers").value) || 0,
       stripePriceId: $("planStripeId").value.trim() || "",
       features, description: $("planDesc").value.trim() || "",
       createdAt: Date.now(),
     });
     $("planName").value = $("planDesc").value = $("planStripeId").value = "";
+    $("planContact").checked = false;
     $("planForm").classList.add("hidden");
     banner($("banner"), "Plan created.", "good");
     await loadPlans(); loadCompanies();
   } catch (e) { banner($("planBanner"), e.message || "Save failed.", "error"); }
   finally { $("planSave").disabled = false; }
+});
+
+// One-click: create the standard packages (skips any that already exist by name).
+const DEFAULT_PACKAGES = [
+  { name: "Canvass", priceMonthly: 29, custom: false, maxUsers: 0, features: ["map"],
+    description: "Bare-bones canvassing — map, leads, territories, and movers." },
+  { name: "Pro", priceMonthly: 59, custom: false, maxUsers: 0,
+    features: ["map","scheduling","calendar","chat","analytics"],
+    description: "Everything in Canvass plus scheduling, calendar sync, team chat, and analytics." },
+  { name: "Elite", priceMonthly: 89, custom: false, maxUsers: 0,
+    features: ["map","scheduling","calendar","chat","analytics","rewards","skiptrace","planner"],
+    description: "Full platform — adds rewards/gamify, skip-trace, and the Success Planner." },
+  { name: "Enterprise", priceMonthly: 0, custom: true, maxUsers: 0,
+    features: ["map","skiptrace","scheduling","calendar","rewards","analytics","chat","planner"],
+    description: "Everything, tailored to your organization. Contact for pricing." },
+];
+$("seedPlansBtn").addEventListener("click", async () => {
+  $("seedPlansBtn").disabled = true;
+  try {
+    const existing = new Set(state.plans.map((p) => p.name));
+    let made = 0;
+    for (const pkg of DEFAULT_PACKAGES) {
+      if (existing.has(pkg.name)) continue;
+      await addDoc(collection(db, "plans"), { ...pkg, stripePriceId: "", createdAt: Date.now() });
+      made++;
+    }
+    banner($("banner"), made ? `Created ${made} package${made===1?"":"s"}.` : "All default packages already exist.", "good");
+    await loadPlans(); loadCompanies();
+  } catch (e) { banner($("planBanner"), e.message || "Could not create packages.", "error"); }
+  finally { $("seedPlansBtn").disabled = false; }
 });
 async function loadPlans() {
   try {
@@ -1012,7 +1080,7 @@ async function loadPlans() {
   state.plans.forEach((p) => {
     const tr = document.createElement("tr");
     tr.innerHTML = `<td><strong>${esc(p.name)}</strong>${p.description?`<div class="muted small">${esc(p.description)}</div>`:""}</td>`+
-      `<td>$${(p.priceMonthly||0)}/mo</td><td>${p.maxUsers?p.maxUsers:"∞"}</td>`+
+      `<td>${p.custom ? '<span class="pill">Contact</span>' : '$'+(p.priceMonthly||0)+'/mo'}</td><td>${p.maxUsers?p.maxUsers:"∞"}</td>`+
       `<td class="muted small">${(p.features||[]).join(", ")||"—"}</td>`+
       `<td><button class="btn ghost sm del">Delete</button></td>`;
     tr.querySelector(".del").addEventListener("click", async () => { if (confirm(`Delete plan "${p.name}"?`)) { await deleteDoc(doc(db,"plans",p.id)); await loadPlans(); loadCompanies(); } });
@@ -1181,6 +1249,18 @@ $("companySave").addEventListener("click", async () => {
   finally { $("companySave").disabled = false; }
 });
 
+// Toggleable services per company (must match the feature keys the app gates on).
+const SERVICES = [
+  ["map", "Map & canvassing"],
+  ["skiptrace", "Skip-trace"],
+  ["scheduling", "Scheduling"],
+  ["calendar", "Calendar sync"],
+  ["chat", "Team chat"],
+  ["analytics", "Analytics"],
+  ["rewards", "Rewards/Gamify"],
+  ["planner", "Success Planner"],
+];
+
 async function loadCompanies() {
   const body = $("companiesBody");
   body.innerHTML = `<tr><td colspan="4" class="muted">Loading…</td></tr>`;
@@ -1200,6 +1280,7 @@ async function loadCompanies() {
         <td><select class="statusSel">${statusOpts.join("")}</select></td>
         <td class="row" style="gap:6px;">
           <label class="day-chip" title="Off = comped: full features, no charge"><input type="checkbox" class="chargeChk" ${c.billingExempt ? "" : "checked"} /> Charge</label>
+          <button class="btn ghost sm svc" title="Toggle services & set price for this company">⚙ Services</button>
           <button class="btn sm mng">Manage →</button>
           <button class="btn ghost sm chk" title="Start Stripe checkout for the selected plan">💳 Checkout</button>
           ${c.stripeCustomerId ? '<button class="btn ghost sm prt" title="Open Stripe billing portal">Portal</button>' : ""}
@@ -1236,6 +1317,33 @@ async function loadCompanies() {
       tr.querySelector(".planSel").addEventListener("change", savePlan);
       tr.querySelector(".statusSel").addEventListener("change", savePlan);
       body.appendChild(tr);
+
+      // Per-company services + price override (SalesRabbit-style on/off switches).
+      const on = (key) => !Array.isArray(c.features) || c.features.includes(key);
+      const svcRow = document.createElement("tr");
+      svcRow.className = "svc-row hidden";
+      svcRow.innerHTML = `<td colspan="4">
+        <div class="svc-panel">
+          <div class="svc-grid">
+            ${SERVICES.map(([k,label]) => `<label class="day-chip"><input type="checkbox" class="svcChk" value="${k}" ${on(k)?"checked":""} /> ${label}</label>`).join("")}
+          </div>
+          <div class="row" style="gap:10px;align-items:center;margin-top:10px;flex-wrap:wrap;">
+            <label class="field" style="max-width:200px;"><span>Price override ($/mo)</span><input type="number" min="0" class="svcPrice" value="${Number(c.planPrice)||0}" /></label>
+            <button class="btn primary sm svcSave">Save services</button>
+            <span class="muted small">Overrides the package — turn individual services on/off for just this company.</span>
+          </div>
+        </div></td>`;
+      tr.querySelector(".svc").addEventListener("click", () => svcRow.classList.toggle("hidden"));
+      svcRow.querySelector(".svcSave").addEventListener("click", async () => {
+        const features = [...svcRow.querySelectorAll(".svcChk")].filter((x) => x.checked).map((x) => x.value);
+        const planPrice = Number(svcRow.querySelector(".svcPrice").value) || 0;
+        try {
+          await setCompanyPlan({ companyId: d.id, features, planPrice });
+          c.features = features; c.planPrice = planPrice;
+          banner($("banner"), `${esc(c.name)}: services updated.`, "good");
+        } catch (e) { banner($("banner"), e.message || "Update failed.", "error"); }
+      });
+      body.appendChild(svcRow);
     });
   } catch (e) { body.innerHTML = `<tr><td colspan="4" class="banner error show">${esc(e.message)}</td></tr>`; }
 }

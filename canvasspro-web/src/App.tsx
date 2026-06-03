@@ -44,7 +44,7 @@ export default function App() {
         <Route path="map" element={<MapPage />} />
         <Route path="movers" element={<Movers />} />
         <Route path="team" element={<Team />} />
-        <Route path="shifts" element={<Shifts />} />
+        <Route path="shifts" element={<Gated feature="planner"><Shifts /></Gated>} />
         <Route path="stats" element={<Gated feature="analytics"><Stats /></Gated>} />
         <Route path="leaderboard" element={<Gated feature="rewards"><Leaderboard /></Gated>} />
         <Route path="gamify" element={<Gated feature="rewards"><Gamify /></Gated>} />

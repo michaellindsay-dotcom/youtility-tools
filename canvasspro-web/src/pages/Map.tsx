@@ -5,6 +5,7 @@ import { addDoc, collection, getDocs, query, where } from "firebase/firestore";
 import { Geolocation } from "@capacitor/geolocation";
 import { db, auth } from "../firebase";
 import { useAuth } from "../auth/AuthContext";
+import { hasFeature } from "../lib/features";
 import { useNav } from "../components/NavContext";
 import { DISP_COLOR } from "../lib/dispositions";
 import { lookupArea, parseAreaProperties, lookupMovers, parseMovers, type MoverHome } from "../lib/knockstat";
@@ -56,7 +57,7 @@ function inPolygon(pt: LatLng, poly: LatLng[]): boolean {
 }
 
 export default function MapPage() {
-  const { profile, role, companyId } = useAuth();
+  const { profile, role, companyId, company } = useAuth();
   const { openNav } = useNav();
   const elRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<L.Map | null>(null);
@@ -616,10 +617,12 @@ export default function MapPage() {
         </div>
       )}
 
-      {/* Bottom-left: shift HUD / start button */}
-      <div className="map-overlay map-bl">
-        <ShiftHud />
-      </div>
+      {/* Bottom-left: shift HUD / start button (Success Planner service) */}
+      {hasFeature(company, "planner") && (
+        <div className="map-overlay map-bl">
+          <ShiftHud />
+        </div>
+      )}
 
       {/* Chat FAB is rendered globally by Layout (with unread alert). */}
 

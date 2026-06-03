@@ -1555,7 +1555,10 @@ export const setStripeConfig = onCall(async (request) => {
 export const setCompanyPlan = onCall(async (request) => {
   const caller = await getCaller(request);
   if (!caller.isSuper) throw new HttpsError("permission-denied", "Super-admins only.");
-  const { companyId, plan, status, billingExempt } = (request.data || {}) as { companyId?: string; plan?: string; status?: string; billingExempt?: boolean };
+  const { companyId, plan, status, billingExempt, features, planPrice } = (request.data || {}) as {
+    companyId?: string; plan?: string; status?: string; billingExempt?: boolean;
+    features?: string[]; planPrice?: number;
+  };
   if (!companyId) throw new HttpsError("invalid-argument", "companyId required.");
   const u: Record<string, unknown> = { updatedAt: Date.now() };
   if (typeof status === "string") u.status = status;
@@ -1572,6 +1575,10 @@ export const setCompanyPlan = onCall(async (request) => {
       u.planPrice = Number(p.priceMonthly) || 0;
     }
   }
+  // Per-company overrides (applied after any plan copy so admin toggles win):
+  // turn individual services on/off and set a custom price for this company.
+  if (Array.isArray(features)) u.features = features.filter((x) => typeof x === "string");
+  if (typeof planPrice === "number" && isFinite(planPrice)) u.planPrice = planPrice;
   await db.doc(`companies/${companyId}`).set(u, { merge: true });
   return { ok: true };
 });

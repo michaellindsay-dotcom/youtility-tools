@@ -9,6 +9,7 @@ const links: { to: string; label: string; icon: string; end?: boolean; feat?: Fe
   { to: "/leads", label: "Leads", icon: "☰" },
   { to: "/chat", label: "Team Chat", icon: "💬", feat: "chat" },
   { to: "/schedule", label: "Schedule", icon: "📅", feat: "scheduling" },
+  { to: "/shifts", label: "Success Planner", icon: "◎", feat: "planner" },
   { to: "/team", label: "Team", icon: "⛩" },
   { to: "/stats", label: "Analytics", icon: "★", feat: "analytics" },
   { to: "/working", label: "Who's Working", icon: "🔥", feat: "chat" },
