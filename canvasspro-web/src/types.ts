@@ -274,6 +274,8 @@ export interface Reward {
   period: RewardPeriod; // window for an individual benchmark
   target: number; // threshold to unlock (benchmark) OR points cost (store)
   active?: boolean;
+  startsAt?: number; // when it becomes available (ms); unset = immediately
+  expiresAt?: number; // when it stops (ms); unset = never
   createdAt: number;
   createdBy: string;
 }

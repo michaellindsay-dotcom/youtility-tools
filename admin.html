@@ -644,6 +644,8 @@
         </div>
         <div class="field"><span id="rwTargetLbl">Target</span><input id="rwTarget" type="number" min="1" value="10" /></div>
         <div class="field"><span>Image</span><input id="rwImage" type="file" accept="image/*" /></div>
+        <div class="field"><span>Schedule — available from</span><input id="rwStarts" type="date" title="Leave blank to start immediately" /></div>
+        <div class="field"><span>Expiration date</span><input id="rwExpires" type="date" title="Leave blank to never expire" /></div>
       </div>
       <div class="row" style="justify-content:flex-end;">
         <button id="rwCancel" class="btn ghost sm">Cancel</button>
@@ -926,14 +928,19 @@ $("rwSave").addEventListener("click", async () => {
       const r = sRef(storage, `rewards/${companyId}/${Date.now()}_${file.name.replace(/[^\w.-]/g,"_")}`);
       await uploadBytes(r, file); imageUrl = await getDownloadURL(r);
     }
+    const startsAt = $("rwStarts").value ? new Date($("rwStarts").value + "T00:00:00").getTime() : 0;
+    const expiresAt = $("rwExpires").value ? new Date($("rwExpires").value + "T23:59:59").getTime() : 0;
+    if (startsAt && expiresAt && expiresAt < startsAt) { banner($("rewardBanner"), "Expiration can't be before the start date.", "error"); $("rwSave").disabled = false; return; }
     await addDoc(collection(db, "companies", companyId, "rewards"), {
       companyId, name, description: $("rwDesc").value.trim() || "", imageUrl,
       kind, audience: aud,
       metric: kind === "store" ? "points" : $("rwMetric").value,
       period: kind === "store" || aud === "team" ? "alltime" : $("rwPeriod").value,
-      target: Number($("rwTarget").value) || 1, active: true, createdAt: Date.now(), createdBy: auth.currentUser.uid,
+      target: Number($("rwTarget").value) || 1, active: true,
+      startsAt, expiresAt,
+      createdAt: Date.now(), createdBy: auth.currentUser.uid,
     });
-    $("rwName").value = $("rwDesc").value = ""; $("rwImage").value = "";
+    $("rwName").value = $("rwDesc").value = ""; $("rwImage").value = ""; $("rwStarts").value = $("rwExpires").value = "";
     $("rewardForm").classList.add("hidden");
     banner($("banner"), "Reward created.", "good");
     await loadRewards(companyId);
@@ -948,13 +955,19 @@ async function loadRewards(companyId) {
     const rows = snap.docs.map((d) => ({ id:d.id, ...d.data() }));
     if (!rows.length) { body.innerHTML = `<tr><td colspan="6" class="muted">No rewards yet.</td></tr>`; return; }
     body.innerHTML = "";
+    const now = Date.now();
     rows.forEach((r) => {
       const active = r.active !== false;
-      const cond = r.kind === "store" ? `${(r.target||0).toLocaleString()} pts`
-        : `${(r.target||0).toLocaleString()} ${(METRIC_LBL[r.metric]||r.metric||"").toLowerCase()}${r.audience==="team" ? " (team)" : " · "+(r.period||"")}`;
+      const expired = r.expiresAt && now > r.expiresAt;
+      const scheduled = r.startsAt && now < r.startsAt;
+      const sched = [r.startsAt ? `from ${fmtDate(r.startsAt)}` : "", r.expiresAt ? `until ${fmtDate(r.expiresAt)}` : ""].filter(Boolean).join(" ");
+      const cond = (r.kind === "store" ? `${(r.target||0).toLocaleString()} pts`
+        : `${(r.target||0).toLocaleString()} ${(METRIC_LBL[r.metric]||r.metric||"").toLowerCase()}${r.audience==="team" ? " (team)" : " · "+(r.period||"")}`)
+        + (sched ? ` · ${sched}` : "");
+      const statusTxt = !active ? "inactive" : expired ? "expired" : scheduled ? "scheduled" : "active";
       const tr = document.createElement("tr");
       tr.innerHTML = `<td>${esc(r.name)}</td><td>${esc(r.kind)}</td><td>${esc(r.audience)}</td><td class="muted small">${esc(cond)}</td>`+
-        `<td><span class="badge ${active?"":"disabled"}">${active?"active":"inactive"}</span></td>`+
+        `<td><span class="badge ${active && !expired && !scheduled ? "" : "disabled"}">${statusTxt}</span></td>`+
         `<td class="row" style="gap:6px;"><button class="btn ghost sm tgl">${active?"Deactivate":"Activate"}</button><button class="btn ghost sm del">Delete</button></td>`;
       tr.querySelector(".tgl").addEventListener("click", async () => { await updateDoc(doc(db,"companies",companyId,"rewards",r.id), { active: !active }); loadRewards(companyId); });
       tr.querySelector(".del").addEventListener("click", async () => { if (confirm(`Delete "${r.name}"?`)) { await deleteDoc(doc(db,"companies",companyId,"rewards",r.id)); loadRewards(companyId); } });
