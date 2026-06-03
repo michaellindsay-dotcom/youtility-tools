@@ -1572,7 +1572,18 @@ export const setCompanyPlan = onCall(async (request) => {
       u.planId = ps.docs[0].id;
       u.features = Array.isArray(p.features) ? p.features : [];
       u.maxUsers = Number(p.maxUsers) || 0;
-      u.planPrice = Number(p.priceMonthly) || 0;
+      // Two-part pricing: base fee (covers includedUsers) + perUserPrice each extra.
+      const baseFee = Number(p.baseFee ?? p.priceMonthly) || 0;
+      const includedUsers = Number(p.includedUsers) || 0;
+      const perUserPrice = Number(p.perUserPrice) || 0;
+      u.baseFee = baseFee;
+      u.includedUsers = includedUsers;
+      u.perUserPrice = perUserPrice;
+      // Effective monthly = base + overage based on the current active head-count.
+      const us = await db.collection("users").where("companyId", "==", companyId).get();
+      const activeUsers = us.docs.filter((d) => !d.data().disabled).length;
+      const extra = Math.max(0, activeUsers - includedUsers);
+      u.planPrice = baseFee + extra * perUserPrice;
     }
   }
   // Per-company overrides (applied after any plan copy so admin toggles win):
