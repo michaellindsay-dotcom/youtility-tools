@@ -620,7 +620,7 @@
 
   <!-- Rewards (per company) -->
   <section id="rewardsCard" class="card hidden">
-    <h2><span id="rewardsTitle">Rewards</span>
+    <h2><span id="rewardsTitle">Rewards &amp; Gamify</span>
       <button id="newRewardBtn" class="btn primary sm">+ New reward</button>
     </h2>
     <p class="muted" style="margin:-6px 0 14px;font-size:13px;">
@@ -844,12 +844,13 @@ async function selectCompany(companyId, companyName) {
   $("usersTitle").textContent = "Accounts" + suffix;
   $("schedulingTitle").textContent = "Scheduling" + suffix;
   $("crmCompanyTitle").textContent = "YoutilityCRM link" + suffix;
-  $("rewardsTitle").textContent = "Rewards" + suffix;
+  $("rewardsTitle").textContent = "Rewards & Gamify" + suffix;
   if (state.isSuper) {
     state.currentTab = "companies";
     renderTab();
   } else {
-    ["schedulingCard","crmCompanyCard","rolesCard","teamsCard","rewardsCard","redemptionsCard","companyBillingCard","usersCard"].forEach((id) => $(id).classList.remove("hidden"));
+    // Company admins: no YoutilityCRM link card (super-admin only).
+    ["schedulingCard","rolesCard","teamsCard","rewardsCard","redemptionsCard","companyBillingCard","usersCard"].forEach((id) => $(id).classList.remove("hidden"));
   }
   await Promise.all([loadRoles(), loadTeams(), loadScheduling(companyId), loadCompanyCrm(companyId), loadRewards(companyId), loadRedemptions(companyId)]);
   await loadUsers();
@@ -1316,11 +1317,11 @@ $("planSave").addEventListener("click", async () => {
 // One-click: create the standard packages (skips any that already exist by name).
 // baseFee = minimum monthly fee (covers includedUsers); perUserPrice = each extra user.
 const DEFAULT_PACKAGES = [
-  { name: "Canvass", baseFee: 29, includedUsers: 3, perUserPrice: 10, priceMonthly: 29, custom: false, maxUsers: 0, features: ["map"],
-    description: "Bare-bones canvassing — map, leads, territories, and movers." },
+  { name: "Canvass", baseFee: 29, includedUsers: 3, perUserPrice: 10, priceMonthly: 29, custom: false, maxUsers: 0, features: ["map","rewards"],
+    description: "Bare-bones canvassing — map, leads, territories, movers, and gamify." },
   { name: "Pro", baseFee: 59, includedUsers: 5, perUserPrice: 12, priceMonthly: 59, custom: false, maxUsers: 0,
-    features: ["map","scheduling","calendar","chat","analytics"],
-    description: "Everything in Canvass plus scheduling, calendar sync, team chat, and analytics." },
+    features: ["map","scheduling","calendar","chat","analytics","rewards"],
+    description: "Everything in Canvass plus scheduling, calendar sync, team chat, analytics, and gamify." },
   { name: "Elite", baseFee: 89, includedUsers: 10, perUserPrice: 15, priceMonthly: 89, custom: false, maxUsers: 0,
     features: ["map","scheduling","calendar","chat","analytics","rewards","skiptrace","planner"],
     description: "Full platform — adds rewards/gamify, skip-trace, and the Success Planner." },
