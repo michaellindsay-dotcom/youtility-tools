@@ -12,6 +12,15 @@ const CONVO = new Set(["pipeline", "appointment", "not_interested", "sold"]);
 const startOfWeek = () => { const d = new Date(); d.setDate(d.getDate() - ((d.getDay() + 6) % 7)); d.setHours(0,0,0,0); return d.getTime(); };
 const startOfMonth = () => new Date(new Date().getFullYear(), new Date().getMonth(), 1).getTime();
 
+// A reward shows only if it's active and inside its scheduled window (if any).
+function isLive(r: Reward): boolean {
+  if (!(r.active ?? true)) return false;
+  const now = Date.now();
+  if (r.startsAt && now < r.startsAt) return false;
+  if (r.expiresAt && now > r.expiresAt) return false;
+  return true;
+}
+
 // View-only rewards board. Reps see rewards + progress and can claim store
 // rewards; ALL creation/management lives in the admin console (admin.html).
 export default function Rewards() {
@@ -111,7 +120,7 @@ export default function Rewards() {
       } catch { seenRef.current = new Set(); }
     }
     const seen = seenRef.current;
-    const met = rewards.filter((r) => (r.active ?? true) && valueFor(r) >= r.target);
+    const met = rewards.filter((r) => isLive(r) && valueFor(r) >= r.target);
     const persist = () => localStorage.setItem(`yk_unlocked_${profile.uid}`, JSON.stringify([...seen]));
     if (!seededRef.current) {
       seededRef.current = true;
@@ -147,8 +156,8 @@ export default function Rewards() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rewards, myAll, myWeek, myMonth, teamAll, statsReady, windowReady, profile]);
 
-  const team = rewards.filter((r) => r.audience === "team" && (r.active ?? true));
-  const indiv = rewards.filter((r) => r.audience === "individual" && (r.active ?? true));
+  const team = rewards.filter((r) => r.audience === "team" && isLive(r));
+  const indiv = rewards.filter((r) => r.audience === "individual" && isLive(r));
 
   async function claim(r: Reward) {
     if (!profile || !companyId) return;
