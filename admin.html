@@ -369,20 +369,79 @@
     </table>
   </section>
 
-  <!-- Stripe billing (super-admin only) -->
+  <!-- Billing / payment provider (super-admin only) -->
   <section id="billingCard" class="card hidden">
-    <h2>Billing — Stripe</h2>
+    <h2>Billing — payment provider</h2>
     <p class="muted" style="margin:-6px 0 14px;font-size:13px;">
-      Connect Stripe to charge companies for their plan. Secret keys are stored server-side and never shown again.
+      Pick which gateway charges your companies, then connect its credentials. Secret keys are stored server-side and never shown again.
     </p>
-    <div class="grid-2">
-      <div class="field"><span>Publishable key</span><input id="stripePub" placeholder="pk_live_…" autocomplete="off" /></div>
-      <div class="field"><span>Secret key</span><input id="stripeSecret" type="password" placeholder="sk_live_… (leave blank to keep)" autocomplete="off" /></div>
-      <div class="field"><span>Webhook signing secret</span><input id="stripeWebhook" type="password" placeholder="whsec_… (leave blank to keep)" autocomplete="off" /></div>
+
+    <div class="grid-2" style="align-items:end;">
+      <div class="field"><span>Active payment provider</span>
+        <select id="billingProvider"><option value="stripe">Stripe</option><option value="square">Square</option></select>
+      </div>
+      <div class="row" style="justify-content:flex-start;">
+        <button id="providerSave" class="btn primary sm">Use this provider</button>
+        <span id="providerNow" class="muted small" style="align-self:center;"></span>
+      </div>
     </div>
-    <div class="row" style="justify-content:flex-end;margin-top:10px;">
-      <button id="stripeSave" class="btn primary sm">Save Stripe keys</button>
+    <p class="muted small" style="margin:6px 0 16px;">Switch the dropdown to configure either provider. Only the active one is used to bill.</p>
+
+    <!-- Stripe credentials -->
+    <div id="stripeBlock">
+      <h3 style="font-size:15px;margin:6px 0 10px;">Stripe credentials</h3>
+      <div class="grid-2">
+        <div class="field"><span>Publishable key</span><input id="stripePub" placeholder="pk_live_…" autocomplete="off" /></div>
+        <div class="field"><span>Secret key</span><input id="stripeSecret" type="password" placeholder="sk_live_… (leave blank to keep)" autocomplete="off" /></div>
+        <div class="field"><span>Webhook signing secret</span><input id="stripeWebhook" type="password" placeholder="whsec_… (leave blank to keep)" autocomplete="off" /></div>
+      </div>
+      <div class="row" style="justify-content:flex-end;margin-top:10px;">
+        <button id="stripeSave" class="btn primary sm">Save Stripe keys</button>
+      </div>
     </div>
+
+    <!-- Square credentials -->
+    <div id="squareBlock">
+      <h3 style="font-size:15px;margin:6px 0 10px;">Square credentials</h3>
+      <div class="grid-2">
+        <div class="field"><span>Environment</span>
+          <select id="sqEnv"><option value="sandbox">Sandbox (testing)</option><option value="production">Production (live payments)</option></select>
+        </div>
+        <div class="field"><span>Application ID</span><input id="sqAppId" placeholder="sq0idp-… (prod) / sandbox-sq0idb-… (test)" autocomplete="off" /></div>
+        <div class="field"><span>Location ID</span><input id="sqLocation" placeholder="L… (the location that receives payments)" autocomplete="off" /></div>
+        <div class="field"><span>Access token</span><input id="sqToken" type="password" placeholder="… (leave blank to keep)" autocomplete="off" /></div>
+        <div class="field"><span>Webhook signature key</span><input id="sqWebhook" type="password" placeholder="… (leave blank to keep)" autocomplete="off" /></div>
+      </div>
+      <div class="row" style="justify-content:flex-end;margin-top:10px;">
+        <button id="squareSave" class="btn primary sm">Save Square keys</button>
+      </div>
+
+      <details class="sq-help" style="margin-top:14px;background:#0e1726;border:1px solid #21314a;border-radius:10px;padding:10px 14px;">
+        <summary style="cursor:pointer;font-weight:600;">How to get your Square credentials (step by step)</summary>
+        <ol style="margin:12px 0 4px;padding-left:20px;line-height:1.6;font-size:13px;">
+          <li>Go to the <a href="https://developer.squareup.com/apps" target="_blank" rel="noopener">Square Developer Dashboard</a> and sign in with the Square account that should <strong>receive the money</strong>.</li>
+          <li>Click <strong>+ (Create app)</strong> — name it e.g. <em>YoutilityKnock</em> — or open an existing app.</li>
+          <li>At the top of the app, set the environment toggle: <strong>Sandbox</strong> to test, <strong>Production</strong> to take real payments. Set the matching <strong>Environment</strong> dropdown above.</li>
+          <li>Open the app's <strong>Credentials</strong> page:
+            <ul style="margin:4px 0;padding-left:18px;">
+              <li>Copy the <strong>Application ID</strong> (prod starts with <code>sq0idp-</code>, sandbox with <code>sandbox-sq0idb-</code>) → paste into <strong>Application ID</strong>.</li>
+              <li>Copy the <strong>Access token</strong> (production or sandbox) → paste into <strong>Access token</strong>. Keep it secret, like a password.</li>
+            </ul>
+          </li>
+          <li>Open <strong>Locations</strong> in the left menu, copy the <strong>Location ID</strong> (starts with <code>L</code>) of the location that should receive payments → paste into <strong>Location ID</strong>.</li>
+          <li>Open <strong>Webhooks → Subscriptions</strong>, click <strong>Add endpoint</strong>:
+            <ul style="margin:4px 0;padding-left:18px;">
+              <li>URL: <code id="sqWebhookUrl">https://youtilityknock.web.app/square/webhook</code></li>
+              <li>API version: the latest available.</li>
+              <li>Events: enable <code>payment.created</code> and <code>payment.updated</code>.</li>
+              <li>Save, then copy the endpoint's <strong>Signature key</strong> → paste into <strong>Webhook signature key</strong>.</li>
+            </ul>
+          </li>
+          <li>Click <strong>Save Square keys</strong>, set <strong>Active payment provider</strong> to <strong>Square</strong>, and click <strong>Use this provider</strong>.</li>
+        </ol>
+      </details>
+    </div>
+
     <div id="billingBanner" class="banner"></div>
   </section>
 
@@ -725,6 +784,10 @@ const getApiKeys      = httpsCallable(fns, "getApiKeys");
 const setApiKeys      = httpsCallable(fns, "setApiKeys");
 const getStripeConfig = httpsCallable(fns, "getStripeConfig");
 const setStripeConfig = httpsCallable(fns, "setStripeConfig");
+const setBillingProvider = httpsCallable(fns, "setBillingProvider");
+const getSquareConfig = httpsCallable(fns, "getSquareConfig");
+const setSquareConfig = httpsCallable(fns, "setSquareConfig");
+const squareSaveCardAndSubscribe = httpsCallable(fns, "squareSaveCardAndSubscribe");
 const setCompanyPlan  = httpsCallable(fns, "setCompanyPlan");
 const createCheckoutSession = httpsCallable(fns, "createCheckoutSession");
 const createBillingPortalSession = httpsCallable(fns, "createBillingPortalSession");
@@ -824,7 +887,7 @@ function enterConsole() {
     loadNotifyConfig();
     loadIntegrations();
     loadApiKeys();
-    loadStripe();
+    loadBillingConfig();
     loadCrm();
     loadMyAccount();
     renderTab();
@@ -1071,37 +1134,128 @@ $("apiKeysSave").addEventListener("click", async () => {
   finally { $("apiKeysSave").disabled = false; }
 });
 
-// ── Stripe billing (super-admin) ─────────────────────────────────────────
-async function loadStripe() {
+// ── Billing config (super-admin): provider selector + Stripe & Square keys ──
+let activeProvider = "stripe";
+
+// Show only the credential block for the provider chosen in the dropdown.
+function syncProviderBlocks() {
+  const sel = $("billingProvider").value;
+  $("stripeBlock").style.display = sel === "stripe" ? "" : "none";
+  $("squareBlock").style.display = sel === "square" ? "" : "none";
+}
+
+async function loadBillingConfig() {
   try {
     const { data } = await getStripeConfig();
+    activeProvider = data.provider || "stripe";
+    $("billingProvider").value = activeProvider;
+    $("providerNow").textContent = `Currently billing with ${activeProvider === "square" ? "Square" : "Stripe"}.`;
     $("stripePub").value = data.publishableKey || "";
     $("stripeSecret").placeholder = data.secretConfigured ? `${data.secretMask} (leave blank to keep)` : "sk_live_…";
     $("stripeWebhook").placeholder = data.webhookConfigured ? "configured (leave blank to keep)" : "whsec_…";
-  } catch (e) { banner($("billingBanner"), e.message || "Could not load Stripe config.", "error"); }
+  } catch (e) { banner($("billingBanner"), e.message || "Could not load billing config.", "error"); }
+  try {
+    const { data } = await getSquareConfig();
+    $("sqEnv").value = data.environment || "sandbox";
+    $("sqAppId").value = data.applicationId || "";
+    $("sqLocation").value = data.locationId || "";
+    $("sqToken").placeholder = data.accessTokenConfigured ? `${data.accessTokenMask} (leave blank to keep)` : "… access token";
+    $("sqWebhook").placeholder = data.webhookConfigured ? "configured (leave blank to keep)" : "… signature key";
+  } catch (e) { /* square optional */ }
+  // Show the live webhook URL using the current origin (falls back to default).
+  try { const el = $("sqWebhookUrl"); if (el) el.textContent = `${location.origin}/square/webhook`; } catch {}
+  syncProviderBlocks();
 }
+
+$("billingProvider").addEventListener("change", syncProviderBlocks);
+
+$("providerSave").addEventListener("click", async () => {
+  $("providerSave").disabled = true;
+  try {
+    const provider = $("billingProvider").value;
+    await setBillingProvider({ provider });
+    activeProvider = provider;
+    squarePublic = null; // company billing card will re-read the active provider
+    $("providerNow").textContent = `Currently billing with ${provider === "square" ? "Square" : "Stripe"}.`;
+    banner($("billingBanner"), `Now billing with ${provider === "square" ? "Square" : "Stripe"}.`, "good");
+  } catch (e) { banner($("billingBanner"), e.message || "Could not switch provider.", "error"); }
+  finally { $("providerSave").disabled = false; }
+});
+
 $("stripeSave").addEventListener("click", async () => {
   $("stripeSave").disabled = true;
   try {
     await setStripeConfig({ publishableKey: $("stripePub").value, secretKey: $("stripeSecret").value, webhookSecret: $("stripeWebhook").value });
     $("stripeSecret").value = ""; $("stripeWebhook").value = "";
     banner($("billingBanner"), "Stripe keys saved.", "good");
-    loadStripe();
+    loadBillingConfig();
   } catch (e) { banner($("billingBanner"), e.message || "Save failed.", "error"); }
   finally { $("stripeSave").disabled = false; }
 });
 
+$("squareSave").addEventListener("click", async () => {
+  $("squareSave").disabled = true;
+  try {
+    await setSquareConfig({
+      environment: $("sqEnv").value,
+      applicationId: $("sqAppId").value,
+      locationId: $("sqLocation").value,
+      accessToken: $("sqToken").value,
+      webhookSignatureKey: $("sqWebhook").value,
+    });
+    $("sqToken").value = ""; $("sqWebhook").value = "";
+    squarePublic = null; // refresh the company billing card's SDK config
+    banner($("billingBanner"), "Square keys saved.", "good");
+    loadBillingConfig();
+  } catch (e) { banner($("billingBanner"), e.message || "Save failed.", "error"); }
+  finally { $("squareSave").disabled = false; }
+});
+
 // ── Company billing + invoices ───────────────────────────────────────────
 let stripeJs = null, cardElement = null, billingCompany = null, billingInvoices = [];
+let squarePublic = null, squarePayments = null, squareCard = null, billingProviderActive = "stripe";
 
-async function ensureStripe() {
-  if (stripeJs) return stripeJs;
+// Read which provider is active + its public (browser-safe) keys, cached.
+async function loadBillingPublic() {
+  if (squarePublic) return squarePublic;
   try {
     const { data } = await getBillingPublicConfig();
-    if (!data.publishableKey || typeof Stripe === "undefined") return null;
-    stripeJs = Stripe(data.publishableKey);
-    return stripeJs;
-  } catch { return null; }
+    squarePublic = data;
+    billingProviderActive = data.provider || "stripe";
+  } catch { squarePublic = { provider: "stripe" }; billingProviderActive = "stripe"; }
+  return squarePublic;
+}
+
+async function ensureStripe(pub) {
+  if (stripeJs) return stripeJs;
+  if (!pub.publishableKey || typeof Stripe === "undefined") return null;
+  stripeJs = Stripe(pub.publishableKey);
+  return stripeJs;
+}
+
+// Load the Square Web Payments SDK on demand (sandbox vs production CDN).
+function loadSquareSdk(environment) {
+  return new Promise((resolve) => {
+    if (window.Square) return resolve(window.Square);
+    const sc = document.createElement("script");
+    sc.src = environment === "production"
+      ? "https://web.squarecdn.com/v1/square.js"
+      : "https://sandbox.web.squarecdn.com/v1/square.js";
+    sc.onload = () => resolve(window.Square || null);
+    sc.onerror = () => resolve(null);
+    document.head.appendChild(sc);
+  });
+}
+
+// Mount Square's hosted card field into #cardElement.
+async function ensureSquareCard(pub) {
+  const sq = await loadSquareSdk(pub.square && pub.square.environment);
+  if (!sq || !pub.square || !pub.square.applicationId || !pub.square.locationId) return null;
+  if (!squarePayments) squarePayments = sq.payments(pub.square.applicationId, pub.square.locationId);
+  if (squareCard) { try { await squareCard.destroy(); } catch {} squareCard = null; }
+  squareCard = await squarePayments.card();
+  await squareCard.attach("#cardElement");
+  return squareCard;
 }
 
 function escHtml(s){ return String(s==null?"":s).replace(/[&<>"]/g,(c)=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c])); }
@@ -1127,15 +1281,28 @@ async function loadBilling(companyId, companyName) {
   $("cardStatus").textContent = c.cardLast4 ? `${c.cardBrand || "card"} •••• ${c.cardLast4}` : "none on file";
   $("nextBill").textContent = c.nextBillingAt ? `Next charge ${fmtDate(c.nextBillingAt)}` : (c.billingExempt ? "Comped" : "No card on file yet");
 
-  const s = await ensureStripe();
-  if (s) {
-    if (cardElement) { try { cardElement.unmount(); } catch {} }
-    cardElement = s.elements().create("card", { style: { base: { color: "#e8eef7", fontSize: "15px", "::placeholder": { color: "#8aa0b8" } } } });
-    cardElement.mount("#cardElement");
-    $("saveCardBtn").disabled = false;
+  // Mount the card field for whichever provider is active.
+  const pub = await loadBillingPublic();
+  $("cardElement").innerHTML = "";
+  if (billingProviderActive === "square") {
+    const card = await ensureSquareCard(pub);
+    if (card) {
+      $("saveCardBtn").disabled = false;
+    } else {
+      $("cardElement").innerHTML = '<span class="muted small">Add Square credentials in Pricing → Billing to enable card capture.</span>';
+      $("saveCardBtn").disabled = true;
+    }
   } else {
-    $("cardElement").innerHTML = '<span class="muted small">Add a Stripe publishable key in Pricing → Billing to enable card capture.</span>';
-    $("saveCardBtn").disabled = true;
+    const s = await ensureStripe(pub);
+    if (s) {
+      if (cardElement) { try { cardElement.unmount(); } catch {} }
+      cardElement = s.elements().create("card", { style: { base: { color: "#e8eef7", fontSize: "15px", "::placeholder": { color: "#8aa0b8" } } } });
+      cardElement.mount("#cardElement");
+      $("saveCardBtn").disabled = false;
+    } else {
+      $("cardElement").innerHTML = '<span class="muted small">Add a Stripe publishable key in Pricing → Billing to enable card capture.</span>';
+      $("saveCardBtn").disabled = true;
+    }
   }
   await loadCompanyInvoices(companyId);
 }
@@ -1157,13 +1324,24 @@ async function loadCompanyInvoices(companyId) {
 }
 
 $("saveCardBtn").addEventListener("click", async () => {
-  if (!billingCompany || !stripeJs || !cardElement) return;
+  if (!billingCompany) return;
   $("saveCardBtn").disabled = true;
   try {
-    const { data: si } = await createSetupIntent({ companyId: billingCompany });
-    const result = await stripeJs.confirmCardSetup(si.clientSecret, { payment_method: { card: cardElement } });
-    if (result.error) throw new Error(result.error.message);
-    const { data } = await saveCardAndSubscribe({ companyId: billingCompany, paymentMethodId: result.setupIntent.payment_method });
+    let data;
+    if (billingProviderActive === "square") {
+      if (!squareCard) throw new Error("Card field isn't ready.");
+      const result = await squareCard.tokenize();
+      if (result.status !== "OK") {
+        throw new Error((result.errors && result.errors[0] && result.errors[0].message) || "Card could not be verified.");
+      }
+      ({ data } = await squareSaveCardAndSubscribe({ companyId: billingCompany, sourceId: result.token }));
+    } else {
+      if (!stripeJs || !cardElement) return;
+      const { data: si } = await createSetupIntent({ companyId: billingCompany });
+      const result = await stripeJs.confirmCardSetup(si.clientSecret, { payment_method: { card: cardElement } });
+      if (result.error) throw new Error(result.error.message);
+      ({ data } = await saveCardAndSubscribe({ companyId: billingCompany, paymentMethodId: result.setupIntent.payment_method }));
+    }
     banner($("companyBillingBanner"), `Card saved (${data.brand || "card"} ••••${data.last4 || ""}). Billing runs every 30 days.`, "good");
     loadBilling(billingCompany);
     if (state.isSuper) loadCompanies();

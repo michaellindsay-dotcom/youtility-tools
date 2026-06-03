@@ -6,6 +6,7 @@ import { initializeApp } from "firebase-admin/app";
 import { getAuth } from "firebase-admin/auth";
 import { getFirestore, FieldValue } from "firebase-admin/firestore";
 import Stripe from "stripe";
+import * as crypto from "crypto";
 
 initializeApp();
 const db = getFirestore();
@@ -1538,12 +1539,31 @@ export const setApiKeys = onCall(async (request) => {
   return { ok: true };
 });
 
+// Which gateway charges companies: "stripe" (default) or "square". The whole
+// platform uses one active provider at a time; the super-admin picks it here.
+function billingProvider(c: Record<string, unknown>): "stripe" | "square" {
+  return c.provider === "square" ? "square" : "stripe";
+}
+
+// Super-admin: choose the active payment provider.
+export const setBillingProvider = onCall(async (request) => {
+  const caller = await getCaller(request);
+  if (!caller.isSuper) throw new HttpsError("permission-denied", "Super-admins only.");
+  const { provider } = (request.data || {}) as { provider?: string };
+  if (provider !== "stripe" && provider !== "square") {
+    throw new HttpsError("invalid-argument", "provider must be 'stripe' or 'square'.");
+  }
+  await db.doc("config/billing").set({ provider, updatedAt: Date.now(), updatedBy: caller.uid }, { merge: true });
+  return { ok: true };
+});
+
 // Stripe keys — publishable is shown; secret + webhook are masked.
 export const getStripeConfig = onCall(async (request) => {
   const caller = await getCaller(request);
   if (!caller.isSuper) throw new HttpsError("permission-denied", "Super-admins only.");
   const c = ((await db.doc("config/billing").get()).data() as Record<string, string>) || {};
   return {
+    provider: billingProvider(c),
     publishableKey: c.stripePublishableKey || "",
     secretConfigured: !!c.stripeSecretKey,
     secretMask: mask(c.stripeSecretKey),
@@ -1559,6 +1579,37 @@ export const setStripeConfig = onCall(async (request) => {
   if (typeof d.publishableKey === "string") u.stripePublishableKey = d.publishableKey.trim();
   if (typeof d.secretKey === "string" && d.secretKey.trim()) u.stripeSecretKey = d.secretKey.trim();
   if (typeof d.webhookSecret === "string" && d.webhookSecret.trim()) u.stripeWebhookSecret = d.webhookSecret.trim();
+  await db.doc("config/billing").set(u, { merge: true });
+  return { ok: true };
+});
+
+// Square keys — application/location IDs are shown; access token + webhook key
+// are masked. `environment` is "sandbox" (testing) or "production" (live money).
+export const getSquareConfig = onCall(async (request) => {
+  const caller = await getCaller(request);
+  if (!caller.isSuper) throw new HttpsError("permission-denied", "Super-admins only.");
+  const c = ((await db.doc("config/billing").get()).data() as Record<string, string>) || {};
+  return {
+    provider: billingProvider(c),
+    environment: c.squareEnvironment === "production" ? "production" : "sandbox",
+    applicationId: c.squareApplicationId || "",
+    locationId: c.squareLocationId || "",
+    accessTokenConfigured: !!c.squareAccessToken,
+    accessTokenMask: mask(c.squareAccessToken),
+    webhookConfigured: !!c.squareWebhookSignatureKey,
+  };
+});
+
+export const setSquareConfig = onCall(async (request) => {
+  const caller = await getCaller(request);
+  if (!caller.isSuper) throw new HttpsError("permission-denied", "Super-admins only.");
+  const d = (request.data || {}) as Record<string, string>;
+  const u: Record<string, unknown> = { updatedAt: Date.now(), updatedBy: caller.uid };
+  if (d.environment === "production" || d.environment === "sandbox") u.squareEnvironment = d.environment;
+  if (typeof d.applicationId === "string") u.squareApplicationId = d.applicationId.trim();
+  if (typeof d.locationId === "string") u.squareLocationId = d.locationId.trim();
+  if (typeof d.accessToken === "string" && d.accessToken.trim()) u.squareAccessToken = d.accessToken.trim();
+  if (typeof d.webhookSignatureKey === "string" && d.webhookSignatureKey.trim()) u.squareWebhookSignatureKey = d.webhookSignatureKey.trim();
   await db.doc("config/billing").set(u, { merge: true });
   return { ok: true };
 });
@@ -1798,11 +1849,21 @@ export const stripeWebhook = onRequest({ cors: false }, async (req, res) => {
   }
 });
 
-// Publishable key for the embedded card field (any authed company admin/super).
+// Public config for the embedded card field (any authed company admin/super).
+// Returns the active provider plus only the non-secret keys that the browser
+// SDK needs (Stripe publishable key, or Square app/location id + environment).
 export const getBillingPublicConfig = onCall(async (request) => {
   await getCaller(request);
   const c = ((await db.doc("config/billing").get()).data() as Record<string, string>) || {};
-  return { publishableKey: c.stripePublishableKey || "" };
+  return {
+    provider: billingProvider(c),
+    publishableKey: c.stripePublishableKey || "",
+    square: {
+      environment: c.squareEnvironment === "production" ? "production" : "sandbox",
+      applicationId: c.squareApplicationId || "",
+      locationId: c.squareLocationId || "",
+    },
+  };
 });
 
 // List invoices for in-app viewing: super-admin sees all (optionally filtered to
@@ -1912,6 +1973,197 @@ export const emailInvoice = onCall(async (request) => {
       `Your YoutilityKnock invoice ${inv.number || ""} for $${amt} is ${inv.status}.${link ? "\n\nView / pay: " + link : ""}`)) sent++;
   }
   return { ok: true, sent };
+});
+
+// ════════════════════════════════════════════════════════════════════════════
+// SQUARE BILLING — the alternative to Stripe. Square has no "metered recurring
+// for an arbitrary amount" primitive that fits per-company pricing, so instead
+// we save a card on file (tokenized in the browser by the Square Web Payments
+// SDK), charge the effective monthly price immediately, and let a daily cron
+// re-charge it every 30 days. Status sync + dunning reuse the same fields and
+// the same billingDunning job as Stripe. Keys live in config/billing.
+// ════════════════════════════════════════════════════════════════════════════
+const SQUARE_VERSION = "2025-01-23"; // Square API version pin
+
+async function squareCfg() {
+  const c = ((await db.doc("config/billing").get()).data() as Record<string, string>) || {};
+  if (!c.squareAccessToken) throw new HttpsError("failed-precondition", "Square isn't configured. Add keys in the admin console.");
+  const production = c.squareEnvironment === "production";
+  return {
+    token: c.squareAccessToken,
+    locationId: c.squareLocationId || "",
+    base: production ? "https://connect.squareup.com" : "https://connect.squareupsandbox.com",
+  };
+}
+
+// Thin REST wrapper (Square's Node SDK churns its types; the codebase already
+// talks to ATTOM/SendGrid/Twilio over fetch, so we do the same here).
+async function squareApi(cfg: { token: string; base: string }, path: string, body?: unknown) {
+  const res = await fetch(cfg.base + path, {
+    method: "POST",
+    headers: {
+      "Authorization": `Bearer ${cfg.token}`,
+      "Square-Version": SQUARE_VERSION,
+      "Content-Type": "application/json",
+    },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  const json: any = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    const detail = json?.errors?.[0]?.detail || `Square API ${res.status}`;
+    throw new HttpsError("internal", detail);
+  }
+  return json;
+}
+
+// Mirror a completed Square payment into invoices/{id} so it shows in the same
+// in-app AR / invoice views Stripe payments use.
+async function mirrorSquarePayment(companyId: string, payment: any): Promise<void> {
+  const companyName = (await db.doc(`companies/${companyId}`).get()).data()?.name || "";
+  const cents = payment?.amount_money?.amount ?? 0;
+  const paid = payment?.status === "COMPLETED";
+  await db.doc(`invoices/${payment.id}`).set({
+    squarePaymentId: payment.id, companyId, companyName,
+    number: payment.receipt_number || "",
+    status: paid ? "paid" : (payment.status || "open").toLowerCase(),
+    amountDue: cents, amountPaid: paid ? cents : 0,
+    currency: (payment?.amount_money?.currency || "USD").toLowerCase(),
+    created: payment.created_at ? new Date(payment.created_at).getTime() : Date.now(),
+    hostedInvoiceUrl: payment.receipt_url || "", invoicePdf: payment.receipt_url || "",
+    lines: [{ description: "YoutilityKnock subscription", amount: cents }],
+    updatedAt: Date.now(),
+  }, { merge: true });
+}
+
+// Charge a company's saved Square card for its effective monthly price. Advances
+// the 30-day clock + records the invoice on success; marks it past_due on
+// failure (billingDunning then pauses it after the 3-day grace window).
+async function runSquareCharge(companyId: string): Promise<{ ok: boolean; error?: string }> {
+  const ref = db.doc(`companies/${companyId}`);
+  const company = (await ref.get()).data() || {};
+  const cents = Math.round((Number(company.planPrice) || 0) * 100);
+  if (company.billingExempt || cents <= 0) return { ok: true };
+  const cardId = company.squareCardId as string | undefined;
+  const customerId = company.squareCustomerId as string | undefined;
+  if (!cardId || !customerId) return { ok: false, error: "No card on file." };
+  const cfg = await squareCfg();
+  try {
+    const { payment } = await squareApi(cfg, "/v2/payments", {
+      idempotency_key: crypto.randomUUID(),
+      source_id: cardId,
+      customer_id: customerId,
+      location_id: cfg.locationId || undefined,
+      amount_money: { amount: cents, currency: "USD" },
+      note: `YoutilityKnock — ${company.plan || "Subscription"}`,
+    });
+    await mirrorSquarePayment(companyId, payment);
+    await ref.set({
+      status: "active", pastDueSince: 0, billingHold: false,
+      nextBillingAt: Date.now() + BILLING_INTERVAL_DAYS * 86400000, updatedAt: Date.now(),
+    }, { merge: true });
+    return { ok: true };
+  } catch (e: any) {
+    const patch: Record<string, unknown> = { status: "past_due", updatedAt: Date.now() };
+    if (!company.pastDueSince) patch.pastDueSince = Date.now();
+    await ref.set(patch, { merge: true });
+    const cfgN = await getNotifyConfig();
+    for (const to of await companyAdminEmails(companyId)) {
+      await sendEmail(cfgN, to, "Payment failed — action needed",
+        `We couldn't process your YoutilityKnock payment. Please update the card on file to avoid interruption — your account will be paused if payment isn't received within 3 days.`);
+    }
+    return { ok: false, error: e?.message || "Charge failed." };
+  }
+}
+
+// Save a Square card on file (token from the browser Web Payments SDK) and, if
+// billing isn't already running, take the first monthly charge to start it.
+export const squareSaveCardAndSubscribe = onCall(async (request) => {
+  const caller = await getCaller(request);
+  const { companyId: cid, sourceId } = (request.data || {}) as { companyId?: string; sourceId?: string };
+  const companyId = authorizeForCompany(caller, cid);
+  if (!sourceId) throw new HttpsError("invalid-argument", "sourceId (card token) required.");
+  const cfg = await squareCfg();
+  const ref = db.doc(`companies/${companyId}`);
+  const company = (await ref.get()).data() || {};
+
+  // Ensure a Square customer for this company.
+  let customerId = company.squareCustomerId as string | undefined;
+  if (!customerId) {
+    const { customer } = await squareApi(cfg, "/v2/customers", {
+      idempotency_key: crypto.randomUUID(),
+      company_name: (company.name as string) || companyId,
+      reference_id: companyId,
+    });
+    customerId = customer.id;
+    await ref.set({ squareCustomerId: customerId, updatedAt: Date.now() }, { merge: true });
+  }
+
+  // Store the card on file.
+  const { card } = await squareApi(cfg, "/v2/cards", {
+    idempotency_key: crypto.randomUUID(),
+    source_id: sourceId,
+    card: { customer_id: customerId },
+  });
+  const hadBilling = !!company.squareCardId && (Number(company.nextBillingAt) || 0) > Date.now();
+  await ref.set({
+    squareCardId: card.id,
+    cardBrand: card.card_brand || "", cardLast4: card.last_4 || "",
+    updatedAt: Date.now(),
+  }, { merge: true });
+
+  // Start the cycle with an immediate charge unless billing is already active.
+  const cents = Math.round((Number(company.planPrice) || 0) * 100);
+  if (!company.billingExempt && cents > 0 && !hadBilling) {
+    const r = await runSquareCharge(companyId);
+    if (!r.ok) throw new HttpsError("internal", r.error || "Could not take first payment.");
+  }
+  return { ok: true, brand: card.card_brand || "", last4: card.last_4 || "" };
+});
+
+// Daily Square recurring charge: re-bill each Square company when its 30-day
+// clock comes due. (Stripe companies are billed by Stripe's own subscriptions.)
+export const squareBillingCron = onSchedule("every 24 hours", async () => {
+  const c = ((await db.doc("config/billing").get()).data() as Record<string, string>) || {};
+  if (billingProvider(c) !== "square") return; // only when Square is the active gateway
+  const now = Date.now();
+  const snap = await db.collection("companies").where("squareCardId", ">", "").get();
+  for (const d of snap.docs) {
+    const co = d.data();
+    if (co.billingExempt || co.status === "suspended") continue;
+    if ((Number(co.nextBillingAt) || 0) > now) continue; // not due yet
+    await runSquareCharge(d.id);
+  }
+});
+
+// Square webhook (Hosting rewrites /square/** here). Verifies the HMAC-SHA256
+// signature, then mirrors payments + keeps the company status in sync.
+export const squareWebhook = onRequest({ cors: false }, async (req, res) => {
+  const c = ((await db.doc("config/billing").get()).data() as Record<string, string>) || {};
+  const key = c.squareWebhookSignatureKey;
+  if (!key) { res.status(503).send("Square not configured"); return; }
+  const raw = (req as unknown as { rawBody: Buffer }).rawBody?.toString("utf8") || "";
+  const sig = req.headers["x-square-hmacsha256-signature"] as string;
+  const expected = crypto.createHmac("sha256", key).update(`${APP_URL}/square/webhook` + raw).digest("base64");
+  if (!sig || sig !== expected) { res.status(400).send("bad signature"); return; }
+
+  try {
+    const event = JSON.parse(raw || "{}");
+    const payment = event?.data?.object?.payment;
+    if (payment?.customer_id) {
+      const snap = await db.collection("companies").where("squareCustomerId", "==", payment.customer_id).limit(1).get();
+      if (!snap.empty) {
+        const companyId = snap.docs[0].id;
+        await mirrorSquarePayment(companyId, payment);
+        if (payment.status === "COMPLETED") {
+          await snap.docs[0].ref.set({ status: "active", pastDueSince: 0, billingHold: false, updatedAt: Date.now() }, { merge: true });
+        }
+      }
+    }
+    res.json({ received: true });
+  } catch (e: any) {
+    logger.error("Square webhook handler error", e);
+    res.status(500).send("handler error");
+  }
 });
 
 // Daily dunning: pause companies still unpaid 3 days after a failed charge.
