@@ -1740,7 +1740,7 @@ async function loadCompanies() {
           <label class="day-chip" title="Off = comped: full features, no charge"><input type="checkbox" class="chargeChk" ${c.billingExempt ? "" : "checked"} /> Charge</label>
           <button class="btn ghost sm svc" title="Toggle services & set price for this company">⚙ Services</button>
           <button class="btn sm mng">Manage →</button>
-          <button class="btn ghost sm chk" title="Start Stripe checkout for the selected plan">💳 Checkout</button>
+          <button class="btn ghost sm chk" title="Bill this company for the selected plan">💳 Bill</button>
           ${c.stripeCustomerId ? '<button class="btn ghost sm prt" title="Open Stripe billing portal">Portal</button>' : ""}
         </td>`;
       tr.querySelector(".chargeChk").addEventListener("change", async (ev) => {
@@ -1753,6 +1753,15 @@ async function loadCompanies() {
         $("rolesCard").scrollIntoView({ behavior:"smooth" });
       });
       tr.querySelector(".chk").addEventListener("click", async () => {
+        // Square has no hosted checkout — bill it via the saved card on the
+        // company's billing card (the Square card field lives there). Only the
+        // Stripe path uses hosted checkout + a per-plan Stripe Price ID.
+        if (activeProvider === "square") {
+          selectCompany(d.id, c.name);
+          $("companyBillingCard").scrollIntoView({ behavior: "smooth" });
+          banner($("banner"), `Square: add ${esc(c.name)}'s card under “Billing & invoices” below to start charging.`, "good");
+          return;
+        }
         const planName = tr.querySelector(".planSel").value;
         const plan = state.plans.find((p) => p.name === planName);
         if (!plan) { banner($("banner"), "Pick a plan for this company first.", "error"); return; }
