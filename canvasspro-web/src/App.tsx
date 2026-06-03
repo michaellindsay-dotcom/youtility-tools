@@ -12,7 +12,6 @@ import MapPage from "./pages/Map";
 import Movers from "./pages/Movers";
 import Team from "./pages/Team";
 import Shifts from "./pages/Shifts";
-import Stats from "./pages/Stats";
 import Leaderboard from "./pages/Leaderboard";
 import Gamify from "./pages/Gamify";
 import Rewards from "./pages/Rewards";
@@ -22,9 +21,20 @@ import Schedule from "./pages/Schedule";
 import Settings from "./pages/Settings";
 
 // Blocks a route (by direct URL) when the company's plan doesn't include it.
-function Gated({ feature, children }: { feature: FeatureKey; children: React.ReactNode }) {
+// Pass one feature, or `anyOf` to allow access when the plan has any of them.
+function Gated({
+  feature,
+  anyOf,
+  children,
+}: {
+  feature?: FeatureKey;
+  anyOf?: FeatureKey[];
+  children: React.ReactNode;
+}) {
   const { company } = useAuth();
-  return hasFeature(company, feature) ? <>{children}</> : <Navigate to="/" replace />;
+  const keys = anyOf ?? (feature ? [feature] : []);
+  const allowed = keys.some((k) => hasFeature(company, k));
+  return allowed ? <>{children}</> : <Navigate to="/" replace />;
 }
 
 export default function App() {
@@ -44,8 +54,9 @@ export default function App() {
         <Route path="map" element={<MapPage />} />
         <Route path="movers" element={<Movers />} />
         <Route path="team" element={<Team />} />
-        <Route path="shifts" element={<Gated feature="planner"><Shifts /></Gated>} />
-        <Route path="stats" element={<Gated feature="analytics"><Stats /></Gated>} />
+        <Route path="shifts" element={<Gated anyOf={["planner", "analytics"]}><Shifts /></Gated>} />
+        {/* Analytics merged into the Success Planner screen; keep the old path working. */}
+        <Route path="stats" element={<Navigate to="/shifts" replace />} />
         <Route path="leaderboard" element={<Gated feature="rewards"><Leaderboard /></Gated>} />
         <Route path="gamify" element={<Gated feature="rewards"><Gamify /></Gated>} />
         <Route path="rewards" element={<Gated feature="rewards"><Rewards /></Gated>} />

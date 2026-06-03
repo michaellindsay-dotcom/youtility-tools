@@ -2,16 +2,18 @@ import { NavLink } from "react-router-dom";
 import { useAuth } from "../auth/AuthContext";
 import { hasFeature, type FeatureKey } from "../lib/features";
 
-const links: { to: string; label: string; icon: string; end?: boolean; feat?: FeatureKey }[] = [
+// `feat` shows the link only when the plan has that feature; `anyFeat` shows it
+// when the plan has any one of several. Success Planner now also hosts the team
+// analytics that used to live on its own "Analytics" link, so it shows for either.
+const links: { to: string; label: string; icon: string; end?: boolean; feat?: FeatureKey; anyFeat?: FeatureKey[] }[] = [
   { to: "/", label: "Dashboard", icon: "▦", end: true },
   { to: "/map", label: "Map", icon: "◉" },
   { to: "/movers", label: "Movers", icon: "🚚" },
   { to: "/leads", label: "Leads", icon: "☰" },
   { to: "/chat", label: "Team Chat", icon: "💬", feat: "chat" },
   { to: "/schedule", label: "Schedule", icon: "📅", feat: "scheduling" },
-  { to: "/shifts", label: "Success Planner", icon: "◎", feat: "planner" },
+  { to: "/shifts", label: "Success Planner", icon: "◎", anyFeat: ["planner", "analytics"] },
   { to: "/team", label: "Team", icon: "⛩" },
-  { to: "/stats", label: "Analytics", icon: "★", feat: "analytics" },
   { to: "/working", label: "Who's Working", icon: "🔥", feat: "chat" },
   { to: "/leaderboard", label: "Leaderboard", icon: "🏆", feat: "rewards" },
   { to: "/gamify", label: "Gamify", icon: "🎮", feat: "rewards" },
@@ -22,7 +24,10 @@ const links: { to: string; label: string; icon: string; end?: boolean; feat?: Fe
 
 export default function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
   const { company } = useAuth();
-  const visible = links.filter((l) => !l.feat || hasFeature(company, l.feat));
+  const visible = links.filter((l) => {
+    if (l.anyFeat) return l.anyFeat.some((f) => hasFeature(company, f));
+    return !l.feat || hasFeature(company, l.feat);
+  });
   return (
     <aside className="sidebar">
       <div className="brand">
