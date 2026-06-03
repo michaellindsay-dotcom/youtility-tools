@@ -5,8 +5,8 @@ import { useAuth } from "../auth/AuthContext";
 import { useShift, fmtElapsed } from "../shift/ShiftContext";
 import type { Shift } from "../types";
 
-// Shift clock + recent-shifts table. Rendered standalone on /shifts and inline
-// on the Analytics tab.
+// Shift clock + recent-shifts table. Rendered at the bottom of the Success
+// Planner screen, beneath the goal planner and team leaderboard.
 export default function ShiftsPanel() {
   const { profile, role, companyId } = useAuth();
   const { active, elapsedSec, doors, starting, startShift, stopShift } = useShift();

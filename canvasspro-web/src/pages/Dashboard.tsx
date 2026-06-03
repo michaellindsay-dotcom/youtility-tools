@@ -234,7 +234,7 @@ export default function Dashboard() {
       <div className="quick-grid">
         <QuickAction to="/map" icon="◉" title="Map View" sub="Start canvassing" />
         <QuickAction to="/leads" icon="☰" title="Lead List" sub="View leads & appointments" />
-        <QuickAction to="/stats" icon="📈" title="Analytics" sub="Deep dive into metrics" />
+        <QuickAction to="/shifts" icon="📈" title="Success Planner" sub="Goals, stats & shifts" />
         <QuickAction to="/leaderboard" icon="🏆" title="Leaderboard" sub="See where you rank" />
         <QuickAction to="/territories" icon="▰" title="Territories" sub="Manage your zones" />
       </div>
