@@ -30,6 +30,14 @@ service cloud.firestore {
     function inPath(path) { return isSignedIn() && (request.auth.uid in path); }
 
     // ── companies (tenants) + per-company roles & teams ──────────────────
+    // Invoices: super-admins see all; a company's admins see their own. Written
+    // only by Cloud Functions (mirrored from Stripe).
+    match /invoices/{invoiceId} {
+      allow read: if isSuper()
+                  || (isSignedIn() && resource.data.companyId == myCompany() && isCompanyAdmin());
+      allow write: if false;
+    }
+
     match /companies/{companyId} {
       allow read: if isSuper() || (isSignedIn() && companyId == myCompany());
       allow write: if false; // server-side only (Cloud Functions)
