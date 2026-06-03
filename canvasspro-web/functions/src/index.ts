@@ -1605,6 +1605,44 @@ function mapSubStatus(s: string): string {
   }
 }
 
+// ── Billing helpers: mirror Stripe invoices + notify company admins ──────────
+const BILLING_INTERVAL_DAYS = 30;
+
+async function companyAdminEmails(companyId: string): Promise<string[]> {
+  try {
+    const s = await db.collection("users").where("companyId", "==", companyId).where("role", "==", "admin").get();
+    return s.docs.map((d) => (d.data().email as string) || "").filter(Boolean);
+  } catch { return []; }
+}
+
+// Upsert a Stripe invoice into invoices/{id} so it shows in-app (AR + profiles).
+async function mirrorInvoice(inv: any): Promise<{ companyId: string } | null> {
+  let companyId: string | null = inv?.subscription_details?.metadata?.companyId || inv?.metadata?.companyId || null;
+  let companyName = "";
+  if (companyId) {
+    companyName = (await db.doc(`companies/${companyId}`).get()).data()?.name || "";
+  } else if (inv?.customer) {
+    const s = await db.collection("companies").where("stripeCustomerId", "==", inv.customer).limit(1).get();
+    if (!s.empty) { companyId = s.docs[0].id; companyName = s.docs[0].data().name || ""; }
+  }
+  if (!companyId) return null;
+  const lines = ((inv.lines && inv.lines.data) || []).map((l: any) => ({
+    description: l.description || "Subscription", amount: l.amount,
+  }));
+  await db.doc(`invoices/${inv.id}`).set({
+    stripeInvoiceId: inv.id, companyId, companyName,
+    number: inv.number || "", status: inv.status || "open",
+    amountDue: inv.amount_due ?? 0, amountPaid: inv.amount_paid ?? 0, currency: inv.currency || "usd",
+    created: (inv.created || 0) * 1000,
+    dueDate: inv.due_date ? inv.due_date * 1000 : (inv.next_payment_attempt ? inv.next_payment_attempt * 1000 : null),
+    periodStart: inv.period_start ? inv.period_start * 1000 : null,
+    periodEnd: inv.period_end ? inv.period_end * 1000 : null,
+    hostedInvoiceUrl: inv.hosted_invoice_url || "", invoicePdf: inv.invoice_pdf || "",
+    lines, updatedAt: Date.now(),
+  }, { merge: true });
+  return { companyId };
+}
+
 // Start a Checkout session for a company + plan; returns the hosted URL.
 export const createCheckoutSession = onCall(async (request) => {
   const caller = await getCaller(request);
@@ -1685,18 +1723,176 @@ export const stripeWebhook = onRequest({ cors: false }, async (req, res) => {
       }
     } else if (event.type.startsWith("customer.subscription.")) {
       const status = mapSubStatus(obj.status);
+      const patch: Record<string, unknown> = { status, updatedAt: Date.now() };
+      if (obj.current_period_end) patch.nextBillingAt = obj.current_period_end * 1000;
       const companyId = obj.metadata?.companyId;
       if (companyId) {
-        await db.doc(`companies/${companyId}`).set({ status, updatedAt: Date.now() }, { merge: true });
+        await db.doc(`companies/${companyId}`).set(patch, { merge: true });
       } else if (obj.customer) {
         const snap = await db.collection("companies").where("stripeCustomerId", "==", obj.customer).limit(1).get();
-        if (!snap.empty) await snap.docs[0].ref.set({ status, updatedAt: Date.now() }, { merge: true });
+        if (!snap.empty) await snap.docs[0].ref.set(patch, { merge: true });
+      }
+    } else if (event.type.startsWith("invoice.")) {
+      // Mirror every invoice for in-app viewing, and drive dunning / reactivation.
+      const res2 = await mirrorInvoice(obj);
+      if (res2) {
+        const ref = db.doc(`companies/${res2.companyId}`);
+        if (event.type === "invoice.payment_failed") {
+          const c = (await ref.get()).data() || {};
+          const patch: Record<string, unknown> = { status: "past_due", updatedAt: Date.now() };
+          if (!c.pastDueSince) patch.pastDueSince = Date.now(); // start the 3-day grace clock
+          await ref.set(patch, { merge: true });
+          const cfg = await getNotifyConfig();
+          const amt = ((obj.amount_due || 0) / 100).toFixed(2);
+          for (const to of await companyAdminEmails(res2.companyId)) {
+            await sendEmail(cfg, to, "Payment failed — action needed",
+              `We couldn't process your YoutilityKnock payment of $${amt}. Please update the card on file to avoid interruption — your account will be paused if payment isn't received within 3 days.${obj.hosted_invoice_url ? "\n\nPay now: " + obj.hosted_invoice_url : ""}`);
+          }
+        } else if (event.type === "invoice.paid" || event.type === "invoice.payment_succeeded") {
+          const patch: Record<string, unknown> = { status: "active", pastDueSince: 0, billingHold: false, updatedAt: Date.now() };
+          const periodEnd = obj.lines?.data?.[0]?.period?.end;
+          if (periodEnd) patch.nextBillingAt = periodEnd * 1000;
+          await ref.set(patch, { merge: true });
+        }
       }
     }
     res.json({ received: true });
   } catch (e: any) {
     logger.error("Stripe webhook handler error", e);
     res.status(500).send("handler error");
+  }
+});
+
+// Publishable key for the embedded card field (any authed company admin/super).
+export const getBillingPublicConfig = onCall(async (request) => {
+  await getCaller(request);
+  const c = ((await db.doc("config/billing").get()).data() as Record<string, string>) || {};
+  return { publishableKey: c.stripePublishableKey || "" };
+});
+
+// List invoices for in-app viewing: super-admin sees all (optionally filtered to
+// one company); a company admin sees only their own. Read via the admin SDK so
+// it doesn't depend on Firestore-rules deployment.
+export const listInvoices = onCall(async (request) => {
+  const caller = await getCaller(request);
+  const { companyId } = (request.data || {}) as { companyId?: string };
+  let q: FirebaseFirestore.Query = db.collection("invoices");
+  if (caller.isSuper) {
+    if (companyId) q = q.where("companyId", "==", companyId);
+  } else {
+    if (caller.role !== "admin" || !caller.companyId) throw new HttpsError("permission-denied", "Company admins only.");
+    if (companyId && companyId !== caller.companyId) throw new HttpsError("permission-denied", "Not allowed.");
+    q = q.where("companyId", "==", caller.companyId);
+  }
+  const snap = await q.get();
+  const invoices = snap.docs
+    .map((d) => ({ id: d.id, ...(d.data() as Record<string, unknown>) }))
+    .sort((a: any, b: any) => (b.created || 0) - (a.created || 0));
+  return { invoices };
+});
+
+// Ensure a Stripe customer + start a SetupIntent so the embedded card field can
+// save a card on file for this company.
+export const createSetupIntent = onCall(async (request) => {
+  const caller = await getCaller(request);
+  const companyId = authorizeForCompany(caller, (request.data || {}).companyId);
+  const stripe = await stripeClient();
+  const ref = db.doc(`companies/${companyId}`);
+  const company = (await ref.get()).data() || {};
+  let customerId = company.stripeCustomerId as string | undefined;
+  if (!customerId) {
+    const cust = await stripe.customers.create({ name: (company.name as string) || companyId, metadata: { companyId } });
+    customerId = cust.id;
+    await ref.set({ stripeCustomerId: customerId, updatedAt: Date.now() }, { merge: true });
+  }
+  const si = await stripe.setupIntents.create({ customer: customerId, usage: "off_session", metadata: { companyId } });
+  return { clientSecret: si.client_secret };
+});
+
+// After the card is confirmed client-side: set it as the default, store the
+// brand/last4, and (re)start the 30-day subscription priced from the company's
+// effective monthly price. The first charge runs immediately.
+export const saveCardAndSubscribe = onCall(async (request) => {
+  const caller = await getCaller(request);
+  const { companyId: cid, paymentMethodId } = (request.data || {}) as { companyId?: string; paymentMethodId?: string };
+  const companyId = authorizeForCompany(caller, cid);
+  if (!paymentMethodId) throw new HttpsError("invalid-argument", "paymentMethodId required.");
+  const stripe = await stripeClient();
+  const ref = db.doc(`companies/${companyId}`);
+  const company = (await ref.get()).data() || {};
+  const customerId = company.stripeCustomerId as string;
+  if (!customerId) throw new HttpsError("failed-precondition", "No customer yet — call createSetupIntent first.");
+  await stripe.paymentMethods.attach(paymentMethodId, { customer: customerId }).catch(() => {});
+  await stripe.customers.update(customerId, { invoice_settings: { default_payment_method: paymentMethodId } });
+  const pm = await stripe.paymentMethods.retrieve(paymentMethodId);
+  const card = (pm as any).card || {};
+  const update: Record<string, unknown> = { cardBrand: card.brand || "", cardLast4: card.last4 || "", updatedAt: Date.now() };
+  // Charge the company's effective monthly price every 30 days from now.
+  const cents = Math.round((Number(company.planPrice) || 0) * 100);
+  if (!company.billingExempt && cents > 0) {
+    const subId = company.stripeSubscriptionId as string | undefined;
+    if (subId) {
+      await stripe.subscriptions.update(subId, { default_payment_method: paymentMethodId });
+    } else {
+      const product = await stripe.products.create({
+        name: `YoutilityKnock — ${company.plan || "Subscription"}`,
+        metadata: { companyId },
+      });
+      const sub = await stripe.subscriptions.create({
+        customer: customerId,
+        default_payment_method: paymentMethodId,
+        items: [{ price_data: {
+          currency: "usd",
+          product: product.id,
+          unit_amount: cents,
+          recurring: { interval: "day", interval_count: BILLING_INTERVAL_DAYS },
+        } }],
+        metadata: { companyId },
+      });
+      update.stripeSubscriptionId = sub.id;
+      if ((sub as any).current_period_end) update.nextBillingAt = (sub as any).current_period_end * 1000;
+      update.status = "active"; update.pastDueSince = 0; update.billingHold = false;
+    }
+  }
+  await ref.set(update, { merge: true });
+  return { ok: true, brand: update.cardBrand, last4: update.cardLast4 };
+});
+
+// Re-email an invoice to the company's admins (with the pay/view link).
+export const emailInvoice = onCall(async (request) => {
+  const caller = await getCaller(request);
+  const { companyId: cid, invoiceId } = (request.data || {}) as { companyId?: string; invoiceId?: string };
+  const companyId = authorizeForCompany(caller, cid);
+  if (!invoiceId) throw new HttpsError("invalid-argument", "invoiceId required.");
+  const inv = (await db.doc(`invoices/${invoiceId}`).get()).data();
+  if (!inv || inv.companyId !== companyId) throw new HttpsError("not-found", "Invoice not found.");
+  const emails = await companyAdminEmails(companyId);
+  if (!emails.length) throw new HttpsError("failed-precondition", "No company admin email on file.");
+  const cfg = await getNotifyConfig();
+  const amt = ((inv.amountDue || 0) / 100).toFixed(2);
+  const link = inv.hostedInvoiceUrl || inv.invoicePdf || "";
+  let sent = 0;
+  for (const to of emails) {
+    if (await sendEmail(cfg, to, `Invoice ${inv.number || ""} — $${amt}`,
+      `Your YoutilityKnock invoice ${inv.number || ""} for $${amt} is ${inv.status}.${link ? "\n\nView / pay: " + link : ""}`)) sent++;
+  }
+  return { ok: true, sent };
+});
+
+// Daily dunning: pause companies still unpaid 3 days after a failed charge.
+export const billingDunning = onSchedule("every 24 hours", async () => {
+  const cutoff = Date.now() - 3 * 86400000;
+  const snap = await db.collection("companies").where("pastDueSince", ">", 0).get();
+  const cfg = await getNotifyConfig();
+  for (const d of snap.docs) {
+    const c = d.data();
+    if (c.billingHold || c.status === "suspended") continue;
+    if ((c.pastDueSince as number) > cutoff) continue; // still inside the 3-day grace window
+    await d.ref.set({ status: "suspended", billingHold: true, updatedAt: Date.now() }, { merge: true });
+    for (const to of await companyAdminEmails(d.id)) {
+      await sendEmail(cfg, to, "Account paused — payment overdue",
+        `Your YoutilityKnock account has been paused because payment is more than 3 days overdue. Update the card on file to restore access immediately.`);
+    }
   }
 });
 
