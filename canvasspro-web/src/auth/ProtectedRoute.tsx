@@ -10,7 +10,7 @@ interface Props {
 }
 
 export default function ProtectedRoute({ children, roles }: Props) {
-  const { user, role, noAccess, loading, logout } = useAuth();
+  const { user, role, company, noAccess, loading, logout } = useAuth();
   const location = useLocation();
 
   if (loading) {
@@ -28,6 +28,28 @@ export default function ProtectedRoute({ children, roles }: Props) {
           <p className="muted">
             Your sign-in worked, but your account hasn't been added to a company yet.
             Ask your administrator to provision your access in the admin console.
+          </p>
+          <button className="btn block" style={{ marginTop: 16 }} onClick={() => logout()}>
+            Sign out
+          </button>
+        </div>
+      </div>
+    );
+  }
+  // Suspended company → the account is paused (an expired trial or overdue
+  // payment). Lock the app until they subscribe; their data stays untouched and
+  // access restores automatically once payment flips the status back to active.
+  if (company?.status === "suspended") {
+    const trialEnded = company.trialExpired === true;
+    return (
+      <div className="auth-wrap">
+        <div className="auth-card card" style={{ textAlign: "center" }}>
+          <h2 style={{ border: 0 }}>{trialEnded ? "Trial ended" : "Account paused"}</h2>
+          <p className="muted">
+            {trialEnded
+              ? "Your free trial has ended and the account is paused. Your data is safe — subscribe to a plan to pick up right where you left off."
+              : "This account is paused. Your data is safe — once payment is received, access is restored automatically."}{" "}
+            Contact your administrator or billing to reactivate.
           </p>
           <button className="btn block" style={{ marginTop: 16 }} onClick={() => logout()}>
             Sign out
