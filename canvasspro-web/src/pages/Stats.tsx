@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { collection, onSnapshot, query, where } from "firebase/firestore";
 import { db } from "../firebase";
 import { useAuth } from "../auth/AuthContext";
+import { hasFeature } from "../lib/features";
 import GoalPlanner from "../components/GoalPlanner";
 import ShiftsPanel from "../components/ShiftsPanel";
 import type { UserStats } from "../types";
@@ -15,7 +16,8 @@ const METRICS: { key: Metric; label: string }[] = [
 ];
 
 export default function Stats() {
-  const { profile, role, companyId } = useAuth();
+  const { profile, role, companyId, company } = useAuth();
+  const showPlanner = hasFeature(company, "planner"); // Success Planner is an optional service
   const [rows, setRows] = useState<UserStats[]>([]);
   const [sortBy, setSortBy] = useState<Metric>("sales");
 
@@ -61,10 +63,14 @@ export default function Stats() {
         </div>
       </div>
 
-      <GoalPlanner />
+      {showPlanner && (
+        <>
+          <GoalPlanner />
 
-      <h2 className="section-h">Shifts</h2>
-      <ShiftsPanel />
+          <h2 className="section-h">Shifts</h2>
+          <ShiftsPanel />
+        </>
+      )}
 
       <h2 className="section-h">Leaderboard</h2>
 

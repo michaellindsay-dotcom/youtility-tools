@@ -1,7 +1,9 @@
 import type { Company } from "../types";
 
 // Plan feature keys (must match the toggles in admin.html's plan editor).
-export const FEATURES = ["map", "skiptrace", "scheduling", "calendar", "rewards", "analytics", "chat"] as const;
+// `planner` = the Success Planner (shift time keeper, goal tracking, pace
+// projections) — an optional service bundled into the top tiers.
+export const FEATURES = ["map", "skiptrace", "scheduling", "calendar", "rewards", "analytics", "chat", "planner"] as const;
 export type FeatureKey = (typeof FEATURES)[number];
 
 // Whether a company's plan includes a feature. A company with no `features`

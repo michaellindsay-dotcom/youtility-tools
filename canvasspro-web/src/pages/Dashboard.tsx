@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import { collection, getDocs, query, where, orderBy, limit } from "firebase/firestore";
 import { db } from "../firebase";
 import { useAuth } from "../auth/AuthContext";
+import { hasFeature } from "../lib/features";
 import { useShift, fmtElapsed } from "../shift/ShiftContext";
 import type { Lead, Shift, UserStats } from "../types";
 
@@ -46,7 +47,8 @@ interface Funnel {
 }
 
 export default function Dashboard() {
-  const { profile } = useAuth();
+  const { profile, company } = useAuth();
+  const showPlanner = hasFeature(company, "planner"); // Success Planner is an optional service
   const shift = useShift();
   const [leads, setLeads] = useState<Lead[]>([]);
   const [shifts, setShifts] = useState<Shift[]>([]);
@@ -147,35 +149,38 @@ export default function Dashboard() {
           </div>
         </div>
         <div className="row dash-progress-actions">
-          {shift.active ? (
-            <div className="shift-live-bar">
-              <span className="shift-dot" />
-              <span className="shift-time mono">{fmtElapsed(shift.elapsedSec)}</span>
-              <span className="shift-doors">{shift.doors} doors</span>
-              <button className="btn sm" onClick={() => shift.stopShift()}>Stop</button>
-            </div>
-          ) : (
-            <Link to="/map" className="btn primary sm">▶ Start Shift</Link>
-          )}
+          {showPlanner &&
+            (shift.active ? (
+              <div className="shift-live-bar">
+                <span className="shift-dot" />
+                <span className="shift-time mono">{fmtElapsed(shift.elapsedSec)}</span>
+                <span className="shift-doors">{shift.doors} doors</span>
+                <button className="btn sm" onClick={() => shift.stopShift()}>Stop</button>
+              </div>
+            ) : (
+              <Link to="/map" className="btn primary sm">▶ Start Shift</Link>
+            ))}
           <Link to="/leaderboard" className="btn sm">🏆 Leaderboard</Link>
         </div>
       </div>
 
       <div className="dash-2col">
-        {/* Success planner */}
-        <div className="card planner">
-          <h2 className="planner-h">◎ Success Planner</h2>
-          <p className="muted small">Based on your pace, here's what you need to hit your goals:</p>
-          <ul className="planner-list">
-            <li><strong>Today:</strong> {plan.todayLeft} more doors <span className="muted">(~{plan.todayMin} min)</span></li>
-            <li><strong>This week:</strong> {plan.weekPerDay} doors/day <span className="muted">({f.week.doors}/{GOALS.doorsWeek} done)</span></li>
-            <li><strong>This month:</strong> {plan.monthPerDay} doors/day <span className="muted">({f.month.doors}/{GOALS.doorsMonth} done)</span></li>
-          </ul>
-          <div className="planner-ring">
-            <div className="ring-pct">{plan.monthlyPct}%</div>
-            <div className="muted small">monthly</div>
+        {/* Success planner (optional service) */}
+        {showPlanner && (
+          <div className="card planner">
+            <h2 className="planner-h">◎ Success Planner</h2>
+            <p className="muted small">Based on your pace, here's what you need to hit your goals:</p>
+            <ul className="planner-list">
+              <li><strong>Today:</strong> {plan.todayLeft} more doors <span className="muted">(~{plan.todayMin} min)</span></li>
+              <li><strong>This week:</strong> {plan.weekPerDay} doors/day <span className="muted">({f.week.doors}/{GOALS.doorsWeek} done)</span></li>
+              <li><strong>This month:</strong> {plan.monthPerDay} doors/day <span className="muted">({f.month.doors}/{GOALS.doorsMonth} done)</span></li>
+            </ul>
+            <div className="planner-ring">
+              <div className="ring-pct">{plan.monthlyPct}%</div>
+              <div className="muted small">monthly</div>
+            </div>
           </div>
-        </div>
+        )}
 
         {/* Top performers */}
         <div className="card">
@@ -196,20 +201,24 @@ export default function Dashboard() {
         </div>
       </div>
 
-      {/* Goal progress */}
-      <h2 className="section-h">◎ Goal Progress</h2>
-      <div className="dash-2col">
-        <GoalCard title="This Week" rows={[
-          ["Doors", f.week.doors, GOALS.doorsWeek],
-          ["Conversations", f.week.conv, GOALS.convWeek],
-          ["Appointments", f.week.appt, GOALS.apptWeek],
-        ]} note={`${plan.weekPerDay} doors/day to goal`} />
-        <GoalCard title="This Month" rows={[
-          ["Doors", f.month.doors, GOALS.doorsMonth],
-          ["Conversations", f.month.conv, GOALS.convMonth],
-          ["Appointments", f.month.appt, GOALS.apptMonth],
-        ]} note={`${plan.monthPerDay} doors/day · ${f.month.hours}h logged`} />
-      </div>
+      {/* Goal progress (part of the Success Planner service) */}
+      {showPlanner && (
+        <>
+          <h2 className="section-h">◎ Goal Progress</h2>
+          <div className="dash-2col">
+            <GoalCard title="This Week" rows={[
+              ["Doors", f.week.doors, GOALS.doorsWeek],
+              ["Conversations", f.week.conv, GOALS.convWeek],
+              ["Appointments", f.week.appt, GOALS.apptWeek],
+            ]} note={`${plan.weekPerDay} doors/day to goal`} />
+            <GoalCard title="This Month" rows={[
+              ["Doors", f.month.doors, GOALS.doorsMonth],
+              ["Conversations", f.month.conv, GOALS.convMonth],
+              ["Appointments", f.month.appt, GOALS.apptMonth],
+            ]} note={`${plan.monthPerDay} doors/day · ${f.month.hours}h logged`} />
+          </div>
+        </>
+      )}
 
       {/* Today's funnel */}
       <h2 className="section-h">Today's Funnel</h2>
