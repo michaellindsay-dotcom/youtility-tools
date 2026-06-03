@@ -2001,13 +2001,13 @@ async function crmAuth(sent: string, companyId?: string): Promise<boolean> {
 
 // Push a changed lead / appointment to that company's CRM webhook (best-effort).
 // Leads and appointments have separate endpoints in the CRM add-on.
-async function pushToCrm(kind: "lead" | "event", companyId: string, id: string, data: any) {
+async function pushToCrm(kind: "lead" | "event" | "reward", companyId: string, id: string, data: any) {
   if (data?._syncedFrom === "crm") return; // came from the CRM — don't echo back
   const link = await companyCrm(companyId);
   if (!link.enabled) return; // sync paused
   const url = kind === "event"
     ? (link.appointmentWebhookUrl || link.webhookUrl)
-    : link.webhookUrl;
+    : link.webhookUrl; // rewards/contests ride the main webhook
   if (!url) return; // no endpoint configured for this kind
   try {
     await fetch(url, {
@@ -2028,6 +2028,14 @@ export const onEventSync = onDocumentWritten("events/{id}", async (event) => {
   const after = event.data?.after?.data();
   if (!after?.companyId) return;
   await pushToCrm("event", after.companyId, event.params.id, after);
+});
+
+// Rewards & contests sync to the CRM in real time (and skip CRM-originated ones
+// so the two dashboards stay in sync without looping).
+export const onRewardSync = onDocumentWritten("companies/{cid}/rewards/{rid}", async (event) => {
+  const after = event.data?.after?.data();
+  if (!after) return; // deletion — leave the CRM copy to its own lifecycle
+  await pushToCrm("reward", event.params.cid, event.params.rid, after);
 });
 
 // ── /crm/** router (provision · export · ingest) ─────────────────────────────
@@ -2104,26 +2112,67 @@ export const crmApi = onRequest({ cors: true }, async (req, res) => {
       const companyId = req.query.companyId as string;
       if (!companyId) { res.status(400).json({ error: "companyId required" }); return; }
       if (!(await crmAuth(sent, companyId))) { res.status(401).json({ error: "Unauthorized" }); return; }
-      const [company, usersSnap, leadsSnap, eventsSnap] = await Promise.all([
+      const [company, usersSnap, leadsSnap, eventsSnap, rewardsSnap, statsSnap] = await Promise.all([
         db.doc(`companies/${companyId}`).get(),
         db.collection("users").where("companyId", "==", companyId).get(),
         db.collection("leads").where("companyId", "==", companyId).get(),
         db.collection("events").where("companyId", "==", companyId).get(),
+        db.collection("companies").doc(companyId).collection("rewards").get(),
+        db.collection("userStats").where("companyId", "==", companyId).get(),
       ]);
+      // Leaderboard = company head-to-head ranking, sorted by closes then appts.
+      const leaderboard = statsSnap.docs
+        .map((d) => ({ uid: d.id, ...d.data() }) as Record<string, any>)
+        .sort((a, b) => (b.sales || 0) - (a.sales || 0) || (b.appointments || 0) - (a.appointments || 0))
+        .map((r, i) => ({ rank: i + 1, ...r }));
       res.json({
         company: company.exists ? { id: company.id, ...company.data() } : null,
         users: usersSnap.docs.map((d) => ({ id: d.id, ...d.data() })),
         leads: leadsSnap.docs.map((d) => ({ id: d.id, ...d.data() })),
         appointments: eventsSnap.docs.map((d) => ({ id: d.id, ...d.data() })),
+        rewards: rewardsSnap.docs.map((d) => ({ id: d.id, ...d.data() })),
+        leaderboard,
       });
       return;
     }
 
-    // ── Ingest / upsert a lead from the CRM (push into Knock) ──
+    // ── Ingest / upsert a lead OR reward/contest from the CRM (push into Knock) ──
     if (req.method === "POST" && path.endsWith("/ingest")) {
-      const { companyId, lead } = (req.body || {}) as { companyId?: string; lead?: any };
-      if (!companyId || !lead) { res.status(400).json({ error: "companyId and lead required" }); return; }
+      const { companyId, lead, reward } = (req.body || {}) as { companyId?: string; lead?: any; reward?: any };
+      if (!companyId || (!lead && !reward)) { res.status(400).json({ error: "companyId and lead or reward required" }); return; }
       if (!(await crmAuth(sent, companyId))) { res.status(401).json({ error: "Unauthorized" }); return; }
+
+      // Reward / contest from the CRM → companies/{id}/rewards so reps see it in-app.
+      if (reward) {
+        const now = Date.now();
+        const data: Record<string, unknown> = {
+          companyId,
+          name: reward.name || "Reward",
+          description: reward.description || "",
+          imageUrl: reward.imageUrl || "",
+          kind: reward.kind === "store" ? "store" : "benchmark",
+          audience: reward.audience === "team" ? "team" : "individual",
+          metric: reward.kind === "store" ? "points" : (reward.metric || "sales"),
+          period: reward.period || "monthly",
+          target: Number(reward.target) || 1,
+          active: reward.active !== false,
+          startsAt: Number(reward.startsAt) || 0,
+          expiresAt: Number(reward.expiresAt) || 0,
+          crmRewardId: reward.crmRewardId || null,
+          _syncedFrom: "crm", updatedAt: now,
+        };
+        const col = db.collection("companies").doc(companyId).collection("rewards");
+        let existingR = null;
+        if (reward.crmRewardId) {
+          const q = await col.where("crmRewardId", "==", reward.crmRewardId).limit(1).get();
+          if (!q.empty) existingR = q.docs[0];
+        }
+        let rid: string;
+        if (existingR) { await existingR.ref.set(data, { merge: true }); rid = existingR.id; }
+        else { const ref = await col.add({ ...data, createdAt: now, createdBy: "crm" }); rid = ref.id; }
+        res.json({ ok: true, rewardId: rid });
+        return;
+      }
       // Default owner = a company admin, so the lead is visible in the app.
       const adminSnap = await db.collection("users").where("companyId", "==", companyId).where("role", "==", "admin").limit(1).get();
       const ownerUid = adminSnap.empty ? null : adminSnap.docs[0].id;
