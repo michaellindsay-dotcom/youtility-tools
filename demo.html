@@ -1,0 +1,425 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>YoutilityKnock — Product Demo</title>
+<style>
+  /* ── YoutilityKnock brand ─────────────────────────────────────────── */
+  :root{
+    --navy:#020C18; --navy2:#0a1426; --panel:#0e1a30; --panel2:#13203a;
+    --line:#1f2e4a; --ink:#E8EEF8; --muted:#8896AA;
+    --sky:#0EA5E9; --sky2:#38BDF8; --sky3:#7DD3FC;
+    --green:#22C55E; --green2:#34D399; --amber:#F59E0B; --amber2:#FBBF24;
+    --red:#F87171; --purple:#A78BFA; --slate:#64748B; --orange:#FB923C;
+  }
+  *{box-sizing:border-box; margin:0; padding:0; -webkit-font-smoothing:antialiased;}
+  html,body{background:#000; overflow:hidden;}
+  body{
+    font-family:'Segoe UI',-apple-system,BlinkMacSystemFont,'Helvetica Neue',Arial,sans-serif;
+    color:var(--ink);
+  }
+  /* Fixed 1920×1080 stage, scaled to fit the viewport. */
+  #stage{
+    position:fixed; left:50%; top:50%; width:1920px; height:1080px;
+    transform-origin:center center;
+    background:radial-gradient(120% 120% at 70% -10%, #0a1830 0%, var(--navy) 55%, #01060f 100%);
+    overflow:hidden;
+  }
+  .scene{
+    position:absolute; inset:0; opacity:0; visibility:hidden;
+    transition:opacity .6s ease;
+    display:flex; align-items:center; justify-content:center;
+  }
+  .scene.active{opacity:1; visibility:visible;}
+
+  /* subtle moving grid backdrop */
+  .grid-bg{position:absolute; inset:-40%;
+    background-image:linear-gradient(rgba(56,189,248,.05) 1px,transparent 1px),
+      linear-gradient(90deg,rgba(56,189,248,.05) 1px,transparent 1px);
+    background-size:60px 60px; transform:rotate(0deg);}
+  .glow{position:absolute; border-radius:50%; filter:blur(90px); opacity:.45;}
+
+  /* ── shared bits ──────────────────────────────────────────────────── */
+  .brandrow{display:flex; align-items:center; gap:18px;}
+  .logo-mark{width:64px; height:64px; border-radius:18px;
+    background:linear-gradient(135deg,var(--sky2),var(--sky)); display:grid; place-items:center;
+    box-shadow:0 12px 40px rgba(14,165,233,.45);}
+  .logo-mark svg{width:38px; height:38px;}
+  .wordmark{font-size:40px; font-weight:800; letter-spacing:-.5px;}
+  .wordmark b{color:var(--sky2);}
+  .kicker{display:inline-block; padding:8px 18px; border-radius:999px;
+    background:rgba(56,189,248,.12); border:1px solid rgba(56,189,248,.35);
+    color:var(--sky3); font-weight:700; font-size:20px; letter-spacing:.5px;}
+  .cap{position:absolute; left:90px; bottom:90px; max-width:760px;}
+  .cap .tag{font-size:22px; font-weight:800; color:var(--sky2); letter-spacing:2px; text-transform:uppercase;}
+  .cap h2{font-size:62px; line-height:1.02; font-weight:800; letter-spacing:-1px; margin-top:14px;}
+  .cap p{font-size:26px; color:var(--muted); margin-top:18px; line-height:1.4;}
+
+  .reveal{opacity:0; transform:translateY(26px);}
+  .active .reveal{animation:rise .8s cubic-bezier(.2,.7,.2,1) forwards;}
+  .active .d1{animation-delay:.15s} .active .d2{animation-delay:.35s}
+  .active .d3{animation-delay:.55s} .active .d4{animation-delay:.75s}
+  .active .d5{animation-delay:.95s} .active .d6{animation-delay:1.15s}
+  @keyframes rise{to{opacity:1; transform:none;}}
+
+  /* ── phone mock ───────────────────────────────────────────────────── */
+  .phone{position:relative; width:430px; height:880px; border-radius:54px;
+    background:#05101f; border:12px solid #0c1830; box-shadow:0 40px 120px rgba(0,0,0,.6), inset 0 0 0 2px #16263f;}
+  .phone .screen{position:absolute; inset:12px; border-radius:42px; overflow:hidden; background:#0b1220;}
+  .phone .notch{position:absolute; top:18px; left:50%; transform:translateX(-50%); width:150px; height:28px; border-radius:0 0 18px 18px; background:#05101f; z-index:6;}
+
+  /* ── stylized aerial map ──────────────────────────────────────────── */
+  .map{position:absolute; inset:0;
+    background:
+      radial-gradient(60% 50% at 30% 20%, rgba(80,120,70,.6), transparent 60%),
+      radial-gradient(50% 50% at 80% 70%, rgba(90,110,75,.5), transparent 60%),
+      linear-gradient(135deg,#5d6b4a 0%, #6b7456 30%, #7c8466 55%, #5e6a4c 100%);}
+  .map::before{content:""; position:absolute; inset:0; opacity:.5;
+    background-image:
+      linear-gradient(rgba(20,28,20,.35) 3px, transparent 3px),
+      linear-gradient(90deg, rgba(20,28,20,.35) 3px, transparent 3px);
+    background-size:96px 70px; background-position:-10px 0;}
+  .road{position:absolute; background:#cdd2cf; opacity:.85;}
+  .road.h{height:14px; left:0; right:0;} .road.v{width:14px; top:0; bottom:0;}
+
+  /* home pin — matches the app's .home-pin */
+  .pin{position:absolute; transform:translate(-50%,-50%) scale(0); }
+  .pin span{display:grid; place-items:center; width:34px; height:34px; border-radius:50%;
+    border:3px solid #fff; box-shadow:0 2px 8px rgba(0,0,0,.55);}
+  .pin span svg{width:17px; height:17px;}
+  .pin.lead span{width:42px; height:42px; box-shadow:0 4px 16px rgba(0,0,0,.6);}
+  .pin.show{animation:drop .5s cubic-bezier(.2,1.2,.3,1) forwards;}
+  @keyframes drop{0%{transform:translate(-50%,-160%) scale(0);} 70%{transform:translate(-50%,-50%) scale(1.15);} 100%{transform:translate(-50%,-50%) scale(1);}}
+  .you{position:absolute; width:26px; height:26px; border-radius:50%; background:var(--sky);
+    border:4px solid #fff; transform:translate(-50%,-50%); box-shadow:0 0 0 0 rgba(14,165,233,.6);}
+  .active .you{animation:ping 1.8s ease-out infinite;}
+  @keyframes ping{0%{box-shadow:0 0 0 0 rgba(14,165,233,.55);}100%{box-shadow:0 0 0 40px rgba(14,165,233,0);}}
+
+  .popup{position:absolute; transform:translate(-50%,calc(-100% - 26px)); background:#fff; color:#0b1220;
+    border-radius:14px; padding:12px 14px; width:230px; box-shadow:0 18px 50px rgba(0,0,0,.5); opacity:0;}
+  .popup.show{animation:pop .5s ease forwards .2s;}
+  @keyframes pop{from{opacity:0; transform:translate(-50%,calc(-100% - 10px));}to{opacity:1; transform:translate(-50%,calc(-100% - 26px));}}
+  .popup b{font-size:17px;} .popup .row{display:flex; justify-content:space-between; font-size:13px; color:#475569; margin-top:6px;}
+  .popup .chip{display:inline-block; margin-top:8px; font-size:12px; font-weight:800; color:#fff; background:var(--green); padding:3px 10px; border-radius:999px;}
+  .popup::after{content:""; position:absolute; bottom:-10px; left:50%; transform:translateX(-50%); border:10px solid transparent; border-top-color:#fff;}
+
+  .fab-col{position:absolute; left:18px; top:60px; display:flex; flex-direction:column; gap:10px; z-index:5;}
+  .fab{width:46px; height:46px; border-radius:14px; background:#0e1a30cc; border:1px solid #ffffff22; display:grid; place-items:center; font-size:20px;}
+
+  /* ── disposition card ─────────────────────────────────────────────── */
+  .dispo{width:780px; background:var(--panel); border:1px solid var(--line); border-radius:26px; padding:34px; box-shadow:0 40px 120px rgba(0,0,0,.55);}
+  .dispo h3{font-size:30px;} .dispo .addr{color:var(--muted); font-size:19px; margin-top:4px;}
+  .pills{display:flex; flex-wrap:wrap; gap:12px; margin:24px 0;}
+  .pill{padding:12px 20px; border-radius:999px; border:2px solid var(--line); font-weight:700; font-size:19px; color:var(--ink); background:#0c1730;}
+  .pill.on{color:#06121f;}
+  .fld{margin-top:14px;} .fld label{display:block; font-size:15px; color:var(--muted); margin-bottom:6px; font-weight:700; letter-spacing:.5px;}
+  .fld .inp{height:52px; border-radius:12px; border:1px solid var(--line); background:#0b1626; display:flex; align-items:center; padding:0 16px; font-size:20px; color:var(--ink);}
+  .grid2{display:grid; grid-template-columns:1fr 1fr; gap:16px;}
+  .typed::after{content:"▌"; color:var(--sky2); animation:blink 1s steps(1) infinite;}
+  @keyframes blink{50%{opacity:0;}}
+
+  /* ── leaderboard / bars ───────────────────────────────────────────── */
+  .board{width:980px; background:var(--panel); border:1px solid var(--line); border-radius:26px; padding:38px;}
+  .lbrow{display:flex; align-items:center; gap:18px; margin:16px 0;}
+  .ava{width:54px; height:54px; border-radius:50%; display:grid; place-items:center; font-weight:800; font-size:22px; color:#06121f; flex:0 0 auto;}
+  .lbname{width:230px; font-size:24px; font-weight:700;}
+  .bar{flex:1; height:26px; border-radius:999px; background:#0b1626; overflow:hidden;}
+  .bar i{display:block; height:100%; width:0; border-radius:999px; background:linear-gradient(90deg,var(--sky),var(--sky2));}
+  .active .bar i{animation:grow 1.4s cubic-bezier(.2,.7,.2,1) forwards;}
+  @keyframes grow{to{width:var(--w);}}
+  .lbval{width:90px; text-align:right; font-size:26px; font-weight:800; color:var(--sky3);}
+
+  /* ── KPI tiles ────────────────────────────────────────────────────── */
+  .tiles{display:grid; grid-template-columns:repeat(4,1fr); gap:22px; width:1180px;}
+  .tile{background:var(--panel); border:1px solid var(--line); border-radius:22px; padding:30px;}
+  .tile .k{font-size:17px; color:var(--muted); font-weight:700; letter-spacing:.5px; text-transform:uppercase;}
+  .tile .v{font-size:60px; font-weight:800; margin-top:10px; letter-spacing:-1px;}
+  .tile .v.s{color:var(--sky2);} .tile .v.g{color:var(--green2);} .tile .v.p{color:var(--purple);} .tile .v.a{color:var(--amber2);}
+
+  /* feature grid */
+  .fgrid{display:grid; grid-template-columns:repeat(3,1fr); gap:22px; width:1320px;}
+  .fcard{background:linear-gradient(180deg,var(--panel2),var(--panel)); border:1px solid var(--line); border-radius:22px; padding:30px;}
+  .fcard .ic{width:60px; height:60px; border-radius:16px; display:grid; place-items:center; font-size:30px; background:#0b1730; border:1px solid var(--line);}
+  .fcard h4{font-size:26px; margin-top:18px;} .fcard p{color:var(--muted); font-size:18px; margin-top:8px; line-height:1.4;}
+
+  /* VS throwdown */
+  .vs{display:flex; align-items:center; gap:50px;}
+  .team{width:360px; background:var(--panel); border:1px solid var(--line); border-radius:24px; padding:34px; text-align:center;}
+  .team .nm{font-size:30px; font-weight:800;} .team .sc{font-size:84px; font-weight:800; letter-spacing:-2px; margin-top:8px;}
+  .vsbadge{width:120px; height:120px; border-radius:50%; display:grid; place-items:center; font-size:46px; font-weight:900; color:#06121f;
+    background:linear-gradient(135deg,var(--amber2),var(--amber)); box-shadow:0 0 60px rgba(245,158,11,.5);}
+
+  .btn{display:inline-flex; align-items:center; gap:12px; background:linear-gradient(135deg,var(--sky2),var(--sky)); color:#04111f;
+    font-weight:800; font-size:28px; padding:20px 40px; border-radius:16px; box-shadow:0 20px 60px rgba(14,165,233,.45);}
+  .url{font-size:30px; color:var(--sky3); font-weight:700; letter-spacing:1px; margin-top:26px;}
+
+  /* progress bar */
+  #prog{position:fixed; left:0; bottom:0; height:6px; background:var(--sky2); width:0; z-index:50; box-shadow:0 0 14px var(--sky2);}
+  .credit{position:absolute; right:60px; bottom:50px; color:var(--muted); font-size:18px; opacity:.8;}
+
+  /* ── 9:16 vertical layout for Reels / TikTok / Shorts ─────────────── */
+  body.vert #stage{width:1080px; height:1920px;}
+  body.vert .cap{left:70px; right:70px; bottom:170px; max-width:none; text-align:center;}
+  body.vert .cap h2{font-size:74px;} body.vert .cap p{font-size:34px;}
+  body.vert .scene h1{font-size:78px !important;}
+  body.vert .tiles{grid-template-columns:repeat(2,1fr); width:920px; gap:28px;}
+  body.vert .fgrid{grid-template-columns:repeat(2,1fr); width:960px; gap:26px;}
+  body.vert .board{width:980px;}
+  body.vert .dispo{width:940px;}
+  body.vert .phone{transform:scale(1.18);}
+  body.vert .credit{right:50%; transform:translateX(50%); bottom:70px;}
+</style>
+</head>
+<body>
+<div id="stage">
+  <div class="grid-bg"></div>
+  <div class="glow" style="width:700px;height:700px;background:#0EA5E9;left:-150px;top:-200px;"></div>
+  <div class="glow" style="width:600px;height:600px;background:#8B5CF6;right:-150px;bottom:-200px;opacity:.3;"></div>
+
+  <!-- ░░ SCENE 0 — INTRO ░░ -->
+  <section class="scene" data-dur="4200">
+    <div style="text-align:center;">
+      <div class="brandrow reveal d1" style="justify-content:center;">
+        <div class="logo-mark">
+          <svg viewBox="0 0 24 24" fill="#04111f"><path d="M12 3 3 10.5h2.4V21h5.1v-6h3v6h5.1V10.5H21z"/></svg>
+        </div>
+        <div class="wordmark">Youtility<b>Knock</b></div>
+      </div>
+      <h1 class="reveal d3" style="font-size:88px; font-weight:800; letter-spacing:-2px; margin-top:30px; line-height:1.02;">
+        The Platform Built to<br><span style="color:var(--sky2);">Win Door-to-Door</span>
+      </h1>
+      <p class="reveal d5" style="font-size:30px; color:var(--muted); margin-top:26px;">
+        Twelve industry-first tools. One real-time platform.
+      </p>
+    </div>
+  </section>
+
+  <!-- ░░ SCENE 1 — MAP / HOMEOWNER INTELLIGENCE ░░ -->
+  <section class="scene" data-dur="6000">
+    <div class="phone reveal d1">
+      <div class="notch"></div>
+      <div class="screen">
+        <div class="map" id="demoMap">
+          <div class="road h" style="top:30%;"></div>
+          <div class="road h" style="top:66%;"></div>
+          <div class="road v" style="left:34%;"></div>
+          <div class="road v" style="left:70%;"></div>
+          <div class="fab-col">
+            <div class="fab">☰</div><div class="fab">⟳</div><div class="fab">🧭</div><div class="fab">📍</div>
+          </div>
+          <!-- pins injected by JS -->
+          <div class="you" style="left:52%; top:54%;"></div>
+        </div>
+      </div>
+    </div>
+    <div class="cap">
+      <div class="tag reveal d2">Know Before You Knock</div>
+      <h2 class="reveal d3">Homeowner intelligence on every pin</h2>
+      <p class="reveal d4">Owner name, value, equity, length of residence and recent move-ins — surfaced the moment a rep taps a home.</p>
+    </div>
+  </section>
+
+  <!-- ░░ SCENE 2 — DISPOSITION ░░ -->
+  <section class="scene" data-dur="6000">
+    <div class="dispo reveal d1">
+      <h3>Log Disposition</h3>
+      <div class="addr">1428 Maple Heights Dr</div>
+      <div class="pills">
+        <span class="pill">New</span>
+        <span class="pill">Not Home</span>
+        <span class="pill">Go Back</span>
+        <span class="pill on" style="background:#34D399;border-color:#34D399;">Appointment</span>
+        <span class="pill">Sold</span>
+      </div>
+      <div class="grid2">
+        <div class="fld"><label>NAME</label><div class="inp"><span id="t_name"></span></div></div>
+        <div class="fld"><label>PHONE</label><div class="inp"><span id="t_phone"></span></div></div>
+      </div>
+      <div class="fld"><label>EMAIL</label><div class="inp"><span id="t_email"></span></div></div>
+      <div class="fld"><label>HOME DATA</label><div class="inp" style="color:var(--sky3);font-size:18px;">4bd · 2.5ba · 2,480 sqft · built 1998 · $412,500</div></div>
+    </div>
+    <div class="cap">
+      <div class="tag reveal d2">Every Door, Captured</div>
+      <h2 class="reveal d3">Disposition in seconds</h2>
+      <p class="reveal d4">Geofenced knocks, auto-filled owner data, photos and on-the-spot scheduling — no end-of-day data entry.</p>
+    </div>
+  </section>
+
+  <!-- ░░ SCENE 3 — LEADERBOARD / LIVE COACHING ░░ -->
+  <section class="scene" data-dur="5600">
+    <div style="text-align:center;width:100%;">
+      <div class="kicker reveal d1">LIVE LEADERBOARD</div>
+      <div class="board reveal d2" style="margin:34px auto 0;">
+        <div class="lbrow"><div class="ava" style="background:var(--amber2);">JD</div><div class="lbname">Jordan D.</div><div class="bar"><i style="--w:96%;"></i></div><div class="lbval">142</div></div>
+        <div class="lbrow"><div class="ava" style="background:var(--sky2);">MR</div><div class="lbname">Maria R.</div><div class="bar"><i style="--w:84%;background:linear-gradient(90deg,#0EA5E9,#7DD3FC);"></i></div><div class="lbval">124</div></div>
+        <div class="lbrow"><div class="ava" style="background:var(--green2);">TS</div><div class="lbname">Tyler S.</div><div class="bar"><i style="--w:71%;background:linear-gradient(90deg,#16a34a,#34D399);"></i></div><div class="lbval">103</div></div>
+        <div class="lbrow"><div class="ava" style="background:var(--purple);">AK</div><div class="lbname">Aisha K.</div><div class="bar"><i style="--w:60%;background:linear-gradient(90deg,#7c3aed,#A78BFA);"></i></div><div class="lbval">88</div></div>
+      </div>
+    </div>
+    <div class="cap">
+      <div class="tag reveal d3">Live Performance Coaching</div>
+      <h2 class="reveal d4">Stats that push in the moment</h2>
+      <p class="reveal d5">Real-time feedback reaches reps as they work — coaching happens when it matters, not at the debrief.</p>
+    </div>
+  </section>
+
+  <!-- ░░ SCENE 4 — GAMIFICATION / THROWDOWN ░░ -->
+  <section class="scene" data-dur="5400">
+    <div style="text-align:center;">
+      <div class="kicker reveal d1">GAMIFICATION ENGINE</div>
+      <div class="vs reveal d2" style="margin-top:40px;">
+        <div class="team"><div class="nm" style="color:var(--sky2);">Team Velocity</div><div class="sc">317</div><div style="color:var(--muted);font-size:20px;">doors today</div></div>
+        <div class="vsbadge">VS</div>
+        <div class="team"><div class="nm" style="color:var(--amber2);">Team Apex</div><div class="sc">298</div><div style="color:var(--muted);font-size:20px;">doors today</div></div>
+      </div>
+    </div>
+    <div class="cap">
+      <div class="tag reveal d3">Head-to-Head Throwdowns</div>
+      <h2 class="reveal d4">Build a culture that wins</h2>
+      <p class="reveal d5">Contests, custom rewards & a points store, dynamic leaderboards — the competitive engine that retains reps and drives record production.</p>
+    </div>
+  </section>
+
+  <!-- ░░ SCENE 5 — FEATURE GRID ░░ -->
+  <section class="scene" data-dur="5600">
+    <div style="text-align:center;">
+      <h2 class="reveal d1" style="font-size:56px;font-weight:800;letter-spacing:-1px;margin-bottom:38px;">One platform. Every tool.</h2>
+      <div class="fgrid">
+        <div class="fcard reveal d1"><div class="ic">🗺️</div><h4>Route Optimization</h4><p>The smartest path through every assigned area.</p></div>
+        <div class="fcard reveal d2"><div class="ic">📅</div><h4>Follow-Up Scheduling</h4><p>Automated reminders so no hot lead goes cold.</p></div>
+        <div class="fcard reveal d3"><div class="ic">🚚</div><h4>Mover Intelligence</h4><p>Fresh move-ins surfaced as the best doors to knock.</p></div>
+        <div class="fcard reveal d4"><div class="ic">💬</div><h4>Built-In Team Chat</h4><p>Rally the team and stay connected in the field.</p></div>
+        <div class="fcard reveal d5"><div class="ic">📍</div><h4>Who's Working</h4><p>See every rep live, on one real-time map.</p></div>
+        <div class="fcard reveal d6"><div class="ic">🏆</div><h4>Custom Rewards & Store</h4><p>Redeemable points that fuel the grind.</p></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ░░ SCENE 6 — COMMAND CENTER ░░ -->
+  <section class="scene" data-dur="5400">
+    <div style="text-align:center;">
+      <div class="kicker reveal d1">ADMIN COMMAND CENTER</div>
+      <h2 class="reveal d2" style="font-size:50px;font-weight:800;margin:22px 0 36px;">Every metric. Every rep. One view.</h2>
+      <div class="tiles">
+        <div class="tile reveal d2"><div class="k">Doors Today</div><div class="v s" data-count="4192">0</div></div>
+        <div class="tile reveal d3"><div class="k">Appointments</div><div class="v g" data-count="318">0</div></div>
+        <div class="tile reveal d4"><div class="k">Sales</div><div class="v a" data-count="96">0</div></div>
+        <div class="tile reveal d5"><div class="k">Active Reps</div><div class="v p" data-count="47">0</div></div>
+      </div>
+      <p class="reveal d6" style="color:var(--muted);font-size:24px;margin-top:38px;">Plus <b style="color:var(--ink);">true succession planning</b> — the only door-to-door platform that maps your team's future.</p>
+    </div>
+  </section>
+
+  <!-- ░░ SCENE 7 — CTA ░░ -->
+  <section class="scene" data-dur="5200">
+    <div style="text-align:center;">
+      <div class="brandrow reveal d1" style="justify-content:center;">
+        <div class="logo-mark"><svg viewBox="0 0 24 24" fill="#04111f"><path d="M12 3 3 10.5h2.4V21h5.1v-6h3v6h5.1V10.5H21z"/></svg></div>
+        <div class="wordmark">Youtility<b>Knock</b></div>
+      </div>
+      <h2 class="reveal d2" style="font-size:74px;font-weight:800;letter-spacing:-1.5px;margin-top:30px;line-height:1.03;">
+        Build a championship<br>team this season.
+      </h2>
+      <div class="reveal d4" style="margin-top:40px;"><span class="btn">Schedule Your Demo →</span></div>
+      <div class="url reveal d5">youtilityknock.web.app</div>
+    </div>
+  </section>
+
+  <div class="credit">youtilityknock.web.app</div>
+</div>
+<div id="prog"></div>
+
+<script>
+  // 9:16 vertical mode for Reels/TikTok/Shorts via ?ar=9x16.
+  const VERT = location.search.includes('ar=9x16');
+  if(VERT) document.body.classList.add('vert');
+  const STAGE_W = VERT?1080:1920, STAGE_H = VERT?1920:1080;
+  // Scale the fixed stage to fit any viewport (keeps capture crisp).
+  function fit(){
+    const s=document.getElementById('stage');
+    const k=Math.min(innerWidth/STAGE_W, innerHeight/STAGE_H);
+    s.style.transform='translate(-50%,-50%) scale('+k+')';
+  }
+  addEventListener('resize',fit); fit();
+
+  // Build the map pins for scene 1 (gray homes + one converted lead).
+  const homes=[[20,18],[28,42],[44,24],[60,40],[40,58],[64,62],[80,30],[24,72],[76,76],[52,20],[36,34],[68,18],[18,52],[84,52],[48,44]];
+  const HOUSE='<svg viewBox="0 0 24 24" fill="#fff"><path d="M12 3 3 10.5h2.4V21h5.1v-6h3v6h5.1V10.5H21z"/></svg>';
+  const map=document.getElementById('demoMap');
+  homes.forEach(([x,y])=>{
+    const p=document.createElement('div'); p.className='pin';
+    p.style.left=x+'%'; p.style.top=y+'%';
+    p.innerHTML='<span style="background:#475569">'+HOUSE+'</span>';
+    map.appendChild(p);
+  });
+  // a converted "Appointment" lead + popup
+  const lead=document.createElement('div'); lead.className='pin lead';
+  lead.style.left='44%'; lead.style.top='44%';
+  lead.innerHTML='<span style="background:#34D399">'+HOUSE+'</span>';
+  map.appendChild(lead);
+  const popup=document.createElement('div'); popup.className='popup';
+  popup.style.left='44%'; popup.style.top='44%';
+  popup.innerHTML='<b>Sarah Jennings</b><div class="row"><span>Est. value</span><b>$412,500</b></div><div class="row"><span>Owner since</span><b>2014</b></div><span class="chip">Appointment set</span>';
+  map.appendChild(popup);
+
+  function runMap(){
+    map.querySelectorAll('.pin').forEach((p,i)=>{
+      p.classList.remove('show'); void p.offsetWidth;
+      setTimeout(()=>p.classList.add('show'), 250 + i*90);
+    });
+    popup.classList.remove('show');
+    setTimeout(()=>popup.classList.add('show'), 250 + homes.length*90 + 500);
+  }
+
+  // typing effect for disposition
+  function typeInto(el,text,delay){
+    el.textContent=''; el.classList.add('typed');
+    let i=0; const t=setInterval(()=>{
+      el.textContent=text.slice(0,++i);
+      if(i>=text.length){clearInterval(t); el.classList.remove('typed');}
+    },45);
+  }
+  function runDispo(){
+    setTimeout(()=>typeInto(document.getElementById('t_name'),'Sarah Jennings'),500);
+    setTimeout(()=>typeInto(document.getElementById('t_phone'),'(801) 555-0142'),1700);
+    setTimeout(()=>typeInto(document.getElementById('t_email'),'sarah.j@email.com'),2900);
+  }
+
+  // count-up for KPI tiles
+  function runCount(scene){
+    scene.querySelectorAll('[data-count]').forEach(el=>{
+      const end=+el.dataset.count; const dur=1400; const t0=performance.now();
+      function step(t){const p=Math.min(1,(t-t0)/dur); el.textContent=Math.round(end*(1-Math.pow(1-p,3))).toLocaleString(); if(p<1)requestAnimationFrame(step);}
+      requestAnimationFrame(step);
+    });
+  }
+
+  const scenes=[...document.querySelectorAll('.scene')];
+  let idx=-1, timer=null;
+  function show(i){
+    if(idx>=0) scenes[idx].classList.remove('active');
+    idx=i; const sc=scenes[i]; sc.classList.add('active');
+    if(i===1) runMap();
+    if(i===2) runDispo();
+    if(i===6) setTimeout(()=>runCount(sc),300);
+    // progress bar
+    const dur=+sc.dataset.dur||5000;
+    const prog=document.getElementById('prog'); prog.style.transition='none'; prog.style.width='0';
+    void prog.offsetWidth; prog.style.transition='width '+dur+'ms linear'; prog.style.width='100%';
+    clearTimeout(timer); timer=setTimeout(()=>show((i+1)%scenes.length), dur);
+  }
+
+  // Public API for headless capture (screenshots/video controller).
+  window.__demo={
+    count: scenes.length,
+    durations: scenes.map(s=>+s.dataset.dur||5000),
+    goto(i){clearTimeout(timer); if(idx>=0)scenes[idx].classList.remove('active'); idx=i; const sc=scenes[i]; sc.classList.add('active'); if(i===1)runMap(); if(i===2)runDispo(); if(i===6)setTimeout(()=>runCount(sc),300);},
+    play(){show(0);}
+  };
+
+  // Autostart unless told to hold (capture mode passes ?hold=1).
+  if(!location.search.includes('hold=1')) show(0);
+</script>
+</body>
+</html>

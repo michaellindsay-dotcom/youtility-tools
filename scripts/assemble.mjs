@@ -15,6 +15,7 @@ const appDist = join(root, "canvasspro-web", "dist");
 const STATIC_FILES = [
   "index.html",
   "admin.html",
+  "demo.html",
   "canvass-pro.html",
   "youtility-crm.html",
   "player-highlight.html",
