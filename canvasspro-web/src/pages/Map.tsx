@@ -186,7 +186,7 @@ export default function MapPage() {
   // so walking/panning back over loaded ground costs no ATTOM call.
   async function fetchNearby(center: LatLng) {
     const cached = getTile(center.lat, center.lng);
-    if (cached) {
+    if (cached && cached.length) {
       cached.forEach((h) => addHomeMarker(h));
       return;
     }
@@ -250,16 +250,19 @@ export default function MapPage() {
             .filter((m) => inPolygon({ lat: m.lat, lng: m.lng }, poly))
             .forEach((m) => addMoverMarker(m));
         }
-      } else {
-        const c = myLoc.current || { lat: map.getCenter().lat, lng: map.getCenter().lng };
-        await fetchNearbyMovers(c);
       }
+      // Always also pull movers around where the rep is / is looking.
+      const c = myLoc.current || { lat: map.getCenter().lat, lng: map.getCenter().lng };
+      await fetchNearbyMovers(c);
     } catch {
       /* silent — movers are supplemental to the home pins */
     }
   }
 
-  // Manual / initial load: assigned territory(ies), or nearest 200 around the rep.
+  // Manual / initial load: assigned territory(ies) PLUS the homes around the
+  // rep's current location/viewport, so pins always show where they're actually
+  // standing or looking — not only over their territory. Roaming then keeps
+  // loading more as they pan/walk.
   async function loadHomes() {
     const map = mapRef.current;
     if (!map || !profile) return;
@@ -283,14 +286,12 @@ export default function MapPage() {
             .filter((h) => inPolygon({ lat: h.lat, lng: h.lng }, poly))
             .forEach((h) => addHomeMarker(h));
         }
-        lastLoadCenter.current = null;
-        setStatus(`${homeLayer.current.getLayers().length} homes in your area`);
-      } else {
-        const c = myLoc.current || { lat: map.getCenter().lat, lng: map.getCenter().lng };
-        await fetchNearby(c);
-        lastLoadCenter.current = L.latLng(c.lat, c.lng);
-        setStatus(`${homeLayer.current.getLayers().length} homes nearby · move to load more`);
       }
+      // Always also pull homes around where the rep is / is looking.
+      const c = myLoc.current || { lat: map.getCenter().lat, lng: map.getCenter().lng };
+      await fetchNearby(c);
+      lastLoadCenter.current = L.latLng(c.lat, c.lng);
+      setStatus(`${homeLayer.current.getLayers().length} homes loaded · move to load more`);
     } catch (e: any) {
       setStatus("Could not load homes: " + (e?.message || ""));
     } finally {
@@ -299,12 +300,13 @@ export default function MapPage() {
   }
 
   // Auto-load as the rep moves: when the map center drifts past the threshold
-  // (and they're not in an assigned area or drawing), pull homes around the new
-  // center and accumulate them — no manual refresh needed.
+  // (and they're not drawing), pull homes around the new center and accumulate
+  // them — no manual refresh needed. Runs everywhere now, including for reps
+  // who have an assigned territory, so pins follow wherever they look/walk.
   async function autoRoam() {
     const map = mapRef.current;
     if (!map || !profile || loadingRef.current) return;
-    if (assigned.current.length || modeRef.current === "draw") return;
+    if (modeRef.current === "draw") return;
     const ctr = map.getCenter();
     if (lastLoadCenter.current && ctr.distanceTo(lastLoadCenter.current) < ROAM_THRESHOLD_M) return;
     loadingRef.current = true;
