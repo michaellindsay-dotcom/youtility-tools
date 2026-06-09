@@ -87,6 +87,12 @@ export default function MapPage() {
   const [moversOnly, setMoversOnly] = useState(false);
   const moversOnlyRef = useRef(false);
   moversOnlyRef.current = moversOnly;
+  // Follow mode: when ON (compass button), the map recenters on the rep's live
+  // location as they move. OFF (default) lets them pan/zoom freely. The ref lets
+  // the geolocation watch read the current toggle without re-subscribing.
+  const [following, setFollowing] = useState(false);
+  const followRef = useRef(false);
+  followRef.current = following;
   const [dispoTarget, setDispoTarget] = useState<DispoInput | null>(null);
   // Save panel shown after an area is drawn: name it + assign it to a rep.
   const [savePanel, setSavePanel] = useState(false);
@@ -364,10 +370,40 @@ export default function MapPage() {
     if (next) setStatus(`${moverLayer.current.getLayers().length} recent movers · other pins hidden`);
   }
 
-  // Refresh button: reload movers always, and the homes/leads too unless hidden.
+  // Refresh button: recenter on the rep's live location, then reload movers
+  // always and the homes/leads too unless hidden.
   async function refresh() {
+    await recenterToMe();
     if (!moversOnly) await loadHomes();
     await loadMovers();
+  }
+
+  // Center the map on the rep's exact location (acquiring a fresh fix if we
+  // don't have one yet). Used on login, on refresh, and by the compass button.
+  async function recenterToMe(): Promise<void> {
+    const map = mapRef.current;
+    if (!map) return;
+    let loc = myLoc.current;
+    if (!loc) {
+      try {
+        const pos = await Geolocation.getCurrentPosition({ enableHighAccuracy: true, timeout: 8000 });
+        loc = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+        myLoc.current = loc;
+        setYou(loc.lat, loc.lng);
+      } catch {
+        return; // location unavailable
+      }
+    }
+    map.setView([loc.lat, loc.lng], Math.max(map.getZoom(), 18), { animate: true });
+  }
+
+  // Compass button: jump to the rep's exact location and follow them until they
+  // tap it again. While off, the map stays wherever they panned/zoomed.
+  async function toggleFollow() {
+    const next = !following;
+    setFollowing(next);
+    followRef.current = next;
+    if (next) await recenterToMe();
   }
 
   function setYou(lat: number, lng: number) {
@@ -379,10 +415,11 @@ export default function MapPage() {
     }
   }
 
-  // Keep the map locked on the rep's GPS as they walk. Recentering triggers the
-  // debounced auto-load so homes appear ahead of them (served from cache when
-  // already pulled). A small threshold avoids jitter from GPS noise.
-  async function startFollowing() {
+  // Watch the rep's GPS to keep the "You" marker current. The map only recenters
+  // when follow mode is ON (compass button) — otherwise they're free to pan and
+  // zoom without being yanked back. A small threshold avoids jitter from GPS
+  // noise. Recentering triggers the debounced auto-load so homes appear ahead.
+  async function startWatching() {
     if (watchId.current) return;
     try {
       watchId.current = await Geolocation.watchPosition({ enableHighAccuracy: true, timeout: 10000 }, (pos) => {
@@ -391,7 +428,8 @@ export default function MapPage() {
         myLoc.current = { lat, lng };
         setYou(lat, lng);
         const map = mapRef.current;
-        if (map && map.getCenter().distanceTo(L.latLng(lat, lng)) > 12) map.panTo([lat, lng], { animate: true });
+        if (followRef.current && map && map.getCenter().distanceTo(L.latLng(lat, lng)) > 12)
+          map.panTo([lat, lng], { animate: true });
       });
     } catch {
       /* location unavailable — map just won't follow */
@@ -468,7 +506,7 @@ export default function MapPage() {
       await buildPins();
       await loadHomes();
       void loadMovers(); // drop recent move-in pins for the area / live location
-      void startFollowing(); // keep the map on the rep as they walk
+      void startWatching(); // track the "You" marker (recenters only in follow mode)
     })();
 
     return () => {
@@ -551,6 +589,15 @@ export default function MapPage() {
         <button className="map-fab" onClick={openNav} aria-label="Menu">☰</button>
         <button className="map-fab" onClick={refresh} disabled={loadingHomes} aria-label="Refresh homes" title="Refresh homes & movers">
           {loadingHomes ? "…" : "⟳"}
+        </button>
+        {/* Compass: jump to my exact location and follow me until tapped again. */}
+        <button
+          className={"map-fab" + (following ? " active" : "")}
+          onClick={toggleFollow}
+          aria-label={following ? "Stop following my location" : "Go to my location"}
+          title={following ? "Following you — tap to stop" : "Go to my location & follow"}
+        >
+          🧭
         </button>
         <button
           className={"map-fab" + (mode === "drop" ? " active" : "")}
