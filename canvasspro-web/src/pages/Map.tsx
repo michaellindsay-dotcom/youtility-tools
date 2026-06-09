@@ -435,12 +435,17 @@ export default function MapPage() {
   useEffect(() => {
     if (!companyId || !profile || !elRef.current || mapRef.current) return;
 
-    // MAX_ZOOM caps how far in you can go. `maxNativeZoom` tells Leaflet the
-    // deepest level each source actually has tiles for — beyond it, Leaflet
-    // upscales those tiles instead of requesting nonexistent ones (which 404
-    // into a blank/white screen). Esri imagery + the labels + OSM top out at
-    // z19; Google imagery goes deeper.
-    const MAX_ZOOM = 20;
+    // MAX_ZOOM caps how far in you can go. Google imagery is the default base
+    // layer: it has crisp native tiles all the way to z21, so reps can zoom in
+    // close on a roof/driveway and stay sharp. `maxNativeZoom` tells Leaflet the
+    // deepest level a source actually has tiles for — beyond it, Leaflet upscales
+    // those tiles instead of requesting nonexistent ones (which 404 into a blank
+    // white screen). Esri imagery + the labels + OSM top out at z19, so they
+    // upscale past that; pins are placed by lat/lng so they stay put on any layer.
+    const MAX_ZOOM = 21;
+    const gSat = L.tileLayer("https://{s}.google.com/vt/lyrs=y&x={x}&y={y}&z={z}", {
+      subdomains: ["mt0", "mt1", "mt2", "mt3"], maxZoom: MAX_ZOOM, maxNativeZoom: 21, attribution: "© Google",
+    });
     const satellite = L.tileLayer(
       "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
       { maxZoom: MAX_ZOOM, maxNativeZoom: 19, attribution: "Tiles © Esri — Maxar, Earthstar Geographics" }
@@ -450,16 +455,13 @@ export default function MapPage() {
       { maxZoom: MAX_ZOOM, maxNativeZoom: 19 }
     );
     const hybrid = L.layerGroup([satellite, labels]);
-    const gSat = L.tileLayer("https://{s}.google.com/vt/lyrs=y&x={x}&y={y}&z={z}", {
-      subdomains: ["mt0", "mt1", "mt2", "mt3"], maxZoom: MAX_ZOOM, attribution: "© Google",
-    });
     const street = L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
       maxZoom: MAX_ZOOM, maxNativeZoom: 19, attribution: "© OpenStreetMap",
     });
 
-    const map = L.map(elRef.current, { center: DEFAULT_CENTER, zoom: 14, maxZoom: MAX_ZOOM, layers: [hybrid], zoomControl: false });
+    const map = L.map(elRef.current, { center: DEFAULT_CENTER, zoom: 14, maxZoom: MAX_ZOOM, layers: [gSat], zoomControl: false });
     L.control.zoom({ position: "topright" }).addTo(map);
-    L.control.layers({ "Esri satellite": hybrid, "Google satellite": gSat, Street: street }, undefined, { position: "topright" }).addTo(map);
+    L.control.layers({ "Google satellite": gSat, "Esri satellite": hybrid, Street: street }, undefined, { position: "topright" }).addTo(map);
     territoryLayer.current.addTo(map);
     homeLayer.current.addTo(map);
     leadLayer.current.addTo(map);
