@@ -435,21 +435,29 @@ export default function MapPage() {
   useEffect(() => {
     if (!companyId || !profile || !elRef.current || mapRef.current) return;
 
+    // MAX_ZOOM caps how far in you can go. `maxNativeZoom` tells Leaflet the
+    // deepest level each source actually has tiles for — beyond it, Leaflet
+    // upscales those tiles instead of requesting nonexistent ones (which 404
+    // into a blank/white screen). Esri imagery + the labels + OSM top out at
+    // z19; Google imagery goes deeper.
+    const MAX_ZOOM = 20;
     const satellite = L.tileLayer(
       "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
-      { maxZoom: 19, attribution: "Tiles © Esri — Maxar, Earthstar Geographics" }
+      { maxZoom: MAX_ZOOM, maxNativeZoom: 19, attribution: "Tiles © Esri — Maxar, Earthstar Geographics" }
     );
     const labels = L.tileLayer(
       "https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}",
-      { maxZoom: 19 }
+      { maxZoom: MAX_ZOOM, maxNativeZoom: 19 }
     );
     const hybrid = L.layerGroup([satellite, labels]);
     const gSat = L.tileLayer("https://{s}.google.com/vt/lyrs=y&x={x}&y={y}&z={z}", {
-      subdomains: ["mt0", "mt1", "mt2", "mt3"], maxZoom: 21, attribution: "© Google",
+      subdomains: ["mt0", "mt1", "mt2", "mt3"], maxZoom: MAX_ZOOM, attribution: "© Google",
     });
-    const street = L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 19, attribution: "© OpenStreetMap" });
+    const street = L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+      maxZoom: MAX_ZOOM, maxNativeZoom: 19, attribution: "© OpenStreetMap",
+    });
 
-    const map = L.map(elRef.current, { center: DEFAULT_CENTER, zoom: 14, maxZoom: 21, layers: [hybrid], zoomControl: false });
+    const map = L.map(elRef.current, { center: DEFAULT_CENTER, zoom: 14, maxZoom: MAX_ZOOM, layers: [hybrid], zoomControl: false });
     L.control.zoom({ position: "topright" }).addTo(map);
     L.control.layers({ "Esri satellite": hybrid, "Google satellite": gSat, Street: street }, undefined, { position: "topright" }).addTo(map);
     territoryLayer.current.addTo(map);
