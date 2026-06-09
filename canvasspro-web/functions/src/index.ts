@@ -33,6 +33,26 @@ async function attomGet(path: string, params: Record<string, string | number | u
   return { ok: res.ok, status: res.status, json };
 }
 
+// ATTOM auth failures (expired / revoked / unentitled key) must NOT leak the
+// raw provider JSON to the rep's screen. Translate 401/403 into a clean, typed
+// error the client can render as a friendly banner and degrade around (keep
+// cached + lead + mover pins). Other upstream errors pass through unchanged.
+function sendAttomError(
+  res: { status: (code: number) => { json: (body: unknown) => void } },
+  status: number,
+  json: any // eslint-disable-line @typescript-eslint/no-explicit-any
+): void {
+  if (status === 401 || status === 403) {
+    logger.error("ATTOM auth rejected", {
+      status,
+      msg: json?.status?.msg ?? json?.Response?.status?.msg ?? "unknown",
+    });
+    res.status(502).json({ error: "Property data is temporarily unavailable.", code: "PROVIDER_AUTH" });
+    return;
+  }
+  res.status(status).json(json);
+}
+
 // BatchData skip-tracing — owner phones/emails (ATTOM doesn't provide contact).
 const BATCH = {
   baseUrl: process.env.BATCHDATA_API_URL || "https://api.batchdata.com",
@@ -249,7 +269,8 @@ export const api = onRequest({ cors: true }, async (req, res) => {
         endsalesearchdate: fmt(end),
         pagesize: 200,
       });
-      res.status(ok ? 200 : status).json(json);
+      if (!ok) { sendAttomError(res, status, json); return; }
+      res.status(200).json(json);
       return;
     }
 
@@ -264,7 +285,8 @@ export const api = onRequest({ cors: true }, async (req, res) => {
         radius,
         pagesize: 200,
       });
-      res.status(ok ? 200 : status).json(json);
+      if (!ok) { sendAttomError(res, status, json); return; }
+      res.status(200).json(json);
       return;
     }
 
@@ -275,7 +297,7 @@ export const api = onRequest({ cors: true }, async (req, res) => {
     const address1 = ci > -1 ? address.slice(0, ci).trim() : address;
     const address2 = ci > -1 ? address.slice(ci + 1).trim() : "";
     const { ok, status, json } = await attomGet("/property/expandedprofile", { address1, address2 });
-    if (!ok) { res.status(status).json(json); return; }
+    if (!ok) { sendAttomError(res, status, json); return; }
     // Merge BatchData skip-trace (owner phones/emails) when configured.
     if (BATCH.enabled && BATCH.key) {
       try {

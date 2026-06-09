@@ -456,9 +456,16 @@ export async function lookupArea(
     headers: { Authorization: `Bearer ${idToken}` },
   });
   if (!res.ok) {
-    const body = await res.text().catch(() => "");
-    const err = new Error(`Area lookup failed (${res.status})${body ? ": " + body.slice(0, 200) : ""}`);
-    (err as any).code = "HTTP_" + res.status;
+    // The proxy translates an ATTOM auth failure into { code: "PROVIDER_AUTH" }
+    // so we can show a clean banner instead of the raw provider JSON.
+    const body = (await res.json().catch(() => null)) as AnyObj | null;
+    const code = (body?.code as string) || "HTTP_" + res.status;
+    const msg =
+      code === "PROVIDER_AUTH"
+        ? "Property data is temporarily unavailable."
+        : `Area lookup failed (${res.status})${body ? ": " + JSON.stringify(body).slice(0, 200) : ""}`;
+    const err = new Error(msg);
+    (err as any).code = code;
     throw err;
   }
   return res.json();

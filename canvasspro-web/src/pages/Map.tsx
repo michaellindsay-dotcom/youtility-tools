@@ -303,7 +303,17 @@ export default function MapPage() {
       await fetchNearby(c);
       lastLoadCenter.current = L.latLng(c.lat, c.lng);
     } catch (e: any) {
-      setStatus("Could not load homes: " + (e?.message || ""));
+      // ATTOM auth failure (expired/revoked key): degrade gracefully instead of
+      // dumping the raw provider error. Repaint saved homes for the current view
+      // from cache so the rep keeps working; lead + mover pins are untouched.
+      if (e?.code === "PROVIDER_AUTH") {
+        const c = myLoc.current || { lat: map.getCenter().lat, lng: map.getCenter().lng };
+        (getTile(c.lat, c.lng) || nearbyCachedHomes(c.lat, c.lng) || []).forEach((h) => addHomeMarker(h));
+        setStatus("Property data is temporarily unavailable — showing saved homes.");
+      } else {
+        setStatus("Could not load homes: " + (e?.message || ""));
+      }
+      window.setTimeout(() => setStatus(""), 6000);
     } finally {
       setLoadingHomes(false);
     }
