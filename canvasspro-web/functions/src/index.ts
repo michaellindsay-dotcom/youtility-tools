@@ -2584,6 +2584,10 @@ export const crmApi = onRequest({ cors: true }, async (req, res) => {
             lat: p.lat, lng: p.lng,
             address: p.address || "",
             ownerName: p.ownerName || "",
+            // Outreach sent — powers the "Mailed/Texted/Emailed on <date>" popup.
+            mailedAt: p.mailedAt ?? null,
+            smsAt: p.smsAt ?? null,
+            emailAt: p.emailAt ?? null,
             hot: !!p.hotLead,
             hotSource: p.hotLeadSource || "",
             hotAt: p.hotLeadAt ?? null,

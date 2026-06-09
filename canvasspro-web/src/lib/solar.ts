@@ -19,6 +19,9 @@ export interface SolarPin {
   lng: number;
   address?: string;
   ownerName?: string;
+  mailedAt?: number | null; // postcard sent (ms epoch)
+  smsAt?: number | null;    // text sent
+  emailAt?: number | null;  // email sent
   hot?: boolean;
   hotSource?: string; // qr | sms | email
   hotAt?: number | string | null;
@@ -37,13 +40,33 @@ export function solarIcon(hot: boolean): L.DivIcon {
   });
 }
 
+function fmtDate(ms?: number | string | null): string {
+  if (!ms) return "";
+  const d = new Date(ms);
+  return Number.isNaN(d.getTime()) ? "" : d.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
+}
+
 export function solarPopupHtml(p: SolarPin): string {
-  const line2 = p.hot
-    ? `🔥 Hot lead${p.hotSource ? ` — ${p.hotSource === "qr" ? "scanned QR code" : p.hotSource === "sms" ? "clicked text link" : "clicked email link"}` : ""}`
-    : "Solar outreach sent — no engagement yet";
-  return `<div style="min-width:160px"><strong>${p.ownerName || "Homeowner"}</strong><br>` +
-    `<span style="color:#555">${p.address || ""}</span><br>` +
-    `<span style="color:${p.hot ? "#ea580c" : "#64748b"};font-weight:600">${line2}</span></div>`;
+  // Outreach history — every channel this home was reached on, with the date.
+  const sent: string[] = [];
+  if (p.mailedAt) sent.push(`📬 Mailed ${fmtDate(p.mailedAt)}`);
+  if (p.smsAt) sent.push(`💬 Texted ${fmtDate(p.smsAt)}`);
+  if (p.emailAt) sent.push(`✉️ Emailed ${fmtDate(p.emailAt)}`);
+  const sentHtml = sent.length
+    ? `<div style="color:#475569;font-size:12px;margin-top:4px">${sent.join("<br>")}</div>`
+    : "";
+
+  const statusHtml = p.hot
+    ? `<div style="color:#ea580c;font-weight:600;margin-top:4px">🔥 Hot lead${
+        p.hotSource ? ` — ${p.hotSource === "qr" ? "scanned QR code" : p.hotSource === "sms" ? "clicked text link" : "clicked email link"}` : ""
+      }${p.hotAt ? ` (${fmtDate(p.hotAt)})` : ""}</div>`
+    : `<div style="color:#64748b;font-weight:600;margin-top:4px">☀️ Outreach sent — no engagement yet</div>`;
+
+  return `<div style="min-width:170px"><strong>${p.ownerName || "Homeowner"}</strong><br>` +
+    `<span style="color:#555">${p.address || ""}</span>` +
+    sentHtml +
+    statusHtml +
+    `</div>`;
 }
 
 // Fetch this company's solar pins, already visibility-filtered for the caller.
