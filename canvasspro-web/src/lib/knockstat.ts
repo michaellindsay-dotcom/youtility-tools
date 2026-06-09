@@ -11,7 +11,22 @@ import type { Person, PropertyRecord, LeadEnrichment } from "../types";
 
 type AnyObj = Record<string, any>;
 
-// Pluck the first defined value at any of the given dotted paths.
+// Read a single key, falling back to a case-insensitive match. ATTOM is wildly
+// inconsistent about casing across endpoints (`yearbuilt` vs `yearBuilt`,
+// `bathstotal` vs `bathsTotal`, `firstnameandmi` vs `firstNameAndMi`), so an
+// exact-only lookup silently drops most homeowner/property fields.
+function readKey(obj: any, key: string): any {
+  if (obj == null || typeof obj !== "object") return undefined;
+  if (key in obj) return obj[key];
+  const lk = key.toLowerCase();
+  for (const k of Object.keys(obj)) {
+    if (k.toLowerCase() === lk) return obj[k];
+  }
+  return undefined;
+}
+
+// Pluck the first defined value at any of the given dotted paths
+// (case-insensitive per segment).
 export function pick(obj: AnyObj | null | undefined, ...paths: string[]): any {
   for (const p of paths) {
     const parts = p.split(".");
@@ -22,7 +37,7 @@ export function pick(obj: AnyObj | null | undefined, ...paths: string[]): any {
         ok = false;
         break;
       }
-      v = v[part];
+      v = readKey(v, part);
     }
     if (ok && v != null && v !== "") return v;
   }
@@ -138,8 +153,9 @@ export function normalizeKnockstatResponse(raw: AnyObj): PropertyRecord {
         const ao: AnyObj = pick(r, "assessment.owner", "owner") || {};
         const fmt = (o: AnyObj | undefined): string => {
           if (!o) return "";
-          if (o.fullName) return String(o.fullName);
-          return [o.firstNameAndMi || o.firstName || o.firstname, o.lastName || o.lastname]
+          const full = pick(o, "fullName");
+          if (full) return String(full);
+          return [pick(o, "firstNameAndMi", "firstName"), pick(o, "lastName")]
             .filter(Boolean)
             .join(" ");
         };

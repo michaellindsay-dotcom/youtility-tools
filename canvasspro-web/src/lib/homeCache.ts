@@ -29,12 +29,15 @@ const idx = (n: number) => Math.round(n / TILE);
 export function tileKey(lat: number, lng: number): string { return `${idx(lat)}_${idx(lng)}`; }
 
 // Homes previously pulled for the tile containing (lat,lng), or null on miss.
+// An empty tile counts as a MISS: a transient ATTOM "SuccessWithoutResult" must
+// never get cached as "no homes here" and suppress pins for the next 14 days.
 export function getTile(lat: number, lng: number): CachedHome[] | null {
   const e = load()[tileKey(lat, lng)];
-  return e && Date.now() - e.at < TTL ? e.homes : null;
+  return e && e.homes.length && Date.now() - e.at < TTL ? e.homes : null;
 }
 
 export function putTile(lat: number, lng: number, homes: CachedHome[]): void {
+  if (!homes.length) return; // don't poison the tile with an empty result
   const c = load();
   c[tileKey(lat, lng)] = { homes, at: Date.now() };
   save(c);

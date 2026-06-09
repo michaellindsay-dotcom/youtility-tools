@@ -186,7 +186,7 @@ export default function MapPage() {
   // so walking/panning back over loaded ground costs no ATTOM call.
   async function fetchNearby(center: LatLng) {
     const cached = getTile(center.lat, center.lng);
-    if (cached) {
+    if (cached && cached.length) {
       cached.forEach((h) => addHomeMarker(h));
       return;
     }
