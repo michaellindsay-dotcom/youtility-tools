@@ -11,6 +11,7 @@ import { DISP_COLOR } from "../lib/dispositions";
 import { lookupArea, parseAreaProperties, lookupMovers, parseMovers, type MoverHome } from "../lib/knockstat";
 import { moverIcon, moverColor, moverPopupHtml, daysAgo, MOVER_DAYS } from "../lib/movers";
 import { getTile, putTile, nearbyCachedHomes } from "../lib/homeCache";
+import { fetchSolarPins, solarIcon, solarPopupHtml } from "../lib/solar";
 import DispositionModal, { type DispoInput } from "../components/DispositionModal";
 import ShiftHud from "../components/ShiftHud";
 import type { Lead, Territory, LatLng, UserProfile } from "../types";
@@ -73,6 +74,7 @@ export default function MapPage() {
   const youMarker = useRef<L.CircleMarker | null>(null);
   const watchId = useRef<string | null>(null);
   const territoryLayer = useRef<L.LayerGroup>(L.layerGroup());
+  const solarLayer = useRef<L.LayerGroup>(L.layerGroup()); // ☀️/🔥 solar-scanner pins from the CRM
   const assigned = useRef<Territory[]>([]);
   const myLoc = useRef<LatLng | null>(null);
   const drawPts = useRef<LatLng[]>([]);
@@ -89,6 +91,11 @@ export default function MapPage() {
   const [moversOnly, setMoversOnly] = useState(false);
   const moversOnlyRef = useRef(false);
   moversOnlyRef.current = moversOnly;
+  // Solar Scanner pins (CRM add-on) — on by default; the ref lets async loads
+  // read the current toggle without re-subscribing.
+  const [showSolar, setShowSolar] = useState(true);
+  const showSolarRef = useRef(true);
+  showSolarRef.current = showSolar;
   // Follow mode: when ON (compass button), the map recenters on the rep's live
   // location as they move. OFF (default) lets them pan/zoom freely. The ref lets
   // the geolocation watch read the current toggle without re-subscribing.
@@ -381,6 +388,36 @@ export default function MapPage() {
     await recenterToMe();
     if (!moversOnly) await loadHomes();
     await loadMovers();
+    void loadSolarPins();
+  }
+
+  // ── Solar Scanner pins (CRM add-on) ─────────────────────────────────────────
+  // Pull this company's solar-scanner pins (already visibility-filtered for the
+  // caller by the getSolarPins function) and drop them on their own layer: ☀️ for
+  // a mailed/texted/emailed home, 🔥 for a hot lead the homeowner engaged with.
+  // Supplemental — a failure never blocks the rest of the map.
+  async function loadSolarPins() {
+    solarLayer.current.clearLayers();
+    if (!companyId || !showSolarRef.current) return;
+    try {
+      const pins = await fetchSolarPins(companyId);
+      for (const p of pins) {
+        L.marker([p.lat, p.lng], { icon: solarIcon(!!p.hot), zIndexOffset: p.hot ? 2500 : 1500 })
+          .bindPopup(solarPopupHtml(p))
+          .addTo(solarLayer.current);
+      }
+    } catch {
+      /* solar pins are supplemental — never surface an error here */
+    }
+  }
+
+  // Toggle the solar layer on/off (FAB). Repaints on enable.
+  async function toggleSolar() {
+    const next = !showSolar;
+    setShowSolar(next);
+    showSolarRef.current = next;
+    if (next) await loadSolarPins();
+    else solarLayer.current.clearLayers();
   }
 
   // Center the map on the rep's exact location (acquiring a fresh fix if we
@@ -476,6 +513,7 @@ export default function MapPage() {
     homeLayer.current.addTo(map);
     leadLayer.current.addTo(map);
     moverLayer.current.addTo(map); // always on; sits above the other pins
+    solarLayer.current.addTo(map); // ☀️/🔥 solar pins; toggled via the FAB
     mapRef.current = map;
     setTimeout(() => map.invalidateSize(), 120);
 
@@ -521,6 +559,7 @@ export default function MapPage() {
       await buildPins();
       await loadHomes();
       void loadMovers(); // drop recent move-in pins for the area / live location
+      void loadSolarPins(); // drop ☀️/🔥 solar-scanner pins (CRM add-on)
       void startWatching(); // track the "You" marker (recenters only in follow mode)
     })();
 
@@ -637,6 +676,14 @@ export default function MapPage() {
           aria-label="Show movers only" title="Movers — recent move-ins only"
         >
           🚚
+        </button>
+        {/* Solar: show/hide the CRM solar-scanner pins (☀️ sent · 🔥 hot lead). */}
+        <button
+          className={"map-fab" + (showSolar ? " active" : "")}
+          onClick={toggleSolar}
+          aria-label="Toggle solar scanner pins" title="Solar Scanner pins (☀️ sent · 🔥 hot lead)"
+        >
+          ☀️
         </button>
       </div>
 

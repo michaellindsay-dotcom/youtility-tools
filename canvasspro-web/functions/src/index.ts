@@ -2357,6 +2357,52 @@ export const onRewardSync = onDocumentWritten("companies/{cid}/rewards/{rid}", a
   await pushToCrm("reward", event.params.cid, event.params.rid, after);
 });
 
+// ── Solar Scanner pins (CRM → field app) ─────────────────────────────────────
+// The CRM pushes its solar-scanner pins here (POST /crm/solar-pins) and the
+// field map reads them back through getSolarPins. A plain pin marks a home the
+// scanner mailed/texted/emailed; `hot` marks one where the homeowner engaged
+// (scanned the postcard QR / clicked the SMS or email link) — the 🔥 hot lead.
+// Visibility: admins, managers and super-admins see every pin; a rep sees only
+// pins that fall inside a territory assigned to them.
+function pinInPolygon(pt: { lat: number; lng: number }, poly: Array<{ lat: number; lng: number }>): boolean {
+  let inside = false;
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    const xi = poly[i].lng, yi = poly[i].lat, xj = poly[j].lng, yj = poly[j].lat;
+    const hit = yi > pt.lat !== yj > pt.lat && pt.lng < ((xj - xi) * (pt.lat - yi)) / (yj - yi) + xi;
+    if (hit) inside = !inside;
+  }
+  return inside;
+}
+
+export const getSolarPins = onCall(async (request) => {
+  const caller = await getCaller(request);
+  const companyId = ((request.data || {}) as { companyId?: string }).companyId || caller.companyId;
+  if (!companyId) throw new HttpsError("invalid-argument", "companyId is required.");
+  if (!caller.isSuper && caller.companyId !== companyId) {
+    throw new HttpsError("permission-denied", "Not allowed to read this company.");
+  }
+  const snap = await db.collection("companies").doc(companyId).collection("solarPins").get();
+  let pins = (snap.docs.map((d) => ({ id: d.id, ...d.data() })) as Array<Record<string, any>>)
+    .filter((p) => typeof p.lat === "number" && typeof p.lng === "number");
+
+  // Admins / managers / super-admins see every pin. A rep sees only the pins
+  // inside a territory assigned to them (assignedTo === uid, or legacy
+  // territoryIds membership for unassigned-but-listed areas).
+  const seeAll = caller.isSuper || caller.role === "admin" || caller.role === "manager";
+  if (!seeAll) {
+    const [tSnap, uSnap] = await Promise.all([
+      db.collection("territories").where("companyId", "==", companyId).get(),
+      db.doc(`users/${caller.uid}`).get(),
+    ]);
+    const myIds: string[] = (uSnap.data()?.territoryIds as string[]) || [];
+    const mine = (tSnap.docs.map((d) => ({ id: d.id, ...d.data() })) as Array<Record<string, any>>)
+      .filter((t) => Array.isArray(t.polygon) && t.polygon.length >= 3)
+      .filter((t) => (t.assignedTo ? t.assignedTo === caller.uid : myIds.includes(t.id)));
+    pins = pins.filter((p) => mine.some((t) => pinInPolygon({ lat: p.lat, lng: p.lng }, t.polygon)));
+  }
+  return { pins };
+});
+
 // ── /crm/** router (provision · export · ingest) ─────────────────────────────
 export const crmApi = onRequest({ cors: true }, async (req, res) => {
   const sent = req.get("x-crm-secret") || "";
@@ -2514,6 +2560,41 @@ export const crmApi = onRequest({ cors: true }, async (req, res) => {
       if (existing) { await existing.ref.set(fields, { merge: true }); id = existing.id; }
       else { const ref = await db.collection("leads").add({ ...fields, createdAt: now }); id = ref.id; }
       res.json({ ok: true, leadId: id });
+      return;
+    }
+
+    // ── Upsert solar-scanner pins from the CRM (push into the field map) ──
+    if (req.method === "POST" && path.endsWith("/solar-pins")) {
+      const { companyId, pins } = (req.body || {}) as { companyId?: string; pins?: any[] };
+      if (!companyId || !Array.isArray(pins)) { res.status(400).json({ error: "companyId and pins[] required" }); return; }
+      if (!(await crmAuth(sent, companyId))) { res.status(401).json({ error: "Unauthorized" }); return; }
+      const col = db.collection("companies").doc(companyId).collection("solarPins");
+      const now = Date.now();
+      let upserted = 0;
+      // Firestore caps a batch at 500 writes — chunk to stay well under it.
+      for (let i = 0; i < pins.length; i += 400) {
+        const batch = db.batch();
+        for (const p of pins.slice(i, i + 400)) {
+          if (typeof p?.lat !== "number" || typeof p?.lng !== "number") continue;
+          const id = String(p.id || `${p.scanId}_${p.resultIdx}`).replace(/[^\w-]/g, "_");
+          batch.set(col.doc(id), {
+            companyId,
+            scanId: p.scanId ?? null,
+            resultIdx: typeof p.resultIdx === "number" ? p.resultIdx : null,
+            lat: p.lat, lng: p.lng,
+            address: p.address || "",
+            ownerName: p.ownerName || "",
+            hot: !!p.hotLead,
+            hotSource: p.hotLeadSource || "",
+            hotAt: p.hotLeadAt ?? null,
+            crmContactId: p.contactId ?? null,
+            _syncedFrom: "crm", updatedAt: now,
+          }, { merge: true });
+          upserted++;
+        }
+        await batch.commit();
+      }
+      res.json({ ok: true, upserted });
       return;
     }
 
