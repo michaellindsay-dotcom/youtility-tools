@@ -79,7 +79,9 @@ export default function MapPage() {
   const drawLayer = useRef<L.Polygon | null>(null);
   const modeRef = useRef<MapMode>("view");
 
-  const [status, setStatus] = useState("Loading map…");
+  // The status pill is now used only for transient errors / draw hints — the
+  // persistent "N homes loaded · keep moving" counts were removed.
+  const [status, setStatus] = useState("");
   const [mode, setMode] = useState<MapMode>("view");
   const [loadingHomes, setLoadingHomes] = useState(false);
   // "Movers only" hides the lead + gray home pins so just the recent move-ins
@@ -300,7 +302,6 @@ export default function MapPage() {
       const c = myLoc.current || { lat: map.getCenter().lat, lng: map.getCenter().lng };
       await fetchNearby(c);
       lastLoadCenter.current = L.latLng(c.lat, c.lng);
-      setStatus(`${homeLayer.current.getLayers().length} homes loaded · move to load more`);
     } catch (e: any) {
       setStatus("Could not load homes: " + (e?.message || ""));
     } finally {
@@ -336,11 +337,6 @@ export default function MapPage() {
       // Move-ins outside the assigned area only roam in when isolating movers.
       if (moversOnlyRef.current) await fetchNearbyMovers({ lat: ctr.lat, lng: ctr.lng });
       lastLoadCenter.current = ctr;
-      setStatus(
-        moversOnlyRef.current
-          ? `${moverLayer.current.getLayers().length} recent movers · keep moving`
-          : `${homeLayer.current.getLayers().length} homes loaded · keep moving`
-      );
     } catch {
       /* silent — keep what's already shown */
     } finally {
@@ -367,7 +363,6 @@ export default function MapPage() {
       leadLayer.current.addTo(map);
     }
     await loadMovers();
-    if (next) setStatus(`${moverLayer.current.getLayers().length} recent movers · other pins hidden`);
   }
 
   // Refresh button: recenter on the rep's live location, then reload movers
