@@ -157,6 +157,18 @@
   /* progress bar */
   #prog{position:fixed; left:0; bottom:0; height:6px; background:var(--sky2); width:0; z-index:50; box-shadow:0 0 14px var(--sky2);}
   .credit{position:absolute; right:60px; bottom:50px; color:var(--muted); font-size:18px; opacity:.8;}
+
+  /* ── 9:16 vertical layout for Reels / TikTok / Shorts ─────────────── */
+  body.vert #stage{width:1080px; height:1920px;}
+  body.vert .cap{left:70px; right:70px; bottom:170px; max-width:none; text-align:center;}
+  body.vert .cap h2{font-size:74px;} body.vert .cap p{font-size:34px;}
+  body.vert .scene h1{font-size:78px !important;}
+  body.vert .tiles{grid-template-columns:repeat(2,1fr); width:920px; gap:28px;}
+  body.vert .fgrid{grid-template-columns:repeat(2,1fr); width:960px; gap:26px;}
+  body.vert .board{width:980px;}
+  body.vert .dispo{width:940px;}
+  body.vert .phone{transform:scale(1.18);}
+  body.vert .credit{right:50%; transform:translateX(50%); bottom:70px;}
 </style>
 </head>
 <body>
@@ -319,10 +331,14 @@
 <div id="prog"></div>
 
 <script>
-  // Scale the fixed 1920×1080 stage to fit any viewport (keeps capture crisp).
+  // 9:16 vertical mode for Reels/TikTok/Shorts via ?ar=9x16.
+  const VERT = location.search.includes('ar=9x16');
+  if(VERT) document.body.classList.add('vert');
+  const STAGE_W = VERT?1080:1920, STAGE_H = VERT?1920:1080;
+  // Scale the fixed stage to fit any viewport (keeps capture crisp).
   function fit(){
     const s=document.getElementById('stage');
-    const k=Math.min(innerWidth/1920, innerHeight/1080);
+    const k=Math.min(innerWidth/STAGE_W, innerHeight/STAGE_H);
     s.style.transform='translate(-50%,-50%) scale('+k+')';
   }
   addEventListener('resize',fit); fit();
