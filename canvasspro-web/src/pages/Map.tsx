@@ -226,8 +226,9 @@ export default function MapPage() {
     parseMovers(raw).forEach((m) => addMoverMarker(m));
   }
 
-  // Load movers for the assigned area(s), or nearest around the rep — mirrors
-  // loadHomes so the two paint together.
+  // Load movers. Assigned-area move-ins ALWAYS show. Move-ins outside the
+  // assigned area only show when "movers only" (🚚) is selected — otherwise the
+  // recent move-in pins stay hidden so they don't clutter the normal view.
   async function loadMovers() {
     const map = mapRef.current;
     if (!map || !profile) return;
@@ -251,9 +252,11 @@ export default function MapPage() {
             .forEach((m) => addMoverMarker(m));
         }
       }
-      // Always also pull movers around where the rep is / is looking.
-      const c = myLoc.current || { lat: map.getCenter().lat, lng: map.getCenter().lng };
-      await fetchNearbyMovers(c);
+      // Movers outside the assigned area: only when isolating movers.
+      if (moversOnlyRef.current) {
+        const c = myLoc.current || { lat: map.getCenter().lat, lng: map.getCenter().lng };
+        await fetchNearbyMovers(c);
+      }
     } catch {
       /* silent — movers are supplemental to the home pins */
     }
@@ -324,7 +327,8 @@ export default function MapPage() {
         }
         await fetchNearby({ lat: ctr.lat, lng: ctr.lng });
       }
-      await fetchNearbyMovers({ lat: ctr.lat, lng: ctr.lng });
+      // Move-ins outside the assigned area only roam in when isolating movers.
+      if (moversOnlyRef.current) await fetchNearbyMovers({ lat: ctr.lat, lng: ctr.lng });
       lastLoadCenter.current = ctr;
       setStatus(
         moversOnlyRef.current
@@ -340,8 +344,10 @@ export default function MapPage() {
   }
 
   // Toggle "movers only": detach the lead + home pin layers (leaving just the
-  // mover pins), or restore them. Used by the 🚚 FAB under the pencil.
-  function toggleMoversOnly() {
+  // mover pins), or restore them. Used by the 🚚 FAB under the pencil. Reloads
+  // movers so the recent move-ins outside the assigned area appear when ON, and
+  // are cleared when OFF (leaving only assigned-area move-ins).
+  async function toggleMoversOnly() {
     const map = mapRef.current;
     if (!map) return;
     const next = !moversOnly;
@@ -350,11 +356,12 @@ export default function MapPage() {
     if (next) {
       map.removeLayer(homeLayer.current);
       map.removeLayer(leadLayer.current);
-      setStatus(`${moverLayer.current.getLayers().length} recent movers · other pins hidden`);
     } else {
       homeLayer.current.addTo(map);
       leadLayer.current.addTo(map);
     }
+    await loadMovers();
+    if (next) setStatus(`${moverLayer.current.getLayers().length} recent movers · other pins hidden`);
   }
 
   // Refresh button: reload movers always, and the homes/leads too unless hidden.
