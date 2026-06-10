@@ -7,7 +7,13 @@ import {
   inMemoryPersistence,
   signInWithCustomToken,
 } from "firebase/auth";
-import { getFirestore, connectFirestoreEmulator } from "firebase/firestore";
+import {
+  initializeFirestore,
+  connectFirestoreEmulator,
+  persistentLocalCache,
+  persistentMultipleTabManager,
+  memoryLocalCache,
+} from "firebase/firestore";
 import { getFunctions, connectFunctionsEmulator } from "firebase/functions";
 import { getStorage } from "firebase/storage";
 
@@ -38,7 +44,17 @@ export const isImpersonating = !!impToken;
 
 export const app = initializeApp(firebaseConfig, isImpersonating ? "impersonation" : undefined);
 export const auth = getAuth(app);
-export const db = getFirestore(app);
+// Persist Firestore to IndexedDB so writes made on a flaky/no connection (the
+// norm when knocking doors) survive an app refresh or reload and sync once
+// signal returns. Without this, a queued write lives only in memory and is lost
+// on reload — the lead "saves" in the UI but never reaches the server.
+// The impersonation instance stays tab-local (memory only) so an operator's
+// device never caches another user's data to disk.
+export const db = initializeFirestore(app, {
+  localCache: isImpersonating
+    ? memoryLocalCache()
+    : persistentLocalCache({ tabManager: persistentMultipleTabManager() }),
+});
 export const functions = getFunctions(app);
 export const storage = getStorage(app);
 export const googleProvider = new GoogleAuthProvider();
