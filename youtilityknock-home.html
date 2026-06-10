@@ -2047,15 +2047,33 @@ function toggleMobileMenu(btn){
 }
 
 // ─── FORM SUBMIT ───
-function submitDemoForm(e){
+async function submitDemoForm(e){
   e.preventDefault();
   const btn=document.getElementById('submit-btn');
+  const val=id=>(document.getElementById(id)?.value||'').trim();
+  const payload={
+    fname:val('fname'), lname:val('lname'), company:val('company'), title:val('title'),
+    email:val('email'), phone:val('phone'), teamsize:val('teamsize'),
+    industry:val('industry'), message:val('message')
+  };
   btn.textContent='Sending...';btn.disabled=true;
-  setTimeout(()=>{
+  try{
+    const res=await fetch('/demo-request',{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify(payload)
+    });
+    if(!res.ok){
+      const err=await res.json().catch(()=>({}));
+      throw new Error(err.error||'Request failed');
+    }
     btn.style.display='none';
     document.getElementById('form-success').style.display='block';
     e.target.reset();
-  },1200);
+  }catch(err){
+    btn.textContent='Schedule My Demo →';btn.disabled=false;
+    alert("Sorry — we couldn't send your request. Please try again or email us directly.");
+  }
 }
 
 // ─── PROGRESS BARS ANIMATE ON SCROLL ───
