@@ -168,6 +168,7 @@
   <nav id="tabBar" class="tabbar hidden">
     <button class="tab active" data-tab="home">🏠 Home</button>
     <button class="tab" data-tab="companies">🏢 Companies</button>
+    <button class="tab" data-tab="demos">📨 Demo Requests</button>
     <button class="tab" data-tab="payments">💳 Pricing</button>
     <button class="tab" data-tab="receivables">📊 Receivables</button>
     <button class="tab" data-tab="notifications">🔔 Notifications</button>
@@ -183,6 +184,7 @@
     <p class="muted" style="margin:-6px 0 16px;font-size:13px;">Pick a settings area to manage.</p>
     <div class="home-grid">
       <button class="home-btn" data-go="companies"><span class="hb-ico">🏢</span><b>Companies</b><small>Create companies, assign packages, toggle services, status &amp; billing</small></button>
+      <button class="home-btn" data-go="demos"><span class="hb-ico">📨</span><b>Demo Requests</b><small>Incoming demo requests from the landing page — follow up &amp; track</small></button>
       <button class="home-btn" data-go="payments"><span class="hb-ico">💳</span><b>Pricing &amp; Packages</b><small>Build tiers &amp; prices, load defaults, connect Stripe billing</small></button>
       <button class="home-btn" data-go="receivables"><span class="hb-ico">📊</span><b>Accounts Receivable</b><small>Upcoming charges, due dates, balances &amp; invoices</small></button>
       <button class="home-btn" data-go="apis"><span class="hb-ico">🔌</span><b>Integrations &amp; APIs</b><small>ATTOM, BatchData, Google/Microsoft calendars, CRM keys</small></button>
@@ -234,6 +236,18 @@
     <table>
       <thead><tr><th>Company</th><th>Plan</th><th>Status</th><th></th></tr></thead>
       <tbody id="companiesBody"><tr><td colspan="4" class="muted">Loading…</td></tr></tbody>
+    </table>
+  </section>
+
+  <!-- Demo requests (super-admin only) — incoming from the landing-page form -->
+  <section id="demoRequestsCard" class="card hidden">
+    <h2>Demo Requests
+      <button id="demoRefreshBtn" class="btn ghost sm">↻ Refresh</button>
+    </h2>
+    <p class="muted" style="margin:-6px 0 16px;font-size:13px;">Requests submitted from the “Request a Demo” form on the landing page. Every super-admin is emailed when one comes in.</p>
+    <table>
+      <thead><tr><th>Received</th><th>Name</th><th>Company</th><th>Contact</th><th>Team / Industry</th><th>Status</th><th></th></tr></thead>
+      <tbody id="demoRequestsBody"><tr><td colspan="7" class="muted">Loading…</td></tr></tbody>
     </table>
   </section>
 
@@ -852,6 +866,7 @@ function showLogin() {
 // ── Tabs (super-admin) ────────────────────────────────────────────────────
 const TAB_CARDS = {
   companies: ["companiesCard","schedulingCard","crmCompanyCard","rolesCard","teamsCard","rewardsCard","redemptionsCard","companyBillingCard","usersCard"],
+  demos: ["demoRequestsCard"],
   payments: ["plansCard","billingCard"],
   receivables: ["arCard"],
   notifications: ["notifyCard"],
@@ -872,7 +887,7 @@ function renderTab() {
   });
   document.querySelectorAll("#tabBar .tab").forEach((b) => b.classList.toggle("active", b.dataset.tab === tab));
 }
-function showTab(name) { state.currentTab = name; renderTab(); window.scrollTo({ top: 0, behavior: "smooth" }); if (name === "receivables") loadAR(); }
+function showTab(name) { state.currentTab = name; renderTab(); window.scrollTo({ top: 0, behavior: "smooth" }); if (name === "receivables") loadAR(); if (name === "demos") loadDemoRequests(); }
 $("tabBar").addEventListener("click", (e) => { const t = e.target.closest(".tab"); if (t) showTab(t.dataset.tab); });
 // Home hub: each big button jumps to that settings tab.
 $("consoleHome").addEventListener("click", (e) => { const b = e.target.closest(".home-btn"); if (b) showTab(b.dataset.go); });
@@ -1386,6 +1401,66 @@ function openInvoice(inv) {
 }
 
 // ── Accounts Receivable (super-admin) ────────────────────────────────────
+// ── Demo requests (super-admin) ───────────────────────────────────────────
+const fmtDateTime = (ms) => ms ? new Date(ms).toLocaleString("en-US",{month:"short",day:"numeric",hour:"numeric",minute:"2-digit"}) : "—";
+async function loadDemoRequests() {
+  if (!state.isSuper) return;
+  const body = $("demoRequestsBody");
+  body.innerHTML = `<tr><td colspan="7" class="muted">Loading…</td></tr>`;
+  try {
+    const snap = await getDocs(query(collection(db, "demoRequests"), orderBy("createdAt", "desc")));
+    if (!snap.size) { body.innerHTML = `<tr><td colspan="7" class="muted">No demo requests yet.</td></tr>`; return; }
+    body.innerHTML = "";
+    snap.forEach((d) => {
+      const r = d.data();
+      const handled = r.status === "handled";
+      const contact = [
+        r.email ? `<a href="mailto:${esc(r.email)}">${esc(r.email)}</a>` : "",
+        r.phone ? esc(r.phone) : "",
+      ].filter(Boolean).join("<br>") || '<span class="muted">—</span>';
+      const teamInd = [r.teamsize, r.industry].filter(Boolean).map(esc).join(" · ") || '<span class="muted">—</span>';
+      const role = r.title ? `<div class="muted" style="font-size:12px;">${esc(r.title)}</div>` : "";
+      const msg = r.message ? `<div class="muted" style="font-size:12px;margin-top:4px;max-width:280px;white-space:normal;">“${esc(r.message)}”</div>` : "";
+      const tr = document.createElement("tr");
+      tr.innerHTML =
+        `<td>${esc(fmtDateTime(r.createdAt))}</td>`+
+        `<td><strong>${esc(r.name || ((r.fname||"")+" "+(r.lname||"")).trim())}</strong>${role}</td>`+
+        `<td>${esc(r.company || "")}${msg}</td>`+
+        `<td>${contact}</td>`+
+        `<td>${teamInd}</td>`+
+        `<td><span class="inv-${handled ? "paid" : "open"}">${handled ? "handled" : "new"}</span></td>`+
+        `<td style="white-space:nowrap;">`+
+          `<button class="btn ghost sm" data-demo-toggle="${d.id}" data-handled="${handled ? 1 : 0}">${handled ? "Reopen" : "Mark handled"}</button> `+
+          `<button class="btn ghost sm" data-demo-del="${d.id}">Delete</button>`+
+        `</td>`;
+      body.appendChild(tr);
+    });
+  } catch (e) {
+    body.innerHTML = `<tr><td colspan="7" class="muted">Could not load: ${esc(e.message || e)}</td></tr>`;
+  }
+}
+$("demoRefreshBtn").addEventListener("click", loadDemoRequests);
+$("demoRequestsBody").addEventListener("click", async (e) => {
+  const toggle = e.target.closest("[data-demo-toggle]");
+  const del = e.target.closest("[data-demo-del]");
+  try {
+    if (toggle) {
+      const handled = toggle.dataset.handled === "1";
+      toggle.disabled = true;
+      await updateDoc(doc(db, "demoRequests", toggle.dataset.demoToggle),
+        { status: handled ? "new" : "handled", handledAt: handled ? null : Date.now() });
+      await loadDemoRequests();
+    } else if (del) {
+      if (!confirm("Delete this demo request? This can't be undone.")) return;
+      del.disabled = true;
+      await deleteDoc(doc(db, "demoRequests", del.dataset.demoDel));
+      await loadDemoRequests();
+    }
+  } catch (err) {
+    banner($("banner"), err.message || "Action failed.", "error");
+  }
+});
+
 async function loadAR() {
   if (!state.isSuper) return;
   const body = $("arBody"), invBody = $("arInvBody");

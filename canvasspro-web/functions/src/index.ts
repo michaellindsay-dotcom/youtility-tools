@@ -806,6 +806,94 @@ async function notifyUser(opts: NotifyOpts): Promise<void> {
   ]);
 }
 
+// ════════════════════════════════════════════════════════════════════════════
+// requestDemo — public (unauthenticated) demo request from the marketing site.
+// ----------------------------------------------------------------------------
+// Anyone on the landing page can submit the "Request a Demo" form. We:
+//   • Store the request in `demoRequests` so it shows up in the super-admin
+//     portal (admin.html → Demo Requests tab).
+//   • Email EVERY super-admin (users with superAdmin:true) so they hear about
+//     it immediately, regardless of whether they're online.
+// Exposed at /demo-request via a Hosting rewrite (same-origin, no CORS needed),
+// but cors:true is set so it also works if called cross-origin.
+// ════════════════════════════════════════════════════════════════════════════
+const DEMO_FIELDS = ["fname", "lname", "company", "title", "email", "phone", "teamsize", "industry", "message"] as const;
+
+export const requestDemo = onRequest({ cors: true }, async (req, res) => {
+  if (req.method === "OPTIONS") { res.status(204).send(""); return; }
+  if (req.method !== "POST") { res.status(405).json({ error: "Method not allowed" }); return; }
+
+  // Accept either parsed JSON or a raw/form body.
+  const raw = (typeof req.body === "string" ? safeJson(req.body) : req.body) || {};
+  const data: Record<string, string> = {};
+  for (const k of DEMO_FIELDS) {
+    const v = raw[k];
+    data[k] = typeof v === "string" ? v.trim().slice(0, 2000) : "";
+  }
+
+  // Minimal validation — mirror the required fields on the form.
+  const emailOk = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(data.email);
+  if (!data.fname || !data.lname || !data.company || !emailOk || !data.teamsize) {
+    res.status(400).json({ error: "Missing or invalid required fields." });
+    return;
+  }
+
+  const fullName = `${data.fname} ${data.lname}`.trim();
+  const record = {
+    ...data,
+    name: fullName,
+    status: "new",
+    createdAt: Date.now(),
+    source: "landing-page",
+    userAgent: String(req.headers["user-agent"] || "").slice(0, 300),
+  };
+
+  try {
+    const ref = await db.collection("demoRequests").add(record);
+
+    // Email every super-admin. Don't fail the request if email isn't configured —
+    // the record is already saved and visible in the portal.
+    try {
+      const supers = await db.collection("users").where("superAdmin", "==", true).get();
+      const recipients = supers.docs
+        .map((d) => String(d.data()?.email || "").trim())
+        .filter((e) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e));
+      if (recipients.length) {
+        const cfg = await getNotifyConfig();
+        const subject = `New demo request — ${data.company}`;
+        const body = [
+          `A new demo request just came in from the YoutilityKnock landing page.`,
+          ``,
+          `Name:       ${fullName}`,
+          `Company:    ${data.company}`,
+          data.title ? `Role:       ${data.title}` : "",
+          `Email:      ${data.email}`,
+          data.phone ? `Phone:      ${data.phone}` : "",
+          `Team size:  ${data.teamsize}`,
+          data.industry ? `Industry:   ${data.industry}` : "",
+          data.message ? `\nChallenge:\n${data.message}` : "",
+          ``,
+          `Open the Super Admin portal → Demo Requests to follow up.`,
+        ].filter((l) => l !== "").join("\n");
+        await Promise.all(recipients.map((to) => sendEmail(cfg, to, subject, body)));
+      } else {
+        logger.warn("requestDemo: no super-admin recipients found to email");
+      }
+    } catch (e) {
+      logger.error("requestDemo: notifying super-admins failed (request was saved)", e);
+    }
+
+    res.status(200).json({ ok: true, id: ref.id });
+  } catch (err) {
+    logger.error("requestDemo failed", err);
+    res.status(500).json({ error: "Could not submit request. Please try again." });
+  }
+});
+
+function safeJson(s: string): Record<string, unknown> {
+  try { return JSON.parse(s) as Record<string, unknown>; } catch { return {}; }
+}
+
 // ── trigger: new company-channel chat message → notify the rest of the company
 export const onChatMessage = onDocumentCreated("chat/{messageId}", async (event) => {
   const msg = event.data?.data();

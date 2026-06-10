@@ -239,6 +239,16 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
+    // ── demo requests (public landing-page form) ─────────────────────────
+    // Created server-side only (requestDemo Cloud Function, which also emails
+    // every super-admin). Super-admins read them in the console and may update
+    // one (e.g. mark it handled) or delete it. No client writes here directly,
+    // so the public form can't be used to spam Firestore.
+    match /demoRequests/{requestId} {
+      allow read, update, delete: if isSuper();
+      allow create: if false;
+    }
+
     // ── per-company YoutilityCRM link (holds each tenant's CRM secret) ───
     // Cloud Functions only. Consoles read/write via getCompanyCrm/
     // setCompanyCrm callables, which mask the secret.
