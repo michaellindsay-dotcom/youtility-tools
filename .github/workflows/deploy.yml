@@ -46,7 +46,10 @@ jobs:
         env:
           FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
 
-      - name: Deploy Hosting + Functions
-        run: npx firebase-tools deploy --only hosting,functions --project youtilityknock --non-interactive --force
+      - name: Deploy Hosting + Functions + security rules
+        # Include firestore:rules and storage so rule changes (e.g. new
+        # collections) actually ship. firestore:rules deploys ONLY the rules —
+        # not indexes — so --force can't drop indexes that aren't in the repo.
+        run: npx firebase-tools deploy --only hosting,functions,firestore:rules,storage --project youtilityknock --non-interactive --force
         env:
           GOOGLE_APPLICATION_CREDENTIALS: ${{ runner.temp }}/gcp-sa.json
