@@ -40,10 +40,13 @@ export default function ProtectedRoute({ children, roles }: Props) {
   // accounts out, landing them on the login screen with the same message; this
   // branch just avoids any flash of the app in the meantime.) Data is never
   // deleted — access restores automatically once the company is active again.
+  // Only block on a SERVER-confirmed company state (companyLoaded). A stale
+  // browser cache can briefly report an old "suspended" status or a missing
+  // doc; we must not lock an active company out before the server replies.
   const status = String(company?.status || "active").toLowerCase();
-  const companyInactive = company
-    ? status === "suspended" || status === "inactive"
-    : companyLoaded; // company doc missing once loaded = removed
+  const companyInactive =
+    companyLoaded &&
+    (company ? status === "suspended" || status === "inactive" : true);
   if (companyInactive) {
     return (
       <div className="auth-wrap">
