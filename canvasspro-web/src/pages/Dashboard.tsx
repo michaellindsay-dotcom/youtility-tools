@@ -4,7 +4,6 @@ import { collection, getDocs, query, where, orderBy, limit } from "firebase/fire
 import { db } from "../firebase";
 import { useAuth } from "../auth/AuthContext";
 import { hasFeature } from "../lib/features";
-import { useShift, fmtElapsed } from "../shift/ShiftContext";
 import type { Lead, Shift, UserStats } from "../types";
 
 // Default targets (configurable later via a company `config` doc).
@@ -49,7 +48,6 @@ interface Funnel {
 export default function Dashboard() {
   const { profile, company } = useAuth();
   const showPlanner = hasFeature(company, "planner"); // Success Planner is an optional service
-  const shift = useShift();
   const [leads, setLeads] = useState<Lead[]>([]);
   const [shifts, setShifts] = useState<Shift[]>([]);
   const [top, setTop] = useState<UserStats[]>([]);
@@ -140,30 +138,6 @@ export default function Dashboard() {
         <p className="page-sub">Track your progress, crush your goals, and climb the leaderboard.</p>
       </div>
 
-      {/* Today's progress */}
-      <div className="card dash-progress">
-        <div>
-          <strong>Today's Progress</strong>
-          <div className="muted small">
-            {f.today.doors} / {GOALS.doorsDay} doors ({pct(f.today.doors, GOALS.doorsDay)}%)
-          </div>
-        </div>
-        <div className="row dash-progress-actions">
-          {showPlanner &&
-            (shift.active ? (
-              <div className="shift-live-bar">
-                <span className="shift-dot" />
-                <span className="shift-time mono">{fmtElapsed(shift.elapsedSec)}</span>
-                <span className="shift-doors">{shift.doors} doors</span>
-                <button className="btn sm" onClick={() => shift.stopShift()}>Stop</button>
-              </div>
-            ) : (
-              <Link to="/map" className="btn primary sm">▶ Start Shift</Link>
-            ))}
-          <Link to="/leaderboard" className="btn sm">🏆 Leaderboard</Link>
-        </div>
-      </div>
-
       <div className="dash-2col">
         {/* Success planner (optional service) */}
         {showPlanner && (
@@ -171,7 +145,7 @@ export default function Dashboard() {
             <h2 className="planner-h">◎ Success Planner</h2>
             <p className="muted small">Based on your pace, here's what you need to hit your goals:</p>
             <ul className="planner-list">
-              <li><strong>Today:</strong> {plan.todayLeft} more doors <span className="muted">(~{plan.todayMin} min)</span></li>
+              <li><strong>Today:</strong> {plan.todayLeft} more doors <span className="muted">({f.today.doors}/{GOALS.doorsDay} done · ~{plan.todayMin} min)</span></li>
               <li><strong>This week:</strong> {plan.weekPerDay} doors/day <span className="muted">({f.week.doors}/{GOALS.doorsWeek} done)</span></li>
               <li><strong>This month:</strong> {plan.monthPerDay} doors/day <span className="muted">({f.month.doors}/{GOALS.doorsMonth} done)</span></li>
             </ul>
@@ -182,14 +156,14 @@ export default function Dashboard() {
           </div>
         )}
 
-        {/* Top performers */}
-        <div className="card">
-          <h2>🏆 Top Performers</h2>
+        {/* Top performers — whole card links to the leaderboard */}
+        <Link to="/leaderboard" className="card link-card top-performers">
+          <h2>🏆 Top Performers <span className="muted small" style={{ fontWeight: 400 }}>→</span></h2>
           {top.length === 0 ? (
             <p className="muted small">No activity this week yet.</p>
           ) : (
             <ol className="top-list">
-              {top.map((t) => (
+              {top.slice(0, 3).map((t) => (
                 <li key={t.uid}>
                   <span>{t.userName || t.uid}</span>
                   <span className="muted">{t.sales ?? 0} sold · {t.appointments ?? 0} appts</span>
@@ -197,8 +171,8 @@ export default function Dashboard() {
               ))}
             </ol>
           )}
-          <Link to="/leaderboard" className="muted small">View full leaderboard →</Link>
-        </div>
+          <span className="muted small">View full leaderboard →</span>
+        </Link>
       </div>
 
       {/* Goal progress (part of the Success Planner service) */}
