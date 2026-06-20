@@ -335,7 +335,18 @@ a {
   align-items: center;
   gap: 12px;
 }
-/* Start Shift + notifications, pushed to the right edge of the bar. */
+/* Company name filling the space between the menu and the actions. */
+.topbar-company {
+  font-weight: 700;
+  color: #fff;
+  font-size: 17px;
+  letter-spacing: 0.2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+/* Notifications + Start Shift, pushed to the right edge of the bar. */
 .topbar-actions {
   margin-left: auto;
   display: flex;
