@@ -70,6 +70,12 @@ workflows:
       # code signing" script below (fetch-signing-files --create), which both
       # creates the cert + App Store profile via the API key and prints real
       # logs if anything is still wrong.
+      groups:
+        # Provides CERTIFICATE_PRIVATE_KEY — the RSA private key used to create
+        # (once) and then reuse the iOS Distribution certificate. Without it a
+        # fresh account can't create a cert, so no profile, so the archive fails
+        # with "requires a provisioning profile".
+        - ios_signing
       node: 20
       xcode: latest
       cocoapods: default
@@ -114,6 +120,7 @@ workflows:
           keychain initialize
           app-store-connect fetch-signing-files "us.youtility.knock" \
             --type IOS_APP_STORE \
+            --certificate-key=@env:CERTIFICATE_PRIVATE_KEY \
             --create
           keychain add-certificates
           xcode-project use-profiles
