@@ -4,7 +4,7 @@ import ShiftBar from "./ShiftBar";
 import NotificationBell from "./NotificationBell";
 
 export default function Topbar({ onMenu }: { onMenu?: () => void }) {
-  const { profile, logout } = useAuth();
+  const { profile, logout, company } = useAuth();
 
   const exitMirror = async () => {
     await logout();
@@ -22,11 +22,13 @@ export default function Topbar({ onMenu }: { onMenu?: () => void }) {
         </div>
       )}
       <button className="topbar-menu" onClick={onMenu} aria-label="Menu">☰</button>
-      {/* Start Shift on the right, notifications just to its right.
-          Sign out now lives at the bottom of the sidebar. */}
+      {/* Company name fills the space between the menu and the actions, making
+          it feel like a company-specific platform. */}
+      <div className="topbar-company">{company?.name ?? ""}</div>
+      {/* Notifications, then Start Shift on the far right. */}
       <div className="topbar-actions">
-        <ShiftBar />
         <NotificationBell />
+        <ShiftBar />
       </div>
     </header>
   );
