@@ -216,6 +216,19 @@ export default function Login() {
             </p>
           </>
         )}
+
+        {/* Store-required legal links. Absolute URLs opened externally so they
+            resolve against Firebase Hosting even inside the native WebView,
+            where the app itself runs from the bundle root. */}
+        <p className="muted small" style={{ marginTop: 14, textAlign: "center" }}>
+          <a href="https://youtilityknock.web.app/privacy" target="_blank" rel="noopener noreferrer">
+            Privacy Policy
+          </a>
+          {" · "}
+          <a href="https://youtilityknock.web.app/terms" target="_blank" rel="noopener noreferrer">
+            Terms of Service
+          </a>
+        </p>
       </div>
     </div>
   );
