@@ -66,6 +66,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
     setCompanyLoaded(false);
     return onSnapshot(doc(db, "companies", cid), (snap) => {
+      // A cold offline cache (e.g. a fresh native install) raises an initial
+      // "doesn't exist" event with fromCache=true before the server responds.
+      // Treating that as "company removed" would wrongly flag the account as
+      // inactive and sign the user out, so ignore a not-exists answer that is
+      // only from cache and wait for the server-backed snapshot.
+      if (!snap.exists() && snap.metadata.fromCache) return;
       setCompany(snap.exists() ? ({ id: snap.id, ...(snap.data() as Omit<Company, "id">) }) : null);
       setCompanyLoaded(true);
     });
