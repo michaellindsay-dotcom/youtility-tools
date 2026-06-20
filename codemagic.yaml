@@ -63,9 +63,13 @@ workflows:
     integrations:
       app_store_connect: YoutilityKnock ASC
     environment:
-      ios_signing:
-        distribution_type: app_store
-        bundle_identifier: us.youtility.knock
+      # No `ios_signing:` block on purpose. That block makes Codemagic run its
+      # own automatic-signing prep at init, which fails immediately on a brand-
+      # new account ("No matching profiles found") before any script can create
+      # the cert/profile. Instead we do all signing explicitly in the "Set up
+      # code signing" script below (fetch-signing-files --create), which both
+      # creates the cert + App Store profile via the API key and prints real
+      # logs if anything is still wrong.
       node: 20
       xcode: latest
       cocoapods: default
