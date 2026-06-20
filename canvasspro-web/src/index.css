@@ -229,6 +229,7 @@ a {
   min-height: 0;
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
+  position: relative;
 }
 
 .brand {
@@ -1739,11 +1740,14 @@ details.raw pre {
 }
 .map-canvas-full { position: absolute; inset: 0; }
 @media (max-width: 860px) {
-  .map-screen { position: fixed; inset: 0; height: 100vh; height: 100dvh; margin: 0; z-index: 60; }
+  /* Fill the content area BELOW the fixed header (app-content is position:
+     relative) instead of overlaying the whole viewport — so the map and its
+     tools no longer collide with the top bar. */
+  .map-screen { position: absolute; inset: 0; margin: 0; z-index: 1; }
 }
 
 .map-overlay { position: absolute; z-index: 1100; display: flex; gap: 8px; }
-.map-tl { top: max(12px, env(safe-area-inset-top)); left: max(12px, env(safe-area-inset-left)); flex-direction: column; }
+.map-tl { top: 12px; left: max(12px, env(safe-area-inset-left)); flex-direction: column; }
 .map-bl { bottom: max(16px, env(safe-area-inset-bottom)); left: max(12px, env(safe-area-inset-left)); }
 
 .map-fab {
