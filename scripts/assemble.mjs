@@ -14,6 +14,8 @@ const appDist = join(root, "canvasspro-web", "dist");
 // Standalone static pages served at the site root.
 const STATIC_FILES = [
   "index.html",
+  "privacy.html",
+  "terms.html",
   "admin.html",
   "demo.html",
   "canvass-pro.html",

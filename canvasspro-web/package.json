@@ -13,14 +13,17 @@
     "cap:sync": "npm run build:native && cap sync",
     "cap:ios": "npm run build:native && cap sync ios && cap open ios",
     "cap:android": "npm run build:native && cap sync android && cap open android",
+    "assets:generate": "capacitor-assets generate --iconBackgroundColor '#0ea5e9' --iconBackgroundColorDark '#0f1727' --splashBackgroundColor '#0f1727' --splashBackgroundColorDark '#0f1727'",
     "emulators": "firebase emulators:start",
     "deploy": "npm run build && firebase deploy"
   },
   "dependencies": {
+    "@capacitor/android": "^6.1.2",
     "@capacitor/app": "^6.0.0",
     "@capacitor/core": "^6.1.2",
     "@capacitor/geolocation": "^6.0.1",
     "@capacitor/ios": "^6.1.2",
+    "@capacitor/splash-screen": "^6.0.2",
     "firebase": "^10.13.2",
     "leaflet": "^1.9.4",
     "leaflet.markercluster": "^1.5.3",
@@ -29,6 +32,7 @@
     "react-router-dom": "^6.26.2"
   },
   "devDependencies": {
+    "@capacitor/assets": "^3.0.5",
     "@capacitor/cli": "^6.1.2",
     "@types/leaflet": "^1.9.12",
     "@types/leaflet.markercluster": "^1.5.4",
