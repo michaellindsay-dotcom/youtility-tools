@@ -118,9 +118,14 @@ workflows:
           # cert/profile yet, so plain `use-profiles` finds nothing. On later
           # builds these already exist and are simply fetched (no duplicates).
           keychain initialize
+          # CERTIFICATE_PRIVATE_KEY is stored base64-encoded (single line) to
+          # survive pasting into the Codemagic UI without newline mangling —
+          # passing the raw multi-line PEM via @env failed validation. Decode it
+          # back to a real PEM file and hand that to fetch-signing-files.
+          printf '%s' "$CERTIFICATE_PRIVATE_KEY" | openssl base64 -d -A > /tmp/cert_key.pem
           app-store-connect fetch-signing-files "us.youtility.knock" \
             --type IOS_APP_STORE \
-            --certificate-key=@env:CERTIFICATE_PRIVATE_KEY \
+            --certificate-key=@file:/tmp/cert_key.pem \
             --create
           keychain add-certificates
           xcode-project use-profiles
