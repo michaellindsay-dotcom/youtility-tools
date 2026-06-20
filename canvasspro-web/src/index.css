@@ -1998,9 +1998,24 @@ details.raw pre {
   display: block;
   color: inherit;
 }
+/* Centered, button-styled header so it's obviously clickable. */
+.top-performers h2 {
+  text-align: center;
+  background: rgba(14, 165, 233, 0.14);
+  color: var(--accent-2);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-sm);
+  padding: 9px 12px;
+  margin: 0 0 12px;
+  transition: background 0.12s;
+}
+.top-performers:hover h2 {
+  background: rgba(14, 165, 233, 0.24);
+}
 .top-performers > .muted {
   display: block;
   margin-top: 10px;
+  text-align: center;
   color: var(--accent-2);
 }
 .dash-progress {
@@ -2058,17 +2073,26 @@ details.raw pre {
   font-size: 14px;
   color: #fff;
 }
+/* Title on the left, monthly % on the right — no more overlapping text. */
+.planner-top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
 .planner-ring {
-  position: absolute;
-  top: 18px;
-  right: 18px;
-  text-align: center;
+  text-align: right;
   color: #fff;
+  flex-shrink: 0;
+  line-height: 1.1;
 }
 .ring-pct {
   font-family: "Space Grotesk", sans-serif;
-  font-size: 28px;
+  font-size: 24px;
   font-weight: 700;
+}
+.planner-ring .muted {
+  font-size: 11px;
 }
 .top-list {
   margin: 6px 0 10px;
