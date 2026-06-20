@@ -102,6 +102,16 @@ workflows:
       - name: Fetch signing profiles & build IPA
         script: |
           cd canvasspro-web/ios/App
+          # Create the distribution certificate + App Store provisioning profile
+          # via the App Store Connect API key, then apply them. `--create` makes
+          # the very first build work from scratch — a brand-new account has no
+          # cert/profile yet, so plain `use-profiles` finds nothing. On later
+          # builds these already exist and are simply fetched (no duplicates).
+          keychain initialize
+          app-store-connect fetch-signing-files "us.youtility.knock" \
+            --type IOS_APP_STORE \
+            --create
+          keychain add-certificates
           xcode-project use-profiles
           xcode-project build-ipa --workspace "App.xcworkspace" --scheme "App"
     artifacts:
