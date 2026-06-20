@@ -20,7 +20,7 @@ interface AuthState {
   user: User | null;
   profile: UserProfile | null;
   company: Company | null;
-  /** True once the company doc has resolved at least once (exists or not). */
+  /** True once the company doc has resolved from the SERVER (not just cache). */
   companyLoaded: boolean;
   role: Role | null;
   companyId: string | null;
@@ -66,14 +66,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
     setCompanyLoaded(false);
     return onSnapshot(doc(db, "companies", cid), (snap) => {
-      // A cold offline cache (e.g. a fresh native install) raises an initial
-      // "doesn't exist" event with fromCache=true before the server responds.
-      // Treating that as "company removed" would wrongly flag the account as
-      // inactive and sign the user out, so ignore a not-exists answer that is
-      // only from cache and wait for the server-backed snapshot.
-      if (!snap.exists() && snap.metadata.fromCache) return;
+      // Render with whatever we have (cache included) for a snappy UI…
       setCompany(snap.exists() ? ({ id: snap.id, ...(snap.data() as Omit<Company, "id">) }) : null);
-      setCompanyLoaded(true);
+      // …but only make the inactive/removed sign-out decision once the answer
+      // is SERVER-confirmed. A stale or cold local cache briefly reports the
+      // company as missing, or with an old "suspended" status, before the
+      // server replies — that must never lock an active company out (it was
+      // signing valid users out of the web app on a laptop with stale cache).
+      if (!snap.metadata.fromCache) setCompanyLoaded(true);
     });
   }, [profile?.companyId]);
 
