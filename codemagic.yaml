@@ -103,6 +103,10 @@ workflows:
           set_or_add NSLocationWhenInUseUsageDescription "YoutilityKnock uses your location to show nearby homes and confirm on-site knocks."
           set_or_add NSCameraUsageDescription "Used to photograph the home and the utility bill on a lead."
           set_or_add NSPhotoLibraryUsageDescription "Attach photos to a lead."
+          # Declare no non-exempt encryption (the app only uses standard HTTPS),
+          # so App Store Connect skips the export-compliance question on every
+          # upload and the build reaches TestFlight without stalling.
+          $P -c "Set :ITSAppUsesNonExemptEncryption false" "$PLIST" 2>/dev/null || $P -c "Add :ITSAppUsesNonExemptEncryption bool false" "$PLIST"
       - name: Install CocoaPods
         script: |
           cd canvasspro-web/ios/App && pod install
