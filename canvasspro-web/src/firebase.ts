@@ -1,6 +1,8 @@
 import { initializeApp } from "firebase/app";
 import {
   getAuth,
+  initializeAuth,
+  browserLocalPersistence,
   connectAuthEmulator,
   GoogleAuthProvider,
   setPersistence,
@@ -12,10 +14,16 @@ import {
   connectFirestoreEmulator,
   persistentLocalCache,
   persistentMultipleTabManager,
+  persistentSingleTabManager,
   memoryLocalCache,
 } from "firebase/firestore";
 import { getFunctions, connectFunctionsEmulator } from "firebase/functions";
 import { getStorage } from "firebase/storage";
+import { Capacitor } from "@capacitor/core";
+
+// Native (Capacitor) WebView vs. a regular browser. The capacitor:// origin
+// changes how Firebase's storage-based features behave, so we adjust below.
+const isNative = Capacitor.isNativePlatform();
 
 // Public client identifiers for the youtilityknock Firebase project. These
 // are safe to ship in the bundle — security is enforced by Firebase Auth +
@@ -43,7 +51,14 @@ const impToken =
 export const isImpersonating = !!impToken;
 
 export const app = initializeApp(firebaseConfig, isImpersonating ? "impersonation" : undefined);
-export const auth = getAuth(app);
+// In the native WebView, Firebase Auth's default persistence probing (indexedDB)
+// can hang under the capacitor:// origin — onAuthStateChanged never fires and
+// the app is stuck on "Loading…". Pin auth to localStorage there, which is
+// reliable in WKWebView. The web build keeps the default behavior.
+export const auth =
+  isNative && !isImpersonating
+    ? initializeAuth(app, { persistence: browserLocalPersistence })
+    : getAuth(app);
 // Persist Firestore to IndexedDB so writes made on a flaky/no connection (the
 // norm when knocking doors) survive an app refresh or reload and sync once
 // signal returns. Without this, a queued write lives only in memory and is lost
@@ -53,7 +68,14 @@ export const auth = getAuth(app);
 export const db = initializeFirestore(app, {
   localCache: isImpersonating
     ? memoryLocalCache()
-    : persistentLocalCache({ tabManager: persistentMultipleTabManager() }),
+    : persistentLocalCache({
+        // Native is a single WebView; the multi-tab manager relies on Web Locks /
+        // BroadcastChannel, which can hang in WKWebView. Use the single-tab
+        // manager there. Web keeps multi-tab so multiple browser tabs stay synced.
+        tabManager: isNative
+          ? persistentSingleTabManager(undefined)
+          : persistentMultipleTabManager(),
+      }),
 });
 export const functions = getFunctions(app);
 export const storage = getStorage(app);
