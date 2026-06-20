@@ -142,17 +142,19 @@ export default function Dashboard() {
         {/* Success planner (optional service) */}
         {showPlanner && (
           <div className="card planner">
-            <h2 className="planner-h">◎ Success Planner</h2>
+            <div className="planner-top">
+              <h2 className="planner-h">◎ Success Planner</h2>
+              <div className="planner-ring">
+                <div className="ring-pct">{plan.monthlyPct}%</div>
+                <div className="muted small">monthly</div>
+              </div>
+            </div>
             <p className="muted small">Based on your pace, here's what you need to hit your goals:</p>
             <ul className="planner-list">
               <li><strong>Today:</strong> {plan.todayLeft} more doors <span className="muted">({f.today.doors}/{GOALS.doorsDay} done · ~{plan.todayMin} min)</span></li>
               <li><strong>This week:</strong> {plan.weekPerDay} doors/day <span className="muted">({f.week.doors}/{GOALS.doorsWeek} done)</span></li>
               <li><strong>This month:</strong> {plan.monthPerDay} doors/day <span className="muted">({f.month.doors}/{GOALS.doorsMonth} done)</span></li>
             </ul>
-            <div className="planner-ring">
-              <div className="ring-pct">{plan.monthlyPct}%</div>
-              <div className="muted small">monthly</div>
-            </div>
           </div>
         )}
 
