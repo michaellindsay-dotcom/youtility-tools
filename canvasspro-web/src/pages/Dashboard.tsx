@@ -229,16 +229,6 @@ export default function Dashboard() {
         <FunnelCard n={f.today.closed} label="Closed" sub={`${pct(f.today.closed, f.today.appt || 1)}% close rate`} />
       </div>
 
-      {/* Quick actions */}
-      <h2 className="section-h">Quick Actions</h2>
-      <div className="quick-grid">
-        <QuickAction to="/map" icon="◉" title="Map View" sub="Start canvassing" />
-        <QuickAction to="/leads" icon="☰" title="Lead List" sub="View leads & appointments" />
-        <QuickAction to="/shifts" icon="📈" title="Success Planner" sub="Goals, stats & shifts" />
-        <QuickAction to="/leaderboard" icon="🏆" title="Leaderboard" sub="See where you rank" />
-        <QuickAction to="/territories" icon="▰" title="Territories" sub="Manage your zones" />
-      </div>
-
       {loading && <p className="muted small" style={{ marginTop: 16 }}>Loading your numbers…</p>}
     </div>
   );
@@ -276,14 +266,3 @@ function FunnelCard({ n, label, sub }: { n: number; label: string; sub: string }
   );
 }
 
-function QuickAction({ to, icon, title, sub }: { to: string; icon: string; title: string; sub: string }) {
-  return (
-    <Link to={to} className="card link-card quick-action">
-      <span className="qa-icon">{icon}</span>
-      <div>
-        <div className="qa-title">{title}</div>
-        <div className="muted small">{sub}</div>
-      </div>
-    </Link>
-  );
-}
