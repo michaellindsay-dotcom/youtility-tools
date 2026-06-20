@@ -1,4 +1,4 @@
-import { NavLink } from "react-router-dom";
+import { NavLink, useNavigate } from "react-router-dom";
 import { useAuth } from "../auth/AuthContext";
 import { hasFeature, type FeatureKey } from "../lib/features";
 
@@ -23,7 +23,13 @@ const links: { to: string; label: string; icon: string; end?: boolean; feat?: Fe
 ];
 
 export default function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
-  const { company } = useAuth();
+  const { company, logout } = useAuth();
+  const navigate = useNavigate();
+  const onSignOut = async () => {
+    await logout();
+    onNavigate?.();
+    navigate("/login", { replace: true });
+  };
   const visible = links.filter((l) => {
     if (l.anyFeat) return l.anyFeat.some((f) => hasFeature(company, f));
     return !l.feat || hasFeature(company, l.feat);
@@ -52,8 +58,9 @@ export default function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
           </NavLink>
         ))}
       </nav>
-      <div className="brand-sub" style={{ marginTop: "auto", padding: "8px" }}>
-        build BUILD-48
+      <div className="sidebar-foot">
+        <button className="btn ghost sidebar-signout" onClick={onSignOut}>⏻ Sign out</button>
+        <div className="brand-sub">build BUILD-48</div>
       </div>
     </aside>
   );

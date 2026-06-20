@@ -335,6 +335,25 @@ a {
   align-items: center;
   gap: 12px;
 }
+/* Start Shift + notifications, pushed to the right edge of the bar. */
+.topbar-actions {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+/* Sign out + build tag pinned to the bottom of the sidebar. */
+.sidebar-foot {
+  margin-top: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 8px;
+}
+.sidebar-signout {
+  width: 100%;
+  justify-content: center;
+}
 .topbar-user-info {
   text-align: right;
 }
