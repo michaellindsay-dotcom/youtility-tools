@@ -87,6 +87,11 @@ workflows:
           npm install @capacitor/ios
           [ -d ios ] || npx cap add ios
           npx cap sync ios
+          # iPhone-only (TARGETED_DEVICE_FAMILY=1). YoutilityKnock is a field
+          # phone app; dropping iPad avoids the iPad screenshot/review overhead
+          # on every App Store submission. Capacitor defaults to "1,2".
+          sed -i '' 's/TARGETED_DEVICE_FAMILY = "1,2"/TARGETED_DEVICE_FAMILY = "1"/g' \
+            ios/App/App.xcodeproj/project.pbxproj
       - name: Generate app icons & splash screens
         script: |
           cd canvasspro-web
