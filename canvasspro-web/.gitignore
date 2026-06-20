@@ -18,6 +18,10 @@ serviceAccountKey.json
 ios/
 android/
 
+# generated app-store artifacts (icons/splash come from assets/ via
+# `npm run assets:generate`; the PWA `icons/` output is never shipped)
+icons/
+
 # firebase
 .firebase/
 firebase-debug.log

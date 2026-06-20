@@ -1,26 +1,61 @@
 # ============================================================================
-# Codemagic CI — build, sign, and ship the YoutilityKnock iOS app with no Mac.
-# ============================================================================
-# ONE-TIME SETUP (in the Codemagic web app at codemagic.io):
-#   1. Sign up / log in → "Add application" → connect this GitHub repo.
-#   2. Enroll in the Apple Developer Program first (developer.apple.com, $99/yr).
-#   3. Create an App Store Connect API key:
-#        App Store Connect → Users and Access → Integrations → App Store Connect
-#        API → generate a key (Admin or App Manager role). Download the .p8.
-#   4. In Codemagic → Teams → your team → Integrations → App Store Connect:
-#        add that key. NAME IT EXACTLY:  YoutilityKnock ASC
-#        (or rename it here under integrations.app_store_connect).
-#   5. In App Store Connect → My Apps → "+" → New App:
-#        Platform iOS, Name "YoutilityKnock", Bundle ID  us.youtility.knock
-#        (Codemagic can also auto-register the bundle id on the first build.)
-#   6. Run the `ios-release` workflow from the Codemagic UI.
+# Codemagic CI — build, sign, and ship YoutilityKnock to BOTH stores, no Mac.
+#   • ios-release      → signed IPA → TestFlight → App Store  (Apple)
+#   • android-release  → signed AAB → Internal track → Play   (Google)
 #
-# The build auto-creates the native iOS project, injects the required
-# permission strings, signs with your App Store profile, and uploads to
-# TestFlight. Promote to the public App Store from App Store Connect when ready.
+# The web bundle, the native iOS/Android projects, the app icons and the
+# splash screens are all generated fresh on every build from this repo —
+# nothing native is committed. You only supply signing credentials once in
+# the Codemagic UI (steps below).
+# ============================================================================
+#
+# ── ONE-TIME SETUP ─────────────────────────────────────────────────────────
+#
+# APPLE  (for the ios-release workflow)
+#   1. Enroll in the Apple Developer Program (developer.apple.com, $99/yr).
+#   2. App Store Connect → Users and Access → Integrations → App Store Connect
+#      API → generate a key (Admin or App Manager). Download the .p8.
+#   3. Codemagic → Teams → your team → Integrations → App Store Connect:
+#      add that key and NAME IT EXACTLY:  YoutilityKnock ASC
+#   4. App Store Connect → My Apps → "+" → New App:
+#      Platform iOS, Name "YoutilityKnock", Bundle ID  us.youtility.knock
+#      (Codemagic can also auto-register the bundle id on the first build.)
+#
+# GOOGLE  (for the android-release workflow)
+#   1. Pay the one-time Google Play Developer fee ($25) at play.google.com/console.
+#   2. Create the app in Play Console: name "YoutilityKnock",
+#      package name  us.youtility.knock.
+#   3. Generate an upload keystore (once) and upload it to Codemagic:
+#        keytool -genkey -v -keystore youtilityknock.keystore \
+#          -alias youtilityknock -keyalg RSA -keysize 2048 -validity 10000
+#      Codemagic → Teams → Code signing identities → Android keystores →
+#      upload it with reference name EXACTLY:  youtilityknock_keystore
+#   4. Create a Play service account with the "Release manager" role and
+#      download its JSON key (Play Console → Users and permissions, and
+#      Google Cloud → IAM → Service Accounts). In Codemagic add an
+#      environment-variable group named "google_play" with one secure
+#      variable:  GCLOUD_SERVICE_ACCOUNT_CREDENTIALS = <the JSON, pasted whole>.
+#   5. The very FIRST Android release must be uploaded to Play manually (the
+#      service-account API can only update an app that already has one build).
+#      After that, android-release ships to the Internal track automatically.
+#
+# Then run each workflow from the Codemagic UI. Promote builds to the public
+# store from App Store Connect / Play Console when you're ready.
 # ============================================================================
 
+definitions:
+  scripts:
+    - &build_web
+      name: Build the web bundle (native mode)
+      script: |
+        npm --prefix canvasspro-web install
+        npm --prefix canvasspro-web run build:native
+
 workflows:
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # iOS → TestFlight / App Store
+  # ──────────────────────────────────────────────────────────────────────────
   ios-release:
     name: YoutilityKnock iOS
     instance_type: mac_mini_m2
@@ -35,16 +70,19 @@ workflows:
       xcode: latest
       cocoapods: default
     scripts:
-      - name: Build the web bundle (native mode)
-        script: |
-          npm --prefix canvasspro-web install
-          npm --prefix canvasspro-web run build:native
+      - *build_web
       - name: Create iOS project & sync Capacitor
         script: |
           cd canvasspro-web
           npm install @capacitor/ios
           [ -d ios ] || npx cap add ios
           npx cap sync ios
+      - name: Generate app icons & splash screens
+        script: |
+          cd canvasspro-web
+          npx capacitor-assets generate --ios \
+            --iconBackgroundColor '#0ea5e9' --iconBackgroundColorDark '#0f1727' \
+            --splashBackgroundColor '#0f1727' --splashBackgroundColorDark '#0f1727'
       - name: Inject iOS permission strings (location / camera / photos)
         script: |
           PLIST=canvasspro-web/ios/App/App/Info.plist
@@ -73,3 +111,91 @@ workflows:
       app_store_connect:
         auth: integration
         submit_to_testflight: true
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # Android → Google Play (Internal track)
+  # ──────────────────────────────────────────────────────────────────────────
+  android-release:
+    name: YoutilityKnock Android
+    instance_type: linux_x2
+    max_build_duration: 60
+    environment:
+      android_signing:
+        - youtilityknock_keystore
+      groups:
+        - google_play          # provides GCLOUD_SERVICE_ACCOUNT_CREDENTIALS
+      node: 20
+      java: 17
+    scripts:
+      - *build_web
+      - name: Create Android project & sync Capacitor
+        script: |
+          cd canvasspro-web
+          npm install @capacitor/android
+          [ -d android ] || npx cap add android
+          npx cap sync android
+      - name: Generate app icons & splash screens
+        script: |
+          cd canvasspro-web
+          npx capacitor-assets generate --android \
+            --iconBackgroundColor '#0ea5e9' --iconBackgroundColorDark '#0f1727' \
+            --splashBackgroundColor '#0f1727' --splashBackgroundColorDark '#0f1727'
+      - name: Add location permissions to AndroidManifest
+        script: |
+          # The @capacitor/geolocation plugin ships an empty manifest, so the
+          # app must declare its own location permissions or getCurrentPosition
+          # silently fails on Android.
+          MANIFEST=canvasspro-web/android/app/src/main/AndroidManifest.xml
+          grep -q 'ACCESS_FINE_LOCATION' "$MANIFEST" || \
+            sed -i 's#</manifest>#    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />\n    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />\n</manifest>#' "$MANIFEST"
+      - name: Target Android 15 (API 35) for Play compliance
+        script: |
+          # Google Play requires new apps to target API 35. Bump the SDK levels
+          # and the Gradle/AGP toolchain that supports compiling against 35.
+          VARS=canvasspro-web/android/variables.gradle
+          sed -i 's/compileSdkVersion = 34/compileSdkVersion = 35/' "$VARS"
+          sed -i 's/targetSdkVersion = 34/targetSdkVersion = 35/' "$VARS"
+          sed -i "s#com.android.tools.build:gradle:8.2.1#com.android.tools.build:gradle:8.6.1#" \
+            canvasspro-web/android/build.gradle
+          sed -i "s#gradle-8.2.1-all.zip#gradle-8.9-all.zip#" \
+            canvasspro-web/android/gradle/wrapper/gradle-wrapper.properties
+      - name: Configure release signing & version
+        script: |
+          # Codemagic exposes the uploaded keystore via CM_* env vars when
+          # `android_signing` is set. Gradle merges repeated `android {}`
+          # blocks, so we just append a release signing + version config.
+          cat >> canvasspro-web/android/app/build.gradle <<'GRADLE'
+
+          android {
+              defaultConfig {
+                  versionCode (System.getenv("BUILD_NUMBER") ?: "1").toInteger() + 1
+                  versionName System.getenv("VERSION_NAME") ?: "1.0.0"
+              }
+              signingConfigs {
+                  release {
+                      storeFile file(System.getenv("CM_KEYSTORE_PATH"))
+                      storePassword System.getenv("CM_KEYSTORE_PASSWORD")
+                      keyAlias System.getenv("CM_KEY_ALIAS")
+                      keyPassword System.getenv("CM_KEY_PASSWORD")
+                  }
+              }
+              buildTypes {
+                  release {
+                      signingConfig signingConfigs.release
+                  }
+              }
+          }
+          GRADLE
+      - name: Build signed AAB
+        script: |
+          cd canvasspro-web/android
+          chmod +x gradlew
+          ./gradlew bundleRelease
+    artifacts:
+      - canvasspro-web/android/app/build/outputs/**/*.aab
+      - canvasspro-web/android/app/build/outputs/**/mapping.txt
+    publishing:
+      google_play:
+        credentials: $GCLOUD_SERVICE_ACCOUNT_CREDENTIALS
+        track: internal
+        submit_as_draft: true
