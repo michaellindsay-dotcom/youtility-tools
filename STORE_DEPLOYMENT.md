@@ -16,6 +16,8 @@ You supply signing credentials once per store in the Codemagic UI.
 | Terms of Service | `https://youtilityknock.web.app/terms`  |
 | CI config       | [`codemagic.yaml`](./codemagic.yaml) |
 | Icon/splash art | [`canvasspro-web/assets/`](./canvasspro-web/assets/) |
+| Listing copy    | [`STORE_LISTING.md`](./STORE_LISTING.md) |
+| Publisher       | Sun Service (info@sunservice.io) |
 
 ---
 

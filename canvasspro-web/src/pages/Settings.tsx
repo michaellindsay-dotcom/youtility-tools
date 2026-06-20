@@ -284,6 +284,22 @@ export default function Settings() {
       </div>
 
       <p className="muted small">Need a role change? Ask an admin from the Admin · Users screen.</p>
+
+      <div className="card">
+        <h3 style={{ marginBottom: 4 }}>About</h3>
+        <p className="muted small" style={{ marginBottom: 10 }}>
+          YoutilityKnock by Sun Service
+        </p>
+        <p className="muted small">
+          <a href="https://youtilityknock.web.app/privacy" target="_blank" rel="noopener noreferrer">
+            Privacy Policy
+          </a>
+          {" · "}
+          <a href="https://youtilityknock.web.app/terms" target="_blank" rel="noopener noreferrer">
+            Terms of Service
+          </a>
+        </p>
+      </div>
     </div>
   );
 }
