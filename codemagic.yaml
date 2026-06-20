@@ -112,6 +112,11 @@ workflows:
           # so App Store Connect skips the export-compliance question on every
           # upload and the build reaches TestFlight without stalling.
           $P -c "Set :ITSAppUsesNonExemptEncryption false" "$PLIST" 2>/dev/null || $P -c "Add :ITSAppUsesNonExemptEncryption bool false" "$PLIST"
+          # Lock the app to portrait — it's a one-handed field app, so rotation
+          # is undesirable. Replace the orientation array with portrait only.
+          $P -c "Delete :UISupportedInterfaceOrientations" "$PLIST" 2>/dev/null || true
+          $P -c "Add :UISupportedInterfaceOrientations array" "$PLIST"
+          $P -c "Add :UISupportedInterfaceOrientations:0 string UIInterfaceOrientationPortrait" "$PLIST"
       - name: Install CocoaPods
         script: |
           cd canvasspro-web/ios/App && pod install
@@ -183,6 +188,9 @@ workflows:
           MANIFEST=canvasspro-web/android/app/src/main/AndroidManifest.xml
           grep -q 'ACCESS_FINE_LOCATION' "$MANIFEST" || \
             sed -i 's#</manifest>#    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />\n    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />\n</manifest>#' "$MANIFEST"
+          # Lock MainActivity to portrait (field app — no rotation).
+          grep -q 'android:screenOrientation' "$MANIFEST" || \
+            sed -i 's#android:name=".MainActivity"#android:name=".MainActivity"\n            android:screenOrientation="portrait"#' "$MANIFEST"
       - name: Target Android 15 (API 35) for Play compliance
         script: |
           # Google Play requires new apps to target API 35. Bump the SDK levels
