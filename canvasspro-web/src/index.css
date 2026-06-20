@@ -320,7 +320,9 @@ a {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 14px 28px;
+  /* Pad for the status bar / Dynamic Island / notch (safe-area insets) so the
+     bar doesn't render underneath them in the native WebView. */
+  padding: calc(14px + env(safe-area-inset-top)) calc(28px + env(safe-area-inset-right)) 14px calc(28px + env(safe-area-inset-left));
   border-bottom: 1px solid var(--line);
   background: rgba(10, 15, 26, 0.5);
   backdrop-filter: blur(8px);
@@ -1668,7 +1670,19 @@ details.raw pre {
   }
   .app-shell.nav-open .nav-backdrop { opacity: 1; pointer-events: auto; }
   .topbar-menu { display: inline-flex; }
-  .app-content { padding: 16px 14px 72px; }
+  .app-content { padding: 16px 14px calc(72px + env(safe-area-inset-bottom)); }
+  /* Push the slide-in sidebar's content below the status bar/notch. */
+  .sidebar { padding-top: calc(20px + env(safe-area-inset-top)); }
+  /* Tighten the top bar on phones so everything (incl. Sign out) fits. */
+  .topbar {
+    padding-left: calc(14px + env(safe-area-inset-left));
+    padding-right: calc(14px + env(safe-area-inset-right));
+    gap: 8px;
+  }
+  /* The name/role text crowds a narrow bar — the avatar already identifies the
+     user, so hide the text on phones. */
+  .topbar-user-info { display: none; }
+  .topbar-user { gap: 8px; }
 }
 
 /* Full-screen map */
