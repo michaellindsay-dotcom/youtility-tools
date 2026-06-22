@@ -197,12 +197,14 @@ a {
 /* ── App shell ───────────────────────────────────────────── */
 .app-shell {
   display: flex;
-  height: 100vh;
-  height: 100dvh;
+  /* Pin the whole shell to the viewport so the top bar can NEVER move — only
+     .app-content scrolls. (A plain 100dvh element could still ride up/down with
+     the document's rubber-band bounce in the iOS WebView; fixed can't.) */
+  position: fixed;
+  inset: 0;
   overflow: hidden;
   /* Reserve the status-bar / Dynamic Island space here so the header sits
-     below it on every page (more reliable than per-element insets in the
-     native WebView). box-sizing is border-box, so this stays within 100dvh. */
+     below it on every page. box-sizing is border-box, so this stays in-frame. */
   padding-top: env(safe-area-inset-top);
 }
 .sidebar {
@@ -233,6 +235,7 @@ a {
   min-height: 0;
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
   position: relative;
 }
 
