@@ -337,8 +337,8 @@ a {
   align-items: center;
   gap: 12px;
   /* The status-bar space is reserved by .app-shell's padding-top, so the bar
-     itself just needs normal padding. */
-  padding: 14px 28px;
+     itself just needs normal padding. Kept compact to give the map more room. */
+  padding: 9px 28px;
   border-bottom: 1px solid var(--line);
   background: rgba(10, 15, 26, 0.5);
   backdrop-filter: blur(8px);
