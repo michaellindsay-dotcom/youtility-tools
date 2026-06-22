@@ -1691,6 +1691,9 @@ details.raw pre {
 .nav-backdrop { display: none; }
 
 @media (max-width: 860px) {
+  /* Trim the phone nav: these live elsewhere on mobile (Movers on the map,
+     Leads/Team Chat in the main flow). Desktop keeps the full list. */
+  .nav-link.mobile-hidden { display: none; }
   .sidebar {
     position: fixed;
     left: 0;
