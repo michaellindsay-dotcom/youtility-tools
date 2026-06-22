@@ -177,6 +177,15 @@ export default function Dashboard() {
         </Link>
       </div>
 
+      {/* Today's funnel */}
+      <h2 className="section-h">Today's Funnel</h2>
+      <div className="stat-grid">
+        <FunnelCard n={f.today.doors} label="Doors Knocked" sub={`${f.today.hours}h on shift`} />
+        <FunnelCard n={f.today.conv} label="Conversations" sub={`${pct(f.today.conv, f.today.doors || 1)}% conv rate`} />
+        <FunnelCard n={f.today.appt} label="Appts Set" sub={`${pct(f.today.appt, f.today.conv || 1)}% set rate`} />
+        <FunnelCard n={f.today.closed} label="Closed" sub={`${pct(f.today.closed, f.today.appt || 1)}% close rate`} />
+      </div>
+
       {/* Goal progress (part of the Success Planner service) */}
       {showPlanner && (
         <>
@@ -187,23 +196,9 @@ export default function Dashboard() {
               ["Conversations", f.week.conv, GOALS.convWeek],
               ["Appointments", f.week.appt, GOALS.apptWeek],
             ]} note={`${plan.weekPerDay} doors/day to goal`} />
-            <GoalCard title="This Month" rows={[
-              ["Doors", f.month.doors, GOALS.doorsMonth],
-              ["Conversations", f.month.conv, GOALS.convMonth],
-              ["Appointments", f.month.appt, GOALS.apptMonth],
-            ]} note={`${plan.monthPerDay} doors/day · ${f.month.hours}h logged`} />
           </div>
         </>
       )}
-
-      {/* Today's funnel */}
-      <h2 className="section-h">Today's Funnel</h2>
-      <div className="stat-grid">
-        <FunnelCard n={f.today.doors} label="Doors Knocked" sub={`${f.today.hours}h on shift`} />
-        <FunnelCard n={f.today.conv} label="Conversations" sub={`${pct(f.today.conv, f.today.doors || 1)}% conv rate`} />
-        <FunnelCard n={f.today.appt} label="Appts Set" sub={`${pct(f.today.appt, f.today.conv || 1)}% set rate`} />
-        <FunnelCard n={f.today.closed} label="Closed" sub={`${pct(f.today.closed, f.today.appt || 1)}% close rate`} />
-      </div>
 
       {loading && <p className="muted small" style={{ marginTop: 16 }}>Loading your numbers…</p>}
     </div>
