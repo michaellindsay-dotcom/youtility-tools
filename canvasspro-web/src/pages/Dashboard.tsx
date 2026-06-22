@@ -4,7 +4,7 @@ import { collection, getDocs, query, where, orderBy, limit } from "firebase/fire
 import { db } from "../firebase";
 import { useAuth } from "../auth/AuthContext";
 import { hasFeature } from "../lib/features";
-import type { Lead, Shift, UserStats } from "../types";
+import type { Lead, Shift, UserProfile, UserStats } from "../types";
 
 // Default targets (configurable later via a company `config` doc).
 const GOALS = {
@@ -45,13 +45,33 @@ interface Funnel {
   hours: number;
 }
 
+// The four metrics shown in the team Top Performers boards, in funnel order.
+type MetricKey = "doors" | "conv" | "appt" | "closed";
+const METRICS: { key: MetricKey; label: string; emoji: string }[] = [
+  { key: "doors", label: "Doors Knocked", emoji: "🚪" },
+  { key: "conv", label: "Conversations", emoji: "💬" },
+  { key: "appt", label: "Appts Set", emoji: "📅" },
+  { key: "closed", label: "Closed", emoji: "💰" },
+];
+
+interface Performer {
+  uid: string;
+  name: string;
+  count: number;
+}
+
 export default function Dashboard() {
-  const { profile, company } = useAuth();
+  const { profile, company, role, companyId } = useAuth();
   const showPlanner = hasFeature(company, "planner"); // Success Planner is an optional service
   const [leads, setLeads] = useState<Lead[]>([]);
   const [shifts, setShifts] = useState<Shift[]>([]);
   const [top, setTop] = useState<UserStats[]>([]);
   const [loading, setLoading] = useState(true);
+  // Team Top Performers — leads visible to this user (their downstream, or the
+  // whole company for admins) for the current week, plus a uid→name map.
+  const [teamLeads, setTeamLeads] = useState<Lead[]>([]);
+  const [teamNames, setTeamNames] = useState<Record<string, string>>({});
+  const [teamScope, setTeamScope] = useState<"today" | "week">("today");
 
   useEffect(() => {
     if (!profile) return;
@@ -87,6 +107,80 @@ export default function Dashboard() {
       cancelled = true;
     };
   }, [profile]);
+
+  // Pull this week's team leads + the names to attribute them to. Admins see the
+  // whole company; managers/users see only their downstream (uid in
+  // visibilityPath / managerPath), matching the leads read rules.
+  useEffect(() => {
+    if (!profile || !companyId) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const weekStart = startOfWeek();
+        const leadsBase = collection(db, "leads");
+        const leadQ =
+          role === "admin"
+            ? query(leadsBase, where("companyId", "==", companyId), where("createdAt", ">=", weekStart))
+            : query(
+                leadsBase,
+                where("companyId", "==", companyId),
+                where("visibilityPath", "array-contains", profile.uid),
+                where("createdAt", ">=", weekStart)
+              );
+
+        const usersBase = collection(db, "users");
+        const userQ =
+          role === "admin"
+            ? query(usersBase, where("companyId", "==", companyId))
+            : query(usersBase, where("companyId", "==", companyId), where("managerPath", "array-contains", profile.uid));
+
+        const [leadSnap, userSnap] = await Promise.all([getDocs(leadQ), getDocs(userQ)]);
+        if (cancelled) return;
+
+        const names: Record<string, string> = { [profile.uid]: profile.displayName || "You" };
+        userSnap.docs.forEach((d) => {
+          const u = d.data() as UserProfile;
+          if (u.displayName) names[d.id] = u.displayName;
+        });
+
+        setTeamLeads(leadSnap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<Lead, "id">) })));
+        setTeamNames(names);
+      } catch (e) {
+        // Missing composite index or permissions — fail quietly, the section just hides.
+        console.error("team top performers", e);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [profile, role, companyId]);
+
+  // Top performers per metric, for the selected window (today / this week).
+  const teamTops = useMemo(() => {
+    const since = teamScope === "today" ? startOfToday() : startOfWeek();
+    const verified = teamLeads.filter((l) => l.verified !== false && knockTime(l) >= since && l.assignedTo);
+    const byUid: Record<string, Record<MetricKey, number>> = {};
+    for (const l of verified) {
+      const uid = l.assignedTo as string;
+      const m = (byUid[uid] ??= { doors: 0, conv: 0, appt: 0, closed: 0 });
+      m.doors += 1;
+      if (CONVO.has(l.status)) m.conv += 1;
+      if (l.status === "appointment") m.appt += 1;
+      if (l.status === "sold") m.closed += 1;
+    }
+    const ranked = (key: MetricKey): Performer[] =>
+      Object.entries(byUid)
+        .map(([uid, m]) => ({ uid, name: teamNames[uid] || "Teammate", count: m[key] }))
+        .filter((p) => p.count > 0)
+        .sort((a, b) => b.count - a.count)
+        .slice(0, 5);
+    return { doors: ranked("doors"), conv: ranked("conv"), appt: ranked("appt"), closed: ranked("closed") };
+  }, [teamLeads, teamNames, teamScope]);
+
+  const hasTeamData = useMemo(
+    () => METRICS.some((m) => teamTops[m.key].length > 0),
+    [teamTops]
+  );
 
   const f = useMemo(() => {
     const windows = { today: startOfToday(), week: startOfWeek(), month: startOfMonth() };
@@ -186,6 +280,32 @@ export default function Dashboard() {
         <FunnelCard n={f.today.closed} label="Closed" sub={`${pct(f.today.closed, f.today.appt || 1)}% close rate`} />
       </div>
 
+      {/* Team Top Performers — daily / weekly leaders per funnel metric */}
+      <div className="section-head row">
+        <h2 className="section-h" style={{ margin: 0 }}>🏅 Team Top Performers</h2>
+        <div className="type-pills">
+          <button className={"pill" + (teamScope === "today" ? " active" : "")} onClick={() => setTeamScope("today")}>
+            Daily
+          </button>
+          <button className={"pill" + (teamScope === "week" ? " active" : "")} onClick={() => setTeamScope("week")}>
+            Weekly
+          </button>
+        </div>
+      </div>
+      {hasTeamData ? (
+        <div className="team-tops">
+          {METRICS.map((m) => (
+            <PerformerCard key={m.key} title={m.label} emoji={m.emoji} rows={teamTops[m.key]} mine={profile?.uid} />
+          ))}
+        </div>
+      ) : (
+        <div className="card">
+          <p className="muted small" style={{ margin: 0 }}>
+            No {teamScope === "today" ? "activity today" : "activity this week"} from your team yet — leaders show up here as the doors get knocked.
+          </p>
+        </div>
+      )}
+
       {/* Goal progress (part of the Success Planner service) */}
       {showPlanner && (
         <>
@@ -223,6 +343,40 @@ function GoalCard({ title, rows, note }: { title: string; rows: [string, number,
         ))}
       </dl>
       <div className="muted small">{note}</div>
+    </div>
+  );
+}
+
+function PerformerCard({
+  title,
+  emoji,
+  rows,
+  mine,
+}: {
+  title: string;
+  emoji: string;
+  rows: Performer[];
+  mine?: string;
+}) {
+  const medal = ["🥇", "🥈", "🥉"];
+  return (
+    <div className="card perf-card">
+      <h3 className="perf-h">
+        <span>{emoji}</span> {title}
+      </h3>
+      {rows.length === 0 ? (
+        <p className="muted small" style={{ margin: 0 }}>No activity yet.</p>
+      ) : (
+        <ol className="perf-list">
+          {rows.map((r, i) => (
+            <li key={r.uid} className={r.uid === mine ? "me" : ""}>
+              <span className="perf-rank">{medal[i] ?? i + 1}</span>
+              <span className="perf-name">{r.uid === mine ? "You" : r.name}</span>
+              <span className="perf-count">{r.count}</span>
+            </li>
+          ))}
+        </ol>
+      )}
     </div>
   );
 }

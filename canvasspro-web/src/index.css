@@ -2185,6 +2185,72 @@ body.modal-open .chat-fab-global { display: none; }
   justify-content: space-between;
   gap: 10px;
 }
+
+/* ── Team Top Performers (dashboard) ─────────────────────── */
+.section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin: 24px 0 12px;
+}
+.section-head .type-pills {
+  margin: 0;
+}
+.team-tops {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 14px;
+  margin-bottom: 24px;
+}
+.perf-card {
+  padding: 14px 16px;
+}
+.perf-h {
+  font-family: "Space Grotesk", sans-serif;
+  font-size: 14px;
+  margin: 0 0 10px;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+.perf-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 7px;
+}
+.perf-list li {
+  display: grid;
+  grid-template-columns: 22px 1fr auto;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+}
+.perf-list li.me {
+  background: rgba(14, 165, 233, 0.12);
+  border-radius: var(--radius-sm);
+  margin: -2px -6px;
+  padding: 2px 6px;
+}
+.perf-rank {
+  text-align: center;
+  font-size: 13px;
+  color: var(--ink-mid);
+  font-variant-numeric: tabular-nums;
+}
+.perf-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.perf-count {
+  font-family: "Space Grotesk", sans-serif;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
 .goal-row dd {
   display: block;
 }
