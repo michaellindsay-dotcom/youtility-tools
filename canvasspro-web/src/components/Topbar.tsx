@@ -1,3 +1,4 @@
+import { useLocation } from "react-router-dom";
 import { useAuth } from "../auth/AuthContext";
 import { isImpersonating } from "../firebase";
 import ShiftBar from "./ShiftBar";
@@ -5,6 +6,9 @@ import NotificationBell from "./NotificationBell";
 
 export default function Topbar({ onMenu }: { onMenu?: () => void }) {
   const { profile, logout, company } = useAuth();
+  // On the map, Start Shift lives on the map itself, so the header omits it and
+  // pushes alerts all the way to the right.
+  const onMap = useLocation().pathname.startsWith("/map");
 
   const exitMirror = async () => {
     await logout();
@@ -25,10 +29,9 @@ export default function Topbar({ onMenu }: { onMenu?: () => void }) {
       {/* Company name fills the space between the menu and the actions, making
           it feel like a company-specific platform. */}
       <div className="topbar-company">{company?.name ?? ""}</div>
-      {/* Notifications, then Start Shift on the far right. */}
       <div className="topbar-actions">
         <NotificationBell />
-        <ShiftBar />
+        {!onMap && <ShiftBar />}
       </div>
     </header>
   );

@@ -200,6 +200,10 @@ a {
   height: 100vh;
   height: 100dvh;
   overflow: hidden;
+  /* Reserve the status-bar / Dynamic Island space here so the header sits
+     below it on every page (more reliable than per-element insets in the
+     native WebView). box-sizing is border-box, so this stays within 100dvh. */
+  padding-top: env(safe-area-inset-top);
 }
 .sidebar {
   width: var(--sidebar-w);
@@ -329,9 +333,9 @@ a {
   display: flex;
   align-items: center;
   gap: 12px;
-  /* Pad for the status bar / Dynamic Island / notch (safe-area insets) so the
-     bar doesn't render underneath them in the native WebView. */
-  padding: calc(14px + env(safe-area-inset-top)) calc(28px + env(safe-area-inset-right)) 14px calc(28px + env(safe-area-inset-left));
+  /* The status-bar space is reserved by .app-shell's padding-top, so the bar
+     itself just needs normal padding. */
+  padding: 14px 28px;
   border-bottom: 1px solid var(--line);
   background: rgba(10, 15, 26, 0.5);
   backdrop-filter: blur(8px);
