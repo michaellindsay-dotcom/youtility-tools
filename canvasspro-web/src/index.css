@@ -2188,6 +2188,14 @@ body.modal-open .chat-fab-global { display: none; }
 .goal-row dd {
   display: block;
 }
+/* Read-only derived goal value (no input — calculated from the close goal). */
+.goal-ro {
+  font-weight: 700;
+  font-size: 16px;
+  color: var(--ink);
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
 .goal-bar {
   height: 6px;
   border-radius: 999px;
