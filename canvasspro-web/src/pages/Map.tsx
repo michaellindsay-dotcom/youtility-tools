@@ -511,7 +511,14 @@ export default function MapPage() {
     moverLayer.current.addTo(map); // always on; sits above the other pins
     solarLayer.current.addTo(map); // ☀️/🔥 solar pins; toggled via the FAB
     mapRef.current = map;
-    setTimeout(() => map.invalidateSize(), 120);
+    // The map mounts inside a flex/fixed layout that settles over a few frames;
+    // a single early invalidateSize can fire before the container reaches its
+    // final size, leaving Leaflet rendering tiles for a smaller box (a blank
+    // wedge in a corner). Re-invalidate on a few delays AND whenever the
+    // container actually resizes so the map always fills the screen.
+    [60, 250, 600].forEach((ms) => setTimeout(() => map.invalidateSize(), ms));
+    const ro = new ResizeObserver(() => map.invalidateSize());
+    ro.observe(elRef.current);
 
     map.on("click", (e: L.LeafletMouseEvent) => {
       const { lat, lng } = e.latlng;
@@ -562,6 +569,7 @@ export default function MapPage() {
     return () => {
       if (roamTimer.current) clearTimeout(roamTimer.current);
       if (watchId.current) { Geolocation.clearWatch({ id: watchId.current }).catch(() => {}); watchId.current = null; }
+      ro.disconnect();
       map.remove();
       mapRef.current = null;
     };
