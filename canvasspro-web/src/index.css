@@ -1772,8 +1772,11 @@ body.modal-open .chat-fab-global { display: none; }
   /* Fill the content area BELOW the fixed header (app-content is position:
      relative) instead of overlaying the whole viewport — so the map and its
      tools no longer collide with the top bar. No z-index, so it doesn't create
-     a stacking context that would trap the disposition modal under the chat fab. */
-  .map-screen { position: absolute; inset: 0; margin: 0; }
+     a stacking context that would trap the disposition modal under the chat fab.
+     height:auto overrides the desktop rule's fixed height so inset:0 sizes the
+     map to EXACTLY fill the content area — otherwise it's a touch too tall and
+     the whole map (Start Shift, tools) scrolls a little. */
+  .map-screen { position: absolute; inset: 0; margin: 0; height: auto; }
 }
 
 .map-overlay { position: absolute; z-index: 1100; display: flex; gap: 8px; }
