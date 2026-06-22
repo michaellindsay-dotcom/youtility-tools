@@ -3,14 +3,15 @@ import { useAuth } from "../auth/AuthContext";
 import { hasFeature, type FeatureKey } from "../lib/features";
 
 // `feat` shows the link only when the plan has that feature; `anyFeat` shows it
-// when the plan has any one of several. Success Planner now also hosts the team
-// analytics that used to live on its own "Analytics" link, so it shows for either.
-const links: { to: string; label: string; icon: string; end?: boolean; feat?: FeatureKey; anyFeat?: FeatureKey[] }[] = [
+// when the plan has any one of several. `mobileHidden` hides the link on the
+// phone layout (Movers lives on the map; Leads/Team Chat are reachable from the
+// main flow), keeping the mobile nav lean while desktop keeps the full list.
+const links: { to: string; label: string; icon: string; end?: boolean; feat?: FeatureKey; anyFeat?: FeatureKey[]; mobileHidden?: boolean }[] = [
   { to: "/", label: "Dashboard", icon: "▦", end: true },
   { to: "/map", label: "Map", icon: "◉" },
-  { to: "/movers", label: "Movers", icon: "🚚" },
-  { to: "/leads", label: "Leads", icon: "☰" },
-  { to: "/chat", label: "Team Chat", icon: "💬", feat: "chat" },
+  { to: "/movers", label: "Movers", icon: "🚚", mobileHidden: true },
+  { to: "/leads", label: "Leads", icon: "☰", mobileHidden: true },
+  { to: "/chat", label: "Team Chat", icon: "💬", feat: "chat", mobileHidden: true },
   { to: "/schedule", label: "Schedule", icon: "📅", feat: "scheduling" },
   { to: "/shifts", label: "Success Planner", icon: "◎", anyFeat: ["planner", "analytics"] },
   { to: "/team", label: "Team", icon: "⛩" },
@@ -51,7 +52,7 @@ export default function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
             to={l.to}
             end={l.end}
             onClick={onNavigate}
-            className={({ isActive }) => "nav-link" + (isActive ? " active" : "")}
+            className={({ isActive }) => "nav-link" + (isActive ? " active" : "") + (l.mobileHidden ? " mobile-hidden" : "")}
           >
             <span className="nav-icon">{l.icon}</span>
             {l.label}
