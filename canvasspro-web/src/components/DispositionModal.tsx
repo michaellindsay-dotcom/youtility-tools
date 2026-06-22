@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 import { addDoc, collection, doc, updateDoc } from "firebase/firestore";
 import { ref as storageRef, uploadBytes, getDownloadURL } from "firebase/storage";
 import { Geolocation } from "@capacitor/geolocation";
@@ -111,6 +112,9 @@ export default function DispositionModal({
   const { profile, companyId, company } = useAuth();
   const { active: onShift, startShift, recordKnock } = useShift();
   const [d, setD] = useState<Form | null>(null);
+  // Two-step flow: step 1 = disposition + contact details; step 2 (only for
+  // dispositions that schedule a follow-up or are sold) = appointment + photos.
+  const [step, setStep] = useState<1 | 2>(1);
   const [enriching, setEnriching] = useState(false);
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -142,6 +146,7 @@ export default function DispositionModal({
       notes: "",
       ...target,
     });
+    setStep(1);
     setSummary(summarize(target.enrichment));
     setGeo({ ft: null, accFt: 0, verified: true, locating: target.lat != null && target.lng != null });
     setSchedule(true);
@@ -362,128 +367,163 @@ export default function DispositionModal({
   const apptMin = sched ? toLocalInput(Date.now() + (sched.apptMinLeadHours || 0) * 3600_000) : undefined;
   const apptMax = sched ? toLocalInput(Date.now() + (sched.apptMaxDaysOut || 30) * 86400_000) : undefined;
 
-  return (
+  // Dispositions that warrant a second screen for scheduling + photos. Everyone
+  // else saves straight from step 1 so the initial card stays short.
+  const needsStep2 = !!SCHEDULE_FOR[d.status] || d.status === "sold";
+  const emailValid = !d.email || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(d.email.trim());
+
+  // Step 1 primary action: advance to step 2 when needed, otherwise save.
+  function next() {
+    if (!d) return;
+    if (!d.name.trim()) {
+      setErr("Add the homeowner's name before continuing.");
+      return;
+    }
+    if (!emailValid) {
+      setErr("That email doesn't look right — fix it or clear it.");
+      return;
+    }
+    setErr(null);
+    if (needsStep2) setStep(2);
+    else void save();
+  }
+
+  const step1 = (
+    <>
+      <div className="field-label">Disposition</div>
+      <div className="dispo-grid">
+        {DISPOSITIONS.map((opt) => (
+          <button
+            key={opt.value}
+            type="button"
+            className={"dispo-pill" + (d.status === opt.value ? " active" : "")}
+            style={{
+              borderColor: opt.color,
+              ...(d.status === opt.value ? { background: opt.color, color: "#06121f" } : {}),
+            }}
+            onClick={() => setD({ ...d, status: opt.value })}
+          >
+            {opt.label}
+          </button>
+        ))}
+      </div>
+
+      {(summary || enriching) && (
+        <div className="muted small dispo-summary">{enriching ? "Looking up home data…" : summary}</div>
+      )}
+
+      {geo.locating && (
+        <div className="muted small dispo-summary">📍 Getting a precise location…</div>
+      )}
+
+      {geo.ft != null && !geo.locating && !geo.verified && (
+        <div className="banner warn show" style={{ marginBottom: 10 }}>
+          ⚠ You're <strong>{geo.ft} ft</strong> from this home (over {ONSITE_FT} ft
+          {geo.accFt > 0 ? `, GPS ±${geo.accFt} ft` : ""}). This won't count toward your door knocks or stats.
+        </div>
+      )}
+
+      {!onShift && geo.ft != null && !geo.locating && geo.verified && (
+        <div className="banner info show start-shift-prompt" style={{ marginBottom: 10 }}>
+          <span>You're on-site but not on a shift — start one so this knock counts.</span>
+          <button className="btn primary sm" onClick={() => startShift()}>▶ Start Shift</button>
+        </div>
+      )}
+
+      <label className="field">
+        <span>Address</span>
+        <input value={d.address} onChange={(e) => setD({ ...d, address: e.target.value })} />
+      </label>
+      <div className="grid-2">
+        <label className="field">
+          <span>Name</span>
+          <input value={d.name} placeholder="Full name" onChange={(e) => setD({ ...d, name: e.target.value })} />
+        </label>
+        <label className="field">
+          <span>Phone</span>
+          <input value={d.phone} placeholder="(555) 000-0000" onChange={(e) => setD({ ...d, phone: e.target.value })} />
+        </label>
+      </div>
+      <label className="field">
+        <span>Email</span>
+        <input value={d.email} placeholder="email@example.com" onChange={(e) => setD({ ...d, email: e.target.value })} />
+      </label>
+      <label className="field">
+        <span>Notes</span>
+        <textarea rows={2} value={d.notes} placeholder="Add notes…" onChange={(e) => setD({ ...d, notes: e.target.value })} />
+      </label>
+    </>
+  );
+
+  const step2 = (
+    <>
+      {SCHEDULE_FOR[d.status] && (
+        <div className="dispo-schedule">
+          <label className="dispo-sched-toggle">
+            <input type="checkbox" checked={schedule} onChange={(e) => setSchedule(e.target.checked)} />
+            <span>📅 Schedule {SCHEDULE_FOR[d.status].label.toLowerCase()}</span>
+          </label>
+          {schedule && (
+            <>
+              <input
+                type="datetime-local"
+                className="dispo-sched-input"
+                value={scheduleAt}
+                min={d.status === "appointment" ? apptMin : undefined}
+                max={d.status === "appointment" ? apptMax : undefined}
+                onChange={(e) => setScheduleAt(e.target.value)}
+              />
+              {d.status === "appointment" && company?.scheduling && (
+                <div className="muted small" style={{ marginTop: 6 }}>
+                  {company.scheduling.apptDurationMin}-min appointment · book {company.scheduling.apptMinLeadHours}h+
+                  out, within {company.scheduling.apptMaxDaysOut} days
+                </div>
+              )}
+            </>
+          )}
+        </div>
+      )}
+
+      <div className="dispo-photos">
+        <div className="field-label">Photos</div>
+        <div className="photo-grid">
+          <PhotoSlot
+            label="Front of home"
+            icon="🏠"
+            file={photos.home}
+            existingUrl={d.photoHomeUrl}
+            onPick={(f) => setPhotos((p) => ({ ...p, home: f }))}
+          />
+          <PhotoSlot
+            label="Utility bill"
+            icon="🧾"
+            file={photos.bill}
+            existingUrl={d.photoBillUrl}
+            onPick={(f) => setPhotos((p) => ({ ...p, bill: f }))}
+          />
+        </div>
+      </div>
+    </>
+  );
+
+  return createPortal(
     <div className="modal-overlay" onClick={onClose}>
       <div className="dispo-card" onClick={(e) => e.stopPropagation()}>
         <div className="dispo-head">
           <div>
-            <h3>{d.leadId ? "Home / Disposition" : "Log Disposition"}</h3>
-            <div className="muted small">{d.address}</div>
+            <h3>
+              {step === 2
+                ? "Appointment & Photos"
+                : d.leadId
+                ? "Home / Disposition"
+                : "Log Disposition"}
+            </h3>
+            <div className="muted small">{step === 2 ? d.name || d.address : d.address}</div>
           </div>
           <button className="dispo-x" onClick={onClose}>✕</button>
         </div>
 
-        <div className="field-label">Disposition</div>
-        <div className="dispo-grid">
-          {DISPOSITIONS.map((opt) => (
-            <button
-              key={opt.value}
-              type="button"
-              className={"dispo-pill" + (d.status === opt.value ? " active" : "")}
-              style={{
-                borderColor: opt.color,
-                ...(d.status === opt.value ? { background: opt.color, color: "#06121f" } : {}),
-              }}
-              onClick={() => setD({ ...d, status: opt.value })}
-            >
-              {opt.label}
-            </button>
-          ))}
-        </div>
-
-        {(summary || enriching) && (
-          <div className="muted small dispo-summary">{enriching ? "Looking up home data…" : summary}</div>
-        )}
-
-        {geo.locating && (
-          <div className="muted small dispo-summary">📍 Getting a precise location…</div>
-        )}
-
-        {geo.ft != null && !geo.locating && !geo.verified && (
-          <div className="banner warn show" style={{ marginBottom: 10 }}>
-            ⚠ You're <strong>{geo.ft} ft</strong> from this home (over {ONSITE_FT} ft
-            {geo.accFt > 0 ? `, GPS ±${geo.accFt} ft` : ""}). This won't count toward your door knocks or stats.
-          </div>
-        )}
-
-        {!onShift && geo.ft != null && !geo.locating && geo.verified && (
-          <div className="banner info show start-shift-prompt" style={{ marginBottom: 10 }}>
-            <span>You're on-site but not on a shift — start one so this knock counts.</span>
-            <button className="btn primary sm" onClick={() => startShift()}>▶ Start Shift</button>
-          </div>
-        )}
-
-        <label className="field">
-          <span>Address</span>
-          <input value={d.address} onChange={(e) => setD({ ...d, address: e.target.value })} />
-        </label>
-        <div className="grid-2">
-          <label className="field">
-            <span>Name</span>
-            <input value={d.name} placeholder="Full name" onChange={(e) => setD({ ...d, name: e.target.value })} />
-          </label>
-          <label className="field">
-            <span>Phone</span>
-            <input value={d.phone} placeholder="(555) 000-0000" onChange={(e) => setD({ ...d, phone: e.target.value })} />
-          </label>
-        </div>
-        <label className="field">
-          <span>Email</span>
-          <input value={d.email} placeholder="email@example.com" onChange={(e) => setD({ ...d, email: e.target.value })} />
-        </label>
-        <label className="field">
-          <span>Notes</span>
-          <textarea rows={2} value={d.notes} placeholder="Add notes…" onChange={(e) => setD({ ...d, notes: e.target.value })} />
-        </label>
-
-        {SCHEDULE_FOR[d.status] && (
-          <div className="dispo-schedule">
-            <label className="dispo-sched-toggle">
-              <input type="checkbox" checked={schedule} onChange={(e) => setSchedule(e.target.checked)} />
-              <span>📅 Schedule {SCHEDULE_FOR[d.status].label.toLowerCase()}</span>
-            </label>
-            {schedule && (
-              <>
-                <input
-                  type="datetime-local"
-                  className="dispo-sched-input"
-                  value={scheduleAt}
-                  min={d.status === "appointment" ? apptMin : undefined}
-                  max={d.status === "appointment" ? apptMax : undefined}
-                  onChange={(e) => setScheduleAt(e.target.value)}
-                />
-                {d.status === "appointment" && company?.scheduling && (
-                  <div className="muted small" style={{ marginTop: 6 }}>
-                    {company.scheduling.apptDurationMin}-min appointment · book {company.scheduling.apptMinLeadHours}h+
-                    out, within {company.scheduling.apptMaxDaysOut} days
-                  </div>
-                )}
-              </>
-            )}
-          </div>
-        )}
-
-        {SCHEDULE_FOR[d.status] && (
-          <div className="dispo-photos">
-            <div className="field-label">Photos</div>
-            <div className="photo-grid">
-              <PhotoSlot
-                label="Front of home"
-                icon="🏠"
-                file={photos.home}
-                existingUrl={d.photoHomeUrl}
-                onPick={(f) => setPhotos((p) => ({ ...p, home: f }))}
-              />
-              <PhotoSlot
-                label="Utility bill"
-                icon="🧾"
-                file={photos.bill}
-                existingUrl={d.photoBillUrl}
-                onPick={(f) => setPhotos((p) => ({ ...p, bill: f }))}
-              />
-            </div>
-          </div>
-        )}
+        {step === 1 ? step1 : step2}
 
         {err && (
           <div className="banner warn show" style={{ marginBottom: 10 }}>
@@ -496,14 +536,27 @@ export default function DispositionModal({
             {d.lat != null && d.lng != null ? `${d.lat.toFixed(5)}, ${d.lng.toFixed(5)}` : ""}
           </span>
           <div className="row">
-            <button className="btn ghost sm" onClick={onClose}>Cancel</button>
-            <button className="btn primary sm" onClick={save} disabled={saving}>
-              {saving ? "Saving…" : d.leadId ? "Save" : "Add Lead"}
-            </button>
+            {step === 2 ? (
+              <button className="btn ghost sm" onClick={() => { setErr(null); setStep(1); }}>
+                ← Back
+              </button>
+            ) : (
+              <button className="btn ghost sm" onClick={onClose}>Cancel</button>
+            )}
+            {step === 1 ? (
+              <button className="btn primary sm" onClick={next} disabled={saving}>
+                {needsStep2 ? "Next →" : saving ? "Saving…" : d.leadId ? "Save" : "Add Lead"}
+              </button>
+            ) : (
+              <button className="btn primary sm" onClick={save} disabled={saving}>
+                {saving ? "Saving…" : d.leadId ? "Save" : "Add Lead"}
+              </button>
+            )}
           </div>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }
 
