@@ -959,13 +959,14 @@ details.raw pre {
   display: grid;
   place-items: center;
   z-index: 2000;
-  padding: 16px;
+  padding: max(16px, env(safe-area-inset-top)) 16px max(16px, env(safe-area-inset-bottom));
 }
 .dispo-card {
   width: 100%;
   max-width: 420px;
-  max-height: 90vh;
+  max-height: 100%;
   overflow: auto;
+  overscroll-behavior: contain;
   background: linear-gradient(180deg, #15203a, #0f1727);
   border: 1px solid var(--line-hi);
   border-radius: var(--radius);
@@ -1025,6 +1026,12 @@ details.raw pre {
   justify-content: space-between;
   gap: 10px;
   margin-top: 10px;
+  /* Keep Cancel / Add Lead pinned to the bottom of the (scrolling) card so
+     they're always visible on a small screen. */
+  position: sticky;
+  bottom: 0;
+  background: #0f1727;
+  padding-top: 10px;
 }
 
 /* On-the-spot scheduling inside the disposition modal */
@@ -1749,13 +1756,14 @@ details.raw pre {
 @media (max-width: 860px) {
   /* Fill the content area BELOW the fixed header (app-content is position:
      relative) instead of overlaying the whole viewport — so the map and its
-     tools no longer collide with the top bar. */
-  .map-screen { position: absolute; inset: 0; margin: 0; z-index: 1; }
+     tools no longer collide with the top bar. No z-index, so it doesn't create
+     a stacking context that would trap the disposition modal under the chat fab. */
+  .map-screen { position: absolute; inset: 0; margin: 0; }
 }
 
 .map-overlay { position: absolute; z-index: 1100; display: flex; gap: 8px; }
 .map-tl { top: 12px; left: max(12px, env(safe-area-inset-left)); flex-direction: column; }
-.map-bl { bottom: max(16px, env(safe-area-inset-bottom)); left: max(12px, env(safe-area-inset-left)); }
+.map-bl { bottom: calc(env(safe-area-inset-bottom) + 40px); left: max(12px, env(safe-area-inset-left)); }
 
 .map-fab {
   width: 44px;
