@@ -154,6 +154,14 @@ export default function DispositionModal({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [target]);
 
+  // While the modal is open, flag the body so the floating chat button hides
+  // (it otherwise overlaps the Cancel / Add Lead actions).
+  useEffect(() => {
+    if (!target) return;
+    document.body.classList.add("modal-open");
+    return () => document.body.classList.remove("modal-open");
+  }, [target]);
+
   // When a schedulable disposition is chosen, prefill a sensible default time.
   useEffect(() => {
     const cfg = d ? SCHEDULE_FOR[d.status] : undefined;
