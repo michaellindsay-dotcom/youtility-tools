@@ -1,16 +1,19 @@
-import { useNavigate } from "react-router-dom";
 import { useShift, fmtElapsed } from "../shift/ShiftContext";
 
+// Shift control in the header: tap to start, then it becomes a live timer with
+// door count and a Stop button. Starting/stopping drives the Success Planner
+// stats.
 export default function ShiftBar() {
-  const { active, elapsedSec, doors, stopShift } = useShift();
-  const navigate = useNavigate();
+  const { active, elapsedSec, doors, starting, startShift, stopShift } = useShift();
 
   if (!active) {
-    // Start Shift takes the rep to the Map, where the on-map button actually
-    // starts the shift (and they're ready to work the route).
     return (
-      <button className="btn primary sm shift-btn" onClick={() => navigate("/map")}>
-        ▶ Start Shift
+      <button
+        className="btn primary sm shift-btn"
+        onClick={() => startShift()}
+        disabled={starting}
+      >
+        ▶ {starting ? "Starting…" : "Start Shift"}
       </button>
     );
   }
