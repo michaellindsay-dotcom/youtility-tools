@@ -968,13 +968,21 @@ details.raw pre {
   width: 100%;
   max-width: 420px;
   max-height: 100%;
-  overflow: auto;
+  /* Scroll vertically only — never sideways. A wide child (datetime picker,
+     long GPS string) was letting the whole card scroll in both directions. */
+  overflow-y: auto;
+  overflow-x: hidden;
   overscroll-behavior: contain;
   background: linear-gradient(180deg, #15203a, #0f1727);
   border: 1px solid var(--line-hi);
   border-radius: var(--radius);
   padding: 14px;
 }
+/* Nothing inside the card may exceed its width. */
+.dispo-card * { max-width: 100%; box-sizing: border-box; }
+.dispo-card input,
+.dispo-card textarea,
+.dispo-card select { width: 100%; }
 /* Compact the disposition card so it fits a phone cleanly (less scrolling). */
 .dispo-card .dispo-head { margin-bottom: 8px; }
 .dispo-card .field { margin-bottom: 7px; gap: 4px; }
@@ -1048,6 +1056,15 @@ body.modal-open .chat-fab-global { display: none; }
   background: #0f1727;
   padding-top: 10px;
 }
+/* The GPS readout may shrink/ellipsize so it never pushes the buttons off the
+   edge (which forced a horizontal scrollbar). */
+.dispo-foot > .mono {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.dispo-foot .row { flex-shrink: 0; }
 
 /* On-the-spot scheduling inside the disposition modal */
 .dispo-schedule {
