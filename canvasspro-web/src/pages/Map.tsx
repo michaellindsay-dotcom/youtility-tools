@@ -6,7 +6,6 @@ import { Geolocation } from "@capacitor/geolocation";
 import { db, auth } from "../firebase";
 import { useAuth } from "../auth/AuthContext";
 import { hasFeature } from "../lib/features";
-import { useNav } from "../components/NavContext";
 import { DISP_COLOR } from "../lib/dispositions";
 import { lookupArea, parseAreaProperties, lookupMovers, parseMovers, type MoverHome } from "../lib/knockstat";
 import { moverIcon, moverColor, moverPopupHtml, daysAgo, MOVER_DAYS } from "../lib/movers";
@@ -59,7 +58,6 @@ function inPolygon(pt: LatLng, poly: LatLng[]): boolean {
 
 export default function MapPage() {
   const { profile, role, companyId, company } = useAuth();
-  const { openNav } = useNav();
   const elRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<L.Map | null>(null);
   const leadLayer = useRef<L.LayerGroup>(L.layerGroup());
@@ -640,7 +638,6 @@ export default function MapPage() {
 
       {/* Top-left: menu + controls */}
       <div className="map-overlay map-tl">
-        <button className="map-fab" onClick={openNav} aria-label="Menu">☰</button>
         <button className="map-fab" onClick={refresh} disabled={loadingHomes} aria-label="Refresh homes" title="Refresh homes & movers">
           {loadingHomes ? "…" : "⟳"}
         </button>
