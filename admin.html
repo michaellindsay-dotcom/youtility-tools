@@ -128,6 +128,49 @@
   #cardElement { padding:12px; border:1px solid var(--line-hi); border-radius:10px; background:rgba(255,255,255,.04); }
   .inv-status { text-transform:capitalize; }
   .inv-paid { color:#22C55E; } .inv-open { color:#F59E0B; } .inv-past_due, .inv-uncollectible { color:#EF4444; }
+
+  /* ── Town Hall (company-admin landing) ─────────────────────────────── */
+  .th-head { display:flex; align-items:flex-end; justify-content:space-between; gap:16px; flex-wrap:wrap; margin-top:18px; }
+  .th-head h1 { font-family:'Space Grotesk',sans-serif; font-size:22px; margin:0; }
+  .th-head .muted { font-size:13px; }
+  .th-live { display:inline-flex; align-items:center; gap:7px; font-size:13px; color:var(--good); font-weight:600; }
+  .th-dot { width:9px; height:9px; border-radius:50%; background:var(--good); box-shadow:0 0 0 0 rgba(52,211,153,.6); animation:thPulse 1.8s infinite; }
+  @keyframes thPulse { 0%{box-shadow:0 0 0 0 rgba(52,211,153,.55);} 70%{box-shadow:0 0 0 9px rgba(52,211,153,0);} 100%{box-shadow:0 0 0 0 rgba(52,211,153,0);} }
+  /* KPI tiles */
+  .kpi-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:12px; }
+  .kpi { background:rgba(255,255,255,.03); border:1px solid var(--line); border-radius:14px; padding:14px 16px; }
+  .kpi.accent { background:linear-gradient(135deg,rgba(14,165,233,.18),rgba(56,189,248,.06)); border-color:rgba(56,189,248,.3); }
+  .kpi-n { font-family:'Space Grotesk',sans-serif; font-size:28px; font-weight:700; line-height:1.1; }
+  .kpi-l { color:var(--ink-mid); font-size:12px; margin-top:4px; text-transform:uppercase; letter-spacing:.4px; }
+  .kpi-s { color:var(--ink-dim); font-size:12px; margin-top:3px; }
+  .th-subhead { font-size:12px; text-transform:uppercase; letter-spacing:.5px; color:var(--ink-mid); margin:18px 0 8px; }
+  /* Two-column town hall layout */
+  .th-cols { display:grid; grid-template-columns:1fr 1fr; gap:18px; }
+  @media (max-width:860px){ .th-cols { grid-template-columns:1fr; } }
+  /* Who's working */
+  .work-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(150px,1fr)); gap:12px; }
+  .work-card { background:rgba(255,255,255,.03); border:1px solid var(--line); border-radius:14px; padding:14px; text-align:center; position:relative; }
+  .work-live { position:absolute; top:10px; right:10px; font-size:10px; font-weight:700; color:var(--good); letter-spacing:.5px; }
+  .work-av { width:46px; height:46px; border-radius:50%; margin:2px auto 8px; display:flex; align-items:center; justify-content:center; font-weight:700; color:#06121F; }
+  .work-name { font-weight:600; font-size:14px; }
+  .work-stats { display:flex; justify-content:center; gap:16px; margin-top:8px; }
+  .work-stats b { font-family:'Space Grotesk',sans-serif; font-size:18px; display:block; }
+  .work-stats span { font-size:11px; color:var(--ink-dim); }
+  /* Rankings table */
+  .rank-tbl td, .rank-tbl th { padding:9px 10px; }
+  .rank-medal { font-size:16px; width:30px; text-align:center; }
+  .rank-name { font-weight:600; }
+  .rank-num { font-variant-numeric:tabular-nums; text-align:center; }
+  tr.rank-me { background:rgba(14,165,233,.1); }
+  /* Funnel bars */
+  .funnel { display:grid; gap:12px; }
+  .fn-row { }
+  .fn-top { display:flex; justify-content:space-between; font-size:13px; margin-bottom:5px; }
+  .fn-top b { font-family:'Space Grotesk',sans-serif; }
+  .fn-bar { height:10px; border-radius:999px; background:rgba(255,255,255,.06); overflow:hidden; }
+  .fn-bar span { display:block; height:100%; background:linear-gradient(90deg,var(--accent),var(--accent-2)); }
+  .fn-rate { font-size:11px; color:var(--ink-dim); margin-top:4px; }
+  .th-empty { color:var(--ink-dim); font-size:14px; padding:18px 4px; }
 </style>
 <script src="https://js.stripe.com/v3/"></script>
 </head>
@@ -177,6 +220,57 @@
   </nav>
 
   <div id="banner" class="banner"></div>
+
+  <!-- Company-admin view toggle (Town Hall ⇄ Settings). Hidden for super-admins. -->
+  <nav id="adminViewToggle" class="tabbar hidden">
+    <button class="tab active" data-view="townhall">🏛 Town Hall</button>
+    <button class="tab" data-view="settings">⚙️ Settings</button>
+  </nav>
+
+  <!-- Town Hall: the company owner's at-a-glance overview (company admins). -->
+  <section id="townHall" class="hidden">
+    <div class="th-head">
+      <div>
+        <h1 id="thTitle">Town Hall</h1>
+        <div class="muted" id="thDate"></div>
+      </div>
+      <div style="display:flex;align-items:center;gap:12px;">
+        <span class="th-live" id="thLive"><span class="th-dot"></span><span id="thLiveText">—</span></span>
+        <button id="thRefresh" class="btn ghost sm">↻ Refresh</button>
+      </div>
+    </div>
+
+    <!-- Headline company stats -->
+    <div class="card">
+      <h2>Company at a glance</h2>
+      <div class="kpi-grid" id="thKpis">
+        <div class="th-empty">Loading company stats…</div>
+      </div>
+    </div>
+
+    <div class="th-cols">
+      <!-- Who's working right now -->
+      <div class="card">
+        <h2>🔥 Who's working now</h2>
+        <div id="thWorking"><div class="th-empty">Loading…</div></div>
+      </div>
+
+      <!-- Company funnel / success metrics -->
+      <div class="card">
+        <h2>📈 Success metrics · this week</h2>
+        <div class="funnel" id="thFunnel"><div class="th-empty">Loading…</div></div>
+      </div>
+    </div>
+
+    <!-- Leaderboard / rep rankings -->
+    <div class="card">
+      <h2>🏆 Rep rankings · this week</h2>
+      <table class="rank-tbl">
+        <thead><tr><th></th><th>Rep</th><th class="rank-num">Doors</th><th class="rank-num">Convos</th><th class="rank-num">Appts</th><th class="rank-num">Closed</th><th class="rank-num">Close&nbsp;%</th></tr></thead>
+        <tbody id="thRankings"><tr><td colspan="7" class="th-empty">Loading rankings…</td></tr></tbody>
+      </table>
+    </div>
+  </section>
 
   <!-- Console home: simple button hub to every settings area (super-admin) -->
   <section id="consoleHome" class="card hidden">
@@ -907,11 +1001,29 @@ function enterConsole() {
     loadMyAccount();
     renderTab();
   } else {
-    // Company admin: no tabs, just their own company's cards.
+    // Company admin: no super-admin tabs. Land on the Town Hall overview, with
+    // a toggle over to the management/settings cards.
     $("tabBar").classList.add("hidden");
-    selectCompany(state.companyId, "");
+    $("adminViewToggle").classList.remove("hidden");
+    selectCompany(state.companyId, "").then(() => showAdminView("townhall"));
   }
 }
+
+// ── Company-admin view toggle: Town Hall ⇄ Settings ───────────────────────
+const COMPANY_SETTINGS_CARDS = ["schedulingCard","rolesCard","teamsCard","rewardsCard","redemptionsCard","companyBillingCard","usersCard"];
+function showAdminView(view) {
+  state.adminView = view;
+  const onTH = view === "townhall";
+  $("townHall").classList.toggle("hidden", !onTH);
+  // The settings cards were revealed by selectCompany; hide them on the Town Hall.
+  COMPANY_SETTINGS_CARDS.forEach((id) => { const el = $(id); if (el) el.classList.toggle("hidden", onTH); });
+  document.querySelectorAll("#adminViewToggle .tab").forEach((b) => b.classList.toggle("active", b.dataset.view === view));
+  if (onTH) loadTownHall(state.selectedCompany);
+  else if (thTick) { clearInterval(thTick); thTick = null; }
+  window.scrollTo({ top: 0, behavior: "smooth" });
+}
+$("adminViewToggle").addEventListener("click", (e) => { const t = e.target.closest(".tab"); if (t) showAdminView(t.dataset.view); });
+$("thRefresh").addEventListener("click", () => loadTownHall(state.selectedCompany));
 
 // Load everything for one company and reveal the roles/teams/users panels.
 async function selectCompany(companyId, companyName) {
@@ -934,6 +1046,137 @@ async function selectCompany(companyId, companyName) {
   await loadUsers();
   populateUserFormSelects();
   loadBilling(companyId, companyName);
+}
+
+// ── Town Hall (company owner's at-a-glance dashboard) ─────────────────────
+// A "conversation" is any door that turned into a real interaction (mirrors the
+// field app's funnel). Doors = verified knocks; appts = booked; closed = sold.
+const TH_CONVO = new Set(["pipeline", "appointment", "not_interested", "sold"]);
+const TH_AV_COLORS = ["#0EA5E9","#8B5CF6","#F59E0B","#10B981","#F472B6","#34D399","#FB923C","#60A5FA","#A78BFA","#F87171"];
+function thStartOfToday() { const d = new Date(); d.setHours(0,0,0,0); return d.getTime(); }
+function thStartOfWeek() { const d = new Date(); const day = (d.getDay()+6)%7; d.setDate(d.getDate()-day); d.setHours(0,0,0,0); return d.getTime(); }
+function thInitials(name) { return (name||"?").trim().split(/\s+/).slice(0,2).map((s)=>s[0]||"").join("").toUpperCase() || "?"; }
+function thColor(uid) { let h=0; const s=String(uid||""); for (let i=0;i<s.length;i++) h=(h*31+s.charCodeAt(i))>>>0; return TH_AV_COLORS[h%TH_AV_COLORS.length]; }
+function thKnockAt(l) { return l.knockedAt || l.createdAt || 0; }
+function thFmtElapsed(ms) {
+  const s = Math.max(0, Math.floor(ms/1000)); const h=Math.floor(s/3600), m=Math.floor((s%3600)/60);
+  return h>0 ? `${h}h ${m}m` : `${m}m`;
+}
+let thTick = null; // interval that keeps "on shift" timers live
+
+async function loadTownHall(companyId) {
+  if (!companyId) return;
+  $("thDate").textContent = new Date().toLocaleDateString("en-US",{weekday:"long",month:"long",day:"numeric"});
+  try {
+    const weekStart = thStartOfWeek();
+    const [leadSnap, shiftSnap, userSnap, companySnap] = await Promise.all([
+      getDocs(query(collection(db,"leads"), where("companyId","==",companyId), where("createdAt",">=",weekStart))),
+      getDocs(query(collection(db,"shifts"), where("companyId","==",companyId), where("status","==","active"))),
+      getDocs(query(collection(db,"users"), where("companyId","==",companyId))),
+      getDoc(doc(db,"companies",companyId)),
+    ]);
+
+    const leads = leadSnap.docs.map((d)=>d.data()).filter((l)=>l.verified !== false);
+    const shifts = shiftSnap.docs.map((d)=>({ id:d.id, ...d.data() }));
+    const users = userSnap.docs.map((d)=>({ uid:d.id, ...d.data() }));
+    const names = {}; users.forEach((u)=>{ names[u.uid] = u.displayName || u.email || "Rep"; });
+    const companyName = companySnap.exists() ? (companySnap.data().name || "") : "";
+    $("thTitle").textContent = companyName ? `${companyName} · Town Hall` : "Town Hall";
+
+    const todayStart = thStartOfToday();
+    const blank = () => ({ doors:0, conv:0, appt:0, closed:0 });
+    const tally = (acc, l) => { acc.doors++; if (TH_CONVO.has(l.status)) acc.conv++; if (l.status==="appointment") acc.appt++; if (l.status==="sold") acc.closed++; };
+
+    const today = blank(), week = blank();
+    const perRep = {}; // uid -> week funnel
+    for (const l of leads) {
+      const t = thKnockAt(l);
+      if (t < weekStart) continue;
+      tally(week, l);
+      if (t >= todayStart) tally(today, l);
+      const uid = l.assignedTo; if (!uid) continue;
+      (perRep[uid] ??= blank()); tally(perRep[uid], l);
+    }
+
+    const activeCount = shifts.length;
+    const teamSize = users.filter((u)=>!u.disabled).length;
+    const liveDoorsToday = shifts.reduce((s,x)=>s+(x.doorsKnocked||0),0);
+
+    // KPI tiles
+    const pct = (n,d) => d>0 ? Math.round((n/d)*100) : 0;
+    $("thKpis").innerHTML = [
+      `<div class="kpi accent"><div class="kpi-n">${activeCount}</div><div class="kpi-l">On shift now</div><div class="kpi-s">${liveDoorsToday} doors knocked live</div></div>`,
+      `<div class="kpi"><div class="kpi-n">${teamSize}</div><div class="kpi-l">Team size</div><div class="kpi-s">${users.length} total accounts</div></div>`,
+      `<div class="kpi"><div class="kpi-n">${today.doors}</div><div class="kpi-l">Doors today</div><div class="kpi-s">${week.doors} this week</div></div>`,
+      `<div class="kpi"><div class="kpi-n">${today.conv}</div><div class="kpi-l">Convos today</div><div class="kpi-s">${week.conv} this week</div></div>`,
+      `<div class="kpi"><div class="kpi-n">${today.appt}</div><div class="kpi-l">Appts today</div><div class="kpi-s">${week.appt} this week</div></div>`,
+      `<div class="kpi"><div class="kpi-n">${today.closed}</div><div class="kpi-l">Closed today</div><div class="kpi-s">${week.closed} this week · ${pct(week.closed,week.doors)}% of doors</div></div>`,
+    ].join("");
+
+    // Live banner
+    $("thLiveText").textContent = activeCount > 0
+      ? `${activeCount} rep${activeCount===1?"":"s"} on shift right now`
+      : "No one on shift right now";
+    $("thLive").style.color = activeCount > 0 ? "var(--good)" : "var(--ink-dim)";
+    $("thLive").querySelector(".th-dot").style.background = activeCount > 0 ? "var(--good)" : "var(--ink-dim)";
+
+    // Who's working (kept live by thTick)
+    state.thShifts = shifts.slice().sort((a,b)=>(b.doorsKnocked||0)-(a.doorsKnocked||0));
+    renderWorking();
+    if (thTick) clearInterval(thTick);
+    thTick = setInterval(renderWorking, 1000);
+
+    // Success-metrics funnel (this week, company-wide)
+    const fnRows = [
+      ["🚪 Doors knocked", week.doors, null],
+      ["💬 Conversations", week.conv, week.doors ? `${pct(week.conv,week.doors)}% of doors` : ""],
+      ["📅 Appointments", week.appt, week.conv ? `${pct(week.appt,week.conv)}% of convos` : ""],
+      ["💰 Closed", week.closed, week.appt ? `${pct(week.closed,week.appt)}% of appts` : ""],
+    ];
+    const maxF = Math.max(1, week.doors);
+    $("thFunnel").innerHTML = week.doors === 0
+      ? `<div class="th-empty">No knocks logged yet this week.</div>`
+      : fnRows.map(([label,n,rate]) =>
+          `<div class="fn-row"><div class="fn-top"><span>${label}</span><b>${n}</b></div>`+
+          `<div class="fn-bar"><span style="width:${Math.max(2,Math.round((n/maxF)*100))}%"></span></div>`+
+          (rate ? `<div class="fn-rate">${rate}</div>` : "")+`</div>`
+        ).join("");
+
+    // Rep rankings (this week) — sorted by closed, then appts, convos, doors.
+    const ranked = Object.entries(perRep)
+      .map(([uid,f]) => ({ uid, name: names[uid] || "Rep", ...f }))
+      .sort((a,b) => b.closed-a.closed || b.appt-a.appt || b.conv-a.conv || b.doors-a.doors)
+      .slice(0, 12);
+    const medals = ["🥇","🥈","🥉"];
+    const meUid = auth.currentUser ? auth.currentUser.uid : null;
+    $("thRankings").innerHTML = ranked.length === 0
+      ? `<tr><td colspan="7" class="th-empty">No rep activity yet this week.</td></tr>`
+      : ranked.map((r,i) =>
+          `<tr class="${r.uid===meUid?"rank-me":""}">`+
+          `<td class="rank-medal">${medals[i] || (i+1)}</td>`+
+          `<td class="rank-name">${esc(r.name)}</td>`+
+          `<td class="rank-num">${r.doors}</td><td class="rank-num">${r.conv}</td>`+
+          `<td class="rank-num">${r.appt}</td><td class="rank-num">${r.closed}</td>`+
+          `<td class="rank-num">${pct(r.closed,r.doors)}%</td></tr>`
+        ).join("");
+  } catch (e) {
+    console.error("town hall", e);
+    $("thKpis").innerHTML = `<div class="th-empty">Couldn't load company stats: ${esc(e.message||String(e))}</div>`;
+  }
+}
+
+function renderWorking() {
+  const shifts = state.thShifts || [];
+  const el = $("thWorking"); if (!el) return;
+  if (shifts.length === 0) { el.innerHTML = `<div class="th-empty">Nobody's clocked in. The board lights up here the moment a rep starts a shift.</div>`; return; }
+  const now = Date.now();
+  el.innerHTML = `<div class="work-grid">` + shifts.map((s) =>
+    `<div class="work-card"><div class="work-live">● LIVE</div>`+
+    `<div class="work-av" style="background:${thColor(s.userId)}">${thInitials(s.userName)}</div>`+
+    `<div class="work-name">${esc(s.userName || "Rep")}</div>`+
+    `<div class="work-stats"><div><b>${s.doorsKnocked||0}</b><span>doors</span></div>`+
+    `<div><b>${thFmtElapsed(now-(s.startAt||now))}</b><span>on shift</span></div></div></div>`
+  ).join("") + `</div>`;
 }
 
 // ── My account (super-admin self-service) ─────────────────────────────────
