@@ -1005,7 +1005,11 @@ function enterConsole() {
     // a toggle over to the management/settings cards.
     $("tabBar").classList.add("hidden");
     $("adminViewToggle").classList.remove("hidden");
-    selectCompany(state.companyId, "").then(() => showAdminView("townhall"));
+    state.selectedCompany = state.companyId;
+    // Show the Town Hall right away; load the settings cards' data in the
+    // background so a slow/failed settings query can't blank the landing.
+    showAdminView("townhall");
+    selectCompany(state.companyId, "");
   }
 }
 
@@ -1039,8 +1043,8 @@ async function selectCompany(companyId, companyName) {
     state.currentTab = "companies";
     renderTab();
   } else {
-    // Company admins: no YoutilityCRM link card (super-admin only).
-    ["schedulingCard","rolesCard","teamsCard","rewardsCard","redemptionsCard","companyBillingCard","usersCard"].forEach((id) => $(id).classList.remove("hidden"));
+    // Company admins: card visibility is owned by showAdminView (Town Hall ⇄
+    // Settings), so we don't reveal the settings cards here.
   }
   await Promise.all([loadRoles(), loadTeams(), loadScheduling(companyId), loadCompanyCrm(companyId), loadRewards(companyId), loadRedemptions(companyId)]);
   await loadUsers();
@@ -1080,18 +1084,22 @@ async function loadTownHall(companyId) {
         return (await getDocs(query(collection(db,"leads"), where("companyId","==",companyId)))).docs;
       }
     };
-    const [leadDocs, shiftSnap, userSnap, companySnap] = await Promise.all([
-      fetchWeekLeads(),
-      getDocs(query(collection(db,"shifts"), where("companyId","==",companyId), where("status","==","active"))),
-      getDocs(query(collection(db,"users"), where("companyId","==",companyId))),
-      getDoc(doc(db,"companies",companyId)),
+    // Load each section independently so one failed query (permissions, a
+    // missing index, an empty collection) can't blank the whole board.
+    const [leadDocs, shiftDocs, userDocs, companySnap] = await Promise.all([
+      fetchWeekLeads().catch((e) => { console.warn("town hall: leads load failed", e); return []; }),
+      getDocs(query(collection(db,"shifts"), where("companyId","==",companyId), where("status","==","active")))
+        .then((s)=>s.docs).catch((e) => { console.warn("town hall: shifts load failed", e); return []; }),
+      getDocs(query(collection(db,"users"), where("companyId","==",companyId)))
+        .then((s)=>s.docs).catch((e) => { console.warn("town hall: users load failed", e); return []; }),
+      getDoc(doc(db,"companies",companyId)).catch(() => null),
     ]);
 
     const leads = leadDocs.map((d)=>d.data()).filter((l)=>l.verified !== false);
-    const shifts = shiftSnap.docs.map((d)=>({ id:d.id, ...d.data() }));
-    const users = userSnap.docs.map((d)=>({ uid:d.id, ...d.data() }));
+    const shifts = shiftDocs.map((d)=>({ id:d.id, ...d.data() }));
+    const users = userDocs.map((d)=>({ uid:d.id, ...d.data() }));
     const names = {}; users.forEach((u)=>{ names[u.uid] = u.displayName || u.email || "Rep"; });
-    const companyName = companySnap.exists() ? (companySnap.data().name || "") : "";
+    const companyName = (companySnap && companySnap.exists()) ? (companySnap.data().name || "") : "";
     $("thTitle").textContent = companyName ? `${companyName} · Town Hall` : "Town Hall";
 
     const todayStart = thStartOfToday();
