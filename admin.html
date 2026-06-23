@@ -1069,14 +1069,25 @@ async function loadTownHall(companyId) {
   $("thDate").textContent = new Date().toLocaleDateString("en-US",{weekday:"long",month:"long",day:"numeric"});
   try {
     const weekStart = thStartOfWeek();
-    const [leadSnap, shiftSnap, userSnap, companySnap] = await Promise.all([
-      getDocs(query(collection(db,"leads"), where("companyId","==",companyId), where("createdAt",">=",weekStart))),
+    // Prefer the indexed query; if the companyId+createdAt composite index
+    // isn't built in this project yet, fall back to a single-field query and
+    // window client-side (the per-lead loop below already filters to this week).
+    const fetchWeekLeads = async () => {
+      try {
+        return (await getDocs(query(collection(db,"leads"), where("companyId","==",companyId), where("createdAt",">=",weekStart)))).docs;
+      } catch (err) {
+        console.warn("town hall: weekly leads index missing, using fallback", err);
+        return (await getDocs(query(collection(db,"leads"), where("companyId","==",companyId)))).docs;
+      }
+    };
+    const [leadDocs, shiftSnap, userSnap, companySnap] = await Promise.all([
+      fetchWeekLeads(),
       getDocs(query(collection(db,"shifts"), where("companyId","==",companyId), where("status","==","active"))),
       getDocs(query(collection(db,"users"), where("companyId","==",companyId))),
       getDoc(doc(db,"companies",companyId)),
     ]);
 
-    const leads = leadSnap.docs.map((d)=>d.data()).filter((l)=>l.verified !== false);
+    const leads = leadDocs.map((d)=>d.data()).filter((l)=>l.verified !== false);
     const shifts = shiftSnap.docs.map((d)=>({ id:d.id, ...d.data() }));
     const users = userSnap.docs.map((d)=>({ uid:d.id, ...d.data() }));
     const names = {}; users.forEach((u)=>{ names[u.uid] = u.displayName || u.email || "Rep"; });
