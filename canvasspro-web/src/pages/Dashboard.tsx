@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import { collection, getDocs, query, where, orderBy, limit } from "firebase/firestore";
+import { collection, getDocs, query, where } from "firebase/firestore";
 import { db } from "../firebase";
 import { useAuth } from "../auth/AuthContext";
 import { hasFeature } from "../lib/features";
@@ -46,7 +46,7 @@ interface Funnel {
 }
 
 export default function Dashboard() {
-  const { profile, company } = useAuth();
+  const { profile, company, role } = useAuth();
   const showPlanner = hasFeature(company, "planner"); // Success Planner is an optional service
   const [leads, setLeads] = useState<Lead[]>([]);
   const [shifts, setShifts] = useState<Shift[]>([]);
@@ -65,18 +65,27 @@ export default function Dashboard() {
         const shiftSnap = await getDocs(
           query(collection(db, "shifts"), where("userId", "==", profile.uid), where("startAt", ">=", monthStart))
         );
+        // Top performers — scope to what this user is allowed to read (admins
+        // see the company; everyone else their downstream), matching the
+        // userStats rules. No orderBy here so we don't depend on the
+        // companyId+sales composite index being deployed — sort client-side.
+        const topFilters = [where("companyId", "==", profile.companyId)] as ReturnType<typeof where>[];
+        if (role !== "admin") topFilters.push(where("managerPath", "array-contains", profile.uid));
         let topSnap;
         try {
-          topSnap = await getDocs(
-            query(collection(db, "userStats"), where("companyId", "==", profile.companyId), orderBy("sales", "desc"), limit(5))
-          );
-        } catch {
+          topSnap = await getDocs(query(collection(db, "userStats"), ...topFilters));
+        } catch (err) {
+          console.warn("top performers query failed", err);
           topSnap = null;
         }
         if (cancelled) return;
         setLeads(leadSnap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<Lead, "id">) })));
         setShifts(shiftSnap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<Shift, "id">) })));
-        setTop(topSnap ? topSnap.docs.map((d) => ({ uid: d.id, ...(d.data() as Omit<UserStats, "uid">) })) : []);
+        const topRows = topSnap
+          ? topSnap.docs.map((d) => ({ uid: d.id, ...(d.data() as Omit<UserStats, "uid">) }))
+          : [];
+        topRows.sort((a, b) => (b.sales ?? 0) - (a.sales ?? 0));
+        setTop(topRows.slice(0, 5));
         setLoading(false);
       } catch (e) {
         console.error(e);
@@ -86,7 +95,7 @@ export default function Dashboard() {
     return () => {
       cancelled = true;
     };
-  }, [profile]);
+  }, [profile, role]);
 
   const f = useMemo(() => {
     const windows = { today: startOfToday(), week: startOfWeek(), month: startOfMonth() };
@@ -162,7 +171,7 @@ export default function Dashboard() {
         <Link to="/leaderboard" className="card link-card top-performers">
           <h2>🏆 Top Performers <span className="muted small" style={{ fontWeight: 400 }}>→</span></h2>
           {top.length === 0 ? (
-            <p className="muted small">No activity this week yet.</p>
+            <p className="muted small">No team production logged yet — sold deals and appointments show up here.</p>
           ) : (
             <ol className="top-list">
               {top.slice(0, 3).map((t) => (
