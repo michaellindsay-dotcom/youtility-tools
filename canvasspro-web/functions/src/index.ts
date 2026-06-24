@@ -2808,6 +2808,27 @@ export const getSolarPins = onCall(async (request) => {
 });
 
 // ── /crm/** router (provision · export · ingest) ─────────────────────────────
+
+// Block CRM data access for a company that's locked. A billing lock (unpaid /
+// dunning hold / expired trial) returns 402 with the payment message the linked
+// CRM should show; a plain admin suspension returns 403. Returns true if it
+// sent a blocking response (caller should `return`).
+async function crmCompanyAccessBlocked(companyId: string, res: any): Promise<boolean> {
+  const c = (await db.doc(`companies/${companyId}`).get()).data();
+  if (!c) return false; // unknown company → let the normal handler respond
+  const status = String(c.status || "active").toLowerCase();
+  const billingLocked = Boolean(c.billingHold || c.trialExpired || c.pastDueSince || status === "past_due");
+  if (billingLocked) {
+    res.status(402).json({ error: "Please contact your administrator for payment to reactivate your account.", code: "PAYMENT_REQUIRED" });
+    return true;
+  }
+  if (status === "suspended" || status === "inactive") {
+    res.status(403).json({ error: "This account is inactive. Please contact your system administrator.", code: "ACCOUNT_INACTIVE" });
+    return true;
+  }
+  return false;
+}
+
 export const crmApi = onRequest({ cors: true }, async (req, res) => {
   const sent = req.get("x-crm-secret") || "";
   const path = req.path;
@@ -2881,6 +2902,7 @@ export const crmApi = onRequest({ cors: true }, async (req, res) => {
       const companyId = req.query.companyId as string;
       if (!companyId) { res.status(400).json({ error: "companyId required" }); return; }
       if (!(await crmAuth(sent, companyId))) { res.status(401).json({ error: "Unauthorized" }); return; }
+      if (await crmCompanyAccessBlocked(companyId, res)) return;
       const [company, usersSnap, leadsSnap, eventsSnap, rewardsSnap, statsSnap] = await Promise.all([
         db.doc(`companies/${companyId}`).get(),
         db.collection("users").where("companyId", "==", companyId).get(),
@@ -2910,6 +2932,7 @@ export const crmApi = onRequest({ cors: true }, async (req, res) => {
       const { companyId, lead, reward } = (req.body || {}) as { companyId?: string; lead?: any; reward?: any };
       if (!companyId || (!lead && !reward)) { res.status(400).json({ error: "companyId and lead or reward required" }); return; }
       if (!(await crmAuth(sent, companyId))) { res.status(401).json({ error: "Unauthorized" }); return; }
+      if (await crmCompanyAccessBlocked(companyId, res)) return;
 
       // Reward / contest from the CRM → companies/{id}/rewards so reps see it in-app.
       if (reward) {
