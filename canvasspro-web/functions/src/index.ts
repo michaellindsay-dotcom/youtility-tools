@@ -8,6 +8,7 @@ import { getFirestore, FieldValue } from "firebase-admin/firestore";
 import Stripe from "stripe";
 import * as crypto from "crypto";
 import PDFDocument from "pdfkit";
+import * as nodemailer from "nodemailer";
 
 initializeApp();
 const db = getFirestore();
@@ -694,6 +695,14 @@ export const impersonate = onCall(async (request) => {
 // ════════════════════════════════════════════════════════════════════════════
 
 interface NotifyConfig {
+  // SMTP (the platform's own-mailbox email — preferred over SendGrid).
+  smtpHost: string;
+  smtpPort: number;
+  smtpSecure: boolean;
+  smtpUser: string;
+  smtpPass: string;
+  smtpFrom: string;
+  smtpFromName: string;
   sendgridKey: string;
   sendgridFrom: string;
   sendgridFromName: string;
@@ -704,14 +713,21 @@ interface NotifyConfig {
 
 // Read provider config: Firestore (set via super-admin console) overrides env.
 async function getNotifyConfig(): Promise<NotifyConfig> {
-  let c: Record<string, string> = {};
+  let c: Record<string, any> = {};
   try {
     const snap = await db.doc("config/notifications").get();
-    if (snap.exists) c = (snap.data() as Record<string, string>) || {};
+    if (snap.exists) c = (snap.data() as Record<string, any>) || {};
   } catch (e) {
     logger.warn("getNotifyConfig read failed", e);
   }
   return {
+    smtpHost: c.smtpHost || process.env.SMTP_HOST || "",
+    smtpPort: Number(c.smtpPort) || 587,
+    smtpSecure: c.smtpSecure === true,
+    smtpUser: c.smtpUser || process.env.SMTP_USER || "",
+    smtpPass: c.smtpPass || process.env.SMTP_PASS || "",
+    smtpFrom: c.smtpFrom || "",
+    smtpFromName: c.smtpFromName || "YoutilityKnock",
     sendgridKey: c.sendgridKey || process.env.SENDGRID_API_KEY || "",
     sendgridFrom: c.sendgridFrom || process.env.SENDGRID_FROM || "",
     sendgridFromName: c.sendgridFromName || process.env.SENDGRID_FROM_NAME || "YoutilityKnock",
@@ -730,10 +746,34 @@ interface EmailAttachment { filename: string; content: string; type: string } //
 async function sendEmailDetailed(
   cfg: NotifyConfig, to: string, subject: string, text: string, attachments?: EmailAttachment[]
 ): Promise<{ ok: boolean; detail: string }> {
-  if (!cfg.sendgridKey || !cfg.sendgridFrom) {
-    return { ok: false, detail: "SendGrid isn't configured — add the API key and a verified From email under Notifications." };
-  }
   if (!to) return { ok: false, detail: "No recipient email." };
+
+  // Preferred: send through the platform's own mailbox over SMTP (no SendGrid).
+  if (cfg.smtpHost && cfg.smtpUser && cfg.smtpPass && cfg.smtpFrom) {
+    try {
+      const transporter = nodemailer.createTransport({
+        host: cfg.smtpHost,
+        port: cfg.smtpPort || 587,
+        secure: cfg.smtpSecure, // true = 465 (implicit TLS); false = 587 (STARTTLS)
+        auth: { user: cfg.smtpUser, pass: cfg.smtpPass },
+      });
+      await transporter.sendMail({
+        from: cfg.smtpFromName ? `"${cfg.smtpFromName}" <${cfg.smtpFrom}>` : cfg.smtpFrom,
+        to, subject, text,
+        attachments: attachments?.map((a) => ({
+          filename: a.filename, content: Buffer.from(a.content, "base64"), contentType: a.type,
+        })),
+      });
+      return { ok: true, detail: "" };
+    } catch (e: any) {
+      logger.warn("SMTP send failed", e);
+      return { ok: false, detail: (e?.message || "SMTP send failed.") + " — check the SMTP host/port, username, and app password under Notifications." };
+    }
+  }
+
+  if (!cfg.sendgridKey || !cfg.sendgridFrom) {
+    return { ok: false, detail: "Email isn't configured — add your SMTP mailbox (or SendGrid) under Notifications." };
+  }
   try {
     const body: Record<string, unknown> = {
       personalizations: [{ to: [{ email: to }] }],
@@ -1010,8 +1050,18 @@ export const getNotificationConfig = onCall(async (request) => {
   const caller = await getCaller(request);
   if (!caller.isSuper) throw new HttpsError("permission-denied", "Super-admins only.");
   const snap = await db.doc("config/notifications").get();
-  const c = (snap.exists ? (snap.data() as Record<string, string>) : {}) || {};
+  const c = (snap.exists ? (snap.data() as Record<string, any>) : {}) || {};
   return {
+    smtp: {
+      configured: !!c.smtpHost && !!c.smtpUser && !!c.smtpPass && !!c.smtpFrom,
+      host: c.smtpHost || "",
+      port: Number(c.smtpPort) || 587,
+      secure: c.smtpSecure === true,
+      user: c.smtpUser || "",
+      passMask: mask(c.smtpPass),
+      from: c.smtpFrom || "",
+      fromName: c.smtpFromName || "",
+    },
     sendgrid: {
       configured: !!c.sendgridKey,
       keyMask: mask(c.sendgridKey),
@@ -1030,8 +1080,17 @@ export const getNotificationConfig = onCall(async (request) => {
 export const setNotificationConfig = onCall(async (request) => {
   const caller = await getCaller(request);
   if (!caller.isSuper) throw new HttpsError("permission-denied", "Super-admins only.");
-  const d = (request.data || {}) as Record<string, string>;
+  const d = (request.data || {}) as Record<string, any>;
   const update: Record<string, unknown> = { updatedAt: Date.now(), updatedBy: caller.uid };
+  // SMTP (own-mailbox email). The password is a secret (blank = keep existing);
+  // don't trim it — passwords/app-passwords can contain spaces.
+  if (typeof d.smtpHost === "string") update.smtpHost = d.smtpHost.trim();
+  if (d.smtpPort !== undefined && d.smtpPort !== "") update.smtpPort = Number(d.smtpPort) || 587;
+  if (typeof d.smtpSecure === "boolean") update.smtpSecure = d.smtpSecure;
+  if (typeof d.smtpUser === "string") update.smtpUser = d.smtpUser.trim();
+  if (typeof d.smtpPass === "string" && d.smtpPass) update.smtpPass = d.smtpPass;
+  if (typeof d.smtpFrom === "string") update.smtpFrom = d.smtpFrom.trim();
+  if (typeof d.smtpFromName === "string") update.smtpFromName = d.smtpFromName.trim();
   // Secrets: only overwrite when a non-empty value is supplied (blank = keep
   // existing). Non-secret fields are always set from the payload.
   if (typeof d.sendgridKey === "string" && d.sendgridKey.trim()) update.sendgridKey = d.sendgridKey.trim();
@@ -1051,12 +1110,14 @@ export const clearNotificationProvider = onCall(async (request) => {
   if (!caller.isSuper) throw new HttpsError("permission-denied", "Super-admins only.");
   const { provider } = (request.data || {}) as { provider?: string };
   const ref = db.doc("config/notifications");
-  if (provider === "sendgrid") {
+  if (provider === "smtp") {
+    await ref.set({ smtpHost: "", smtpPort: "", smtpSecure: false, smtpUser: "", smtpPass: "", smtpFrom: "", smtpFromName: "" }, { merge: true });
+  } else if (provider === "sendgrid") {
     await ref.set({ sendgridKey: "", sendgridFrom: "", sendgridFromName: "" }, { merge: true });
   } else if (provider === "twilio") {
     await ref.set({ twilioSid: "", twilioToken: "", twilioFrom: "" }, { merge: true });
   } else {
-    throw new HttpsError("invalid-argument", "provider must be 'sendgrid' or 'twilio'.");
+    throw new HttpsError("invalid-argument", "provider must be 'smtp', 'sendgrid' or 'twilio'.");
   }
   return { ok: true };
 });
