@@ -15,6 +15,7 @@ const GOALS = {
   convMonth: 600,
   apptWeek: 15,
   apptMonth: 60,
+  salesWeek: 5,
 };
 const MIN_PER_DOOR = 2;
 const CONVO = new Set(["pipeline", "appointment", "not_interested", "sold"]);
@@ -36,6 +37,9 @@ function startOfMonth() {
   return new Date(d.getFullYear(), d.getMonth(), 1).getTime();
 }
 const knockTime = (l: Lead) => l.knockedAt || l.createdAt;
+// When a deal counts as "closed": its close date. Falls back to updatedAt
+// (set when it was marked sold) for leads saved before soldAt existed.
+const closeTime = (l: Lead) => l.soldAt ?? l.updatedAt ?? l.knockedAt ?? l.createdAt;
 
 interface Funnel {
   doors: number;
@@ -112,7 +116,11 @@ export default function Dashboard() {
     const windows = { today: startOfToday(), week: startOfWeek(), month: startOfMonth() };
     const verified = leads.filter((l) => l.verified !== false);
     const since = (ts: number): Funnel => {
+      // Doors / conversations / appts are counted by when the door was knocked.
       const ls = verified.filter((l) => knockTime(l) >= ts);
+      // Closes are counted by their close date, so a deal set earlier but sold
+      // in this window still lands here (independent of the knock date).
+      const closed = verified.filter((l) => l.status === "sold" && closeTime(l) >= ts).length;
       const hrs =
         shifts
           .filter((s) => s.startAt >= ts)
@@ -122,7 +130,7 @@ export default function Dashboard() {
         doors: ls.length,
         conv: ls.filter((l) => CONVO.has(l.status)).length,
         appt: ls.filter((l) => l.status === "appointment").length,
-        closed: ls.filter((l) => l.status === "sold").length,
+        closed,
         hours: Math.round(hrs * 10) / 10,
       };
     };
@@ -215,7 +223,8 @@ export default function Dashboard() {
               ["Doors", f.week.doors, GOALS.doorsWeek],
               ["Conversations", f.week.conv, GOALS.convWeek],
               ["Appointments", f.week.appt, GOALS.apptWeek],
-            ]} note={`${plan.weekPerDay} doors/day to goal`} />
+              ["Sales", f.week.closed, GOALS.salesWeek],
+            ]} note={`${plan.weekPerDay} doors/day to goal · ${pct(f.week.closed, f.week.appt || 1)}% close rate`} />
           </div>
         </>
       )}
