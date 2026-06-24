@@ -638,10 +638,22 @@
           <select id="invoiceSelect" style="flex:1;"><option value="">— select an invoice —</option></select>
           <button id="invoiceOpen" class="btn sm">Open</button>
           <button id="invoiceEmail" class="btn ghost sm">Re-email</button>
+          <button id="invoiceMarkPaid" class="btn ghost sm">Mark paid</button>
         </div>
         <div class="muted small" style="margin-top:8px;">Open a bill to print, or re-email it to the billing contact — the plan's service agreement is attached for signature.</div>
       </div>
     </div>
+
+    <h3 style="font-size:14px;margin:16px 0 8px;">Create invoice</h3>
+    <div class="grid-2">
+      <div class="field"><span>Amount ($)</span><input id="invAmount" type="number" min="0" step="0.01" placeholder="0.00" /></div>
+      <div class="field"><span>Description</span><input id="invDesc" placeholder="e.g. Monthly service — June" /></div>
+    </div>
+    <div class="row" style="justify-content:space-between;align-items:center;margin-top:8px;flex-wrap:wrap;gap:8px;">
+      <label class="day-chip"><input id="invLock" type="checkbox" /> Lock account until paid (due on receipt)</label>
+      <button id="invCreate" class="btn primary sm">Create &amp; send invoice + contract</button>
+    </div>
+
     <div id="companyBillingBanner" class="banner"></div>
   </section>
 
@@ -960,6 +972,8 @@ const createOrganization = httpsCallable(fns, "createOrganization");
 const setOrganization   = httpsCallable(fns, "setOrganization");
 const assignCompanyToOrg = httpsCallable(fns, "assignCompanyToOrg");
 const setOrgLock        = httpsCallable(fns, "setOrgLock");
+const createInvoice     = httpsCallable(fns, "createInvoice");
+const markInvoicePaid   = httpsCallable(fns, "markInvoicePaid");
 
 function banner(el, msg, kind="info") {
   el.className = "banner show " + kind;
@@ -1698,6 +1712,35 @@ $("billContactSave").addEventListener("click", async () => {
     banner($("companyBillingBanner"), "Billing contact saved.", "good");
   } catch (e) { banner($("companyBillingBanner"), e.message || "Could not save billing contact.", "error"); }
   finally { $("billContactSave").disabled = false; }
+});
+$("invCreate").addEventListener("click", async () => {
+  if (!billingCompany) return;
+  const amount = Number($("invAmount").value);
+  if (!isFinite(amount) || amount <= 0) { banner($("companyBillingBanner"), "Enter an amount greater than 0.", "error"); return; }
+  $("invCreate").disabled = true;
+  try {
+    const { data } = await createInvoice({
+      companyId: billingCompany, amount, description: $("invDesc").value,
+      lockUntilPaid: $("invLock").checked, send: true,
+    });
+    const locked = $("invLock").checked ? " Account locked until paid." : "";
+    banner($("companyBillingBanner"),
+      data.sent ? `Invoice + contract sent to the billing contact.${locked}` : `Invoice created, but no billing email is on file to send it.${locked}`,
+      data.sent ? "good" : "error");
+    $("invAmount").value = ""; $("invDesc").value = ""; $("invLock").checked = false;
+    await loadBilling(billingCompany);
+  } catch (e) { banner($("companyBillingBanner"), e.message || "Could not create the invoice.", "error"); }
+  finally { $("invCreate").disabled = false; }
+});
+$("invoiceMarkPaid").addEventListener("click", async () => {
+  const id = $("invoiceSelect").value;
+  if (!id) { banner($("companyBillingBanner"), "Pick an invoice first.", "error"); return; }
+  if (!confirm("Mark this invoice paid? If it locked the account, this restores access.")) return;
+  try {
+    await markInvoicePaid({ invoiceId: id });
+    banner($("companyBillingBanner"), "Invoice marked paid.", "good");
+    await loadBilling(billingCompany);
+  } catch (e) { banner($("companyBillingBanner"), e.message || "Could not update the invoice.", "error"); }
 });
 
 // ── Organizations (super-admin) ───────────────────────────────────────────
