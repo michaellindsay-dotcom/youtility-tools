@@ -391,7 +391,27 @@
       to keep the current value.
     </p>
 
-    <h3 style="font-size:14px;margin-bottom:10px;">✉️ Email — SendGrid <span id="sgStatus" class="pill"></span></h3>
+    <h3 style="font-size:14px;margin-bottom:6px;">✉️ Email — your mailbox (SMTP) <span id="smtpStatus" class="pill"></span></h3>
+    <p class="muted" style="margin:0 0 10px;font-size:12px;">
+      Send from your own email over SMTP — no SendGrid, no sender-verification. For Gmail / Google Workspace use host
+      <span class="mono">smtp.gmail.com</span>, port <span class="mono">587</span>, and a Google
+      <a href="https://myaccount.google.com/apppasswords" target="_blank" rel="noopener">App Password</a> (not your normal password).
+    </p>
+    <div class="grid-2">
+      <div class="field"><span>SMTP host</span><input id="smtpHost" placeholder="smtp.gmail.com" autocomplete="off" /></div>
+      <div class="field"><span>Port</span><input id="smtpPort" type="number" placeholder="587" /></div>
+      <div class="field"><span>Username</span><input id="smtpUser" placeholder="info@yourdomain.com" autocomplete="off" /></div>
+      <div class="field"><span>Password / app password</span><input id="smtpPass" type="password" placeholder="leave blank to keep" autocomplete="off" /></div>
+      <div class="field"><span>From email</span><input id="smtpFrom" type="email" placeholder="info@yourdomain.com" /></div>
+      <div class="field"><span>From name</span><input id="smtpFromName" placeholder="YoutilityKnock" /></div>
+      <label class="day-chip" style="align-self:center;"><input id="smtpSecure" type="checkbox" /> Use SSL (port 465)</label>
+    </div>
+    <div class="row" style="justify-content:flex-end;gap:8px;margin-top:8px;">
+      <button id="smtpClear" class="btn ghost sm">Clear</button>
+      <button id="smtpSave" class="btn primary sm">Save SMTP</button>
+    </div>
+
+    <h3 style="font-size:14px;margin:22px 0 10px;">✉️ Email — SendGrid <span class="muted" style="font-weight:400;">(optional fallback)</span> <span id="sgStatus" class="pill"></span></h3>
     <div class="grid-2">
       <div class="field"><span>API key</span><input id="sgKey" type="password" placeholder="SG.xxxxx (leave blank to keep)" autocomplete="off" /></div>
       <div class="field"><span>From email (verified sender) *</span><input id="sgFrom" type="email" placeholder="alerts@yourdomain.com" /></div>
@@ -2220,6 +2240,16 @@ function setStatusPill(el, configured) {
 async function loadNotifyConfig() {
   try {
     const { data } = await getNotificationConfig();
+    if (data.smtp) {
+      setStatusPill($("smtpStatus"), data.smtp.configured);
+      $("smtpHost").value = data.smtp.host || "";
+      $("smtpPort").value = data.smtp.port || 587;
+      $("smtpUser").value = data.smtp.user || "";
+      $("smtpFrom").value = data.smtp.from || "";
+      $("smtpFromName").value = data.smtp.fromName || "";
+      $("smtpSecure").checked = !!data.smtp.secure;
+      $("smtpPass").placeholder = data.smtp.configured ? `${data.smtp.passMask} (leave blank to keep)` : "app password";
+    }
     setStatusPill($("sgStatus"), data.sendgrid.configured);
     $("sgFrom").value = data.sendgrid.from || "";
     $("sgFromName").value = data.sendgrid.fromName || "";
@@ -2232,6 +2262,29 @@ async function loadNotifyConfig() {
     banner($("notifyBanner"), e.message || "Could not load notification config.", "error");
   }
 }
+$("smtpSave").addEventListener("click", async () => {
+  $("smtpSave").disabled = true;
+  try {
+    await setNotificationConfig({
+      smtpHost: $("smtpHost").value,
+      smtpPort: $("smtpPort").value,
+      smtpSecure: $("smtpSecure").checked,
+      smtpUser: $("smtpUser").value,
+      smtpPass: $("smtpPass").value, // blank → keep existing
+      smtpFrom: $("smtpFrom").value,
+      smtpFromName: $("smtpFromName").value,
+    });
+    $("smtpPass").value = "";
+    banner($("notifyBanner"), "SMTP saved — email now sends from your mailbox.", "good");
+    loadNotifyConfig();
+  } catch (e) { banner($("notifyBanner"), e.message || "Save failed.", "error"); }
+  finally { $("smtpSave").disabled = false; }
+});
+$("smtpClear").addEventListener("click", async () => {
+  if (!confirm("Clear the SMTP settings? Email will stop sending from your mailbox.")) return;
+  try { await clearNotificationProvider({ provider:"smtp" }); ["smtpHost","smtpPort","smtpUser","smtpPass","smtpFrom","smtpFromName"].forEach((id)=>$(id).value=""); $("smtpSecure").checked=false; banner($("notifyBanner"),"SMTP cleared.","good"); loadNotifyConfig(); }
+  catch (e) { banner($("notifyBanner"), e.message || "Clear failed.", "error"); }
+});
 $("sgSave").addEventListener("click", async () => {
   $("sgSave").disabled = true;
   try {
