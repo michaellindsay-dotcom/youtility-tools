@@ -1706,7 +1706,7 @@ $("invoiceOpen").addEventListener("click", () => {
 $("invoiceEmail").addEventListener("click", async () => {
   const id = $("invoiceSelect").value;
   if (!id || !billingCompany) { banner($("companyBillingBanner"), "Pick an invoice first.", "error"); return; }
-  try { const { data } = await emailInvoice({ companyId: billingCompany, invoiceId: id }); banner($("companyBillingBanner"), data.sent ? "Invoice emailed to the billing contact." : "No billing or admin email on file.", data.sent ? "good" : "error"); }
+  try { const { data } = await emailInvoice({ companyId: billingCompany, invoiceId: id }); banner($("companyBillingBanner"), data.sent ? "Invoice emailed to the billing contact." : ("Couldn't send: " + (data.error || "check SendGrid under Notifications.")), data.sent ? "good" : "error"); }
   catch (e) { banner($("companyBillingBanner"), e.message || "Email failed.", "error"); }
 });
 $("billContactSave").addEventListener("click", async () => {
@@ -1736,7 +1736,7 @@ $("invCreate").addEventListener("click", async () => {
     const locked = $("invLock").checked ? " Account locked until paid." : "";
     const sq = data.payUrl ? " Square payment link included." : " (No Square link — configure Square under Pricing → Billing.)";
     banner($("companyBillingBanner"),
-      data.sent ? `Invoice + contract sent to ${email}.${sq}${locked}` : `Invoice created, but the email didn't send — check SendGrid under Notifications.${locked}`,
+      data.sent ? `Invoice + contract sent to ${email}.${sq}${locked}` : `Invoice created, but the email didn't send: ${data.error || "check SendGrid under Notifications"}.${locked}`,
       data.sent ? "good" : "error");
     $("invAmount").value = ""; $("invDesc").value = ""; $("invLock").checked = false;
     await loadBilling(billingCompany);
