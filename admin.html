@@ -1722,8 +1722,13 @@ $("invCreate").addEventListener("click", async () => {
   if (!billingCompany) return;
   const amount = Number($("invAmount").value);
   if (!isFinite(amount) || amount <= 0) { banner($("companyBillingBanner"), "Enter an amount greater than 0.", "error"); return; }
+  const email = $("billEmail").value.trim();
+  if (!email) { banner($("companyBillingBanner"), "Add a Billing email above first — it's saved automatically when you create the invoice.", "error"); $("billEmail").focus(); return; }
   $("invCreate").disabled = true;
   try {
+    // Persist whatever's in the billing-contact fields first, so the invoice
+    // goes to the contact shown on screen (typing alone doesn't save it).
+    await setCompanyBilling({ companyId: billingCompany, billingContactName: $("billContactName").value, billingEmail: email });
     const { data } = await createInvoice({
       companyId: billingCompany, amount, description: $("invDesc").value,
       lockUntilPaid: $("invLock").checked, send: true,
@@ -1731,7 +1736,7 @@ $("invCreate").addEventListener("click", async () => {
     const locked = $("invLock").checked ? " Account locked until paid." : "";
     const sq = data.payUrl ? " Square payment link included." : " (No Square link — configure Square under Pricing → Billing.)";
     banner($("companyBillingBanner"),
-      data.sent ? `Invoice + contract sent to the billing contact.${sq}${locked}` : `Invoice created, but no billing email is on file to send it.${locked}`,
+      data.sent ? `Invoice + contract sent to ${email}.${sq}${locked}` : `Invoice created, but the email didn't send — check SendGrid under Notifications.${locked}`,
       data.sent ? "good" : "error");
     $("invAmount").value = ""; $("invDesc").value = ""; $("invLock").checked = false;
     await loadBilling(billingCompany);
