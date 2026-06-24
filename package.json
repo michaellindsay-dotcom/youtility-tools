@@ -14,6 +14,7 @@
     "emulators": "npm run build && firebase emulators:start",
     "bootstrap:superadmin": "node scripts/bootstrap-superadmin.mjs",
     "seed:company": "node scripts/seed-company.mjs",
+    "seed:demo": "node scripts/seed-demo-activity.mjs",
     "clear:leads": "node scripts/clear-leads.mjs"
   },
   "devDependencies": {
