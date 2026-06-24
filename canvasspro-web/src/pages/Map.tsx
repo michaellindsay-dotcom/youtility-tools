@@ -130,14 +130,15 @@ export default function MapPage() {
         icon: homeIcon(DISP_COLOR[lead.status] || "#94A3B8", lead.verified === false),
         zIndexOffset: 1000, // always above generic home pins
       })
-        .on("click", () =>
+        .on("click", (e: L.LeafletMouseEvent) => {
+          e.originalEvent.stopPropagation();
           setDispoTarget({
             leadId: lead.id, address: lead.address, lat: c[0], lng: c[1], status: lead.status,
             name: lead.ownerName || "", phone: lead.phone || "", email: lead.email || "", notes: lead.notes || "",
             enrichment: lead.enrichment,
             photoHomeUrl: lead.photoHomeUrl, photoBillUrl: lead.photoBillUrl,
-          })
-        )
+          });
+        })
         .addTo(leadLayer.current);
     });
   }
@@ -187,7 +188,10 @@ export default function MapPage() {
     homeKeys.current.add(key);
     if (isExistingLead(h)) return false; // keep the existing lead pin, don't recreate
     L.marker([h.lat, h.lng], { icon: homeIcon("#475569") })
-      .on("click", () => setDispoTarget({ address: h.address, lat: h.lat, lng: h.lng }))
+      .on("click", (e: L.LeafletMouseEvent) => {
+        e.originalEvent.stopPropagation();
+        setDispoTarget({ address: h.address, lat: h.lat, lng: h.lng });
+      })
       .addTo(homeLayer.current);
     return true;
   }
@@ -526,7 +530,10 @@ export default function MapPage() {
       // knock form so the rep can disposition it right away.
       if (modeRef.current === "drop") {
         L.marker([lat, lng], { icon: homeIcon("#475569") })
-          .on("click", () => setDispoTarget({ address: "", lat, lng }))
+          .on("click", (e: L.LeafletMouseEvent) => {
+            e.originalEvent.stopPropagation();
+            setDispoTarget({ address: "", lat, lng });
+          })
           .addTo(homeLayer.current);
         setDispoTarget({ address: "", lat, lng });
         setMode("view");
