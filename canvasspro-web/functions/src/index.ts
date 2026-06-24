@@ -2236,6 +2236,29 @@ function buildContractPdf(opts: {
   });
 }
 
+// Build the company's per-plan service agreement PDF (with enterprise terms if
+// the company is in an enterprise org). Shared by the invoice email + preview.
+async function buildCompanyContractPdf(companyId: string): Promise<Buffer> {
+  const company = (await db.doc(`companies/${companyId}`).get()).data() || {};
+  let enterprise = false, perCompanyFee = 0, orgFee = 0;
+  if (company.organizationId) {
+    const org = (await db.doc(`organizations/${company.organizationId}`).get()).data();
+    if (org && org.enterprise) {
+      enterprise = true;
+      perCompanyFee = Number(org.perCompanyFee) || 0;
+      orgFee = Number(org.orgFee) || 0;
+    }
+  }
+  return buildContractPdf({
+    companyName: (company.name as string) || "Customer",
+    contactName: ((company.billingContactName as string) || "").trim(),
+    plan: (company.plan as string) || "Standard",
+    monthly: Number(company.planPrice) || 0,
+    enterprise, perCompanyFee, orgFee,
+    dateStr: new Date().toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" }),
+  });
+}
+
 // Email an invoice (with the plan's contract attached) to the company's billing
 // contact. Shared by the emailInvoice callable and createInvoice.
 async function sendInvoiceEmail(companyId: string, invoiceId: string, includeContract: boolean): Promise<{ sent: number; contractAttached: boolean }> {
@@ -2249,7 +2272,7 @@ async function sendInvoiceEmail(companyId: string, invoiceId: string, includeCon
   if (!emails.length) throw new HttpsError("failed-precondition", "No billing email or company admin email on file.");
   const cfg = await getNotifyConfig();
   const amt = ((inv.amountDue || 0) / 100).toFixed(2);
-  const link = inv.hostedInvoiceUrl || inv.invoicePdf || "";
+  const link = inv.payUrl || inv.hostedInvoiceUrl || inv.invoicePdf || "";
   const greeting = contactName ? `Hi ${contactName},\n\n` : "";
 
   // Attach the plan's service agreement for signature (default on).
@@ -2257,23 +2280,7 @@ async function sendInvoiceEmail(companyId: string, invoiceId: string, includeCon
   let contractNote = "";
   if (includeContract) {
     try {
-      let enterprise = false, perCompanyFee = 0, orgFee = 0;
-      if (company.organizationId) {
-        const org = (await db.doc(`organizations/${company.organizationId}`).get()).data();
-        if (org && org.enterprise) {
-          enterprise = true;
-          perCompanyFee = Number(org.perCompanyFee) || 0;
-          orgFee = Number(org.orgFee) || 0;
-        }
-      }
-      const pdf = await buildContractPdf({
-        companyName: (company.name as string) || "Customer",
-        contactName,
-        plan: (company.plan as string) || "Standard",
-        monthly: Number(company.planPrice) || 0,
-        enterprise, perCompanyFee, orgFee,
-        dateStr: new Date().toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" }),
-      });
+      const pdf = await buildCompanyContractPdf(companyId);
       attachments = [{ filename: "YoutilityKnock-Service-Agreement.pdf", content: pdf.toString("base64"), type: "application/pdf" }];
       contractNote = "\n\nAttached is your service agreement — please review, sign, and return it.";
     } catch (e) {
@@ -2284,7 +2291,7 @@ async function sendInvoiceEmail(companyId: string, invoiceId: string, includeCon
   let sent = 0;
   for (const to of emails) {
     if (await sendEmail(cfg, to, `Invoice ${inv.number || ""} — $${amt}`,
-      `${greeting}Your YoutilityKnock invoice ${inv.number || ""} for $${amt} is ${inv.status}.${link ? "\n\nView / pay: " + link : ""}${contractNote}`,
+      `${greeting}Your YoutilityKnock invoice ${inv.number || ""} for $${amt} is ${inv.status}.${link ? "\n\nPay online: " + link : ""}${contractNote}`,
       attachments)) sent++;
   }
   return { sent, contractAttached: !!attachments };
@@ -2316,9 +2323,10 @@ export const createInvoice = onCall(async (request) => {
   const now = Date.now();
   const ref = db.collection("invoices").doc();
   const desc = (description || "").trim() || "YoutilityKnock services";
+  const number = `INV-${now.toString(36).toUpperCase()}`;
   await ref.set({
     companyId, companyName: (company.name as string) || "",
-    number: `INV-${now.toString(36).toUpperCase()}`,
+    number,
     status: "open", manual: true,
     amountDue: cents, amountPaid: 0, currency: "usd",
     created: now, dueDate: now, // due on receipt
@@ -2326,6 +2334,10 @@ export const createInvoice = onCall(async (request) => {
     lockUntilPaid: !!lockUntilPaid,
     updatedAt: now,
   });
+  // Generate a Square hosted payment link so the customer can pay online. If
+  // Square isn't configured this returns "" and the invoice just has no link.
+  const payUrl = await squarePaymentLink(cents, `${number} — ${(company.name as string) || "YoutilityKnock"}`);
+  if (payUrl) await ref.set({ payUrl, hostedInvoiceUrl: payUrl, updatedAt: Date.now() }, { merge: true });
   // Due on receipt → optionally lock the account immediately until paid.
   if (lockUntilPaid) {
     await db.doc(`companies/${companyId}`).set(
@@ -2336,7 +2348,16 @@ export const createInvoice = onCall(async (request) => {
     try { emailResult = await sendInvoiceEmail(companyId, ref.id, true); }
     catch (e) { logger.warn("createInvoice send failed", e); }
   }
-  return { ok: true, invoiceId: ref.id, ...emailResult };
+  return { ok: true, invoiceId: ref.id, payUrl, ...emailResult };
+});
+
+// Build the company's service-agreement PDF and return it (base64) so the
+// super-admin console can preview/download it without relying on email.
+export const getContractPdf = onCall(async (request) => {
+  const caller = await getCaller(request);
+  const companyId = authorizeForCompany(caller, (request.data || {}).companyId);
+  const pdf = await buildCompanyContractPdf(companyId);
+  return { filename: "YoutilityKnock-Service-Agreement.pdf", base64: pdf.toString("base64") };
 });
 
 // Mark an invoice paid (super-admin). If it locked the company (due on receipt),
@@ -2397,6 +2418,28 @@ async function squareApi(cfg: { token: string; base: string }, path: string, bod
     throw new HttpsError("internal", detail);
   }
   return json;
+}
+
+// Create a Square hosted payment link for a one-off amount (manual invoices).
+// Returns the pay URL, or "" if Square isn't configured / the call fails.
+async function squarePaymentLink(amountCents: number, name: string): Promise<string> {
+  let cfg;
+  try { cfg = await squareCfg(); } catch { return ""; } // Square not configured
+  if (!cfg.locationId) { logger.warn("square payment link: no locationId configured"); return ""; }
+  try {
+    const json = await squareApi(cfg, "/v2/online-checkout/payment-links", {
+      idempotency_key: crypto.randomUUID(),
+      quick_pay: {
+        name: name.slice(0, 255),
+        price_money: { amount: amountCents, currency: "USD" },
+        location_id: cfg.locationId,
+      },
+    });
+    return json?.payment_link?.url || "";
+  } catch (e) {
+    logger.warn("square payment link failed", e);
+    return "";
+  }
 }
 
 // Mirror a completed Square payment into invoices/{id} so it shows in the same
