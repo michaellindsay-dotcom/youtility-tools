@@ -7,6 +7,7 @@ import { getAuth } from "firebase-admin/auth";
 import { getFirestore, FieldValue } from "firebase-admin/firestore";
 import Stripe from "stripe";
 import * as crypto from "crypto";
+import PDFDocument from "pdfkit";
 
 initializeApp();
 const db = getFirestore();
@@ -723,18 +724,27 @@ async function getNotifyConfig(): Promise<NotifyConfig> {
 // A user is considered "online" if their presence doc was touched this recently.
 const ONLINE_WINDOW_MS = 90 * 1000;
 
-async function sendEmail(cfg: NotifyConfig, to: string, subject: string, text: string): Promise<boolean> {
+interface EmailAttachment { filename: string; content: string; type: string } // content = base64
+async function sendEmail(
+  cfg: NotifyConfig, to: string, subject: string, text: string, attachments?: EmailAttachment[]
+): Promise<boolean> {
   if (!cfg.sendgridKey || !cfg.sendgridFrom || !to) return false;
   try {
+    const body: Record<string, unknown> = {
+      personalizations: [{ to: [{ email: to }] }],
+      from: { email: cfg.sendgridFrom, name: cfg.sendgridFromName },
+      subject,
+      content: [{ type: "text/plain", value: text }],
+    };
+    if (attachments && attachments.length) {
+      body.attachments = attachments.map((a) => ({
+        content: a.content, filename: a.filename, type: a.type, disposition: "attachment",
+      }));
+    }
     const res = await fetch("https://api.sendgrid.com/v3/mail/send", {
       method: "POST",
       headers: { Authorization: `Bearer ${cfg.sendgridKey}`, "Content-Type": "application/json" },
-      body: JSON.stringify({
-        personalizations: [{ to: [{ email: to }] }],
-        from: { email: cfg.sendgridFrom, name: cfg.sendgridFromName },
-        subject,
-        content: [{ type: "text/plain", value: text }],
-      }),
+      body: JSON.stringify(body),
     });
     if (!res.ok) logger.warn(`SendGrid ${res.status}: ${await res.text().catch(() => "")}`);
     return res.ok;
@@ -2173,9 +2183,63 @@ export const saveCardAndSubscribe = onCall(async (request) => {
 });
 
 // Re-email an invoice to the company's admins (with the pay/view link).
+// Build a per-plan service agreement PDF (returned as a Buffer) for the
+// customer to sign and return. Parameterized by the company's plan + price and,
+// for enterprise orgs, the per-company / org-wide fees.
+function buildContractPdf(opts: {
+  companyName: string; contactName: string; plan: string; monthly: number;
+  enterprise: boolean; perCompanyFee: number; orgFee: number; dateStr: string;
+}): Promise<Buffer> {
+  return new Promise((resolve, reject) => {
+    const doc = new PDFDocument({ margin: 56, size: "LETTER" });
+    const chunks: Buffer[] = [];
+    doc.on("data", (c: Buffer) => chunks.push(c));
+    doc.on("end", () => resolve(Buffer.concat(chunks)));
+    doc.on("error", reject);
+
+    const H = (t: string) => doc.moveDown(0.7).fontSize(13).fillColor("#0b2a44").text(t).moveDown(0.15).fillColor("#000").fontSize(11);
+    doc.fontSize(20).fillColor("#0EA5E9").text("YoutilityKnock");
+    doc.fillColor("#000").fontSize(14).text("Service Agreement").moveDown(0.2);
+    doc.fontSize(10).fillColor("#555").text(`Date: ${opts.dateStr}`);
+    doc.fillColor("#000").fontSize(11).moveDown(0.8);
+
+    doc.text(`This Service Agreement ("Agreement") is between Sun Service, provider of YoutilityKnock ("Provider"), and ${opts.companyName} ("Customer").`);
+
+    H("1. Service & Plan");
+    doc.text(`Provider will make the YoutilityKnock platform available to Customer under the "${opts.plan}" plan at $${opts.monthly} per month.`);
+    if (opts.enterprise) {
+      doc.text(`Enterprise terms apply: an additional $${opts.perCompanyFee} per company and $${opts.orgFee} per organization, per month.`);
+    }
+
+    H("2. Billing — Due on Receipt");
+    doc.text("Invoices are due on receipt. If an invoice is not paid, Provider may suspend access to the platform until payment is received. Suspension does not delete Customer data.");
+
+    H("3. Term & Termination");
+    doc.text("This Agreement continues month-to-month until terminated by either party with written notice. Provider may suspend or terminate the service for non-payment.");
+
+    H("4. Data");
+    doc.text("Customer owns its data. Provider stores and processes it solely to provide the service, in accordance with the Privacy Policy at https://youtilityknock.web.app/privacy.");
+
+    H("5. Acceptance");
+    doc.text("By signing below, Customer agrees to the terms of this Agreement.");
+
+    doc.moveDown(2);
+    doc.text(`Customer: ${opts.companyName}`);
+    doc.moveDown(1.4);
+    doc.text("Signature: ________________________________");
+    doc.moveDown(0.8);
+    doc.text(`Printed name: ${opts.contactName || "________________________________"}`);
+    doc.moveDown(0.8);
+    doc.text("Date: ________________________________");
+
+    doc.end();
+  });
+}
+
 export const emailInvoice = onCall(async (request) => {
   const caller = await getCaller(request);
-  const { companyId: cid, invoiceId } = (request.data || {}) as { companyId?: string; invoiceId?: string };
+  const { companyId: cid, invoiceId, includeContract } =
+    (request.data || {}) as { companyId?: string; invoiceId?: string; includeContract?: boolean };
   const companyId = authorizeForCompany(caller, cid);
   if (!invoiceId) throw new HttpsError("invalid-argument", "invoiceId required.");
   const inv = (await db.doc(`invoices/${invoiceId}`).get()).data();
@@ -2190,12 +2254,43 @@ export const emailInvoice = onCall(async (request) => {
   const amt = ((inv.amountDue || 0) / 100).toFixed(2);
   const link = inv.hostedInvoiceUrl || inv.invoicePdf || "";
   const greeting = contactName ? `Hi ${contactName},\n\n` : "";
+
+  // Attach the plan's service agreement for signature (default on).
+  let attachments: EmailAttachment[] | undefined;
+  let contractNote = "";
+  if (includeContract !== false) {
+    try {
+      let enterprise = false, perCompanyFee = 0, orgFee = 0;
+      if (company.organizationId) {
+        const org = (await db.doc(`organizations/${company.organizationId}`).get()).data();
+        if (org && org.enterprise) {
+          enterprise = true;
+          perCompanyFee = Number(org.perCompanyFee) || 0;
+          orgFee = Number(org.orgFee) || 0;
+        }
+      }
+      const pdf = await buildContractPdf({
+        companyName: (company.name as string) || "Customer",
+        contactName,
+        plan: (company.plan as string) || "Standard",
+        monthly: Number(company.planPrice) || 0,
+        enterprise, perCompanyFee, orgFee,
+        dateStr: new Date().toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" }),
+      });
+      attachments = [{ filename: "YoutilityKnock-Service-Agreement.pdf", content: pdf.toString("base64"), type: "application/pdf" }];
+      contractNote = "\n\nAttached is your service agreement — please review, sign, and return it.";
+    } catch (e) {
+      logger.warn("contract pdf build failed", e);
+    }
+  }
+
   let sent = 0;
   for (const to of emails) {
     if (await sendEmail(cfg, to, `Invoice ${inv.number || ""} — $${amt}`,
-      `${greeting}Your YoutilityKnock invoice ${inv.number || ""} for $${amt} is ${inv.status}.${link ? "\n\nView / pay: " + link : ""}`)) sent++;
+      `${greeting}Your YoutilityKnock invoice ${inv.number || ""} for $${amt} is ${inv.status}.${link ? "\n\nView / pay: " + link : ""}${contractNote}`,
+      attachments)) sent++;
   }
-  return { ok: true, sent };
+  return { ok: true, sent, contractAttached: !!attachments };
 });
 
 // ════════════════════════════════════════════════════════════════════════════
