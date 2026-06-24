@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import { collection, getDocs, query, where } from "firebase/firestore";
+import { collection, doc, getDoc, getDocs, query, where } from "firebase/firestore";
 import { db } from "../firebase";
 import { useAuth } from "../auth/AuthContext";
 import { hasFeature } from "../lib/features";
@@ -78,12 +78,23 @@ export default function Dashboard() {
           console.warn("top performers query failed", err);
           topSnap = null;
         }
-        if (cancelled) return;
-        setLeads(leadSnap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<Lead, "id">) })));
-        setShifts(shiftSnap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<Shift, "id">) })));
         const topRows = topSnap
           ? topSnap.docs.map((d) => ({ uid: d.id, ...(d.data() as Omit<UserStats, "uid">) }))
           : [];
+        // managerPath excludes the viewer themselves, so the query above never
+        // returns the viewer's own stats — merge their own doc in so a rep
+        // always sees their own production (rules allow reading your own doc).
+        if (!topRows.some((r) => r.uid === profile.uid)) {
+          try {
+            const mine = await getDoc(doc(db, "userStats", profile.uid));
+            if (mine.exists()) topRows.push({ uid: mine.id, ...(mine.data() as Omit<UserStats, "uid">) });
+          } catch (err) {
+            console.warn("own stats fetch failed", err);
+          }
+        }
+        if (cancelled) return;
+        setLeads(leadSnap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<Lead, "id">) })));
+        setShifts(shiftSnap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<Shift, "id">) })));
         topRows.sort((a, b) => (b.sales ?? 0) - (a.sales ?? 0));
         setTop(topRows.slice(0, 5));
         setLoading(false);

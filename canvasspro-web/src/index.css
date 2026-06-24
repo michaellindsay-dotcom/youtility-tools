@@ -344,7 +344,10 @@ a {
   backdrop-filter: blur(8px);
   /* Fixed header: it's a non-scrolling flex item; only .app-content scrolls. */
   flex-shrink: 0;
-  overflow: hidden;
+  /* Must stay visible so the notification dropdown (absolutely positioned below
+     the bell) isn't clipped to the bar's height. The company name truncates via
+     its own overflow, and .app-main still clips the shell. */
+  overflow: visible;
   z-index: 10;
 }
 .topbar-menu {
