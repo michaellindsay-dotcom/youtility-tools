@@ -1,11 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
-import { collection, onSnapshot, query, where } from "firebase/firestore";
+import { collection, doc, onSnapshot, query, where } from "firebase/firestore";
 import { db } from "../firebase";
 import { useAuth } from "../auth/AuthContext";
 import {
   PTS, LEVEL_PTS, computePoints, levelInfo, tierFor, initials, avatarColor, pointLines,
 } from "../lib/points";
-import { periodKey, activeDaysThisYear, SEASON_LABEL, type SeasonView } from "../lib/season";
+import { periodKey, seasonDocId, activeDaysThisYear, SEASON_LABEL, type SeasonView } from "../lib/season";
 import type { UserStats } from "../types";
 
 interface Ranked extends UserStats {
@@ -22,6 +22,7 @@ export default function Leaderboard() {
   const { profile, role, companyId } = useAuth();
   const [view, setView] = useState<SeasonView>("week");
   const [rows, setRows] = useState<UserStats[]>([]);
+  const [selfRow, setSelfRow] = useState<UserStats | null>(null);
   const [showHow, setShowHow] = useState(false);
 
   useEffect(() => {
@@ -39,9 +40,25 @@ export default function Leaderboard() {
     );
   }, [profile, role, companyId, view]);
 
+  // The managerPath filter above excludes the viewer's own doc (managerPath
+  // omits self), so a non-admin would never see themselves on the board.
+  // Subscribe to their own stats doc separately and merge it in.
+  useEffect(() => {
+    if (!profile) return;
+    const ref = view === "alltime"
+      ? doc(db, "userStats", profile.uid)
+      : doc(db, "seasonStats", seasonDocId(profile.uid, view));
+    return onSnapshot(
+      ref,
+      (snap) => setSelfRow(snap.exists() ? { uid: snap.id, ...(snap.data() as Omit<UserStats, "uid">) } : null),
+      (e) => console.error("self stats", e)
+    );
+  }, [profile, view]);
+
   const ranked: Ranked[] = useMemo(() => {
     const prorate = view === "year";
-    const built = rows.map((r) => {
+    const merged = selfRow && !rows.some((r) => r.uid === selfRow.uid) ? [...rows, selfRow] : rows;
+    const built = merged.map((r) => {
       const points = computePoints(r);
       if (prorate) {
         const rate = points / activeDaysThisYear(r.joinedAt);
@@ -54,7 +71,7 @@ export default function Leaderboard() {
       return { ...r, points, score: points, rank: 0, headline: points.toLocaleString(), sub: undefined };
     });
     return built.sort((a, b) => b.score - a.score).map((r, i) => ({ ...r, rank: i + 1 }));
-  }, [rows, view]);
+  }, [rows, selfRow, view]);
 
   const leaderScore = ranked[0]?.score || 1;
   const me = ranked.find((r) => r.uid === profile?.uid);

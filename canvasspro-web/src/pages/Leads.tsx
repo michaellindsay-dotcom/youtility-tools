@@ -59,7 +59,11 @@ export default function Leads() {
   const shown = filter === "all" ? leads : leads.filter((l) => l.status === filter);
 
   const setStatus = async (id: string, status: LeadStatus) => {
-    await updateDoc(doc(db, "leads", id), { status, updatedAt: Date.now() });
+    // Stamp knockedAt like the disposition modal does, so a disposition logged
+    // from the list (e.g. marking a deal sold) counts as activity *today* in
+    // the funnels/goals — otherwise it keeps its original knock date.
+    const now = Date.now();
+    await updateDoc(doc(db, "leads", id), { status, knockedAt: now, updatedAt: now });
     if (profile) {
       if (status === "appointment") void bumpStats(profile, { appointments: 1 });
       else if (status === "sold") void bumpStats(profile, { sales: 1 });
