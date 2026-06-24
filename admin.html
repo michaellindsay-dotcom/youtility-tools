@@ -651,8 +651,12 @@
     </div>
     <div class="row" style="justify-content:space-between;align-items:center;margin-top:8px;flex-wrap:wrap;gap:8px;">
       <label class="day-chip"><input id="invLock" type="checkbox" /> Lock account until paid (due on receipt)</label>
-      <button id="invCreate" class="btn primary sm">Create &amp; send invoice + contract</button>
+      <span style="display:flex;gap:8px;">
+        <button id="contractPreview" class="btn ghost sm">Preview contract</button>
+        <button id="invCreate" class="btn primary sm">Create &amp; send invoice + contract</button>
+      </span>
     </div>
+    <div class="muted small" style="margin-top:6px;">The invoice email includes a <strong>Square payment link</strong> (set up Square under Pricing → Billing) and the signed service agreement.</div>
 
     <div id="companyBillingBanner" class="banner"></div>
   </section>
@@ -974,6 +978,7 @@ const assignCompanyToOrg = httpsCallable(fns, "assignCompanyToOrg");
 const setOrgLock        = httpsCallable(fns, "setOrgLock");
 const createInvoice     = httpsCallable(fns, "createInvoice");
 const markInvoicePaid   = httpsCallable(fns, "markInvoicePaid");
+const getContractPdf    = httpsCallable(fns, "getContractPdf");
 
 function banner(el, msg, kind="info") {
   el.className = "banner show " + kind;
@@ -1724,13 +1729,28 @@ $("invCreate").addEventListener("click", async () => {
       lockUntilPaid: $("invLock").checked, send: true,
     });
     const locked = $("invLock").checked ? " Account locked until paid." : "";
+    const sq = data.payUrl ? " Square payment link included." : " (No Square link — configure Square under Pricing → Billing.)";
     banner($("companyBillingBanner"),
-      data.sent ? `Invoice + contract sent to the billing contact.${locked}` : `Invoice created, but no billing email is on file to send it.${locked}`,
+      data.sent ? `Invoice + contract sent to the billing contact.${sq}${locked}` : `Invoice created, but no billing email is on file to send it.${locked}`,
       data.sent ? "good" : "error");
     $("invAmount").value = ""; $("invDesc").value = ""; $("invLock").checked = false;
     await loadBilling(billingCompany);
   } catch (e) { banner($("companyBillingBanner"), e.message || "Could not create the invoice.", "error"); }
   finally { $("invCreate").disabled = false; }
+});
+$("contractPreview").addEventListener("click", async () => {
+  if (!billingCompany) return;
+  $("contractPreview").disabled = true;
+  try {
+    const { data } = await getContractPdf({ companyId: billingCompany });
+    const bin = atob(data.base64);
+    const bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    const url = URL.createObjectURL(new Blob([bytes], { type: "application/pdf" }));
+    window.open(url, "_blank");
+    setTimeout(() => URL.revokeObjectURL(url), 60000);
+  } catch (e) { banner($("companyBillingBanner"), e.message || "Could not build the contract.", "error"); }
+  finally { $("contractPreview").disabled = false; }
 });
 $("invoiceMarkPaid").addEventListener("click", async () => {
   const id = $("invoiceSelect").value;
