@@ -14,6 +14,7 @@ import {
 } from "firebase/auth";
 import { doc, getDoc, onSnapshot } from "firebase/firestore";
 import { auth, db, googleProvider } from "../firebase";
+import { isBillingLocked, PAYMENT_LOCK_MSG } from "../lib/billing";
 import type { Company, Role, UserProfile } from "../types";
 
 interface AuthState {
@@ -91,7 +92,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (!company) {
         reason = "Your company account is no longer active. Please contact your system administrator.";
       } else if (status === "suspended" || status === "inactive") {
-        reason = "Your company account is inactive. Please contact your system administrator.";
+        reason = isBillingLocked(company)
+          ? PAYMENT_LOCK_MSG
+          : "Your company account is inactive. Please contact your system administrator.";
       }
     }
     if (reason) {
