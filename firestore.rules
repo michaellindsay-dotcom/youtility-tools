@@ -66,6 +66,14 @@ service cloud.firestore {
       }
     }
 
+    // ── organizations (parent grouping over companies) ───────────────────
+    // Managed entirely from the super-admin console; written by Cloud
+    // Functions only. Holds org-level billing settings + lock state.
+    match /organizations/{orgId} {
+      allow read: if isSuper();
+      allow write: if false;
+    }
+
     // ── reward redemptions (a rep claims a reward) ───────────────────────
     match /redemptions/{redemptionId} {
       allow read: if isSuper()

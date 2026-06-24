@@ -53,6 +53,7 @@ export interface Company {
   billingEmail?: string; // where invoices/contracts are sent
   billingHold?: boolean; // account locked for non-payment
   pastDueSince?: number; // epoch ms the account first went unpaid
+  organizationId?: string; // parent organization, if grouped
   scheduling?: SchedulingSettings;
   createdAt?: number;
 }
