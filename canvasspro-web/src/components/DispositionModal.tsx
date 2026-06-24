@@ -285,6 +285,10 @@ export default function DispositionModal({
         verified: geo.verified,
         distanceFt: geo.ft ?? null,
         knockedAt: now,
+        // Close date — set the moment a deal is marked sold so "closed today"
+        // tracks when it closed, not when the door was first knocked. clean()
+        // drops it (undefined) for any non-sold disposition.
+        soldAt: d.status === "sold" ? now : undefined,
         updatedAt: now,
       });
 

@@ -153,6 +153,7 @@ export interface Lead {
   verified?: boolean;
   distanceFt?: number;
   knockedAt?: number;
+  soldAt?: number; // when the deal was marked sold — drives close-date metrics
   companyId: string;
   territoryId?: string;
   assignedTo?: string; // uid (owner)
