@@ -1,0 +1,162 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Review &amp; sign — YoutilityKnock</title>
+  <style>
+    :root { --sky:#0EA5E9; --ink:#0b1220; --card:#0e1726; --line:#21314a; --muted:#8aa0b8; --text:#e8eef7; }
+    * { box-sizing:border-box; }
+    body { margin:0; font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif; background:var(--ink); color:var(--text); }
+    .wrap { max-width:620px; margin:0 auto; padding:28px 18px 60px; }
+    .brand { font-size:24px; font-weight:800; color:var(--sky); }
+    .brand small { display:block; font-size:12px; color:var(--muted); font-weight:400; margin-top:2px; }
+    .card { background:var(--card); border:1px solid var(--line); border-radius:14px; padding:22px; margin-top:18px; }
+    h1 { font-size:19px; margin:0 0 4px; }
+    .muted { color:var(--muted); }
+    .small { font-size:13px; }
+    table { width:100%; border-collapse:collapse; margin:14px 0; }
+    td { padding:9px 0; border-bottom:1px solid var(--line); font-size:14px; }
+    td.amt { text-align:right; white-space:nowrap; }
+    .total td { border-bottom:none; font-weight:700; font-size:17px; padding-top:14px; }
+    a.preview { color:var(--sky); text-decoration:none; font-size:14px; }
+    a.preview:hover { text-decoration:underline; }
+    .terms { background:#0b1220; border:1px solid var(--line); border-radius:10px; padding:14px 16px; max-height:200px; overflow:auto; font-size:13px; line-height:1.55; color:#c6d3e3; margin:14px 0; }
+    label.agree { display:flex; gap:10px; align-items:flex-start; font-size:14px; margin:14px 0; cursor:pointer; }
+    input[type=checkbox] { margin-top:3px; width:18px; height:18px; accent-color:var(--sky); }
+    .field { margin:14px 0; }
+    .field span { display:block; font-size:13px; color:var(--muted); margin-bottom:6px; }
+    input[type=text] { width:100%; padding:12px 14px; border-radius:9px; border:1px solid var(--line); background:#0b1220; color:var(--text); font-size:15px; }
+    .btn { display:inline-block; border:none; border-radius:9px; padding:13px 22px; font-size:15px; font-weight:700; cursor:pointer; }
+    .btn.primary { background:var(--sky); color:#04121d; }
+    .btn.primary:disabled { opacity:.5; cursor:not-allowed; }
+    .btn.pay { background:#16a34a; color:#fff; text-decoration:none; }
+    .banner { margin-top:14px; padding:11px 14px; border-radius:9px; font-size:14px; display:none; }
+    .banner.show { display:block; }
+    .banner.error { background:#3b1418; border:1px solid #7f1d1d; color:#fecaca; }
+    .banner.good { background:#0f2a17; border:1px solid #166534; color:#bbf7d0; }
+    .signed-note { color:#bbf7d0; font-size:14px; margin:10px 0; }
+    .center { text-align:center; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="brand">YoutilityKnock<small>a product of Sun Service</small></div>
+
+    <div id="loading" class="card muted">Loading your invoice…</div>
+
+    <div id="content" style="display:none;">
+      <div class="card">
+        <h1>Invoice <span id="invNumber"></span></h1>
+        <div class="muted small">Billed to <span id="billedTo"></span></div>
+        <table id="lines"></table>
+        <a class="preview" id="contractLink" href="#" target="_blank" rel="noopener">📄 Preview the service agreement (PDF)</a>
+      </div>
+
+      <div class="card" id="signCard">
+        <h1>Service Agreement</h1>
+        <p class="muted small">Please review and electronically sign the agreement before paying. This agreement is governed by the laws of the State of <span id="govLaw">Utah</span>.</p>
+        <div class="terms" id="terms"></div>
+        <label class="agree"><input type="checkbox" id="agree" /> <span>I have read and agree to the YoutilityKnock Service Agreement, and I am authorized to sign on behalf of the customer named above.</span></label>
+        <div class="field"><span>Type your full legal name to sign</span><input type="text" id="signName" placeholder="e.g. Jordan Smith" autocomplete="name" /></div>
+        <button class="btn primary" id="signBtn" disabled>Sign &amp; continue to payment</button>
+        <div id="banner" class="banner"></div>
+      </div>
+
+      <div class="card center" id="payCard" style="display:none;">
+        <div class="signed-note" id="signedNote">✔ Signed. You're all set to pay.</div>
+        <a class="btn pay" id="payBtn" href="#" target="_blank" rel="noopener">Pay now</a>
+        <p class="muted small" id="noPay" style="display:none;">Payment link isn't available yet — your provider will follow up.</p>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const params = new URLSearchParams(location.search);
+    const inv = params.get("inv") || "";
+    const token = params.get("t") || "";
+    const api = (suffix) => `/sign-api/${encodeURIComponent(inv)}${suffix || ""}`;
+    const $ = (id) => document.getElementById(id);
+    const money = (c, cur) => new Intl.NumberFormat("en-US", { style: "currency", currency: (cur || "usd").toUpperCase() }).format((c || 0) / 100);
+
+    function showError(msg) {
+      $("loading").textContent = msg;
+      $("loading").style.display = "block";
+      $("content").style.display = "none";
+    }
+    function banner(msg, kind) {
+      const b = $("banner");
+      b.textContent = msg;
+      b.className = "banner show " + (kind || "");
+    }
+
+    function renderTerms(d) {
+      $("terms").innerHTML = [
+        `<strong>${d.product} Service Agreement</strong> — provider: ${d.provider}.`,
+        "1. Service & Plan — Provider makes the platform available under the plan and price shown on your invoice.",
+        "2. Billing — Invoices are due on receipt. Unpaid invoices may result in suspension of access; data is retained.",
+        "3. Term — Month-to-month until terminated by either party with written notice.",
+        "4. Data — Customer owns its data; Provider processes it only to deliver the service.",
+        "5. Limitation of Liability — Provider's liability is capped at the last three months of fees; no indirect/consequential damages; service provided \"as is\".",
+        `6. Governing Law — Laws of the State of ${d.governingLaw}.`,
+        "7. Acceptance — Signing below accepts these terms. The full agreement is attached to your invoice email and previewable above.",
+      ].map((t) => `<p style="margin:6px 0;">${t}</p>`).join("");
+    }
+
+    function showPay(payUrl, name) {
+      $("signCard").style.display = "none";
+      $("payCard").style.display = "block";
+      if (name) $("signedNote").textContent = `✔ Signed by ${name}. You're all set to pay.`;
+      if (payUrl) { $("payBtn").href = payUrl; }
+      else { $("payBtn").style.display = "none"; $("noPay").style.display = "block"; }
+    }
+
+    async function load() {
+      if (!inv || !token) { showError("This link is missing its invoice details. Please use the link from your invoice email."); return; }
+      let res, d;
+      try { res = await fetch(api(`?t=${encodeURIComponent(token)}`)); d = await res.json(); }
+      catch { showError("Couldn't load this invoice. Please try again."); return; }
+      if (!res.ok) { showError(d && d.error ? d.error : "This invoice could not be found."); return; }
+
+      $("invNumber").textContent = d.number || "";
+      $("billedTo").textContent = d.companyName || "";
+      $("govLaw").textContent = d.governingLaw || "Utah";
+      $("contractLink").href = api(`/contract?t=${encodeURIComponent(token)}`);
+      const lines = (d.lines && d.lines.length) ? d.lines : [{ description: "Subscription", amount: d.amountDue }];
+      $("lines").innerHTML = lines.map((l) =>
+        `<tr><td>${(l.description || "Item")}</td><td class="amt">${money(l.amount, d.currency)}</td></tr>`).join("") +
+        `<tr class="total"><td>Total due</td><td class="amt">${money(d.amountDue, d.currency)}</td></tr>`;
+      renderTerms(d);
+
+      $("loading").style.display = "none";
+      $("content").style.display = "block";
+
+      if (d.signed) { showPay(d.payUrl, d.signedName); return; }
+
+      const refresh = () => { $("signBtn").disabled = !($("agree").checked && $("signName").value.trim().length >= 2); };
+      $("agree").addEventListener("change", refresh);
+      $("signName").addEventListener("input", refresh);
+      $("signBtn").addEventListener("click", sign);
+    }
+
+    async function sign() {
+      $("signBtn").disabled = true;
+      banner("Recording your signature…");
+      try {
+        const res = await fetch(api(), {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ t: token, name: $("signName").value.trim() }),
+        });
+        const d = await res.json();
+        if (!res.ok || !d.ok) { banner(d && d.error ? d.error : "Could not record your signature.", "error"); $("signBtn").disabled = false; return; }
+        showPay(d.payUrl, d.signedName);
+      } catch {
+        banner("Network error — please try again.", "error");
+        $("signBtn").disabled = false;
+      }
+    }
+
+    load();
+  </script>
+</body>
+</html>
