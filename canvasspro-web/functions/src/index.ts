@@ -2236,12 +2236,9 @@ function buildContractPdf(opts: {
   });
 }
 
-export const emailInvoice = onCall(async (request) => {
-  const caller = await getCaller(request);
-  const { companyId: cid, invoiceId, includeContract } =
-    (request.data || {}) as { companyId?: string; invoiceId?: string; includeContract?: boolean };
-  const companyId = authorizeForCompany(caller, cid);
-  if (!invoiceId) throw new HttpsError("invalid-argument", "invoiceId required.");
+// Email an invoice (with the plan's contract attached) to the company's billing
+// contact. Shared by the emailInvoice callable and createInvoice.
+async function sendInvoiceEmail(companyId: string, invoiceId: string, includeContract: boolean): Promise<{ sent: number; contractAttached: boolean }> {
   const inv = (await db.doc(`invoices/${invoiceId}`).get()).data();
   if (!inv || inv.companyId !== companyId) throw new HttpsError("not-found", "Invoice not found.");
   // Prefer the explicit billing contact; fall back to the company's admins.
@@ -2258,7 +2255,7 @@ export const emailInvoice = onCall(async (request) => {
   // Attach the plan's service agreement for signature (default on).
   let attachments: EmailAttachment[] | undefined;
   let contractNote = "";
-  if (includeContract !== false) {
+  if (includeContract) {
     try {
       let enterprise = false, perCompanyFee = 0, orgFee = 0;
       if (company.organizationId) {
@@ -2290,7 +2287,75 @@ export const emailInvoice = onCall(async (request) => {
       `${greeting}Your YoutilityKnock invoice ${inv.number || ""} for $${amt} is ${inv.status}.${link ? "\n\nView / pay: " + link : ""}${contractNote}`,
       attachments)) sent++;
   }
-  return { ok: true, sent, contractAttached: !!attachments };
+  return { sent, contractAttached: !!attachments };
+}
+
+export const emailInvoice = onCall(async (request) => {
+  const caller = await getCaller(request);
+  const { companyId: cid, invoiceId, includeContract } =
+    (request.data || {}) as { companyId?: string; invoiceId?: string; includeContract?: boolean };
+  const companyId = authorizeForCompany(caller, cid);
+  if (!invoiceId) throw new HttpsError("invalid-argument", "invoiceId required.");
+  return { ok: true, ...(await sendInvoiceEmail(companyId, invoiceId, includeContract !== false)) };
+});
+
+// Create a manual invoice (super-admin) and, by default, email it with the
+// service-agreement contract attached. "Due on receipt"; optionally lock the
+// company immediately until it's paid.
+export const createInvoice = onCall(async (request) => {
+  const caller = await getCaller(request);
+  requireSuper(caller);
+  const { companyId, amount, description, lockUntilPaid, send } = (request.data || {}) as {
+    companyId?: string; amount?: number; description?: string; lockUntilPaid?: boolean; send?: boolean;
+  };
+  if (!companyId) throw new HttpsError("invalid-argument", "companyId required.");
+  const dollars = Number(amount);
+  if (!isFinite(dollars) || dollars <= 0) throw new HttpsError("invalid-argument", "Enter an amount greater than 0.");
+  const cents = Math.round(dollars * 100);
+  const company = (await db.doc(`companies/${companyId}`).get()).data() || {};
+  const now = Date.now();
+  const ref = db.collection("invoices").doc();
+  const desc = (description || "").trim() || "YoutilityKnock services";
+  await ref.set({
+    companyId, companyName: (company.name as string) || "",
+    number: `INV-${now.toString(36).toUpperCase()}`,
+    status: "open", manual: true,
+    amountDue: cents, amountPaid: 0, currency: "usd",
+    created: now, dueDate: now, // due on receipt
+    lines: [{ description: desc, amount: cents }],
+    lockUntilPaid: !!lockUntilPaid,
+    updatedAt: now,
+  });
+  // Due on receipt → optionally lock the account immediately until paid.
+  if (lockUntilPaid) {
+    await db.doc(`companies/${companyId}`).set(
+      { status: "suspended", billingHold: true, pastDueSince: now, updatedAt: now }, { merge: true });
+  }
+  let emailResult = { sent: 0, contractAttached: false };
+  if (send !== false) {
+    try { emailResult = await sendInvoiceEmail(companyId, ref.id, true); }
+    catch (e) { logger.warn("createInvoice send failed", e); }
+  }
+  return { ok: true, invoiceId: ref.id, ...emailResult };
+});
+
+// Mark an invoice paid (super-admin). If it locked the company (due on receipt),
+// unlock it.
+export const markInvoicePaid = onCall(async (request) => {
+  const caller = await getCaller(request);
+  requireSuper(caller);
+  const { invoiceId } = (request.data || {}) as { invoiceId?: string };
+  if (!invoiceId) throw new HttpsError("invalid-argument", "invoiceId required.");
+  const ref = db.doc(`invoices/${invoiceId}`);
+  const inv = (await ref.get()).data();
+  if (!inv) throw new HttpsError("not-found", "Invoice not found.");
+  const now = Date.now();
+  await ref.set({ status: "paid", amountPaid: inv.amountDue || 0, updatedAt: now }, { merge: true });
+  if (inv.lockUntilPaid && inv.companyId) {
+    await db.doc(`companies/${inv.companyId}`).set(
+      { status: "active", billingHold: false, pastDueSince: 0, updatedAt: now }, { merge: true });
+  }
+  return { ok: true };
 });
 
 // ════════════════════════════════════════════════════════════════════════════
