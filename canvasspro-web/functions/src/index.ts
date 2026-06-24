@@ -1779,6 +1779,26 @@ export const setCompanyPlan = onCall(async (request) => {
   return { ok: true };
 });
 
+// Who the bill is addressed to + where it's sent. Super-admins set it for any
+// company; a company admin may set it for their own company.
+export const setCompanyBilling = onCall(async (request) => {
+  const caller = await getCaller(request);
+  const { companyId, billingContactName, billingEmail } = (request.data || {}) as {
+    companyId?: string; billingContactName?: string; billingEmail?: string;
+  };
+  const cid = authorizeForCompany(caller, companyId);
+  const email = (billingEmail || "").trim();
+  if (email && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) {
+    throw new HttpsError("invalid-argument", "Enter a valid billing email.");
+  }
+  await db.doc(`companies/${cid}`).set({
+    billingContactName: (billingContactName || "").trim(),
+    billingEmail: email,
+    updatedAt: Date.now(),
+  }, { merge: true });
+  return { ok: true };
+});
+
 // ════════════════════════════════════════════════════════════════════════════
 // STRIPE BILLING — checkout, billing portal, and a webhook that flips a
 // company's status from the live subscription state. Keys live in config/billing
@@ -2072,15 +2092,20 @@ export const emailInvoice = onCall(async (request) => {
   if (!invoiceId) throw new HttpsError("invalid-argument", "invoiceId required.");
   const inv = (await db.doc(`invoices/${invoiceId}`).get()).data();
   if (!inv || inv.companyId !== companyId) throw new HttpsError("not-found", "Invoice not found.");
-  const emails = await companyAdminEmails(companyId);
-  if (!emails.length) throw new HttpsError("failed-precondition", "No company admin email on file.");
+  // Prefer the explicit billing contact; fall back to the company's admins.
+  const company = (await db.doc(`companies/${companyId}`).get()).data() || {};
+  const billingEmail = ((company.billingEmail as string) || "").trim();
+  const contactName = ((company.billingContactName as string) || "").trim();
+  const emails = billingEmail ? [billingEmail] : await companyAdminEmails(companyId);
+  if (!emails.length) throw new HttpsError("failed-precondition", "No billing email or company admin email on file.");
   const cfg = await getNotifyConfig();
   const amt = ((inv.amountDue || 0) / 100).toFixed(2);
   const link = inv.hostedInvoiceUrl || inv.invoicePdf || "";
+  const greeting = contactName ? `Hi ${contactName},\n\n` : "";
   let sent = 0;
   for (const to of emails) {
     if (await sendEmail(cfg, to, `Invoice ${inv.number || ""} — $${amt}`,
-      `Your YoutilityKnock invoice ${inv.number || ""} for $${amt} is ${inv.status}.${link ? "\n\nView / pay: " + link : ""}`)) sent++;
+      `${greeting}Your YoutilityKnock invoice ${inv.number || ""} for $${amt} is ${inv.status}.${link ? "\n\nView / pay: " + link : ""}`)) sent++;
   }
   return { ok: true, sent };
 });

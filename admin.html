@@ -577,6 +577,15 @@
     <div class="bill-total" id="billTotal">$0<small>/mo</small></div>
     <div class="muted small" id="billServices" style="margin:4px 0 14px;">—</div>
 
+    <h3 style="font-size:14px;margin:0 0 8px;">Billing contact</h3>
+    <div class="grid-2">
+      <div class="field"><span>Contact name (who the bill is addressed to)</span><input id="billContactName" placeholder="e.g. Jordan Smith" /></div>
+      <div class="field"><span>Billing email (invoices are sent here)</span><input id="billEmail" type="email" placeholder="billing@company.com" autocomplete="off" /></div>
+    </div>
+    <div class="row" style="justify-content:flex-end;margin:6px 0 16px;">
+      <button id="billContactSave" class="btn primary sm">Save billing contact</button>
+    </div>
+
     <div class="grid-2">
       <div>
         <h3 style="font-size:14px;margin:0 0 8px;">Card on file <span id="cardStatus" class="pill"></span></h3>
@@ -909,6 +918,7 @@ const setCrmConfig    = httpsCallable(fns, "setCrmConfig");
 const getCompanyCrm   = httpsCallable(fns, "getCompanyCrm");
 const setCompanyCrm   = httpsCallable(fns, "setCompanyCrm");
 const setMyProfile    = httpsCallable(fns, "setMyProfile");
+const setCompanyBilling = httpsCallable(fns, "setCompanyBilling");
 
 function banner(el, msg, kind="info") {
   el.className = "banner show " + kind;
@@ -1557,6 +1567,8 @@ async function loadBilling(companyId, companyName) {
   $("billServices").textContent = "Billed services: " + (feats.map((k) => SVC_LABEL[k] || k).join(", ") || "—") + breakdown;
   $("cardStatus").textContent = c.cardLast4 ? `${c.cardBrand || "card"} •••• ${c.cardLast4}` : "none on file";
   $("nextBill").textContent = c.nextBillingAt ? `Next charge ${fmtDate(c.nextBillingAt)}` : (c.billingExempt ? "Comped" : "No card on file yet");
+  $("billContactName").value = c.billingContactName || "";
+  $("billEmail").value = c.billingEmail || "";
 
   // Mount the card field for whichever provider is active.
   const pub = await loadBillingPublic();
@@ -1633,8 +1645,17 @@ $("invoiceOpen").addEventListener("click", () => {
 $("invoiceEmail").addEventListener("click", async () => {
   const id = $("invoiceSelect").value;
   if (!id || !billingCompany) { banner($("companyBillingBanner"), "Pick an invoice first.", "error"); return; }
-  try { const { data } = await emailInvoice({ companyId: billingCompany, invoiceId: id }); banner($("companyBillingBanner"), data.sent ? "Invoice emailed." : "No admin email on file.", data.sent ? "good" : "error"); }
+  try { const { data } = await emailInvoice({ companyId: billingCompany, invoiceId: id }); banner($("companyBillingBanner"), data.sent ? "Invoice emailed to the billing contact." : "No billing or admin email on file.", data.sent ? "good" : "error"); }
   catch (e) { banner($("companyBillingBanner"), e.message || "Email failed.", "error"); }
+});
+$("billContactSave").addEventListener("click", async () => {
+  if (!billingCompany) return;
+  $("billContactSave").disabled = true;
+  try {
+    await setCompanyBilling({ companyId: billingCompany, billingContactName: $("billContactName").value, billingEmail: $("billEmail").value });
+    banner($("companyBillingBanner"), "Billing contact saved.", "good");
+  } catch (e) { banner($("companyBillingBanner"), e.message || "Could not save billing contact.", "error"); }
+  finally { $("billContactSave").disabled = false; }
 });
 
 // Printable / re-emailable invoice in a pop-out window.

@@ -1,6 +1,7 @@
 import { Navigate, useLocation } from "react-router-dom";
 import type { ReactNode } from "react";
 import { useAuth } from "./AuthContext";
+import { isBillingLocked, PAYMENT_LOCK_MSG } from "../lib/billing";
 import type { Role } from "../types";
 
 interface Props {
@@ -48,12 +49,13 @@ export default function ProtectedRoute({ children, roles }: Props) {
     companyLoaded &&
     (company ? status === "suspended" || status === "inactive" : true);
   if (companyInactive) {
+    const billing = isBillingLocked(company);
     return (
       <div className="auth-wrap">
         <div className="auth-card card" style={{ textAlign: "center" }}>
-          <h2 style={{ border: 0 }}>Account inactive</h2>
+          <h2 style={{ border: 0 }}>{billing ? "Payment required" : "Account inactive"}</h2>
           <p className="muted">
-            This account is no longer active. Please contact your system administrator.
+            {billing ? PAYMENT_LOCK_MSG : "This account is no longer active. Please contact your system administrator."}
           </p>
           <button className="btn block" style={{ marginTop: 16 }} onClick={() => logout()}>
             Sign out

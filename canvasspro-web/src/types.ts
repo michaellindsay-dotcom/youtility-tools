@@ -49,6 +49,10 @@ export interface Company {
   addons?: string[]; // e.g. ["knock"] when provisioned as a CRM add-on
   crmCompanyId?: string; // link to the company record in YoutilityCRM
   billingExempt?: boolean; // comped — full features, not charged
+  billingContactName?: string; // who the bill is addressed to
+  billingEmail?: string; // where invoices/contracts are sent
+  billingHold?: boolean; // account locked for non-payment
+  pastDueSince?: number; // epoch ms the account first went unpaid
   scheduling?: SchedulingSettings;
   createdAt?: number;
 }
