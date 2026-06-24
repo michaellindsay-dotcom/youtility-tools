@@ -353,7 +353,9 @@
         <label class="day-chip" style="align-self:center;"><input id="orgEnterprise" type="checkbox" /> Enterprise pricing</label>
         <div class="field"><span>Per-company fee ($/mo)</span><input id="orgPerCompany" type="number" min="0" value="500" /></div>
         <div class="field"><span>Org-wide fee ($/mo)</span><input id="orgOrgFee" type="number" min="0" value="85" /></div>
+        <div class="field"><span>Organization monthly ($/mo) — overrides the total</span><input id="orgMonthly" type="number" min="0" placeholder="blank = itemize per company" /></div>
       </div>
+      <p class="muted small" style="margin:2px 0 0;">Set <strong>Organization monthly</strong> to bill one flat amount (this is what the contract shows). Leave blank to itemize each company + fees.</p>
       <h3 style="font-size:13px;margin:12px 0 6px;">Companies in this organization</h3>
       <div id="orgCompanies" class="svc-grid" style="max-height:170px;overflow:auto;flex-direction:column;gap:6px;">
         <span class="muted small">Loading companies…</span>
@@ -378,10 +380,23 @@
         <span style="display:flex;gap:8px;">
           <button id="orgContractPreview" class="btn ghost sm">Preview contract</button>
           <button id="orgInvCancel" class="btn ghost sm">Cancel</button>
-          <button id="orgInvCreate" class="btn primary sm">Create &amp; send invoice + contract</button>
+          <button id="orgProviderSign" class="btn primary sm" style="display:none;">Sign as provider</button>
+          <button id="orgInvCreate" class="btn primary sm">Create invoice</button>
         </span>
       </div>
       <div id="orgInvBanner" class="banner"></div>
+
+      <!-- Org card on file: auto-bill the org's monthly every 30 days -->
+      <div style="border-top:1px solid #21314a;margin-top:16px;padding-top:14px;">
+        <h3 style="font-size:14px;margin:0 0 4px;">Card on file — auto-bill every 30 days <span id="orgCardStatus" class="pill"></span></h3>
+        <p class="muted small" style="margin:0 0 10px;">Save the organization's card to charge its monthly automatically on a 30-day cycle (Square).</p>
+        <div id="orgCardElement"></div>
+        <div class="row" style="justify-content:space-between;align-items:center;margin-top:10px;">
+          <span class="muted small" id="orgNextBill">—</span>
+          <button id="orgSaveCardBtn" class="btn primary sm">Save card &amp; start 30-day billing</button>
+        </div>
+        <div id="orgCardBanner" class="banner"></div>
+      </div>
     </div>
 
     <table>
@@ -679,10 +694,11 @@
         <div class="row" style="gap:8px;align-items:center;">
           <select id="invoiceSelect" style="flex:1;"><option value="">— select an invoice —</option></select>
           <button id="invoiceOpen" class="btn sm">Open</button>
+          <button id="invoiceProviderSign" class="btn primary sm">Sign as provider</button>
           <button id="invoiceEmail" class="btn ghost sm">Re-email</button>
           <button id="invoiceMarkPaid" class="btn ghost sm">Mark paid</button>
         </div>
-        <div class="muted small" style="margin-top:8px;">Open a bill to print, or re-email it to the billing contact — the plan's service agreement is attached for signature.</div>
+        <div class="muted small" style="margin-top:8px;">New invoices need your <strong>provider signature</strong> first — sign here, and the customer is automatically emailed to review, sign &amp; pay.</div>
       </div>
     </div>
 
@@ -1025,6 +1041,8 @@ const assignCompanyToOrg = httpsCallable(fns, "assignCompanyToOrg");
 const setOrgLock        = httpsCallable(fns, "setOrgLock");
 const createInvoice     = httpsCallable(fns, "createInvoice");
 const createOrgInvoice  = httpsCallable(fns, "createOrgInvoice");
+const providerSignInvoice = httpsCallable(fns, "providerSignInvoice");
+const squareSaveOrgCardAndSubscribe = httpsCallable(fns, "squareSaveOrgCardAndSubscribe");
 const markInvoicePaid   = httpsCallable(fns, "markInvoicePaid");
 const getContractPdf    = httpsCallable(fns, "getContractPdf");
 
@@ -1799,11 +1817,10 @@ $("invCreate").addEventListener("click", async () => {
       lockUntilPaid: $("invLock").checked, send,
     });
     const locked = $("invLock").checked ? " Account locked until paid." : "";
-    const sq = data.payUrl ? " Square payment link included." : " (No Square link — configure Square under Pricing → Billing.)";
     let msg;
-    if (!send) msg = `Invoice created (not emailed). Re-email it any time from the Invoices list.${locked}`;
-    else if (data.sent) msg = `Invoice + sign-then-pay link sent to ${email}.${sq}${locked}`;
-    else msg = `Invoice created, but the email didn't send: ${data.error || "check SendGrid under Notifications"}.${locked}`;
+    if (!send) msg = `Invoice created (not emailed). Sign it as provider from the Invoices list when ready.${locked}`;
+    else if (data.sent) msg = `Invoice created — provider sign request emailed to you. Sign it (Invoices → Sign as provider) and the customer is emailed to sign & pay.${locked}`;
+    else msg = `Invoice created, but the provider email didn't send: ${data.error || "check Notifications"}. Use “Sign as provider” to continue.${locked}`;
     banner($("companyBillingBanner"), msg, (!send || data.sent) ? "good" : "error");
     $("invAmount").value = ""; $("invDesc").value = ""; $("invLock").checked = false;
     await loadBilling(billingCompany);
@@ -1834,11 +1851,30 @@ $("invoiceMarkPaid").addEventListener("click", async () => {
     await loadBilling(billingCompany);
   } catch (e) { banner($("companyBillingBanner"), e.message || "Could not update the invoice.", "error"); }
 });
+$("invoiceProviderSign").addEventListener("click", () =>
+  signAsProvider($("invoiceSelect").value, $("companyBillingBanner"), () => loadBilling(billingCompany)));
+
+// Provider (super-admin) counter-signs an invoice's agreement, which then emails
+// the customer the sign-then-pay link. Used from both company + org billing.
+async function signAsProvider(invoiceId, bannerEl, after) {
+  if (!invoiceId) { banner(bannerEl, "Pick an invoice first.", "error"); return; }
+  const name = prompt("Type your full name to counter-sign as the Provider (Sun Service). The customer is emailed to sign & pay once you sign:");
+  if (name == null) return;
+  if (name.trim().length < 2) { banner(bannerEl, "Enter your full name to sign.", "error"); return; }
+  try {
+    const { data } = await providerSignInvoice({ invoiceId, name: name.trim() });
+    banner(bannerEl, data.sent ? "Signed as provider — the customer was emailed to review, sign & pay." :
+      `Signed as provider, but the customer email didn't send: ${data.error || "check Notifications"}.`, data.sent ? "good" : "error");
+    if (after) await after();
+  } catch (e) { banner(bannerEl, e.message || "Could not sign the agreement.", "error"); }
+}
 
 // ── Organizations (super-admin) ───────────────────────────────────────────
 let orgs = [], orgCompaniesAll = [], editingOrgId = null;
 
 function orgMonthly(org) {
+  const override = Number(org.monthlyOverride) || 0;
+  if (override > 0) return override;
   const members = orgCompaniesAll.filter((c) => c.organizationId === org.id);
   const base = members.reduce((s, c) => s + (Number(c.planPrice) || 0), 0);
   if (!org.enterprise) return base;
@@ -1881,6 +1917,8 @@ async function loadOrgs() {
 let billingOrgId = null;
 // Compute the same itemized lines the server builds, for an on-screen preview.
 function orgInvoiceLines(org) {
+  const override = Number(org.monthlyOverride) || 0;
+  if (override > 0) return [{ label: "Organization monthly plan (up to 100 users)", amount: override }];
   const members = orgCompaniesAll.filter((c) => c.organizationId === org.id);
   const ent = !!org.enterprise, per = Number(org.perCompanyFee) || 0, orgFee = Number(org.orgFee) || 0;
   const lines = members.map((c) => ({
@@ -1902,10 +1940,54 @@ function openOrgInvoice(orgId) {
     `<td style="padding:6px 0;border-bottom:1px solid #21314a;text-align:right;">$${l.amount}</td></tr>`).join("") +
     `<tr><td style="padding:8px 0;font-weight:700;">Total due</td><td style="padding:8px 0;font-weight:700;text-align:right;">$${total}</td></tr>`;
   $("orgInvDesc").value = ""; $("orgInvLock").checked = false; $("orgInvSend").checked = true;
+  // Reset the provider-sign button until an invoice is created this session.
+  lastOrgInvoiceId = null; $("orgProviderSign").style.display = "none";
+  updateOrgCardStatus(org);
+  mountOrgCard();
   $("orgInvoiceForm").classList.remove("hidden");
   $("orgInvoiceForm").scrollIntoView({ behavior: "smooth", block: "nearest" });
 }
 $("orgInvCancel").addEventListener("click", () => $("orgInvoiceForm").classList.add("hidden"));
+
+// ── Org card on file (Square) ─────────────────────────────────────────────
+let orgSquareCard = null;
+function updateOrgCardStatus(org) {
+  const o = org || orgs.find((x) => x.id === billingOrgId) || {};
+  $("orgCardStatus").textContent = o.cardLast4 ? `${o.cardBrand || "card"} •••• ${o.cardLast4}` : "none on file";
+  $("orgNextBill").textContent = o.nextBillingAt ? `Next charge ${fmtDate(o.nextBillingAt)}` : "No card on file yet";
+}
+async function mountOrgCard() {
+  const pub = await loadBillingPublic();
+  $("orgCardElement").innerHTML = "";
+  if (billingProviderActive !== "square") {
+    $("orgCardElement").innerHTML = '<span class="muted small">Square isn\'t the active gateway — set it under Pricing → Billing to capture an org card.</span>';
+    $("orgSaveCardBtn").disabled = true; return;
+  }
+  const sq = await loadSquareSdk(pub.square && pub.square.environment);
+  if (!sq || !pub.square || !pub.square.applicationId || !pub.square.locationId) {
+    $("orgCardElement").innerHTML = '<span class="muted small">Add Square credentials in Pricing → Billing to enable card capture.</span>';
+    $("orgSaveCardBtn").disabled = true; return;
+  }
+  if (!squarePayments) squarePayments = sq.payments(pub.square.applicationId, pub.square.locationId);
+  if (orgSquareCard) { try { await orgSquareCard.destroy(); } catch {} orgSquareCard = null; }
+  orgSquareCard = await squarePayments.card();
+  await orgSquareCard.attach("#orgCardElement");
+  $("orgSaveCardBtn").disabled = false;
+}
+$("orgSaveCardBtn").addEventListener("click", async () => {
+  if (!billingOrgId) return;
+  if (!orgSquareCard) { banner($("orgCardBanner"), "Card field isn't ready.", "error"); return; }
+  $("orgSaveCardBtn").disabled = true;
+  try {
+    const result = await orgSquareCard.tokenize();
+    if (result.status !== "OK") throw new Error("Card wasn't accepted. Check the number and try again.");
+    const { data } = await squareSaveOrgCardAndSubscribe({ orgId: billingOrgId, sourceId: result.token });
+    banner($("orgCardBanner"), `Card saved (${data.brand} ••••${data.last4}). This organization will be auto-billed every 30 days.`, "good");
+    await loadOrgs();
+    updateOrgCardStatus();
+  } catch (e) { banner($("orgCardBanner"), e.message || "Could not save the card.", "error"); }
+  finally { $("orgSaveCardBtn").disabled = false; }
+});
 $("orgContractPreview").addEventListener("click", async () => {
   if (!billingOrgId) return;
   $("orgContractPreview").disabled = true;
@@ -1919,6 +2001,7 @@ $("orgContractPreview").addEventListener("click", async () => {
   } catch (e) { banner($("orgInvBanner"), e.message || "Could not build the contract.", "error"); }
   finally { $("orgContractPreview").disabled = false; }
 });
+let lastOrgInvoiceId = null;
 $("orgInvCreate").addEventListener("click", async () => {
   if (!billingOrgId) return;
   $("orgInvCreate").disabled = true;
@@ -1927,17 +2010,20 @@ $("orgInvCreate").addEventListener("click", async () => {
       orgId: billingOrgId, description: $("orgInvDesc").value,
       lockUntilPaid: $("orgInvLock").checked, send: $("orgInvSend").checked,
     });
+    lastOrgInvoiceId = data.invoiceId;
+    $("orgProviderSign").style.display = "inline-block";
     const locked = $("orgInvLock").checked ? " Organization locked until paid." : "";
-    const sq = data.payUrl ? " Square payment link included." : " (No Square link — configure Square under Pricing → Billing.)";
     let msg;
-    if (!$("orgInvSend").checked) msg = `Org invoice created (not emailed).${locked}`;
-    else if (data.sent) msg = `Org invoice + sign-then-pay link sent.${sq}${locked}`;
-    else msg = `Invoice created, but the email didn't send: ${data.error || "check Notifications"}.${locked}`;
+    if (!$("orgInvSend").checked) msg = `Org invoice created (not emailed). Click “Sign as provider” when ready.${locked}`;
+    else if (data.sent) msg = `Org invoice created — provider sign request emailed to you. Click “Sign as provider”; the org is then emailed to sign & pay.${locked}`;
+    else msg = `Invoice created, but the provider email didn't send: ${data.error || "check Notifications"}. Use “Sign as provider”.${locked}`;
     banner($("orgInvBanner"), msg, (!$("orgInvSend").checked || data.sent) ? "good" : "error");
     await loadOrgs();
   } catch (e) { banner($("orgInvBanner"), e.message || "Could not create the org invoice.", "error"); }
   finally { $("orgInvCreate").disabled = false; }
 });
+$("orgProviderSign").addEventListener("click", () =>
+  signAsProvider(lastOrgInvoiceId, $("orgInvBanner"), null));
 
 function renderOrgCompanyPicker(orgId) {
   const box = $("orgCompanies");
@@ -1962,6 +2048,7 @@ function openOrgForm(orgId) {
   $("orgEnterprise").checked = !!o.enterprise;
   $("orgPerCompany").value = o.perCompanyFee ?? 500;
   $("orgOrgFee").value = o.orgFee ?? 85;
+  $("orgMonthly").value = o.monthlyOverride ? o.monthlyOverride : "";
   renderOrgCompanyPicker(orgId);
   $("orgForm").classList.remove("hidden");
   $("orgForm").scrollIntoView({ behavior: "smooth", block: "nearest" });
@@ -1984,6 +2071,7 @@ $("orgSave").addEventListener("click", async () => {
       enterprise: $("orgEnterprise").checked,
       perCompanyFee: Number($("orgPerCompany").value) || 0,
       orgFee: Number($("orgOrgFee").value) || 0,
+      monthlyOverride: Number($("orgMonthly").value) || 0,
     });
     // Reconcile company membership from the checkboxes.
     const boxes = Array.from($("orgCompanies").querySelectorAll("input[type=checkbox]"));
