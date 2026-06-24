@@ -363,6 +363,27 @@
         <button id="orgSave" class="btn primary sm">Save organization</button>
       </div>
     </div>
+
+    <!-- Bill an organization: one line per member company + the org fee -->
+    <div id="orgInvoiceForm" class="hidden" style="margin-bottom:16px;border:1px solid #21314a;border-radius:12px;padding:16px;background:#0e1726;">
+      <h3 style="font-size:15px;margin:0 0 4px;">Bill organization · <span id="orgInvName"></span></h3>
+      <p class="muted small" style="margin:0 0 10px;">One invoice itemized by company, sign-then-pay to the org's billing contact. Locking suspends every company in the org until paid.</p>
+      <table style="margin:0 0 8px;"><tbody id="orgInvLines"></tbody></table>
+      <div class="field"><span>Note (optional)</span><input id="orgInvDesc" placeholder="e.g. Monthly platform fees — June" /></div>
+      <div class="row" style="justify-content:space-between;align-items:center;margin-top:8px;flex-wrap:wrap;gap:8px;">
+        <span style="display:flex;gap:14px;flex-wrap:wrap;">
+          <label class="day-chip"><input id="orgInvLock" type="checkbox" /> Lock the whole org until paid</label>
+          <label class="day-chip"><input id="orgInvSend" type="checkbox" checked /> Email it to the org contact</label>
+        </span>
+        <span style="display:flex;gap:8px;">
+          <button id="orgContractPreview" class="btn ghost sm">Preview contract</button>
+          <button id="orgInvCancel" class="btn ghost sm">Cancel</button>
+          <button id="orgInvCreate" class="btn primary sm">Create &amp; send invoice + contract</button>
+        </span>
+      </div>
+      <div id="orgInvBanner" class="banner"></div>
+    </div>
+
     <table>
       <thead><tr><th>Organization</th><th>Companies</th><th>Enterprise</th><th>$/mo</th><th>Status</th><th></th></tr></thead>
       <tbody id="orgsBody"><tr><td colspan="6" class="muted">Loading…</td></tr></tbody>
@@ -633,6 +654,7 @@
     <h2 id="companyBillingTitle">Billing &amp; invoices</h2>
     <div class="bill-total" id="billTotal">$0<small>/mo</small></div>
     <div class="muted small" id="billServices" style="margin:4px 0 14px;">—</div>
+    <div id="orgBilledNotice" class="banner" style="display:none;background:#0e2233;border:1px solid #21314a;color:#bcd6ee;margin:0 0 14px;padding:11px 14px;border-radius:9px;"></div>
 
     <h3 style="font-size:14px;margin:0 0 8px;">Billing contact</h3>
     <div class="grid-2">
@@ -644,7 +666,7 @@
     </div>
 
     <div class="grid-2">
-      <div>
+      <div id="cardOnFileBlock">
         <h3 style="font-size:14px;margin:0 0 8px;">Card on file <span id="cardStatus" class="pill"></span></h3>
         <div id="cardElement"></div>
         <div class="row" style="justify-content:space-between;align-items:center;margin-top:10px;">
@@ -664,19 +686,24 @@
       </div>
     </div>
 
-    <h3 style="font-size:14px;margin:16px 0 8px;">Create invoice</h3>
-    <div class="grid-2">
-      <div class="field"><span>Amount ($)</span><input id="invAmount" type="number" min="0" step="0.01" placeholder="0.00" /></div>
-      <div class="field"><span>Description</span><input id="invDesc" placeholder="e.g. Monthly service — June" /></div>
+    <div id="createInvoiceBlock">
+      <h3 style="font-size:14px;margin:16px 0 8px;">Create invoice</h3>
+      <div class="grid-2">
+        <div class="field"><span>Amount ($)</span><input id="invAmount" type="number" min="0" step="0.01" placeholder="0.00" /></div>
+        <div class="field"><span>Description</span><input id="invDesc" placeholder="e.g. Monthly service — June" /></div>
+      </div>
+      <div class="row" style="justify-content:space-between;align-items:center;margin-top:8px;flex-wrap:wrap;gap:8px;">
+        <span style="display:flex;gap:14px;flex-wrap:wrap;">
+          <label class="day-chip"><input id="invLock" type="checkbox" /> Lock account until paid (due on receipt)</label>
+          <label class="day-chip"><input id="invSend" type="checkbox" checked /> Email it to the billing contact</label>
+        </span>
+        <span style="display:flex;gap:8px;">
+          <button id="contractPreview" class="btn ghost sm">Preview contract</button>
+          <button id="invCreate" class="btn primary sm">Create &amp; send invoice + contract</button>
+        </span>
+      </div>
+      <div class="muted small" style="margin-top:6px;">When emailed, the customer must <strong>e-sign the service agreement</strong> (sign-then-pay), then pays via the <strong>Square payment link</strong> (set up Square under Pricing → Billing).</div>
     </div>
-    <div class="row" style="justify-content:space-between;align-items:center;margin-top:8px;flex-wrap:wrap;gap:8px;">
-      <label class="day-chip"><input id="invLock" type="checkbox" /> Lock account until paid (due on receipt)</label>
-      <span style="display:flex;gap:8px;">
-        <button id="contractPreview" class="btn ghost sm">Preview contract</button>
-        <button id="invCreate" class="btn primary sm">Create &amp; send invoice + contract</button>
-      </span>
-    </div>
-    <div class="muted small" style="margin-top:6px;">The invoice email includes a <strong>Square payment link</strong> (set up Square under Pricing → Billing) and the signed service agreement.</div>
 
     <div id="companyBillingBanner" class="banner"></div>
   </section>
@@ -997,6 +1024,7 @@ const setOrganization   = httpsCallable(fns, "setOrganization");
 const assignCompanyToOrg = httpsCallable(fns, "assignCompanyToOrg");
 const setOrgLock        = httpsCallable(fns, "setOrgLock");
 const createInvoice     = httpsCallable(fns, "createInvoice");
+const createOrgInvoice  = httpsCallable(fns, "createOrgInvoice");
 const markInvoicePaid   = httpsCallable(fns, "markInvoicePaid");
 const getContractPdf    = httpsCallable(fns, "getContractPdf");
 
@@ -1651,6 +1679,22 @@ async function loadBilling(companyId, companyName) {
   $("billContactName").value = c.billingContactName || "";
   $("billEmail").value = c.billingEmail || "";
 
+  // Companies that belong to an organization are billed through the org — block
+  // standalone card-on-file billing + per-company invoices to avoid double bills.
+  const notice = $("orgBilledNotice");
+  if (c.organizationId) {
+    let orgName = "its organization";
+    try { const os = await getDoc(doc(db, "organizations", c.organizationId)); if (os.exists()) orgName = os.data().name || orgName; } catch {}
+    notice.style.display = "block";
+    notice.innerHTML = `This company is billed through <strong>${esc(orgName)}</strong>. Manage its billing on the Organizations screen — individual invoices are disabled here.`;
+    $("cardOnFileBlock").style.display = "none";
+    $("createInvoiceBlock").style.display = "none";
+  } else {
+    notice.style.display = "none";
+    $("cardOnFileBlock").style.display = "";
+    $("createInvoiceBlock").style.display = "";
+  }
+
   // Mount the card field for whichever provider is active.
   const pub = await loadBillingPublic();
   $("cardElement").innerHTML = "";
@@ -1742,22 +1786,25 @@ $("invCreate").addEventListener("click", async () => {
   if (!billingCompany) return;
   const amount = Number($("invAmount").value);
   if (!isFinite(amount) || amount <= 0) { banner($("companyBillingBanner"), "Enter an amount greater than 0.", "error"); return; }
+  const send = $("invSend").checked;
   const email = $("billEmail").value.trim();
-  if (!email) { banner($("companyBillingBanner"), "Add a Billing email above first — it's saved automatically when you create the invoice.", "error"); $("billEmail").focus(); return; }
+  if (send && !email) { banner($("companyBillingBanner"), "Add a Billing email above first — or uncheck “Email it” to just create the invoice.", "error"); $("billEmail").focus(); return; }
   $("invCreate").disabled = true;
   try {
     // Persist whatever's in the billing-contact fields first, so the invoice
     // goes to the contact shown on screen (typing alone doesn't save it).
-    await setCompanyBilling({ companyId: billingCompany, billingContactName: $("billContactName").value, billingEmail: email });
+    if (email) await setCompanyBilling({ companyId: billingCompany, billingContactName: $("billContactName").value, billingEmail: email });
     const { data } = await createInvoice({
       companyId: billingCompany, amount, description: $("invDesc").value,
-      lockUntilPaid: $("invLock").checked, send: true,
+      lockUntilPaid: $("invLock").checked, send,
     });
     const locked = $("invLock").checked ? " Account locked until paid." : "";
     const sq = data.payUrl ? " Square payment link included." : " (No Square link — configure Square under Pricing → Billing.)";
-    banner($("companyBillingBanner"),
-      data.sent ? `Invoice + contract sent to ${email}.${sq}${locked}` : `Invoice created, but the email didn't send: ${data.error || "check SendGrid under Notifications"}.${locked}`,
-      data.sent ? "good" : "error");
+    let msg;
+    if (!send) msg = `Invoice created (not emailed). Re-email it any time from the Invoices list.${locked}`;
+    else if (data.sent) msg = `Invoice + sign-then-pay link sent to ${email}.${sq}${locked}`;
+    else msg = `Invoice created, but the email didn't send: ${data.error || "check SendGrid under Notifications"}.${locked}`;
+    banner($("companyBillingBanner"), msg, (!send || data.sent) ? "good" : "error");
     $("invAmount").value = ""; $("invDesc").value = ""; $("invLock").checked = false;
     await loadBilling(billingCompany);
   } catch (e) { banner($("companyBillingBanner"), e.message || "Could not create the invoice.", "error"); }
@@ -1821,12 +1868,76 @@ async function loadOrgs() {
       <td>${statusPill}</td>
       <td style="white-space:nowrap;">
         <button class="btn ghost sm orgEdit" data-id="${o.id}">Edit</button>
+        <button class="btn primary sm orgBill" data-id="${o.id}" ${count ? "" : "disabled title='Add companies first'"}>Bill</button>
         <button class="btn ${locked ? "primary" : "danger"} sm orgLock" data-id="${o.id}" data-locked="${locked ? 1 : 0}">${locked ? "Unlock" : "Lock"}</button>
       </td></tr>`;
   }).join("");
   body.querySelectorAll(".orgEdit").forEach((b) => b.addEventListener("click", () => openOrgForm(b.dataset.id)));
+  body.querySelectorAll(".orgBill").forEach((b) => b.addEventListener("click", () => openOrgInvoice(b.dataset.id)));
   body.querySelectorAll(".orgLock").forEach((b) => b.addEventListener("click", () => toggleOrgLock(b.dataset.id, b.dataset.locked !== "1")));
 }
+
+// ── Bill an organization ──────────────────────────────────────────────────
+let billingOrgId = null;
+// Compute the same itemized lines the server builds, for an on-screen preview.
+function orgInvoiceLines(org) {
+  const members = orgCompaniesAll.filter((c) => c.organizationId === org.id);
+  const ent = !!org.enterprise, per = Number(org.perCompanyFee) || 0, orgFee = Number(org.orgFee) || 0;
+  const lines = members.map((c) => ({
+    label: esc(c.name || c.id) + (ent ? " (incl. per-company fee)" : ""),
+    amount: (Number(c.planPrice) || 0) + (ent ? per : 0),
+  }));
+  if (ent && orgFee > 0) lines.push({ label: "Organization fee", amount: orgFee });
+  return lines;
+}
+function openOrgInvoice(orgId) {
+  const org = orgs.find((o) => o.id === orgId);
+  if (!org) return;
+  billingOrgId = orgId;
+  $("orgInvName").textContent = org.name || "(unnamed)";
+  const lines = orgInvoiceLines(org);
+  const total = lines.reduce((s, l) => s + l.amount, 0);
+  $("orgInvLines").innerHTML = lines.map((l) =>
+    `<tr><td style="padding:6px 0;border-bottom:1px solid #21314a;">${l.label}</td>`+
+    `<td style="padding:6px 0;border-bottom:1px solid #21314a;text-align:right;">$${l.amount}</td></tr>`).join("") +
+    `<tr><td style="padding:8px 0;font-weight:700;">Total due</td><td style="padding:8px 0;font-weight:700;text-align:right;">$${total}</td></tr>`;
+  $("orgInvDesc").value = ""; $("orgInvLock").checked = false; $("orgInvSend").checked = true;
+  $("orgInvoiceForm").classList.remove("hidden");
+  $("orgInvoiceForm").scrollIntoView({ behavior: "smooth", block: "nearest" });
+}
+$("orgInvCancel").addEventListener("click", () => $("orgInvoiceForm").classList.add("hidden"));
+$("orgContractPreview").addEventListener("click", async () => {
+  if (!billingOrgId) return;
+  $("orgContractPreview").disabled = true;
+  try {
+    const { data } = await getContractPdf({ orgId: billingOrgId });
+    const bin = atob(data.base64), bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    const url = URL.createObjectURL(new Blob([bytes], { type: "application/pdf" }));
+    window.open(url, "_blank");
+    setTimeout(() => URL.revokeObjectURL(url), 60000);
+  } catch (e) { banner($("orgInvBanner"), e.message || "Could not build the contract.", "error"); }
+  finally { $("orgContractPreview").disabled = false; }
+});
+$("orgInvCreate").addEventListener("click", async () => {
+  if (!billingOrgId) return;
+  $("orgInvCreate").disabled = true;
+  try {
+    const { data } = await createOrgInvoice({
+      orgId: billingOrgId, description: $("orgInvDesc").value,
+      lockUntilPaid: $("orgInvLock").checked, send: $("orgInvSend").checked,
+    });
+    const locked = $("orgInvLock").checked ? " Organization locked until paid." : "";
+    const sq = data.payUrl ? " Square payment link included." : " (No Square link — configure Square under Pricing → Billing.)";
+    let msg;
+    if (!$("orgInvSend").checked) msg = `Org invoice created (not emailed).${locked}`;
+    else if (data.sent) msg = `Org invoice + sign-then-pay link sent.${sq}${locked}`;
+    else msg = `Invoice created, but the email didn't send: ${data.error || "check Notifications"}.${locked}`;
+    banner($("orgInvBanner"), msg, (!$("orgInvSend").checked || data.sent) ? "good" : "error");
+    await loadOrgs();
+  } catch (e) { banner($("orgInvBanner"), e.message || "Could not create the org invoice.", "error"); }
+  finally { $("orgInvCreate").disabled = false; }
+});
 
 function renderOrgCompanyPicker(orgId) {
   const box = $("orgCompanies");
@@ -2000,11 +2111,13 @@ async function loadAR() {
     const invoices = (invRes.data && invRes.data.invoices) || [];
     const isOpen = (s) => s === "open" || s === "past_due" || s === "uncollectible";
     const outstandingBy = {};
-    invoices.forEach((i) => { if (isOpen(i.status)) outstandingBy[i.companyId] = (outstandingBy[i.companyId] || 0) + (i.amountDue || 0); });
+    let totalOutstanding = 0, mrr = 0;
+    invoices.forEach((i) => { if (isOpen(i.status)) { if (i.companyId) outstandingBy[i.companyId] = (outstandingBy[i.companyId] || 0) + (i.amountDue || 0); totalOutstanding += (i.amountDue || 0); } });
     body.innerHTML = "";
     compSnap.forEach((d) => {
       const c = d.data();
       const out = outstandingBy[d.id] || 0;
+      if (!c.billingExempt) mrr += Number(c.planPrice) || 0;
       const tr = document.createElement("tr");
       tr.innerHTML = `<td><strong>${esc(c.name)}</strong></td>`+
         `<td>${c.billingExempt ? '<span class="muted">comped</span>' : '$' + (Number(c.planPrice) || 0)}</td>`+
@@ -2014,6 +2127,16 @@ async function loadAR() {
       body.appendChild(tr);
     });
     if (!compSnap.size) body.innerHTML = `<tr><td colspan="5" class="muted">No companies yet.</td></tr>`;
+    else {
+      const tot = document.createElement("tr");
+      tot.style.borderTop = "2px solid var(--line, #21314a)";
+      tot.innerHTML = `<td><strong>Totals</strong></td>`+
+        `<td><strong>$${mrr}/mo</strong><div class="muted" style="font-size:11px;">MRR</div></td>`+
+        `<td></td>`+
+        `<td><strong>$${(totalOutstanding / 100).toFixed(2)}</strong><div class="muted" style="font-size:11px;">outstanding</div></td>`+
+        `<td></td>`;
+      body.appendChild(tot);
+    }
     const open = invoices.filter((i) => isOpen(i.status));
     invBody.innerHTML = "";
     open.forEach((i) => {
@@ -2026,6 +2149,13 @@ async function loadAR() {
       invBody.appendChild(tr);
     });
     if (!open.length) invBody.innerHTML = `<tr><td colspan="6" class="muted">Nothing outstanding. 🎉</td></tr>`;
+    else {
+      const tot = document.createElement("tr");
+      tot.style.borderTop = "2px solid var(--line, #21314a)";
+      tot.innerHTML = `<td colspan="2"><strong>Total outstanding</strong></td>`+
+        `<td><strong>$${(totalOutstanding / 100).toFixed(2)}</strong></td><td colspan="3"></td>`;
+      invBody.appendChild(tot);
+    }
   } catch (e) { body.innerHTML = `<tr><td colspan="5" class="banner error show">${esc(e.message)}</td></tr>`; }
 }
 
