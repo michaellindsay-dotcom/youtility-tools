@@ -725,10 +725,15 @@ async function getNotifyConfig(): Promise<NotifyConfig> {
 const ONLINE_WINDOW_MS = 90 * 1000;
 
 interface EmailAttachment { filename: string; content: string; type: string } // content = base64
-async function sendEmail(
+// Send an email and return why it failed (so the console can show the real
+// SendGrid error instead of a generic "couldn't send").
+async function sendEmailDetailed(
   cfg: NotifyConfig, to: string, subject: string, text: string, attachments?: EmailAttachment[]
-): Promise<boolean> {
-  if (!cfg.sendgridKey || !cfg.sendgridFrom || !to) return false;
+): Promise<{ ok: boolean; detail: string }> {
+  if (!cfg.sendgridKey || !cfg.sendgridFrom) {
+    return { ok: false, detail: "SendGrid isn't configured — add the API key and a verified From email under Notifications." };
+  }
+  if (!to) return { ok: false, detail: "No recipient email." };
   try {
     const body: Record<string, unknown> = {
       personalizations: [{ to: [{ email: to }] }],
@@ -746,12 +751,24 @@ async function sendEmail(
       headers: { Authorization: `Bearer ${cfg.sendgridKey}`, "Content-Type": "application/json" },
       body: JSON.stringify(body),
     });
-    if (!res.ok) logger.warn(`SendGrid ${res.status}: ${await res.text().catch(() => "")}`);
-    return res.ok;
-  } catch (e) {
+    if (res.ok) return { ok: true, detail: "" };
+    const txt = await res.text().catch(() => "");
+    logger.warn(`SendGrid ${res.status}: ${txt}`);
+    let detail = `SendGrid error ${res.status}`;
+    try { const j = JSON.parse(txt); if (j?.errors?.[0]?.message) detail = j.errors[0].message; } catch { /* keep generic */ }
+    if (res.status === 401 || res.status === 403) {
+      detail += " — check the API key, and that the From address is a verified sender in SendGrid.";
+    }
+    return { ok: false, detail };
+  } catch (e: any) {
     logger.error("sendEmail failed", e);
-    return false;
+    return { ok: false, detail: e?.message || "Email send failed." };
   }
+}
+async function sendEmail(
+  cfg: NotifyConfig, to: string, subject: string, text: string, attachments?: EmailAttachment[]
+): Promise<boolean> {
+  return (await sendEmailDetailed(cfg, to, subject, text, attachments)).ok;
 }
 
 async function sendSms(cfg: NotifyConfig, to: string, body: string): Promise<boolean> {
@@ -2261,7 +2278,7 @@ async function buildCompanyContractPdf(companyId: string): Promise<Buffer> {
 
 // Email an invoice (with the plan's contract attached) to the company's billing
 // contact. Shared by the emailInvoice callable and createInvoice.
-async function sendInvoiceEmail(companyId: string, invoiceId: string, includeContract: boolean): Promise<{ sent: number; contractAttached: boolean }> {
+async function sendInvoiceEmail(companyId: string, invoiceId: string, includeContract: boolean): Promise<{ sent: number; contractAttached: boolean; error: string }> {
   const inv = (await db.doc(`invoices/${invoiceId}`).get()).data();
   if (!inv || inv.companyId !== companyId) throw new HttpsError("not-found", "Invoice not found.");
   // Prefer the explicit billing contact; fall back to the company's admins.
@@ -2288,13 +2305,14 @@ async function sendInvoiceEmail(companyId: string, invoiceId: string, includeCon
     }
   }
 
-  let sent = 0;
+  let sent = 0, lastError = "";
   for (const to of emails) {
-    if (await sendEmail(cfg, to, `Invoice ${inv.number || ""} — $${amt}`,
+    const r = await sendEmailDetailed(cfg, to, `Invoice ${inv.number || ""} — $${amt}`,
       `${greeting}Your YoutilityKnock invoice ${inv.number || ""} for $${amt} is ${inv.status}.${link ? "\n\nPay online: " + link : ""}${contractNote}`,
-      attachments)) sent++;
+      attachments);
+    if (r.ok) sent++; else lastError = r.detail;
   }
-  return { sent, contractAttached: !!attachments };
+  return { sent, contractAttached: !!attachments, error: sent ? "" : lastError };
 }
 
 export const emailInvoice = onCall(async (request) => {
@@ -2343,10 +2361,10 @@ export const createInvoice = onCall(async (request) => {
     await db.doc(`companies/${companyId}`).set(
       { status: "suspended", billingHold: true, pastDueSince: now, updatedAt: now }, { merge: true });
   }
-  let emailResult = { sent: 0, contractAttached: false };
+  let emailResult = { sent: 0, contractAttached: false, error: "" };
   if (send !== false) {
     try { emailResult = await sendInvoiceEmail(companyId, ref.id, true); }
-    catch (e) { logger.warn("createInvoice send failed", e); }
+    catch (e: any) { emailResult.error = e?.message || "Email send failed."; logger.warn("createInvoice send failed", e); }
   }
   return { ok: true, invoiceId: ref.id, payUrl, ...emailResult };
 });
