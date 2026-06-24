@@ -211,6 +211,7 @@
   <nav id="tabBar" class="tabbar hidden">
     <button class="tab active" data-tab="home">🏠 Home</button>
     <button class="tab" data-tab="companies">🏢 Companies</button>
+    <button class="tab" data-tab="orgs">🏛 Organizations</button>
     <button class="tab" data-tab="demos">📨 Demo Requests</button>
     <button class="tab" data-tab="payments">💳 Pricing</button>
     <button class="tab" data-tab="receivables">📊 Receivables</button>
@@ -278,6 +279,7 @@
     <p class="muted" style="margin:-6px 0 16px;font-size:13px;">Pick a settings area to manage.</p>
     <div class="home-grid">
       <button class="home-btn" data-go="companies"><span class="hb-ico">🏢</span><b>Companies</b><small>Create companies, assign packages, toggle services, status &amp; billing</small></button>
+      <button class="home-btn" data-go="orgs"><span class="hb-ico">🏛</span><b>Organizations</b><small>Group companies under a parent, enterprise pricing &amp; org-level lock</small></button>
       <button class="home-btn" data-go="demos"><span class="hb-ico">📨</span><b>Demo Requests</b><small>Incoming demo requests from the landing page — follow up &amp; track</small></button>
       <button class="home-btn" data-go="payments"><span class="hb-ico">💳</span><b>Pricing &amp; Packages</b><small>Build tiers &amp; prices, load defaults, connect Stripe billing</small></button>
       <button class="home-btn" data-go="receivables"><span class="hb-ico">📊</span><b>Accounts Receivable</b><small>Upcoming charges, due dates, balances &amp; invoices</small></button>
@@ -331,6 +333,41 @@
       <thead><tr><th>Company</th><th>Plan</th><th>Status</th><th></th></tr></thead>
       <tbody id="companiesBody"><tr><td colspan="4" class="muted">Loading…</td></tr></tbody>
     </table>
+  </section>
+
+  <!-- Organizations (super-admin only) — parent grouping over companies -->
+  <section id="orgsCard" class="card hidden">
+    <h2>Organizations
+      <button id="newOrgBtn" class="btn primary sm" style="float:right;">+ New organization</button>
+    </h2>
+    <p class="muted" style="margin:-6px 0 14px;font-size:13px;">
+      Group multiple companies under one parent. <strong>Enterprise</strong> orgs add a per-company fee on every
+      company plus one org-wide fee, billed <strong>due on receipt</strong> — lock an org to immediately suspend
+      every company under it until they pay.
+    </p>
+    <div id="orgForm" class="hidden" style="margin-bottom:16px;">
+      <div class="grid-2">
+        <div class="field"><span>Organization name *</span><input id="orgName" /></div>
+        <div class="field"><span>Billing contact</span><input id="orgContact" placeholder="who the bill is addressed to" /></div>
+        <div class="field"><span>Billing email</span><input id="orgEmail" type="email" placeholder="billing@org.com" autocomplete="off" /></div>
+        <label class="day-chip" style="align-self:center;"><input id="orgEnterprise" type="checkbox" /> Enterprise pricing</label>
+        <div class="field"><span>Per-company fee ($/mo)</span><input id="orgPerCompany" type="number" min="0" value="500" /></div>
+        <div class="field"><span>Org-wide fee ($/mo)</span><input id="orgOrgFee" type="number" min="0" value="85" /></div>
+      </div>
+      <h3 style="font-size:13px;margin:12px 0 6px;">Companies in this organization</h3>
+      <div id="orgCompanies" class="svc-grid" style="max-height:170px;overflow:auto;flex-direction:column;gap:6px;">
+        <span class="muted small">Loading companies…</span>
+      </div>
+      <div class="row" style="justify-content:flex-end;gap:8px;margin-top:12px;">
+        <button id="orgCancel" class="btn ghost sm">Cancel</button>
+        <button id="orgSave" class="btn primary sm">Save organization</button>
+      </div>
+    </div>
+    <table>
+      <thead><tr><th>Organization</th><th>Companies</th><th>Enterprise</th><th>$/mo</th><th>Status</th><th></th></tr></thead>
+      <tbody id="orgsBody"><tr><td colspan="6" class="muted">Loading…</td></tr></tbody>
+    </table>
+    <div id="orgsBanner" class="banner"></div>
   </section>
 
   <!-- Demo requests (super-admin only) — incoming from the landing-page form -->
@@ -919,6 +956,10 @@ const getCompanyCrm   = httpsCallable(fns, "getCompanyCrm");
 const setCompanyCrm   = httpsCallable(fns, "setCompanyCrm");
 const setMyProfile    = httpsCallable(fns, "setMyProfile");
 const setCompanyBilling = httpsCallable(fns, "setCompanyBilling");
+const createOrganization = httpsCallable(fns, "createOrganization");
+const setOrganization   = httpsCallable(fns, "setOrganization");
+const assignCompanyToOrg = httpsCallable(fns, "assignCompanyToOrg");
+const setOrgLock        = httpsCallable(fns, "setOrgLock");
 
 function banner(el, msg, kind="info") {
   el.className = "banner show " + kind;
@@ -970,6 +1011,7 @@ function showLogin() {
 // ── Tabs (super-admin) ────────────────────────────────────────────────────
 const TAB_CARDS = {
   companies: ["companiesCard","schedulingCard","crmCompanyCard","rolesCard","teamsCard","rewardsCard","redemptionsCard","companyBillingCard","usersCard"],
+  orgs: ["orgsCard"],
   demos: ["demoRequestsCard"],
   payments: ["plansCard","billingCard"],
   receivables: ["arCard"],
@@ -991,7 +1033,7 @@ function renderTab() {
   });
   document.querySelectorAll("#tabBar .tab").forEach((b) => b.classList.toggle("active", b.dataset.tab === tab));
 }
-function showTab(name) { state.currentTab = name; renderTab(); window.scrollTo({ top: 0, behavior: "smooth" }); if (name === "receivables") loadAR(); if (name === "demos") loadDemoRequests(); }
+function showTab(name) { state.currentTab = name; renderTab(); window.scrollTo({ top: 0, behavior: "smooth" }); if (name === "receivables") loadAR(); if (name === "demos") loadDemoRequests(); if (name === "orgs") loadOrgs(); }
 $("tabBar").addEventListener("click", (e) => { const t = e.target.closest(".tab"); if (t) showTab(t.dataset.tab); });
 // Home hub: each big button jumps to that settings tab.
 $("consoleHome").addEventListener("click", (e) => { const b = e.target.closest(".home-btn"); if (b) showTab(b.dataset.go); });
@@ -1657,6 +1699,119 @@ $("billContactSave").addEventListener("click", async () => {
   } catch (e) { banner($("companyBillingBanner"), e.message || "Could not save billing contact.", "error"); }
   finally { $("billContactSave").disabled = false; }
 });
+
+// ── Organizations (super-admin) ───────────────────────────────────────────
+let orgs = [], orgCompaniesAll = [], editingOrgId = null;
+
+function orgMonthly(org) {
+  const members = orgCompaniesAll.filter((c) => c.organizationId === org.id);
+  const base = members.reduce((s, c) => s + (Number(c.planPrice) || 0), 0);
+  if (!org.enterprise) return base;
+  return base + members.length * (Number(org.perCompanyFee) || 0) + (Number(org.orgFee) || 0);
+}
+
+async function loadOrgs() {
+  try {
+    const [orgSnap, coSnap] = await Promise.all([
+      getDocs(collection(db, "organizations")),
+      getDocs(collection(db, "companies")),
+    ]);
+    orgs = orgSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
+    orgCompaniesAll = coSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
+  } catch (e) { banner($("orgsBanner"), e.message || "Could not load organizations.", "error"); return; }
+  const body = $("orgsBody");
+  if (!orgs.length) { body.innerHTML = `<tr><td colspan="6" class="muted">No organizations yet — create one to group companies.</td></tr>`; return; }
+  body.innerHTML = orgs.map((o) => {
+    const count = orgCompaniesAll.filter((c) => c.organizationId === o.id).length;
+    const locked = o.billingHold || o.status === "suspended";
+    const statusPill = locked ? `<span class="pill" style="color:#FECACA;">Locked</span>` : `<span class="pill" style="color:#BBF7D0;">Active</span>`;
+    return `<tr>
+      <td><strong>${esc(o.name || "(unnamed)")}</strong></td>
+      <td>${count}</td>
+      <td>${o.enterprise ? "Yes" : "—"}</td>
+      <td>$${orgMonthly(o)}</td>
+      <td>${statusPill}</td>
+      <td style="white-space:nowrap;">
+        <button class="btn ghost sm orgEdit" data-id="${o.id}">Edit</button>
+        <button class="btn ${locked ? "primary" : "danger"} sm orgLock" data-id="${o.id}" data-locked="${locked ? 1 : 0}">${locked ? "Unlock" : "Lock"}</button>
+      </td></tr>`;
+  }).join("");
+  body.querySelectorAll(".orgEdit").forEach((b) => b.addEventListener("click", () => openOrgForm(b.dataset.id)));
+  body.querySelectorAll(".orgLock").forEach((b) => b.addEventListener("click", () => toggleOrgLock(b.dataset.id, b.dataset.locked !== "1")));
+}
+
+function renderOrgCompanyPicker(orgId) {
+  const box = $("orgCompanies");
+  if (!orgCompaniesAll.length) { box.innerHTML = `<span class="muted small">No companies yet.</span>`; return; }
+  box.innerHTML = orgCompaniesAll.map((c) => {
+    const inThis = c.organizationId === orgId;
+    const inOther = c.organizationId && c.organizationId !== orgId;
+    const otherName = inOther ? (orgs.find((o) => o.id === c.organizationId)?.name || "another org") : "";
+    return `<label class="day-chip" style="justify-content:flex-start;">
+      <input type="checkbox" data-cid="${c.id}" ${inThis ? "checked" : ""}/> ${esc(c.name || c.id)}
+      ${inOther ? `<span class="muted small">— in ${esc(otherName)}</span>` : ""}
+    </label>`;
+  }).join("");
+}
+
+function openOrgForm(orgId) {
+  editingOrgId = orgId;
+  const o = orgId ? orgs.find((x) => x.id === orgId) || {} : {};
+  $("orgName").value = o.name || "";
+  $("orgContact").value = o.billingContactName || "";
+  $("orgEmail").value = o.billingEmail || "";
+  $("orgEnterprise").checked = !!o.enterprise;
+  $("orgPerCompany").value = o.perCompanyFee ?? 500;
+  $("orgOrgFee").value = o.orgFee ?? 85;
+  renderOrgCompanyPicker(orgId);
+  $("orgForm").classList.remove("hidden");
+  $("orgForm").scrollIntoView({ behavior: "smooth", block: "nearest" });
+}
+
+$("newOrgBtn").addEventListener("click", () => openOrgForm(null));
+$("orgCancel").addEventListener("click", () => $("orgForm").classList.add("hidden"));
+
+$("orgSave").addEventListener("click", async () => {
+  const name = $("orgName").value.trim();
+  if (!name) { banner($("orgsBanner"), "Organization name is required.", "error"); return; }
+  $("orgSave").disabled = true;
+  try {
+    let orgId = editingOrgId;
+    if (!orgId) { const { data } = await createOrganization({ name }); orgId = data.orgId; }
+    await setOrganization({
+      orgId, name,
+      billingContactName: $("orgContact").value,
+      billingEmail: $("orgEmail").value,
+      enterprise: $("orgEnterprise").checked,
+      perCompanyFee: Number($("orgPerCompany").value) || 0,
+      orgFee: Number($("orgOrgFee").value) || 0,
+    });
+    // Reconcile company membership from the checkboxes.
+    const boxes = Array.from($("orgCompanies").querySelectorAll("input[type=checkbox]"));
+    for (const cb of boxes) {
+      const cid = cb.dataset.cid;
+      const co = orgCompaniesAll.find((c) => c.id === cid);
+      const current = co && co.organizationId === orgId;
+      if (cb.checked && !current) await assignCompanyToOrg({ companyId: cid, orgId });
+      else if (!cb.checked && current) await assignCompanyToOrg({ companyId: cid, orgId: null });
+    }
+    $("orgForm").classList.add("hidden");
+    banner($("orgsBanner"), "Organization saved.", "good");
+    await loadOrgs();
+  } catch (e) { banner($("orgsBanner"), e.message || "Could not save organization.", "error"); }
+  finally { $("orgSave").disabled = false; }
+});
+
+async function toggleOrgLock(orgId, locked) {
+  const o = orgs.find((x) => x.id === orgId);
+  const verb = locked ? "Lock" : "Unlock";
+  if (!confirm(`${verb} "${o?.name || "this organization"}"? This ${locked ? "suspends" : "restores"} every company under it.`)) return;
+  try {
+    const { data } = await setOrgLock({ orgId, locked });
+    banner($("orgsBanner"), `${verb}ed — ${data.companies} compan${data.companies === 1 ? "y" : "ies"} updated.`, "good");
+    await loadOrgs();
+  } catch (e) { banner($("orgsBanner"), e.message || "Could not update lock.", "error"); }
+}
 
 // Printable / re-emailable invoice in a pop-out window.
 function openInvoice(inv) {

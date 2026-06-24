@@ -1800,6 +1800,94 @@ export const setCompanyBilling = onCall(async (request) => {
 });
 
 // ════════════════════════════════════════════════════════════════════════════
+// ORGANIZATIONS — a parent grouping over multiple company tenants (e.g. a
+// franchise/dealer). Enterprise billing adds a per-company fee on every company
+// in the org PLUS one org-wide fee. Locking an org for non-payment locks every
+// company under it (reusing the per-company billingHold gate). Super-admin only.
+// ════════════════════════════════════════════════════════════════════════════
+const ENTERPRISE_COMPANY_FEE = 500; // added per company in an enterprise org
+const ENTERPRISE_ORG_FEE = 85; // added once for the whole organization
+
+function requireSuper(caller: Caller) {
+  if (!caller.isSuper) throw new HttpsError("permission-denied", "Super-admins only.");
+}
+
+export const createOrganization = onCall(async (request) => {
+  const caller = await getCaller(request);
+  requireSuper(caller);
+  const name = String((request.data || {}).name || "").trim();
+  if (!name) throw new HttpsError("invalid-argument", "Organization name required.");
+  const ref = await db.collection("organizations").add({
+    name, enterprise: false,
+    perCompanyFee: ENTERPRISE_COMPANY_FEE, orgFee: ENTERPRISE_ORG_FEE,
+    billingContactName: "", billingEmail: "",
+    status: "active", billingHold: false, pastDueSince: 0,
+    createdAt: Date.now(), updatedAt: Date.now(),
+  });
+  return { ok: true, orgId: ref.id };
+});
+
+export const setOrganization = onCall(async (request) => {
+  const caller = await getCaller(request);
+  requireSuper(caller);
+  const { orgId, name, billingContactName, billingEmail, enterprise, perCompanyFee, orgFee } =
+    (request.data || {}) as {
+      orgId?: string; name?: string; billingContactName?: string; billingEmail?: string;
+      enterprise?: boolean; perCompanyFee?: number; orgFee?: number;
+    };
+  if (!orgId) throw new HttpsError("invalid-argument", "orgId required.");
+  const email = (billingEmail || "").trim();
+  if (email && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) {
+    throw new HttpsError("invalid-argument", "Enter a valid billing email.");
+  }
+  const u: Record<string, unknown> = { updatedAt: Date.now() };
+  if (typeof name === "string") u.name = name.trim();
+  if (typeof billingContactName === "string") u.billingContactName = billingContactName.trim();
+  if (typeof billingEmail === "string") u.billingEmail = email;
+  if (typeof enterprise === "boolean") u.enterprise = enterprise;
+  if (typeof perCompanyFee === "number" && isFinite(perCompanyFee)) u.perCompanyFee = Math.max(0, perCompanyFee);
+  if (typeof orgFee === "number" && isFinite(orgFee)) u.orgFee = Math.max(0, orgFee);
+  await db.doc(`organizations/${orgId}`).set(u, { merge: true });
+  return { ok: true };
+});
+
+export const assignCompanyToOrg = onCall(async (request) => {
+  const caller = await getCaller(request);
+  requireSuper(caller);
+  const { companyId, orgId } = (request.data || {}) as { companyId?: string; orgId?: string | null };
+  if (!companyId) throw new HttpsError("invalid-argument", "companyId required.");
+  if (orgId) {
+    const org = await db.doc(`organizations/${orgId}`).get();
+    if (!org.exists) throw new HttpsError("not-found", "Organization not found.");
+    await db.doc(`companies/${companyId}`).set({ organizationId: orgId, updatedAt: Date.now() }, { merge: true });
+  } else {
+    await db.doc(`companies/${companyId}`).set({ organizationId: FieldValue.delete(), updatedAt: Date.now() }, { merge: true });
+  }
+  return { ok: true };
+});
+
+// Lock (or unlock) an organization for non-payment. Locking suspends every
+// company under it — the per-company billingHold gate then shows the
+// "contact your administrator for payment" message. "Due on receipt" = lock
+// immediately; unlock once the org pays.
+export const setOrgLock = onCall(async (request) => {
+  const caller = await getCaller(request);
+  requireSuper(caller);
+  const { orgId, locked } = (request.data || {}) as { orgId?: string; locked?: boolean };
+  if (!orgId) throw new HttpsError("invalid-argument", "orgId required.");
+  const now = Date.now();
+  const orgPatch = locked
+    ? { status: "suspended", billingHold: true, pastDueSince: now, updatedAt: now }
+    : { status: "active", billingHold: false, pastDueSince: 0, updatedAt: now };
+  await db.doc(`organizations/${orgId}`).set(orgPatch, { merge: true });
+  const companies = await db.collection("companies").where("organizationId", "==", orgId).get();
+  const batch = db.batch();
+  companies.docs.forEach((d) => batch.set(d.ref, orgPatch, { merge: true }));
+  await batch.commit();
+  return { ok: true, companies: companies.size };
+});
+
+// ════════════════════════════════════════════════════════════════════════════
 // STRIPE BILLING — checkout, billing portal, and a webhook that flips a
 // company's status from the live subscription state. Keys live in config/billing
 // (set in the super-admin screen).
