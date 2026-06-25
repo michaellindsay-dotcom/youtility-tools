@@ -13,6 +13,7 @@ import Movers from "./pages/Movers";
 import Team from "./pages/Team";
 import Reports from "./pages/Reports";
 import Pitches from "./pages/Pitches";
+import PitchLibrary from "./pages/PitchLibrary";
 import Shifts from "./pages/Shifts";
 import Leaderboard from "./pages/Leaderboard";
 import Gamify from "./pages/Gamify";
@@ -64,6 +65,7 @@ export default function App() {
         <Route path="team" element={<Team />} />
         <Route path="reports" element={<RoleGate allow={["admin", "manager"]}><Reports /></RoleGate>} />
         <Route path="pitches" element={<Gated feature="pitch"><Pitches /></Gated>} />
+        <Route path="pitch-library" element={<Gated feature="pitch"><RoleGate allow={["admin", "manager"]}><PitchLibrary /></RoleGate></Gated>} />
         <Route path="shifts" element={<Gated anyOf={["planner", "analytics"]}><Shifts /></Gated>} />
         {/* Analytics merged into the Success Planner screen; keep the old path working. */}
         <Route path="stats" element={<Navigate to="/shifts" replace />} />
