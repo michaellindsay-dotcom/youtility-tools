@@ -74,6 +74,19 @@ service cloud.firestore {
       allow write: if false;
     }
 
+    // ── pitch recordings (rep audio + AI coaching) ───────────────────────
+    // A rep creates their own pitch doc; they and their managers/admins read
+    // it. The AI pipeline (Cloud Functions) writes the transcript + feedback.
+    match /pitches/{pitchId} {
+      allow read: if (isSignedIn() && resource.data.uid == request.auth.uid)
+                  || (inMyCompany(resource.data.companyId)
+                      && (isSuper() || isCompanyAdmin() || inPath(resource.data.visibilityPath)));
+      allow create: if isSignedIn()
+                    && request.resource.data.uid == request.auth.uid
+                    && request.resource.data.companyId == myCompany();
+      allow update, delete: if false; // server-side only (AI pipeline / retention)
+    }
+
     // ── reward redemptions (a rep claims a reward) ───────────────────────
     match /redemptions/{redemptionId} {
       allow read: if isSuper()

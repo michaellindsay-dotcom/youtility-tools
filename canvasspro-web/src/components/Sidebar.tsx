@@ -17,6 +17,7 @@ const links: { to: string; label: string; icon: string; end?: boolean; feat?: Fe
   { to: "/shifts", label: "Success Planner", icon: "◎", anyFeat: ["planner", "analytics"] },
   { to: "/team", label: "Team", icon: "⛩" },
   { to: "/reports", label: "Reports", icon: "📊", roles: ["admin", "manager"] },
+  { to: "/pitches", label: "My Pitches", icon: "🎙️", feat: "pitch" },
   { to: "/working", label: "Who's Working", icon: "🔥", feat: "chat" },
   { to: "/leaderboard", label: "Leaderboard", icon: "🏆", feat: "rewards" },
   { to: "/gamify", label: "Gamify", icon: "🎮", feat: "rewards" },

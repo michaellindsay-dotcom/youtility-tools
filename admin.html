@@ -521,6 +521,22 @@
       <button id="apiKeysSave" class="btn primary sm">Save provider keys</button>
     </div>
     <div id="apiKeysBanner" class="banner"></div>
+
+    <h3 style="font-size:14px;margin:22px 0 10px;">🎙️ Pitch coaching AI <span id="aiStatus" class="pill"></span></h3>
+    <p class="muted" style="margin:-4px 0 10px;font-size:12px;">
+      Transcribes rep pitch recordings (Google Speech-to-Text) and grades them (Claude). Enable the Speech-to-Text API in
+      the <span class="mono">youtilityknock</span> Google Cloud project, then paste an API key restricted to it, plus an
+      <a href="https://console.anthropic.com/" target="_blank" rel="noopener">Anthropic</a> key.
+    </p>
+    <div class="grid-2">
+      <div class="field"><span>Google Speech-to-Text API key</span><input id="sttKey" type="password" placeholder="leave blank to keep" autocomplete="off" /></div>
+      <div class="field"><span>Anthropic API key</span><input id="anthropicKey" type="password" placeholder="sk-ant-… (leave blank to keep)" autocomplete="off" /></div>
+      <div class="field"><span>Claude model</span><input id="anthropicModel" placeholder="claude-sonnet-4-6" /></div>
+    </div>
+    <div class="row" style="justify-content:flex-end;margin-top:10px;">
+      <button id="aiSave" class="btn primary sm">Save AI keys</button>
+    </div>
+    <div id="aiBanner" class="banner"></div>
   </section>
 
   <!-- Plans & pricing (super-admin only) -->
@@ -1014,6 +1030,8 @@ const setCompanySettings      = httpsCallable(fns, "setCompanySettings");
 const getIntegrationPublicConfig = httpsCallable(fns, "getIntegrationPublicConfig");
 const setIntegrationConfig    = httpsCallable(fns, "setIntegrationConfig");
 const getApiKeys      = httpsCallable(fns, "getApiKeys");
+const getAiConfig     = httpsCallable(fns, "getAiConfig");
+const setAiConfig     = httpsCallable(fns, "setAiConfig");
 const setApiKeys      = httpsCallable(fns, "setApiKeys");
 const getStripeConfig = httpsCallable(fns, "getStripeConfig");
 const setStripeConfig = httpsCallable(fns, "setStripeConfig");
@@ -1133,6 +1151,7 @@ function enterConsole() {
     loadNotifyConfig();
     loadIntegrations();
     loadApiKeys();
+    loadAiConfig();
     loadBillingConfig();
     loadCrm();
     loadMyAccount();
@@ -1546,6 +1565,28 @@ $("apiKeysSave").addEventListener("click", async () => {
     banner($("apiKeysBanner"), "Provider keys saved.", "good");
   } catch (e) { banner($("apiKeysBanner"), e.message || "Save failed.", "error"); }
   finally { $("apiKeysSave").disabled = false; }
+});
+
+// ── Pitch coaching AI keys (super-admin) ─────────────────────────────────────
+async function loadAiConfig() {
+  try {
+    const { data } = await getAiConfig();
+    const ok = data.stt.configured && data.anthropic.configured;
+    setStatusPill($("aiStatus"), ok);
+    $("sttKey").placeholder = data.stt.configured ? `${data.stt.keyMask} (leave blank to keep)` : "leave blank to keep";
+    $("anthropicKey").placeholder = data.anthropic.configured ? `${data.anthropic.keyMask} (leave blank to keep)` : "sk-ant-… (leave blank to keep)";
+    $("anthropicModel").value = data.anthropic.model || "claude-sonnet-4-6";
+  } catch (e) { banner($("aiBanner"), e.message || "Could not load AI keys.", "error"); }
+}
+$("aiSave").addEventListener("click", async () => {
+  $("aiSave").disabled = true;
+  try {
+    await setAiConfig({ googleSttKey: $("sttKey").value, anthropicKey: $("anthropicKey").value, anthropicModel: $("anthropicModel").value });
+    $("sttKey").value = ""; $("anthropicKey").value = "";
+    banner($("aiBanner"), "AI keys saved.", "good");
+    loadAiConfig();
+  } catch (e) { banner($("aiBanner"), e.message || "Save failed.", "error"); }
+  finally { $("aiSave").disabled = false; }
 });
 
 // ── Billing config (super-admin): provider selector + Stripe & Square keys ──
