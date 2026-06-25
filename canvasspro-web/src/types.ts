@@ -213,6 +213,29 @@ export interface UserStats {
   joinedAt?: number | null;
 }
 
+// A recorded door pitch + its AI coaching analysis.
+export interface Pitch {
+  id: string;
+  companyId: string;
+  uid: string; // the rep
+  userName?: string;
+  managerPath: string[];
+  visibilityPath: string[]; // [rep, ...managers] — drives downstream visibility
+  leadId?: string | null;
+  address?: string;
+  audioPath: string; // Storage path
+  durationMs?: number;
+  status: "recorded" | "analyzing" | "analyzed" | "error";
+  // Filled in by the AI pipeline (Cloud Function):
+  transcript?: string;
+  score?: number; // 0–100 overall
+  highlight?: string; // the best moment / what worked
+  lowlight?: string; // the weakest moment / what to fix
+  feedback?: string; // coaching summary for the rep
+  analyzedAt?: number;
+  createdAt: number;
+}
+
 export interface ChatMessage {
   id: string;
   companyId?: string;

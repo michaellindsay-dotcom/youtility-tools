@@ -8,6 +8,8 @@ import { useAuth } from "../auth/AuthContext";
 import { DISPOSITIONS } from "../lib/dispositions";
 import { lookupAddress, normalizeKnockstatResponse, buildEnrichment } from "../lib/knockstat";
 import { bumpStats } from "../lib/stats";
+import { hasFeature } from "../lib/features";
+import { usePitchRecorder, pitchSupported } from "../lib/pitch";
 import { validAppointmentTime } from "../lib/scheduling";
 import { useShift } from "../shift/ShiftContext";
 import type { LeadStatus, LeadEnrichment, EventType } from "../types";
@@ -111,6 +113,10 @@ export default function DispositionModal({
 }) {
   const { profile, companyId, company } = useAuth();
   const { active: onShift, startShift, recordKnock } = useShift();
+  // Pitch coaching: record the rep's pitch while this modal is open, upload on
+  // save, and let the AI pipeline grade it. Opt-in feature + one-time consent.
+  const pitch = usePitchRecorder();
+  const pitchOn = pitchSupported && hasFeature(company, "pitch") && !!profile;
   const [d, setD] = useState<Form | null>(null);
   // Two-step flow: step 1 = disposition + contact details; step 2 (only for
   // dispositions that schedule a follow-up or are sold) = appointment + photos.
@@ -156,6 +162,10 @@ export default function DispositionModal({
     if (autoEnrich && !target.enrichment) void enrich(target.address);
     // Check how far the rep is from the home.
     if (target.lat != null && target.lng != null) void checkGeo(target.lat, target.lng);
+    // Start recording the pitch (only once consent has been given).
+    if (pitchOn && pitch.consented) void pitch.start();
+    // Discard the recording if the modal closes without saving (save() uploads).
+    return () => pitch.discard();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [target]);
 
@@ -314,6 +324,12 @@ export default function DispositionModal({
       if (d.status === "appointment") void bumpStats(profile, { appointments: 1 });
       else if (d.status === "sold") void bumpStats(profile, { sales: 1 });
       void recordKnock(geo.verified); // counts toward the active shift if on-site
+
+      // Stop + upload the recorded pitch (best-effort; never blocks the save).
+      if (pitchOn) void pitch.stopAndUpload({
+        companyId: companyId as string, uid: profile.uid, userName: profile.displayName,
+        managerPath: profile.managerPath ?? [], leadId, address: d.address,
+      });
 
       // On-the-spot scheduling. Non-blocking: the lead is already saved, so a
       // scheduling failure surfaces a warning but doesn't lose the lead.
@@ -524,8 +540,22 @@ export default function DispositionModal({
             </h3>
             <div className="muted small">{step === 2 ? d.name || d.address : d.address}</div>
           </div>
+          {pitchOn && pitch.recording && (
+            <span className="pitch-rec" title="Recording your pitch for coaching">● REC</span>
+          )}
           <button className="dispo-x" onClick={onClose}>✕</button>
         </div>
+
+        {pitchOn && !pitch.consented && (
+          <div className="pitch-consent">
+            🎙️ Record this pitch for AI coaching feedback? Audio is stored for your team's review.
+            By starting, you confirm you may record this conversation where you are.
+            <div className="row" style={{ marginTop: 8, gap: 8 }}>
+              <button className="btn primary sm" onClick={() => { pitch.giveConsent(); void pitch.start(); }}>Allow &amp; record</button>
+              <span className="muted small">You can stop by closing this card.</span>
+            </div>
+          </div>
+        )}
 
         {step === 1 ? step1 : step2}
 
