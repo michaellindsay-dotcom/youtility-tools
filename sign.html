@@ -54,12 +54,13 @@
       </div>
 
       <div class="card" id="signCard">
-        <h1>Service Agreement</h1>
-        <p class="muted small">Please review and electronically sign the agreement before paying. This agreement is governed by the laws of the State of <span id="govLaw">Utah</span>.</p>
+        <h1 id="signTitle">Service Agreement</h1>
+        <div class="banner" id="roleNote" style="display:none;"></div>
+        <p class="muted small">Please review and electronically sign the agreement. This agreement is governed by the laws of the State of <span id="govLaw">Utah</span>.</p>
         <div class="terms" id="terms"></div>
-        <label class="agree"><input type="checkbox" id="agree" /> <span>I have read and agree to the YoutilityKnock Service Agreement, and I am authorized to sign on behalf of the customer named above.</span></label>
+        <label class="agree"><input type="checkbox" id="agree" /> <span id="agreeText">I have read and agree to the YoutilityKnock Service Agreement, and I am authorized to sign on behalf of the customer named above.</span></label>
         <div class="field"><span>Type your full legal name to sign</span><input type="text" id="signName" placeholder="e.g. Jordan Smith" autocomplete="name" /></div>
-        <button class="btn primary" id="signBtn" disabled>Sign &amp; continue to payment</button>
+        <button class="btn primary" id="signBtn" disabled>Sign &amp; continue</button>
         <div id="banner" class="banner"></div>
       </div>
 
@@ -90,16 +91,19 @@
       b.className = "banner show " + (kind || "");
     }
 
+    let signRole = "customer";
+
     function renderTerms(d) {
       $("terms").innerHTML = [
         `<strong>${d.product} Service Agreement</strong> — provider: ${d.provider}.`,
-        "1. Service & Plan — Provider makes the platform available under the plan and price shown on your invoice.",
-        "2. Billing — Invoices are due on receipt. Unpaid invoices may result in suspension of access; data is retained.",
-        "3. Term — Month-to-month until terminated by either party with written notice.",
-        "4. Data — Customer owns its data; Provider processes it only to deliver the service.",
-        "5. Limitation of Liability — Provider's liability is capped at the last three months of fees; no indirect/consequential damages; service provided \"as is\".",
-        `6. Governing Law — Laws of the State of ${d.governingLaw}.`,
-        "7. Acceptance — Signing below accepts these terms. The full agreement is attached to your invoice email and previewable above.",
+        "1. Service & Plan — Provider makes the platform available under the plan and price shown on the invoice.",
+        "2. Recurring Billing & Cancellation — This is a recurring monthly fee covering up to 100 users across all of the Customer's organizations; each additional user is $85/user per month. The card on file is automatically charged on a 30-day cycle based on the companies and users on the account. Cancellation requires 30 days' written notice; amounts already billed are non-refundable.",
+        "3. Billing — Invoices are due on receipt. Unpaid invoices may result in suspension of access; data is retained.",
+        "4. Term — Month-to-month until terminated as described in Section 2.",
+        "5. Data — Customer owns its data; Provider processes it only to deliver the service.",
+        "6. Limitation of Liability — Provider's liability is capped at the last three months of fees; no indirect/consequential damages; service provided \"as is\".",
+        `7. Governing Law — Laws of the State of ${d.governingLaw}.`,
+        "8. Acceptance — The Provider signs first, then the Customer. The full agreement is attached to the invoice email and previewable above.",
       ].map((t) => `<p style="margin:6px 0;">${t}</p>`).join("");
     }
 
@@ -111,6 +115,16 @@
       else { $("payBtn").style.display = "none"; $("noPay").style.display = "block"; }
     }
 
+    // Provider has signed (or the customer's turn hasn't come): show a status
+    // card with no payment button.
+    function showStatus(message) {
+      $("signCard").style.display = "none";
+      $("payCard").style.display = "block";
+      $("signedNote").textContent = message;
+      $("payBtn").style.display = "none";
+      $("noPay").style.display = "none";
+    }
+
     async function load() {
       if (!inv || !token) { showError("This link is missing its invoice details. Please use the link from your invoice email."); return; }
       let res, d;
@@ -118,6 +132,7 @@
       catch { showError("Couldn't load this invoice. Please try again."); return; }
       if (!res.ok) { showError(d && d.error ? d.error : "This invoice could not be found."); return; }
 
+      signRole = d.role || "customer";
       $("invNumber").textContent = d.number || "";
       $("billedTo").textContent = d.companyName || "";
       $("govLaw").textContent = d.governingLaw || "Utah";
@@ -128,10 +143,29 @@
         `<tr class="total"><td>Total due</td><td class="amt">${money(d.amountDue, d.currency)}</td></tr>`;
       renderTerms(d);
 
+      // Tailor the wording to who is signing.
+      if (signRole === "provider") {
+        $("signTitle").textContent = "Counter-sign as Provider";
+        $("roleNote").style.display = "block";
+        $("roleNote").className = "banner show good";
+        $("roleNote").textContent = `You are signing as ${d.provider} (the Provider). Once you sign, the customer is automatically emailed to review, sign & pay.`;
+        $("agreeText").textContent = `On behalf of ${d.provider}, I agree to and execute this Service Agreement.`;
+        $("signBtn").textContent = "Sign as Provider";
+      }
+
       $("loading").style.display = "none";
       $("content").style.display = "block";
 
-      if (d.signed) { showPay(d.payUrl, d.signedName); return; }
+      if (d.signed) {
+        if (signRole === "provider") showStatus("✔ You've counter-signed. The customer has been emailed to review, sign & pay.");
+        else showPay(d.payUrl, d.signedName);
+        return;
+      }
+      // Customer whose turn hasn't come yet (Provider hasn't signed).
+      if (signRole === "customer" && !d.ready) {
+        showStatus("This agreement is awaiting the provider's signature. You'll receive an email to sign and pay as soon as it's ready.");
+        return;
+      }
 
       const refresh = () => { $("signBtn").disabled = !($("agree").checked && $("signName").value.trim().length >= 2); };
       $("agree").addEventListener("change", refresh);
@@ -149,7 +183,8 @@
         });
         const d = await res.json();
         if (!res.ok || !d.ok) { banner(d && d.error ? d.error : "Could not record your signature.", "error"); $("signBtn").disabled = false; return; }
-        showPay(d.payUrl, d.signedName);
+        if (signRole === "provider") showStatus("✔ Signed. The customer has been emailed to review, sign & pay.");
+        else showPay(d.payUrl, d.signedName);
       } catch {
         banner("Network error — please try again.", "error");
         $("signBtn").disabled = false;

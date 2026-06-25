@@ -1928,10 +1928,10 @@ export const createOrganization = onCall(async (request) => {
 export const setOrganization = onCall(async (request) => {
   const caller = await getCaller(request);
   requireSuper(caller);
-  const { orgId, name, billingContactName, billingEmail, enterprise, perCompanyFee, orgFee } =
+  const { orgId, name, billingContactName, billingEmail, enterprise, perCompanyFee, orgFee, monthlyOverride } =
     (request.data || {}) as {
       orgId?: string; name?: string; billingContactName?: string; billingEmail?: string;
-      enterprise?: boolean; perCompanyFee?: number; orgFee?: number;
+      enterprise?: boolean; perCompanyFee?: number; orgFee?: number; monthlyOverride?: number;
     };
   if (!orgId) throw new HttpsError("invalid-argument", "orgId required.");
   const email = (billingEmail || "").trim();
@@ -1945,6 +1945,8 @@ export const setOrganization = onCall(async (request) => {
   if (typeof enterprise === "boolean") u.enterprise = enterprise;
   if (typeof perCompanyFee === "number" && isFinite(perCompanyFee)) u.perCompanyFee = Math.max(0, perCompanyFee);
   if (typeof orgFee === "number" && isFinite(orgFee)) u.orgFee = Math.max(0, orgFee);
+  // Explicit monthly that overrides the computed total (0 = use computed).
+  if (typeof monthlyOverride === "number" && isFinite(monthlyOverride)) u.monthlyOverride = Math.max(0, monthlyOverride);
   await db.doc(`organizations/${orgId}`).set(u, { merge: true });
   return { ok: true };
 });
@@ -2280,6 +2282,8 @@ function buildContractPdf(opts: {
   referenceNumber?: string;
   // When the customer has e-signed (sign-then-pay), stamp the acceptance block.
   signedName?: string; signedDateStr?: string;
+  // When the Provider (super-admin) has counter-signed, stamp that block too.
+  providerSignedName?: string; providerSignedDateStr?: string;
 }): Promise<Buffer> {
   return new Promise((resolve, reject) => {
     const doc = new PDFDocument({ margin: 56, size: "LETTER" });
@@ -2304,26 +2308,43 @@ function buildContractPdf(opts: {
       doc.text(`Enterprise terms apply: an additional $${opts.perCompanyFee} per company and $${opts.orgFee} per organization, per month.`);
     }
 
-    H("2. Billing — Due on Receipt");
+    H("2. Recurring Billing & Cancellation");
+    doc.text(`This is a recurring monthly fee. The plan covers up to 100 users across all of Customer's organizations; each additional user beyond 100 is billed at $85 per user, per month. The card on file is automatically charged on a 30-day cycle based on the companies and users on the account. Customer must provide written notice of cancellation at least 30 days in advance; charges already billed for the then-current cycle are non-refundable.`);
+
+    H("3. Billing — Due on Receipt");
     doc.text("Invoices are due on receipt. If an invoice is not paid, Provider may suspend access to the platform until payment is received. Suspension does not delete Customer data.");
 
-    H("3. Term & Termination");
-    doc.text("This Agreement continues month-to-month until terminated by either party with written notice. Provider may suspend or terminate the service for non-payment.");
+    H("4. Term & Termination");
+    doc.text("This Agreement continues month-to-month until terminated by either party with written notice as described in Section 2. Provider may suspend or terminate the service for non-payment.");
 
-    H("4. Data");
+    H("5. Data");
     doc.text(`Customer owns its data. Provider stores and processes it solely to provide the service, in accordance with the Privacy Policy at ${PRIVACY_URL}.`);
 
-    H("5. Limitation of Liability");
+    H("6. Limitation of Liability");
     doc.text(`To the maximum extent permitted by law, Provider's total liability arising out of or related to this Agreement will not exceed the amounts paid by Customer to Provider in the three (3) months preceding the claim. Neither party will be liable for indirect, incidental, special, or consequential damages. The service is provided "as is" without warranties of any kind.`);
 
-    H("6. Governing Law");
+    H("7. Governing Law");
     doc.text(`This Agreement is governed by the laws of the State of ${GOVERNING_LAW_STATE}, without regard to its conflict-of-laws rules. The parties consent to the exclusive jurisdiction of the state and federal courts located in ${GOVERNING_LAW_STATE}.`);
 
-    H("7. Acceptance");
-    doc.text("By signing below, Customer agrees to the terms of this Agreement.");
+    H("8. Acceptance");
+    doc.text("This Agreement is executed by the Provider first and then by the Customer. By signing below, each party agrees to the terms of this Agreement.");
+
+    // Provider counter-signature (executed first) — stamped if signed.
+    doc.moveDown(1.4);
+    doc.text(`Provider: ${PROVIDER_LEGAL_NAME}`);
+    doc.moveDown(1);
+    if (opts.providerSignedName) {
+      doc.fillColor("#0b2a44").text(`Signed electronically by: ${opts.providerSignedName}`).fillColor("#000");
+      doc.moveDown(0.5);
+      doc.text(`Date: ${opts.providerSignedDateStr || opts.dateStr}`);
+    } else {
+      doc.text("Signature: ________________________________");
+      doc.moveDown(0.7);
+      doc.text("Date: ________________________________");
+    }
 
     // Customer signature — stamped if e-signed, otherwise a blank line to sign.
-    doc.moveDown(1.5);
+    doc.moveDown(1.4);
     doc.text(`Customer: ${opts.companyName}`);
     doc.moveDown(1);
     if (opts.signedName) {
@@ -2338,14 +2359,6 @@ function buildContractPdf(opts: {
       doc.text("Date: ________________________________");
     }
 
-    // Provider counter-signature.
-    doc.moveDown(1.6);
-    doc.text(`Provider: ${PROVIDER_LEGAL_NAME}`);
-    doc.moveDown(1);
-    doc.text("Signature: ________________________________");
-    doc.moveDown(0.7);
-    doc.text("Date: ________________________________");
-
     doc.end();
   });
 }
@@ -2353,10 +2366,14 @@ function buildContractPdf(opts: {
 // Build the company's per-plan service agreement PDF (with enterprise terms if
 // the company is in an enterprise org). Shared by the invoice email + preview.
 // `sig` stamps the acceptance block once the customer has e-signed.
-async function buildCompanyContractPdf(
-  companyId: string,
-  opts?: { referenceNumber?: string; signedName?: string; signedAt?: number }
-): Promise<Buffer> {
+interface ContractSig {
+  referenceNumber?: string;
+  signedName?: string; signedAt?: number;
+  providerSignedName?: string; providerSignedAt?: number;
+}
+const contractDateFmt = (ms: number) => new Date(ms).toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" });
+
+async function buildCompanyContractPdf(companyId: string, opts?: ContractSig): Promise<Buffer> {
   const company = (await db.doc(`companies/${companyId}`).get()).data() || {};
   let enterprise = false, perCompanyFee = 0, orgFee = 0;
   if (company.organizationId) {
@@ -2367,17 +2384,18 @@ async function buildCompanyContractPdf(
       orgFee = Number(org.orgFee) || 0;
     }
   }
-  const dateFmt = (ms: number) => new Date(ms).toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" });
   return buildContractPdf({
     companyName: (company.name as string) || "Customer",
     contactName: ((company.billingContactName as string) || "").trim(),
     plan: (company.plan as string) || "Standard",
     monthly: Number(company.planPrice) || 0,
     enterprise, perCompanyFee, orgFee,
-    dateStr: dateFmt(Date.now()),
+    dateStr: contractDateFmt(Date.now()),
     referenceNumber: opts?.referenceNumber,
     signedName: opts?.signedName,
-    signedDateStr: opts?.signedAt ? dateFmt(opts.signedAt) : undefined,
+    signedDateStr: opts?.signedAt ? contractDateFmt(opts.signedAt) : undefined,
+    providerSignedName: opts?.providerSignedName,
+    providerSignedDateStr: opts?.providerSignedAt ? contractDateFmt(opts.providerSignedAt) : undefined,
   });
 }
 
@@ -2446,35 +2464,47 @@ async function orgAdminEmails(orgId: string): Promise<string[]> {
   return Array.from(new Set(all));
 }
 
+// The organization's monthly amount: the super-admin's explicit override
+// (organizations/{id}.monthlyOverride, in dollars) when set, otherwise the
+// computed sum of member companies + enterprise fees.
+function computeOrgMonthly(org: Record<string, any>, memberCount: number, memberPlanTotal: number): number {
+  const override = Number(org.monthlyOverride) || 0;
+  if (override > 0) return override;
+  if (!org.enterprise) return memberPlanTotal;
+  return memberPlanTotal + memberCount * (Number(org.perCompanyFee) || 0) + (Number(org.orgFee) || 0);
+}
+
 // Build the service agreement for an organization (single agreement covering the
-// whole org). Stamped with the e-signature once accepted.
-async function buildOrgContractPdf(
-  orgId: string,
-  opts?: { referenceNumber?: string; signedName?: string; signedAt?: number }
-): Promise<Buffer> {
+// whole org). Stamped with the e-signatures once accepted.
+async function buildOrgContractPdf(orgId: string, opts?: ContractSig): Promise<Buffer> {
   const org = (await db.doc(`organizations/${orgId}`).get()).data() || {};
   const members = await db.collection("companies").where("organizationId", "==", orgId).get();
   const base = members.docs.reduce((s, d) => s + (Number(d.data().planPrice) || 0), 0);
-  const enterprise = !!org.enterprise;
-  const perCompanyFee = Number(org.perCompanyFee) || 0;
-  const orgFee = Number(org.orgFee) || 0;
-  const monthly = enterprise ? base + members.size * perCompanyFee + orgFee : base;
-  const dateFmt = (ms: number) => new Date(ms).toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" });
+  const monthly = computeOrgMonthly(org, members.size, base);
   return buildContractPdf({
     companyName: (org.name as string) || "Organization",
     contactName: ((org.billingContactName as string) || "").trim(),
     plan: "Organization", monthly,
-    enterprise, perCompanyFee, orgFee,
-    dateStr: dateFmt(Date.now()),
+    enterprise: !!org.enterprise,
+    perCompanyFee: Number(org.perCompanyFee) || 0,
+    orgFee: Number(org.orgFee) || 0,
+    dateStr: contractDateFmt(Date.now()),
     referenceNumber: opts?.referenceNumber,
     signedName: opts?.signedName,
-    signedDateStr: opts?.signedAt ? dateFmt(opts.signedAt) : undefined,
+    signedDateStr: opts?.signedAt ? contractDateFmt(opts.signedAt) : undefined,
+    providerSignedName: opts?.providerSignedName,
+    providerSignedDateStr: opts?.providerSignedAt ? contractDateFmt(opts.providerSignedAt) : undefined,
   });
 }
 
-// Pick the right contract (company- or org-scoped) for an invoice.
+// Pick the right contract (company- or org-scoped) for an invoice, carrying
+// whatever signatures have been recorded so far.
 async function buildContractForInvoice(inv: Record<string, any>): Promise<Buffer> {
-  const sig = { referenceNumber: inv.number, signedName: inv.signedName, signedAt: inv.signedAt };
+  const sig: ContractSig = {
+    referenceNumber: inv.number,
+    signedName: inv.signedName, signedAt: inv.signedAt,
+    providerSignedName: inv.providerSignedName, providerSignedAt: inv.providerSignedAt,
+  };
   return inv.organizationId
     ? buildOrgContractPdf(inv.organizationId, sig)
     : buildCompanyContractPdf(inv.companyId, sig);
@@ -2509,6 +2539,74 @@ function invoiceEmailHtml(opts: {
 function escEmail(s: string): string {
   return String(s == null ? "" : s).replace(/[&<>"]/g, (c) =>
     ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c] as string));
+}
+
+// Every super-admin's email (the YoutilityKnock "Provider" side).
+async function superAdminEmails(): Promise<string[]> {
+  const snap = await db.collection("users").where("superAdmin", "==", true).get();
+  return Array.from(new Set(snap.docs
+    .map((d) => String(d.data()?.email || "").trim())
+    .filter((e) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e))));
+}
+
+// Stage 1 of two-stage signing: email the Provider (super-admins) a link to
+// counter-sign the agreement first. Once they sign, the customer is emailed.
+async function sendProviderSignEmail(invoiceId: string): Promise<{ sent: number; error: string }> {
+  const inv = (await db.doc(`invoices/${invoiceId}`).get()).data();
+  if (!inv) throw new HttpsError("not-found", "Invoice not found.");
+  const emails = await superAdminEmails();
+  if (!emails.length) return { sent: 0, error: "No super-admin email on file to sign as Provider." };
+  const cfg = await getNotifyConfig();
+  const amt = "$" + ((inv.amountDue || 0) / 100).toFixed(2);
+  const signUrl = `${APP_URL}/sign?inv=${invoiceId}&t=${inv.providerSignToken}&role=provider`;
+  const attachments: EmailAttachment[] = [];
+  try {
+    const pdf = await buildContractForInvoice({ id: invoiceId, ...inv });
+    attachments.push({ filename: `${PRODUCT_NAME}-Service-Agreement.pdf`, content: pdf.toString("base64"), type: "application/pdf" });
+  } catch (e) { logger.warn("provider contract pdf failed", e); }
+  const text = `Action needed: counter-sign the ${PRODUCT_NAME} service agreement for ${inv.companyName || ""} (invoice ${inv.number || ""}, ${amt}).`+
+    `\n\nSign as Provider here — the customer is emailed automatically once you sign:\n${signUrl}`;
+  const html = `<div style="font-family:Arial,Helvetica,sans-serif;color:#111;max-width:560px;margin:0 auto;">
+    <div style="font-size:22px;font-weight:700;color:#0EA5E9;">${PRODUCT_NAME}</div>
+    <div style="font-size:11px;color:#888;margin-bottom:16px;">a product of ${PROVIDER_LEGAL_NAME}</div>
+    <p>Counter-sign the service agreement for <strong>${escEmail(inv.companyName || "")}</strong> (invoice ${escEmail(inv.number || "")}, ${amt}).</p>
+    <p style="margin:20px 0;"><a href="${escEmail(signUrl)}" style="background:#0EA5E9;color:#fff;text-decoration:none;padding:12px 22px;border-radius:8px;font-weight:600;display:inline-block;">Sign as Provider</a></p>
+    <p style="color:#555;font-size:13px;">The customer is automatically emailed to review, sign, and pay once you've signed.</p>
+  </div>`;
+  let sent = 0, lastError = "";
+  for (const to of emails) {
+    const r = await sendEmailDetailed(cfg, to, `Sign required — agreement for ${inv.companyName || ""} (${inv.number || ""})`, text, attachments, html);
+    if (r.ok) sent++; else lastError = r.detail;
+  }
+  return { sent, error: sent ? "" : lastError };
+}
+
+// Stage 3: once both parties have signed, email the fully-executed agreement to
+// everyone — the customer/org billing contact AND every super-admin.
+async function sendSignedCopyToAllParties(invoiceId: string): Promise<void> {
+  const inv = (await db.doc(`invoices/${invoiceId}`).get()).data();
+  if (!inv) return;
+  const cfg = await getNotifyConfig();
+  const recipients = new Set<string>(await superAdminEmails());
+  if (inv.organizationId) {
+    const org = (await db.doc(`organizations/${inv.organizationId}`).get()).data() || {};
+    const e = ((org.billingEmail as string) || "").trim();
+    if (e) recipients.add(e); else (await orgAdminEmails(inv.organizationId)).forEach((x) => recipients.add(x));
+  } else {
+    const company = (await db.doc(`companies/${inv.companyId}`).get()).data() || {};
+    const e = ((company.billingEmail as string) || "").trim();
+    if (e) recipients.add(e); else (await companyAdminEmails(inv.companyId)).forEach((x) => recipients.add(x));
+  }
+  if (!recipients.size) return;
+  const attachments: EmailAttachment[] = [];
+  try {
+    const pdf = await buildContractForInvoice({ id: invoiceId, ...inv });
+    attachments.push({ filename: `${PRODUCT_NAME}-Signed-Agreement-${inv.number || invoiceId}.pdf`, content: pdf.toString("base64"), type: "application/pdf" });
+  } catch (e) { logger.warn("signed copy pdf failed", e); }
+  const text = `The ${PRODUCT_NAME} service agreement for ${inv.companyName || ""} (ref ${inv.number || ""}) is now fully signed by both parties. A copy is attached for your records.`;
+  for (const to of recipients) {
+    await sendEmailDetailed(cfg, to, `Signed agreement — ${inv.companyName || ""} (${inv.number || ""})`, text, attachments);
+  }
 }
 
 // Email an invoice (with the service agreement + a printable invoice PDF
@@ -2583,7 +2681,36 @@ export const emailInvoice = onCall(async (request) => {
   // Org invoices are super-admin only; company invoices follow the company gate.
   if (inv.organizationId) requireSuper(caller);
   else authorizeForCompany(caller, inv.companyId || cid);
+  // While the Provider hasn't counter-signed yet, re-email goes to the Provider;
+  // afterward it goes to the customer (sign-then-pay).
+  if (inv.signStage === "awaiting_provider") {
+    const r = await sendProviderSignEmail(invoiceId);
+    return { ok: true, sent: r.sent, stage: "awaiting_provider", error: r.error };
+  }
   return { ok: true, ...(await sendInvoiceEmail(invoiceId, includeContract !== false)) };
+});
+
+// Provider (super-admin) counter-signs from the console. Records the signature,
+// advances the stage, and triggers the customer's sign-then-pay email.
+export const providerSignInvoice = onCall(async (request) => {
+  const caller = await getCaller(request);
+  requireSuper(caller);
+  const { invoiceId, name } = (request.data || {}) as { invoiceId?: string; name?: string };
+  if (!invoiceId) throw new HttpsError("invalid-argument", "invoiceId required.");
+  const signerName = String(name || "").trim();
+  if (signerName.length < 2) throw new HttpsError("invalid-argument", "Enter your full name to sign.");
+  const ref = db.doc(`invoices/${invoiceId}`);
+  const inv = (await ref.get()).data();
+  if (!inv) throw new HttpsError("not-found", "Invoice not found.");
+  const now = Date.now();
+  if (!inv.providerSignedAt) {
+    await ref.set({ providerSignedAt: now, providerSignedName: signerName, signStage: "awaiting_customer", updatedAt: now }, { merge: true });
+  }
+  // Now email the customer to review, sign & pay.
+  let emailResult = { sent: 0, contractAttached: false, error: "" };
+  try { emailResult = await sendInvoiceEmail(invoiceId, true); }
+  catch (e: any) { emailResult.error = e?.message || "Email send failed."; logger.warn("providerSign customer email failed", e); }
+  return { ok: true, ...emailResult };
 });
 
 // Create a manual invoice (super-admin) and, by default, email it with the
@@ -2624,6 +2751,7 @@ export const createInvoice = onCall(async (request) => {
   const ref = db.collection("invoices").doc();
   const number = `INV-${now.toString(36).toUpperCase()}`;
   const signToken = crypto.randomBytes(16).toString("hex");
+  const providerSignToken = crypto.randomBytes(16).toString("hex");
   await ref.set({
     companyId, companyName: (company.name as string) || "",
     number,
@@ -2632,7 +2760,10 @@ export const createInvoice = onCall(async (request) => {
     created: now, dueDate: now, // due on receipt
     lines: lineItems,
     lockUntilPaid: !!lockUntilPaid,
+    // Two-stage signing: Provider counter-signs first, then the customer.
+    signStage: "awaiting_provider",
     signToken, signedAt: 0, signedName: "",
+    providerSignToken, providerSignedAt: 0, providerSignedName: "",
     updatedAt: now,
   });
   // Generate a Square hosted payment link so the customer can pay online. If
@@ -2644,12 +2775,14 @@ export const createInvoice = onCall(async (request) => {
     await db.doc(`companies/${companyId}`).set(
       { status: "suspended", billingHold: true, pastDueSince: now, updatedAt: now }, { merge: true });
   }
-  let emailResult = { sent: 0, contractAttached: false, error: "" };
+  // Stage 1: email the Provider (super-admins) to counter-sign first. The
+  // customer email goes out automatically once the Provider signs.
+  let providerEmail = { sent: 0, error: "" };
   if (send !== false) {
-    try { emailResult = await sendInvoiceEmail(ref.id, true); }
-    catch (e: any) { emailResult.error = e?.message || "Email send failed."; logger.warn("createInvoice send failed", e); }
+    try { providerEmail = await sendProviderSignEmail(ref.id); }
+    catch (e: any) { providerEmail.error = e?.message || "Email send failed."; logger.warn("createInvoice provider send failed", e); }
   }
-  return { ok: true, invoiceId: ref.id, payUrl, ...emailResult };
+  return { ok: true, invoiceId: ref.id, payUrl, stage: "awaiting_provider", sent: providerEmail.sent, error: providerEmail.error };
 });
 
 // Create an invoice for an ORGANIZATION (super-admin). Itemizes one line per
@@ -2671,29 +2804,38 @@ export const createOrgInvoice = onCall(async (request) => {
   const enterprise = !!org.enterprise;
   const perCompanyFee = Number(org.perCompanyFee) || 0;
   const orgFee = Number(org.orgFee) || 0;
+  const override = Number(org.monthlyOverride) || 0;
   const lines: Array<{ description: string; amount: number }> = [];
-  members.docs.forEach((d) => {
-    const co = d.data();
-    const base = Number(co.planPrice) || 0;
-    const each = enterprise ? base + perCompanyFee : base;
-    lines.push({ description: `${(co.name as string) || d.id}${enterprise ? " (incl. per-company fee)" : ""}`, amount: Math.round(each * 100) });
-  });
-  if (enterprise && orgFee > 0) lines.push({ description: "Organization fee", amount: Math.round(orgFee * 100) });
+  if (override > 0) {
+    // Flat organization monthly the super-admin entered — bill that exact amount.
+    lines.push({ description: "Organization monthly plan (up to 100 users)", amount: Math.round(override * 100) });
+  } else {
+    members.docs.forEach((d) => {
+      const co = d.data();
+      const base = Number(co.planPrice) || 0;
+      const each = enterprise ? base + perCompanyFee : base;
+      lines.push({ description: `${(co.name as string) || d.id}${enterprise ? " (incl. per-company fee)" : ""}`, amount: Math.round(each * 100) });
+    });
+    if (enterprise && orgFee > 0) lines.push({ description: "Organization fee", amount: Math.round(orgFee * 100) });
+  }
   if (description && description.trim()) lines.push({ description: description.trim(), amount: 0 });
   const cents = lines.reduce((s, l) => s + l.amount, 0);
-  if (cents <= 0) throw new HttpsError("invalid-argument", "Organization total is $0 — set plan prices or fees first.");
+  if (cents <= 0) throw new HttpsError("invalid-argument", "Organization total is $0 — set a monthly amount, plan prices, or fees first.");
 
   const now = Date.now();
   const ref = db.collection("invoices").doc();
   const number = `ORG-${now.toString(36).toUpperCase()}`;
   const signToken = crypto.randomBytes(16).toString("hex");
+  const providerSignToken = crypto.randomBytes(16).toString("hex");
   await ref.set({
     organizationId: orgId, companyName: (org.name as string) || "",
     number, status: "open", manual: true,
     amountDue: cents, amountPaid: 0, currency: "usd",
     created: now, dueDate: now,
     lines, lockUntilPaid: !!lockUntilPaid,
+    signStage: "awaiting_provider",
     signToken, signedAt: 0, signedName: "",
+    providerSignToken, providerSignedAt: 0, providerSignedName: "",
     updatedAt: now,
   });
   const payUrl = await squarePaymentLink(cents, `${number} — ${(org.name as string) || "Organization"}`);
@@ -2706,12 +2848,13 @@ export const createOrgInvoice = onCall(async (request) => {
     members.docs.forEach((d) => batch.set(d.ref, patch, { merge: true }));
     await batch.commit();
   }
-  let emailResult = { sent: 0, contractAttached: false, error: "" };
+  // Stage 1: Provider counter-signs first; customer email auto-sends after.
+  let providerEmail = { sent: 0, error: "" };
   if (send !== false) {
-    try { emailResult = await sendInvoiceEmail(ref.id, true); }
-    catch (e: any) { emailResult.error = e?.message || "Email send failed."; logger.warn("createOrgInvoice send failed", e); }
+    try { providerEmail = await sendProviderSignEmail(ref.id); }
+    catch (e: any) { providerEmail.error = e?.message || "Email send failed."; logger.warn("createOrgInvoice provider send failed", e); }
   }
-  return { ok: true, invoiceId: ref.id, payUrl, ...emailResult };
+  return { ok: true, invoiceId: ref.id, payUrl, stage: "awaiting_provider", sent: providerEmail.sent, error: providerEmail.error };
 });
 
 // Build the company's (or an org's) service-agreement PDF and return it (base64)
@@ -2762,13 +2905,13 @@ export const markInvoicePaid = onCall(async (request) => {
   return { ok: true };
 });
 
-// ── Sign-then-pay: public endpoint behind /sign-api/** (no Knock login). ──────
-// The customer opens /sign?inv=<id>&t=<token> from the invoice email. This
-// endpoint returns the invoice + contract for display, then records the
-// e-signature and only then hands back the pay URL.
-//   GET  /sign-api/<invoiceId>?t=<token>          → invoice summary + signed state
-//   GET  /sign-api/<invoiceId>/contract?t=<token> → the service-agreement PDF
-//   POST /sign-api/<invoiceId>  { t, name }       → record signature, return payUrl
+// ── Two-stage sign-then-pay: public endpoint behind /sign-api/** (no login). ──
+// The Provider (super-admin) counter-signs FIRST via ?role=provider using the
+// providerSignToken; that auto-emails the customer, who then signs with the
+// customer signToken before the pay link unlocks. The token decides the role.
+//   GET  /sign-api/<id>?t=<token>           → summary + role + signed state
+//   GET  /sign-api/<id>/contract?t=<token>  → the service-agreement PDF
+//   POST /sign-api/<id>  { t, name }        → record signature for that role
 export const invoiceSign = onRequest({ cors: true }, async (req, res) => {
   try {
     // Path may arrive with or without the "/sign-api" rewrite prefix.
@@ -2779,7 +2922,11 @@ export const invoiceSign = onRequest({ cors: true }, async (req, res) => {
     if (!invoiceId) { res.status(400).json({ error: "Missing invoice id." }); return; }
     const ref = db.doc(`invoices/${invoiceId}`);
     const inv = (await ref.get()).data();
-    if (!inv || !inv.signToken || token !== inv.signToken) { res.status(404).json({ error: "Invoice not found." }); return; }
+    if (!inv) { res.status(404).json({ error: "Invoice not found." }); return; }
+    // Identify the signer by which token matches.
+    const role = token && token === inv.providerSignToken ? "provider"
+      : token && token === inv.signToken ? "customer" : "";
+    if (!role) { res.status(404).json({ error: "Invoice not found." }); return; }
 
     if (wantContract) {
       const pdf = await buildContractForInvoice({ id: invoiceId, ...inv });
@@ -2789,13 +2936,22 @@ export const invoiceSign = onRequest({ cors: true }, async (req, res) => {
       return;
     }
 
+    const providerSigned = !!inv.providerSignedAt;
+    const customerSigned = !!inv.signedAt;
+    // The customer can only act once the Provider has signed.
+    const customerReady = providerSigned;
     const summary = {
-      number: inv.number || "", companyName: inv.companyName || "",
+      role, number: inv.number || "", companyName: inv.companyName || "",
       amountDue: inv.amountDue || 0, currency: inv.currency || "usd",
       status: inv.status || "open",
       lines: Array.isArray(inv.lines) ? inv.lines : [],
-      signed: !!inv.signedAt, signedName: inv.signedName || "",
-      payUrl: inv.signedAt ? (inv.payUrl || inv.hostedInvoiceUrl || "") : "",
+      providerSigned, providerSignedName: inv.providerSignedName || "",
+      customerSigned, signedName: inv.signedName || "",
+      // For the customer view: whether it's their turn yet.
+      ready: role === "provider" ? true : customerReady,
+      signed: role === "provider" ? providerSigned : customerSigned,
+      // Pay link only revealed to the customer after they've signed.
+      payUrl: (role === "customer" && customerSigned) ? (inv.payUrl || inv.hostedInvoiceUrl || "") : "",
       governingLaw: GOVERNING_LAW_STATE, provider: PROVIDER_LEGAL_NAME, product: PRODUCT_NAME,
     };
 
@@ -2805,12 +2961,29 @@ export const invoiceSign = onRequest({ cors: true }, async (req, res) => {
       const name = String(req.body?.name || "").trim();
       if (name.length < 2) { res.status(400).json({ error: "Type your full name to sign." }); return; }
       const now = Date.now();
+      const ip = (req.headers["x-forwarded-for"] as string || "").split(",")[0].trim() || req.ip || "";
+
+      if (role === "provider") {
+        if (!inv.providerSignedAt) {
+          await ref.set({ providerSignedAt: now, providerSignedName: name, providerSignedIp: ip, signStage: "awaiting_customer", updatedAt: now }, { merge: true });
+          // Provider just signed → email the customer to review, sign & pay.
+          try { await sendInvoiceEmail(invoiceId, true); }
+          catch (e) { logger.warn("provider-sign customer email failed", e); }
+        }
+        res.status(200).json({ ok: true, role, signed: true, signedName: inv.providerSignedName || name });
+        return;
+      }
+
+      // role === "customer": the Provider must have signed first.
+      if (!inv.providerSignedAt) { res.status(409).json({ error: "This agreement is awaiting the provider's signature. Please try again shortly." }); return; }
       if (!inv.signedAt) {
-        const ip = (req.headers["x-forwarded-for"] as string || "").split(",")[0].trim() || req.ip || "";
-        await ref.set({ signedAt: now, signedName: name, signedIp: ip, updatedAt: now }, { merge: true });
+        await ref.set({ signedAt: now, signedName: name, signedIp: ip, signStage: "fully_signed", updatedAt: now }, { merge: true });
+        // Fully signed → email the executed copy to all parties.
+        try { await sendSignedCopyToAllParties(invoiceId); }
+        catch (e) { logger.warn("signed-copy email failed", e); }
       }
       const payUrl = inv.payUrl || inv.hostedInvoiceUrl || "";
-      res.status(200).json({ ok: true, signed: true, signedName: inv.signedName || name, payUrl });
+      res.status(200).json({ ok: true, role, signed: true, signedName: inv.signedName || name, payUrl });
       return;
     }
     res.status(405).json({ error: "Method not allowed." });
@@ -2987,8 +3160,115 @@ export const squareSaveCardAndSubscribe = onCall(async (request) => {
   return { ok: true, brand: card.card_brand || "", last4: card.last_4 || "" };
 });
 
-// Daily Square recurring charge: re-bill each Square company when its 30-day
-// clock comes due. (Stripe companies are billed by Stripe's own subscriptions.)
+// ── Organization-level Square recurring ───────────────────────────────────
+// An org can keep its own card on file and be auto-billed its monthly (the
+// super-admin's override, else the computed total) every 30 days — the same
+// model as a company, but charged once for the whole org.
+async function orgMonthlyCents(orgId: string): Promise<number> {
+  const org = (await db.doc(`organizations/${orgId}`).get()).data() || {};
+  const members = await db.collection("companies").where("organizationId", "==", orgId).get();
+  const base = members.docs.reduce((s, d) => s + (Number(d.data().planPrice) || 0), 0);
+  return Math.round(computeOrgMonthly(org, members.size, base) * 100);
+}
+
+// Mirror an org Square payment into invoices/{paymentId} (org-scoped).
+async function mirrorSquareOrgPayment(orgId: string, payment: any): Promise<void> {
+  const orgName = (await db.doc(`organizations/${orgId}`).get()).data()?.name || "";
+  const cents = payment?.amount_money?.amount ?? 0;
+  const paid = payment?.status === "COMPLETED";
+  await db.doc(`invoices/${payment.id}`).set({
+    squarePaymentId: payment.id, organizationId: orgId, companyName: orgName,
+    number: payment.receipt_number || "",
+    status: paid ? "paid" : (payment.status || "open").toLowerCase(),
+    amountDue: cents, amountPaid: paid ? cents : 0,
+    currency: (payment?.amount_money?.currency || "USD").toLowerCase(),
+    created: payment.created_at ? new Date(payment.created_at).getTime() : Date.now(),
+    hostedInvoiceUrl: payment.receipt_url || "", invoicePdf: payment.receipt_url || "",
+    lines: [{ description: "YoutilityKnock — organization monthly", amount: cents }],
+    updatedAt: Date.now(),
+  }, { merge: true });
+}
+
+// Charge an org's saved card for its monthly; advance the 30-day clock + unlock
+// on success, mark past_due (and the whole org) on failure.
+async function runSquareChargeOrg(orgId: string): Promise<{ ok: boolean; error?: string }> {
+  const ref = db.doc(`organizations/${orgId}`);
+  const org = (await ref.get()).data() || {};
+  const cents = await orgMonthlyCents(orgId);
+  if (org.billingExempt || cents <= 0) return { ok: true };
+  const cardId = org.squareCardId as string | undefined;
+  const customerId = org.squareCustomerId as string | undefined;
+  if (!cardId || !customerId) return { ok: false, error: "No card on file." };
+  const cfg = await squareCfg();
+  try {
+    const { payment } = await squareApi(cfg, "/v2/payments", {
+      idempotency_key: crypto.randomUUID(),
+      source_id: cardId, customer_id: customerId,
+      location_id: cfg.locationId || undefined,
+      amount_money: { amount: cents, currency: "USD" },
+      note: `YoutilityKnock — ${(org.name as string) || "Organization"} monthly`,
+    });
+    await mirrorSquareOrgPayment(orgId, payment);
+    const now = Date.now();
+    const patch = { status: "active", pastDueSince: 0, billingHold: false, nextBillingAt: now + BILLING_INTERVAL_DAYS * 86400000, updatedAt: now };
+    await ref.set(patch, { merge: true });
+    // Lift any hold on member companies too.
+    const members = await db.collection("companies").where("organizationId", "==", orgId).get();
+    const batch = db.batch();
+    members.docs.forEach((d) => batch.set(d.ref, { status: "active", billingHold: false, pastDueSince: 0, updatedAt: now }, { merge: true }));
+    await batch.commit();
+    return { ok: true };
+  } catch (e: any) {
+    const patch: Record<string, unknown> = { status: "past_due", updatedAt: Date.now() };
+    if (!org.pastDueSince) patch.pastDueSince = Date.now();
+    await ref.set(patch, { merge: true });
+    return { ok: false, error: e?.message || "Charge failed." };
+  }
+}
+
+// Save an org's card on file and start its 30-day recurring billing.
+export const squareSaveOrgCardAndSubscribe = onCall(async (request) => {
+  const caller = await getCaller(request);
+  requireSuper(caller);
+  const { orgId, sourceId } = (request.data || {}) as { orgId?: string; sourceId?: string };
+  if (!orgId) throw new HttpsError("invalid-argument", "orgId required.");
+  if (!sourceId) throw new HttpsError("invalid-argument", "sourceId (card token) required.");
+  const cfg = await squareCfg();
+  const ref = db.doc(`organizations/${orgId}`);
+  const org = (await ref.get()).data();
+  if (!org) throw new HttpsError("not-found", "Organization not found.");
+
+  let customerId = org.squareCustomerId as string | undefined;
+  if (!customerId) {
+    const { customer } = await squareApi(cfg, "/v2/customers", {
+      idempotency_key: crypto.randomUUID(),
+      company_name: (org.name as string) || orgId,
+      reference_id: `org:${orgId}`,
+    });
+    customerId = customer.id;
+    await ref.set({ squareCustomerId: customerId, updatedAt: Date.now() }, { merge: true });
+  }
+  const { card } = await squareApi(cfg, "/v2/cards", {
+    idempotency_key: crypto.randomUUID(),
+    source_id: sourceId,
+    card: { customer_id: customerId },
+  });
+  const hadBilling = !!org.squareCardId && (Number(org.nextBillingAt) || 0) > Date.now();
+  await ref.set({
+    squareCardId: card.id, cardBrand: card.card_brand || "", cardLast4: card.last_4 || "",
+    updatedAt: Date.now(),
+  }, { merge: true });
+
+  const cents = await orgMonthlyCents(orgId);
+  if (!org.billingExempt && cents > 0 && !hadBilling) {
+    const r = await runSquareChargeOrg(orgId);
+    if (!r.ok) throw new HttpsError("internal", r.error || "Could not take first payment.");
+  }
+  return { ok: true, brand: card.card_brand || "", last4: card.last_4 || "" };
+});
+
+// Daily Square recurring charge: re-bill each Square company AND organization
+// when its 30-day clock comes due. (Stripe is billed by Stripe's subscriptions.)
 export const squareBillingCron = onSchedule("every 24 hours", async () => {
   const c = ((await db.doc("config/billing").get()).data() as Record<string, string>) || {};
   if (billingProvider(c) !== "square") return; // only when Square is the active gateway
@@ -2997,8 +3277,18 @@ export const squareBillingCron = onSchedule("every 24 hours", async () => {
   for (const d of snap.docs) {
     const co = d.data();
     if (co.billingExempt || co.status === "suspended") continue;
+    // A company billed through its org is charged by the org, not individually.
+    if (co.organizationId) continue;
     if ((Number(co.nextBillingAt) || 0) > now) continue; // not due yet
     await runSquareCharge(d.id);
+  }
+  // Organizations with their own card on file.
+  const orgSnap = await db.collection("organizations").where("squareCardId", ">", "").get();
+  for (const d of orgSnap.docs) {
+    const org = d.data();
+    if (org.billingExempt || org.status === "suspended") continue;
+    if ((Number(org.nextBillingAt) || 0) > now) continue;
+    await runSquareChargeOrg(d.id);
   }
 });
 
@@ -3023,6 +3313,16 @@ export const squareWebhook = onRequest({ cors: false }, async (req, res) => {
         await mirrorSquarePayment(companyId, payment);
         if (payment.status === "COMPLETED") {
           await snap.docs[0].ref.set({ status: "active", pastDueSince: 0, billingHold: false, updatedAt: Date.now() }, { merge: true });
+        }
+      } else {
+        // Not a company — it may be an organization's own card.
+        const orgSnap = await db.collection("organizations").where("squareCustomerId", "==", payment.customer_id).limit(1).get();
+        if (!orgSnap.empty) {
+          const orgId = orgSnap.docs[0].id;
+          await mirrorSquareOrgPayment(orgId, payment);
+          if (payment.status === "COMPLETED") {
+            await orgSnap.docs[0].ref.set({ status: "active", pastDueSince: 0, billingHold: false, updatedAt: Date.now() }, { merge: true });
+          }
         }
       }
     }
