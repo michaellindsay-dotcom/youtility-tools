@@ -1976,6 +1976,123 @@ export const setOrgLock = onCall(async (request) => {
 });
 
 // ════════════════════════════════════════════════════════════════════════════
+// EMPLOYEE REPORTS — a manager/admin pulls one rep's detailed activity, and can
+// "set a close" on the rep's behalf (which also credits the rep's stats).
+// Authorization: super-admin, a company admin in the same company, or a manager
+// the rep reports to (caller's uid is in the rep's managerPath).
+// ════════════════════════════════════════════════════════════════════════════
+const REPORT_CONVO = new Set(["pipeline", "appointment", "not_interested", "sold"]);
+function rStartOfToday() { const d = new Date(); d.setHours(0, 0, 0, 0); return d.getTime(); }
+function rStartOfWeek() { const d = new Date(); const day = (d.getDay() + 6) % 7; d.setDate(d.getDate() - day); d.setHours(0, 0, 0, 0); return d.getTime(); }
+function rStartOfMonth() { const d = new Date(); return new Date(d.getFullYear(), d.getMonth(), 1).getTime(); }
+const rKnock = (l: any) => l.knockedAt || l.createdAt || 0;
+const rClose = (l: any) => l.soldAt || l.updatedAt || l.knockedAt || l.createdAt || 0;
+function rFunnel(leads: any[], since: number) {
+  const knocked = leads.filter((l) => rKnock(l) >= since);
+  return {
+    doors: knocked.length,
+    conv: knocked.filter((l) => REPORT_CONVO.has(l.status)).length,
+    appt: knocked.filter((l) => l.status === "appointment").length,
+    closed: leads.filter((l) => l.status === "sold" && rClose(l) >= since).length,
+  };
+}
+
+// Server-side season-period helpers (mirror canvasspro-web/src/lib/season.ts).
+function rPeriodKey(kind: string, d = new Date()): string {
+  if (kind === "year") return `${d.getFullYear()}`;
+  if (kind === "month") return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+  const dt = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
+  const day = dt.getUTCDay() || 7;
+  dt.setUTCDate(dt.getUTCDate() + 4 - day);
+  const ys = new Date(Date.UTC(dt.getUTCFullYear(), 0, 1));
+  const wk = Math.ceil(((dt.getTime() - ys.getTime()) / 86400000 + 1) / 7);
+  return `${dt.getUTCFullYear()}-W${String(wk).padStart(2, "0")}`;
+}
+const rSeasonDocId = (uid: string, kind: string) => `${uid}__${kind[0].toUpperCase()}${rPeriodKey(kind)}`;
+
+// Credit a rep's rolled-up stats (server-side bumpStats; Admin SDK bypasses the
+// "only the user writes their own stats" rule so a manager can set a close).
+async function serverBumpStats(rep: any, deltas: Record<string, number>) {
+  const inc: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(deltas)) inc[k] = FieldValue.increment(v);
+  const base = {
+    uid: rep.uid, companyId: rep.companyId, userName: rep.displayName || rep.email || "Rep",
+    managerPath: rep.managerPath || [], ...inc, updatedAt: Date.now(),
+  };
+  await Promise.all([
+    db.doc(`userStats/${rep.uid}`).set(base, { merge: true }),
+    ...["week", "month", "year"].map((kind) =>
+      db.doc(`seasonStats/${rSeasonDocId(rep.uid, kind)}`).set(
+        { ...base, kind, period: rPeriodKey(kind), joinedAt: rep.createdAt ?? null }, { merge: true })),
+  ]);
+}
+
+// True if the caller may manage this rep (see their report / set closes).
+function canManageRep(caller: Caller, rep: any): boolean {
+  if (caller.isSuper) return true;
+  if (caller.role === "admin" && caller.companyId === rep.companyId) return true;
+  return Array.isArray(rep.managerPath) && rep.managerPath.includes(caller.uid);
+}
+
+export const getEmployeeReport = onCall(async (request) => {
+  const caller = await getCaller(request);
+  const { repUid } = (request.data || {}) as { repUid?: string };
+  if (!repUid) throw new HttpsError("invalid-argument", "repUid required.");
+  const repSnap = await db.doc(`users/${repUid}`).get();
+  const rep = repSnap.exists ? { uid: repSnap.id, ...repSnap.data() } as any : null;
+  if (!rep) throw new HttpsError("not-found", "Employee not found.");
+  if (!canManageRep(caller, rep)) throw new HttpsError("permission-denied", "Not allowed to view this employee.");
+
+  const [leadSnap, shiftSnap, statSnap] = await Promise.all([
+    db.collection("leads").where("companyId", "==", rep.companyId).where("assignedTo", "==", repUid).get(),
+    db.collection("shifts").where("companyId", "==", rep.companyId).where("userId", "==", repUid).get(),
+    db.doc(`userStats/${repUid}`).get(),
+  ]);
+  const leads = leadSnap.docs.map((d) => ({ id: d.id, ...d.data() }) as any).filter((l) => l.verified !== false);
+  const shifts = shiftSnap.docs.map((d) => d.data() as any);
+  const today = rStartOfToday(), week = rStartOfWeek(), month = rStartOfMonth();
+  const shiftHrs = (since: number) => Math.round(
+    shifts.filter((s) => (s.startAt || 0) >= since)
+      .reduce((sum, s) => sum + ((s.endAt ?? Date.now()) - (s.startAt || 0)), 0) / 3600000 * 10) / 10;
+
+  return {
+    rep: { uid: rep.uid, displayName: rep.displayName || "", email: rep.email || "", title: rep.title || rep.role || "", role: rep.role || "" },
+    funnel: { today: rFunnel(leads, today), week: rFunnel(leads, week), month: rFunnel(leads, month), all: rFunnel(leads, 0) },
+    stats: statSnap.exists ? statSnap.data() : {},
+    shiftHours: { week: shiftHrs(week), month: shiftHrs(month) },
+    leads: leads
+      .sort((a, b) => rKnock(b) - rKnock(a))
+      .slice(0, 200)
+      .map((l) => ({ id: l.id, address: l.address || "", status: l.status, knockedAt: rKnock(l), soldAt: l.soldAt || null })),
+  };
+});
+
+// Set a close (or other disposition) on a lead on a rep's behalf, and credit
+// the rep's stats. Manager/admin only, for reps they manage.
+export const setLeadStatusForRep = onCall(async (request) => {
+  const caller = await getCaller(request);
+  const { leadId, status } = (request.data || {}) as { leadId?: string; status?: string };
+  if (!leadId || !status) throw new HttpsError("invalid-argument", "leadId and status required.");
+  const leadSnap = await db.doc(`leads/${leadId}`).get();
+  const lead = leadSnap.exists ? leadSnap.data() as any : null;
+  if (!lead) throw new HttpsError("not-found", "Lead not found.");
+  const repSnap = await db.doc(`users/${lead.assignedTo}`).get();
+  const rep = repSnap.exists ? { uid: repSnap.id, ...repSnap.data() } as any : null;
+  if (!rep) throw new HttpsError("not-found", "Lead owner not found.");
+  if (!canManageRep(caller, rep)) throw new HttpsError("permission-denied", "Not allowed to manage this employee's leads.");
+
+  const now = Date.now();
+  const prev = lead.status;
+  const patch: Record<string, unknown> = { status, updatedAt: now };
+  if (status === "sold") patch.soldAt = now;
+  await db.doc(`leads/${leadId}`).set(patch, { merge: true });
+  // Credit the rep's stats for newly-set closes / appointments (don't double-count).
+  if (status === "sold" && prev !== "sold") await serverBumpStats(rep, { sales: 1 });
+  else if (status === "appointment" && prev !== "appointment") await serverBumpStats(rep, { appointments: 1 });
+  return { ok: true, repUid: rep.uid };
+});
+
+// ════════════════════════════════════════════════════════════════════════════
 // STRIPE BILLING — checkout, billing portal, and a webhook that flips a
 // company's status from the live subscription state. Keys live in config/billing
 // (set in the super-admin screen).

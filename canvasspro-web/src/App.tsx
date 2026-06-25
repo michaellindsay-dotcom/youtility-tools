@@ -11,6 +11,7 @@ import Territories from "./pages/Territories";
 import MapPage from "./pages/Map";
 import Movers from "./pages/Movers";
 import Team from "./pages/Team";
+import Reports from "./pages/Reports";
 import Shifts from "./pages/Shifts";
 import Leaderboard from "./pages/Leaderboard";
 import Gamify from "./pages/Gamify";
@@ -37,6 +38,12 @@ function Gated({
   return allowed ? <>{children}</> : <Navigate to="/" replace />;
 }
 
+// Gates a route to specific roles (e.g. managers + admins only).
+function RoleGate({ allow, children }: { allow: ("admin" | "manager")[]; children: React.ReactNode }) {
+  const { role } = useAuth();
+  return role && allow.includes(role as "admin" | "manager") ? <>{children}</> : <Navigate to="/" replace />;
+}
+
 export default function App() {
   return (
     <Routes>
@@ -54,6 +61,7 @@ export default function App() {
         <Route path="map" element={<MapPage />} />
         <Route path="movers" element={<Movers />} />
         <Route path="team" element={<Team />} />
+        <Route path="reports" element={<RoleGate allow={["admin", "manager"]}><Reports /></RoleGate>} />
         <Route path="shifts" element={<Gated anyOf={["planner", "analytics"]}><Shifts /></Gated>} />
         {/* Analytics merged into the Success Planner screen; keep the old path working. */}
         <Route path="stats" element={<Navigate to="/shifts" replace />} />

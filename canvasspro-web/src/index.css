@@ -2640,3 +2640,16 @@ body.modal-open .chat-fab-global { display: none; }
     grid-template-columns: 1fr;
   }
 }
+
+/* ── Reports (employee detail) ───────────────────────────── */
+.rep-funnel, .rep-leads { width: 100%; border-collapse: collapse; font-size: 14px; }
+.rep-funnel th, .rep-funnel td, .rep-leads th, .rep-leads td {
+  text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--line);
+  white-space: nowrap;
+}
+.rep-funnel thead th, .rep-leads thead th {
+  color: var(--ink-mid); font-size: 12px; text-transform: uppercase; letter-spacing: .4px;
+}
+.rep-funnel td:not(:first-child), .rep-funnel th:not(:first-child) { text-align: center; font-variant-numeric: tabular-nums; }
+.rep-leads td:first-child { white-space: normal; }
+.disp-dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; vertical-align: middle; margin-right: 4px; }
