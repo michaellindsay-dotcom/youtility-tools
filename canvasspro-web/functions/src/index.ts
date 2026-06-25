@@ -5,6 +5,7 @@ import * as logger from "firebase-functions/logger";
 import { initializeApp } from "firebase-admin/app";
 import { getAuth } from "firebase-admin/auth";
 import { getFirestore, FieldValue } from "firebase-admin/firestore";
+import { getStorage } from "firebase-admin/storage";
 import Stripe from "stripe";
 import * as crypto from "crypto";
 import PDFDocument from "pdfkit";
@@ -2090,6 +2091,122 @@ export const setLeadStatusForRep = onCall(async (request) => {
   if (status === "sold" && prev !== "sold") await serverBumpStats(rep, { sales: 1 });
   else if (status === "appointment" && prev !== "appointment") await serverBumpStats(rep, { appointments: 1 });
   return { ok: true, repUid: rep.uid };
+});
+
+// ════════════════════════════════════════════════════════════════════════════
+// PITCH AI — when a rep's pitch recording lands, transcribe it (Google
+// Speech-to-Text) and grade it (Claude), writing the score + coaching feedback
+// back onto the pitch doc. Keys live in config/ai (set in the super-admin
+// console). No keys → the pitch is marked "error" with a hint, nothing crashes.
+// ════════════════════════════════════════════════════════════════════════════
+async function readAiConfig() {
+  const c = ((await db.doc("config/ai").get()).data() as Record<string, string>) || {};
+  return {
+    googleSttKey: c.googleSttKey || process.env.GOOGLE_STT_KEY || "",
+    anthropicKey: c.anthropicKey || process.env.ANTHROPIC_API_KEY || "",
+    anthropicModel: c.anthropicModel || "claude-sonnet-4-6",
+  };
+}
+
+// Transcribe GCS-hosted audio via Google STT longRunningRecognize (handles
+// multi-minute clips). Returns the transcript text.
+async function transcribePitch(gsUri: string, key: string): Promise<string> {
+  const start = await fetch(`https://speech.googleapis.com/v1/speech:longrunningrecognize?key=${key}`, {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      config: { encoding: "WEBM_OPUS", sampleRateHertz: 48000, languageCode: "en-US", enableAutomaticPunctuation: true },
+      audio: { uri: gsUri },
+    }),
+  });
+  const startJson: any = await start.json().catch(() => ({}));
+  if (!start.ok) throw new Error(startJson?.error?.message || `STT start failed (${start.status})`);
+  const opName = startJson.name;
+  for (let i = 0; i < 90; i++) {
+    await new Promise((r) => setTimeout(r, 5000));
+    const op: any = await (await fetch(`https://speech.googleapis.com/v1/operations/${opName}?key=${key}`)).json().catch(() => ({}));
+    if (op.done) {
+      if (op.error) throw new Error(op.error.message);
+      return ((op.response?.results) || []).map((r: any) => r.alternatives?.[0]?.transcript || "").join(" ").trim();
+    }
+  }
+  throw new Error("Transcription timed out.");
+}
+
+// Grade a pitch transcript with Claude. Returns score + highlight/lowlight/feedback.
+async function claudeGradePitch(transcript: string, key: string, model: string): Promise<any> {
+  const prompt =
+    "You are an expert door-to-door sales coach. Analyze this rep's pitch transcript and reply with ONLY a JSON object " +
+    `(no prose) of the form {"score": <integer 0-100>, "highlight": "<the strongest moment / what worked, 1-2 sentences>", ` +
+    `"lowlight": "<the weakest moment / what to improve, 1-2 sentences>", "feedback": "<2-3 sentence coaching summary addressed to the rep>"}.\n\nTranscript:\n` +
+    transcript;
+  const res = await fetch("https://api.anthropic.com/v1/messages", {
+    method: "POST",
+    headers: { "x-api-key": key, "anthropic-version": "2023-06-01", "content-type": "application/json" },
+    body: JSON.stringify({ model, max_tokens: 700, messages: [{ role: "user", content: prompt }] }),
+  });
+  const json: any = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(json?.error?.message || `Claude failed (${res.status})`);
+  const text = (json.content?.[0]?.text as string) || "";
+  const m = text.match(/\{[\s\S]*\}/);
+  try { return m ? JSON.parse(m[0]) : { score: null, feedback: text.slice(0, 500) }; }
+  catch { return { score: null, feedback: text.slice(0, 500) }; }
+}
+
+export const onPitchCreated = onDocumentCreated(
+  { document: "pitches/{id}", timeoutSeconds: 540, memory: "512MiB" },
+  async (event) => {
+    const snap = event.data;
+    if (!snap) return;
+    const p = snap.data() as any;
+    if (p.status !== "recorded" || !p.audioPath) return;
+    const cfg = await readAiConfig();
+    if (!cfg.googleSttKey || !cfg.anthropicKey) {
+      await snap.ref.set({ status: "error", feedback: "AI isn't configured — add Google STT + Anthropic keys in the admin console." }, { merge: true });
+      return;
+    }
+    await snap.ref.set({ status: "analyzing" }, { merge: true });
+    try {
+      const bucket = getStorage().bucket();
+      const transcript = await transcribePitch(`gs://${bucket.name}/${p.audioPath}`, cfg.googleSttKey);
+      if (!transcript) {
+        await snap.ref.set({ status: "analyzed", transcript: "", feedback: "No clear speech was detected in this recording.", analyzedAt: Date.now() }, { merge: true });
+        return;
+      }
+      const a = await claudeGradePitch(transcript, cfg.anthropicKey, cfg.anthropicModel);
+      await snap.ref.set({
+        status: "analyzed", transcript,
+        score: typeof a.score === "number" ? a.score : null,
+        highlight: a.highlight || "", lowlight: a.lowlight || "", feedback: a.feedback || "",
+        analyzedAt: Date.now(),
+      }, { merge: true });
+    } catch (e: any) {
+      logger.error("onPitchCreated failed", e);
+      await snap.ref.set({ status: "error", feedback: (e?.message || "Analysis failed.").slice(0, 300) }, { merge: true });
+    }
+  }
+);
+
+// Super-admin: AI provider keys (Google STT + Anthropic) for pitch coaching.
+export const getAiConfig = onCall(async (request) => {
+  const caller = await getCaller(request);
+  requireSuper(caller);
+  const c = ((await db.doc("config/ai").get()).data() as Record<string, string>) || {};
+  return {
+    stt: { configured: !!c.googleSttKey, keyMask: mask(c.googleSttKey) },
+    anthropic: { configured: !!c.anthropicKey, keyMask: mask(c.anthropicKey), model: c.anthropicModel || "claude-sonnet-4-6" },
+  };
+});
+
+export const setAiConfig = onCall(async (request) => {
+  const caller = await getCaller(request);
+  requireSuper(caller);
+  const d = (request.data || {}) as Record<string, string>;
+  const update: Record<string, unknown> = { updatedAt: Date.now(), updatedBy: caller.uid };
+  if (typeof d.googleSttKey === "string" && d.googleSttKey.trim()) update.googleSttKey = d.googleSttKey.trim();
+  if (typeof d.anthropicKey === "string" && d.anthropicKey.trim()) update.anthropicKey = d.anthropicKey.trim();
+  if (typeof d.anthropicModel === "string" && d.anthropicModel.trim()) update.anthropicModel = d.anthropicModel.trim();
+  await db.doc("config/ai").set(update, { merge: true });
+  return { ok: true };
 });
 
 // ════════════════════════════════════════════════════════════════════════════
