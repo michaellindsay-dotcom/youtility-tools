@@ -2680,3 +2680,14 @@ body.modal-open .chat-fab-global { display: none; }
 .pitch-cards { display: grid; gap: 14px; }
 .pitch-card-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
 .pitch-addr { font-weight: 600; margin-top: 2px; }
+
+/* ── Leaderboard top-3 by metric ─────────────────────────── */
+.lb-tops { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 14px; margin-bottom: 18px; }
+.lb-top { padding: 14px 16px; }
+.lb-top-h { font-family: "Space Grotesk", sans-serif; font-size: 14px; margin: 0 0 10px; }
+.lb-top-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 7px; }
+.lb-top-list li { display: grid; grid-template-columns: 24px 1fr auto; align-items: center; gap: 8px; font-size: 14px; }
+.lb-top-list li.me { background: rgba(14,165,233,.12); border-radius: var(--radius-sm); margin: -2px -6px; padding: 2px 6px; }
+.lb-top-medal { text-align: center; }
+.lb-top-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lb-top-val { font-family: "Space Grotesk", sans-serif; font-weight: 700; font-variant-numeric: tabular-nums; }

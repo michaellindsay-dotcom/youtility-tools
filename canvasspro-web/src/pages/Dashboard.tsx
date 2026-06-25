@@ -54,6 +54,9 @@ export default function Dashboard() {
   const showPlanner = hasFeature(company, "planner"); // Success Planner is an optional service
   const [leads, setLeads] = useState<Lead[]>([]);
   const [shifts, setShifts] = useState<Shift[]>([]);
+  // Sold leads are fetched separately (all-time, not just this month) so a deal
+  // closed in a window still counts even if the lead was created earlier.
+  const [soldLeads, setSoldLeads] = useState<Lead[]>([]);
   const [top, setTop] = useState<UserStats[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -69,6 +72,19 @@ export default function Dashboard() {
         const shiftSnap = await getDocs(
           query(collection(db, "shifts"), where("userId", "==", profile.uid), where("startAt", ">=", monthStart))
         );
+        // All of the rep's sold leads (small set) — closes are counted from
+        // these by close date, regardless of when the lead was first created.
+        // Resilient: if the composite index isn't built yet, fall back to the
+        // month-windowed leads so the dashboard still renders.
+        let soldDocs;
+        try {
+          soldDocs = (await getDocs(
+            query(collection(db, "leads"), where("assignedTo", "==", profile.uid), where("status", "==", "sold"))
+          )).docs;
+        } catch (err) {
+          console.warn("sold leads query failed (index building?)", err);
+          soldDocs = leadSnap.docs.filter((d) => (d.data() as Lead).status === "sold");
+        }
         // Top performers — scope to what this user is allowed to read (admins
         // see the company; everyone else their downstream), matching the
         // userStats rules. No orderBy here so we don't depend on the
@@ -99,6 +115,7 @@ export default function Dashboard() {
         if (cancelled) return;
         setLeads(leadSnap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<Lead, "id">) })));
         setShifts(shiftSnap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<Shift, "id">) })));
+        setSoldLeads(soldDocs.map((d) => ({ id: d.id, ...(d.data() as Omit<Lead, "id">) })));
         topRows.sort((a, b) => (b.sales ?? 0) - (a.sales ?? 0));
         setTop(topRows.slice(0, 5));
         setLoading(false);
@@ -115,12 +132,13 @@ export default function Dashboard() {
   const f = useMemo(() => {
     const windows = { today: startOfToday(), week: startOfWeek(), month: startOfMonth() };
     const verified = leads.filter((l) => l.verified !== false);
+    const verifiedSold = soldLeads.filter((l) => l.verified !== false);
     const since = (ts: number): Funnel => {
       // Doors / conversations / appts are counted by when the door was knocked.
       const ls = verified.filter((l) => knockTime(l) >= ts);
-      // Closes are counted by their close date, so a deal set earlier but sold
-      // in this window still lands here (independent of the knock date).
-      const closed = verified.filter((l) => l.status === "sold" && closeTime(l) >= ts).length;
+      // Closes are counted by their close date from the full sold-lead set, so a
+      // deal set earlier (even a prior month) but sold in this window counts.
+      const closed = verifiedSold.filter((l) => closeTime(l) >= ts).length;
       const hrs =
         shifts
           .filter((s) => s.startAt >= ts)
@@ -135,7 +153,7 @@ export default function Dashboard() {
       };
     };
     return { today: since(windows.today), week: since(windows.week), month: since(windows.month) };
-  }, [leads, shifts]);
+  }, [leads, shifts, soldLeads]);
 
   // Success planner — what they need to hit goals at current pace.
   const plan = useMemo(() => {
