@@ -10,6 +10,11 @@ import Stripe from "stripe";
 import * as crypto from "crypto";
 import PDFDocument from "pdfkit";
 import * as nodemailer from "nodemailer";
+import { spawn } from "child_process";
+import ffmpegPath from "ffmpeg-static";
+import { tmpdir } from "os";
+import { join } from "path";
+import { writeFile, readFile, unlink } from "fs/promises";
 
 initializeApp();
 const db = getFirestore();
@@ -2134,14 +2139,35 @@ async function readAiConfig() {
   };
 }
 
-// Transcribe GCS-hosted audio via Google STT longRunningRecognize (handles
-// multi-minute clips). Returns the transcript text.
-async function transcribePitch(gsUri: string, key: string): Promise<string> {
+// Transcode any browser recording (webm/opus on Android/desktop, mp4/aac on
+// iOS) to mono 16 kHz FLAC, which Google STT reliably ingests. ffmpeg also lets
+// us send the audio inline so the transcriber never reads from the bucket.
+async function transcodeToFlac(input: Buffer, ext: string): Promise<Buffer> {
+  const stamp = `${Date.now()}_${Math.random().toString(36).slice(2)}`;
+  const inPath = join(tmpdir(), `pitch_${stamp}.${ext || "webm"}`);
+  const outPath = join(tmpdir(), `pitch_${stamp}.flac`);
+  await writeFile(inPath, input);
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const p = spawn(ffmpegPath as string, ["-y", "-i", inPath, "-ac", "1", "-ar", "16000", "-c:a", "flac", outPath]);
+      let err = "";
+      p.stderr.on("data", (d) => { err += d.toString(); });
+      p.on("error", reject);
+      p.on("close", (code) => (code === 0 ? resolve() : reject(new Error("ffmpeg failed: " + err.slice(-300)))));
+    });
+    return await readFile(outPath);
+  } finally {
+    await Promise.all([unlink(inPath).catch(() => {}), unlink(outPath).catch(() => {})]);
+  }
+}
+
+// Transcribe FLAC audio (sent inline) via Google STT longRunningRecognize.
+async function transcribeFlac(flacB64: string, key: string): Promise<string> {
   const start = await fetch(`https://speech.googleapis.com/v1/speech:longrunningrecognize?key=${key}`, {
     method: "POST", headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
-      config: { encoding: "WEBM_OPUS", sampleRateHertz: 48000, languageCode: "en-US", enableAutomaticPunctuation: true },
-      audio: { uri: gsUri },
+      config: { encoding: "FLAC", sampleRateHertz: 16000, languageCode: "en-US", enableAutomaticPunctuation: true },
+      audio: { content: flacB64 },
     }),
   });
   const startJson: any = await start.json().catch(() => ({}));
@@ -2192,8 +2218,12 @@ export const onPitchCreated = onDocumentCreated(
     }
     await snap.ref.set({ status: "analyzing" }, { merge: true });
     try {
-      const bucket = getStorage().bucket();
-      const transcript = await transcribePitch(`gs://${bucket.name}/${p.audioPath}`, cfg.googleSttKey);
+      // Download with the function's own credentials (no "anonymous" GCS read),
+      // transcode to FLAC (handles iOS mp4/aac + Android webm), transcribe inline.
+      const [audio] = await getStorage().bucket().file(p.audioPath).download();
+      const ext = (p.audioPath.split(".").pop() || "webm").toLowerCase();
+      const flac = await transcodeToFlac(audio, ext);
+      const transcript = await transcribeFlac(flac.toString("base64"), cfg.googleSttKey);
       if (!transcript) {
         await snap.ref.set({ status: "analyzed", transcript: "", feedback: "No clear speech was detected in this recording.", analyzedAt: Date.now() }, { merge: true });
         return;
