@@ -30,9 +30,9 @@ export default function Leaderboard() {
     // All-time reads userStats; seasons read the matching seasonStats bucket.
     const coll = view === "alltime" ? "userStats" : "seasonStats";
     const base = collection(db, coll);
+    // Company-wide: every rep sees the whole company's leaderboard.
     const filters = [where("companyId", "==", companyId)] as ReturnType<typeof where>[];
     if (view !== "alltime") filters.push(where("period", "==", periodKey(view)));
-    if (role !== "admin") filters.push(where("managerPath", "array-contains", profile.uid));
     return onSnapshot(
       query(base, ...filters),
       (snap) => setRows(snap.docs.map((d) => ({ uid: d.id, ...(d.data() as Omit<UserStats, "uid">) }))),
@@ -78,12 +78,24 @@ export default function Leaderboard() {
   const podium = ranked.slice(0, 3);
   const rest = ranked.slice(3);
 
+  // Top 3 for each raw metric (independent of the points formula).
+  const metricTops = useMemo(() => {
+    const merged = selfRow && !rows.some((r) => r.uid === selfRow.uid) ? [...rows, selfRow] : rows;
+    const top3 = (key: "doorsKnocked" | "appointments" | "sales") =>
+      merged
+        .map((r) => ({ uid: r.uid, name: r.userName || r.uid, value: (r[key] as number) ?? 0 }))
+        .filter((r) => r.value > 0)
+        .sort((a, b) => b.value - a.value)
+        .slice(0, 3);
+    return { doors: top3("doorsKnocked"), appts: top3("appointments"), sales: top3("sales") };
+  }, [rows, selfRow]);
+
   return (
     <div className="page-body lb">
       <div className="page-head row">
         <div>
           <h1>🏆 Leaderboard</h1>
-          <p className="page-sub">{role === "admin" ? "Company" : "Your team"} · {SEASON_LABEL[view]}</p>
+          <p className="page-sub">Company · {SEASON_LABEL[view]}</p>
         </div>
         <button className="chip-btn" onClick={() => setShowHow((v) => !v)}>
           {showHow ? "Hide" : "How points work"}
@@ -96,6 +108,12 @@ export default function Leaderboard() {
             {SEASON_LABEL[v]}
           </button>
         ))}
+      </div>
+
+      <div className="lb-tops">
+        <MetricTop title="🚪 Doors knocked" rows={metricTops.doors} mine={profile?.uid} />
+        <MetricTop title="📅 Appointments" rows={metricTops.appts} mine={profile?.uid} />
+        <MetricTop title="💰 Sales" rows={metricTops.sales} mine={profile?.uid} />
       </div>
 
       {view === "year" && (
@@ -130,6 +148,28 @@ export default function Leaderboard() {
         <div className="lb-list">
           {rest.map((r) => <RankRow key={r.uid} r={r} you={r.uid === profile?.uid} leaderScore={leaderScore} />)}
         </div>
+      )}
+    </div>
+  );
+}
+
+function MetricTop({ title, rows, mine }: { title: string; rows: { uid: string; name: string; value: number }[]; mine?: string }) {
+  const medal = ["🥇", "🥈", "🥉"];
+  return (
+    <div className="card lb-top">
+      <h3 className="lb-top-h">{title}</h3>
+      {rows.length === 0 ? (
+        <p className="muted small" style={{ margin: 0 }}>No activity yet.</p>
+      ) : (
+        <ol className="lb-top-list">
+          {rows.map((r, i) => (
+            <li key={r.uid} className={r.uid === mine ? "me" : ""}>
+              <span className="lb-top-medal">{medal[i]}</span>
+              <span className="lb-top-name">{r.uid === mine ? "You" : r.name}</span>
+              <span className="lb-top-val">{r.value}</span>
+            </li>
+          ))}
+        </ol>
       )}
     </div>
   );

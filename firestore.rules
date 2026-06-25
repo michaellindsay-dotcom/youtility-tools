@@ -140,23 +140,23 @@ service cloud.firestore {
                     && (isSuper() || isCompanyAdmin() || inPath(resource.data.visibilityPath));
     }
 
-    // ── user stats (downstream-scoped via managerPath) ───────────────────
+    // ── user stats ───────────────────────────────────────────────────────
+    // Any company member can read their company's stats (powers a company-wide
+    // leaderboard everyone can see). A user writes only their own.
     match /userStats/{userId} {
       allow read: if isSuper()
                   || (isSignedIn() && request.auth.uid == userId)
-                  || (isSignedIn() && resource.data.companyId == myCompany()
-                      && (isCompanyAdmin() || request.auth.uid in resource.data.managerPath));
+                  || (isSignedIn() && resource.data.companyId == myCompany());
       allow write: if isSignedIn()
                    && (request.auth.uid == userId || isSuper());
     }
 
     // ── season stats (resetting week/month/year buckets) ─────────────────
-    // Same downstream visibility as userStats; a user writes only their own.
+    // Company-wide readable (leaderboard); a user writes only their own.
     match /seasonStats/{docId} {
       allow read: if isSuper()
                   || (isSignedIn() && resource.data.uid == request.auth.uid)
-                  || (isSignedIn() && resource.data.companyId == myCompany()
-                      && (isCompanyAdmin() || request.auth.uid in resource.data.managerPath));
+                  || (isSignedIn() && resource.data.companyId == myCompany());
       allow write: if isSignedIn()
                    && (request.resource.data.uid == request.auth.uid || isSuper());
     }
