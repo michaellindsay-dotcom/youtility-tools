@@ -2044,10 +2044,11 @@ export const getEmployeeReport = onCall(async (request) => {
   if (!rep) throw new HttpsError("not-found", "Employee not found.");
   if (!canManageRep(caller, rep)) throw new HttpsError("permission-denied", "Not allowed to view this employee.");
 
-  const [leadSnap, shiftSnap, statSnap] = await Promise.all([
+  const [leadSnap, shiftSnap, statSnap, pitchSnap] = await Promise.all([
     db.collection("leads").where("companyId", "==", rep.companyId).where("assignedTo", "==", repUid).get(),
     db.collection("shifts").where("companyId", "==", rep.companyId).where("userId", "==", repUid).get(),
     db.doc(`userStats/${repUid}`).get(),
+    db.collection("pitches").where("companyId", "==", rep.companyId).where("uid", "==", repUid).get(),
   ]);
   const leads = leadSnap.docs.map((d) => ({ id: d.id, ...d.data() }) as any).filter((l) => l.verified !== false);
   const shifts = shiftSnap.docs.map((d) => d.data() as any);
@@ -2055,6 +2056,18 @@ export const getEmployeeReport = onCall(async (request) => {
   const shiftHrs = (since: number) => Math.round(
     shifts.filter((s) => (s.startAt || 0) >= since)
       .reduce((sum, s) => sum + ((s.endAt ?? Date.now()) - (s.startAt || 0)), 0) / 3600000 * 10) / 10;
+
+  const pitches = pitchSnap.docs
+    .map((d) => ({ id: d.id, ...d.data() }) as any)
+    .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0))
+    .map((p) => ({
+      id: p.id, address: p.address || "", createdAt: p.createdAt || 0, status: p.status,
+      score: typeof p.score === "number" ? p.score : null,
+      highlight: p.highlight || "", lowlight: p.lowlight || "", feedback: p.feedback || "",
+    }));
+  const scored = pitches.filter((p) => typeof p.score === "number");
+  const best = scored.length ? scored.reduce((a, b) => (b.score! > a.score! ? b : a)) : null;
+  const worst = scored.length ? scored.reduce((a, b) => (b.score! < a.score! ? b : a)) : null;
 
   return {
     rep: { uid: rep.uid, displayName: rep.displayName || "", email: rep.email || "", title: rep.title || rep.role || "", role: rep.role || "" },
@@ -2065,6 +2078,7 @@ export const getEmployeeReport = onCall(async (request) => {
       .sort((a, b) => rKnock(b) - rKnock(a))
       .slice(0, 200)
       .map((l) => ({ id: l.id, address: l.address || "", status: l.status, knockedAt: rKnock(l), soldAt: l.soldAt || null })),
+    pitches: { recent: pitches.slice(0, 30), best, worst, count: pitches.length },
   };
 });
 

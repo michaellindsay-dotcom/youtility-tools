@@ -2666,3 +2666,17 @@ body.modal-open .chat-fab-global { display: none; }
   background: rgba(14,165,233,.1); border: 1px solid rgba(56,189,248,.3);
   border-radius: var(--radius-sm); color: var(--ink-mid);
 }
+
+/* ── Pitch coaching feedback (Reports + My Pitches) ──────── */
+.pitch-block { background: rgba(255,255,255,.03); border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; }
+.pitch-block-head { display: flex; align-items: center; justify-content: space-between; }
+.pitch-tag { font-weight: 600; font-size: 13px; }
+.pitch-score, .pitch-score-big { font-family: "Space Grotesk", sans-serif; font-weight: 700; }
+.pitch-score-big { font-size: 26px; }
+.pitch-score small, .pitch-score-big small { font-size: 12px; color: var(--ink-mid); font-weight: 500; }
+.pitch-fb { font-size: 14px; margin: 8px 0 6px; }
+.pitch-hi, .pitch-lo { font-size: 13px; margin: 4px 0; color: var(--ink-mid); }
+.pitch-list { margin: 8px 0 0; padding-left: 16px; display: grid; gap: 6px; font-size: 13px; }
+.pitch-cards { display: grid; gap: 14px; }
+.pitch-card-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.pitch-addr { font-weight: 600; margin-top: 2px; }

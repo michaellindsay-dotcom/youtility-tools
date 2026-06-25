@@ -8,12 +8,31 @@ import type { UserProfile } from "../types";
 
 interface Funnel { doors: number; conv: number; appt: number; closed: number }
 interface ReportLead { id: string; address: string; status: string; knockedAt: number; soldAt: number | null }
+interface PitchItem {
+  id: string; address: string; createdAt: number; status: string;
+  score: number | null; highlight: string; lowlight: string; feedback: string;
+}
 interface Report {
   rep: { uid: string; displayName: string; email: string; title: string; role: string };
   funnel: { today: Funnel; week: Funnel; month: Funnel; all: Funnel };
   stats: { sales?: number; appointments?: number; doorsKnocked?: number; shifts?: number };
   shiftHours: { week: number; month: number };
   leads: ReportLead[];
+  pitches?: { recent: PitchItem[]; best: PitchItem | null; worst: PitchItem | null; count: number };
+}
+
+function PitchBlock({ tag, p }: { tag: string; p: PitchItem }) {
+  return (
+    <div className="pitch-block">
+      <div className="pitch-block-head">
+        <span className="pitch-tag">{tag}</span>
+        <span className="pitch-score">{p.score ?? "—"}<small>/100</small></span>
+      </div>
+      {p.feedback && <p className="pitch-fb">{p.feedback}</p>}
+      {p.highlight && <p className="pitch-hi"><strong>✅ Best:</strong> {p.highlight}</p>}
+      {p.lowlight && <p className="pitch-lo"><strong>⚠️ Fix:</strong> {p.lowlight}</p>}
+    </div>
+  );
 }
 
 const fmtDate = (ms: number) => ms ? new Date(ms).toLocaleDateString("en-US", { month: "short", day: "numeric" }) : "—";
@@ -122,6 +141,30 @@ export default function Reports() {
               {" "}{report.shiftHours.week}h on shift this week
             </div>
           </div>
+
+          {report.pitches && report.pitches.count > 0 && (
+            <div className="card" style={{ marginTop: 16 }}>
+              <h3 className="section-h" style={{ marginTop: 0 }}>🎙️ Pitch coaching <span className="muted small">({report.pitches.count} recorded)</span></h3>
+              <div className="dash-2col">
+                {report.pitches.best && <PitchBlock tag="🏆 Best pitch" p={report.pitches.best} />}
+                {report.pitches.worst && report.pitches.worst.id !== report.pitches.best?.id && <PitchBlock tag="📉 Needs work" p={report.pitches.worst} />}
+              </div>
+              <details style={{ marginTop: 12 }}>
+                <summary className="muted small" style={{ cursor: "pointer" }}>All recordings ({report.pitches.recent.length})</summary>
+                <ul className="pitch-list">
+                  {report.pitches.recent.map((p) => (
+                    <li key={p.id}>
+                      <span className="muted small">{fmtDate(p.createdAt)}{p.address ? ` · ${p.address}` : ""}</span>
+                      {" — "}
+                      {p.status === "analyzed" ? <><strong>{p.score ?? "—"}/100</strong>{p.feedback ? ` · ${p.feedback}` : ""}</>
+                        : p.status === "error" ? <span className="muted">{p.feedback || "analysis failed"}</span>
+                        : <span className="muted">{p.status}…</span>}
+                    </li>
+                  ))}
+                </ul>
+              </details>
+            </div>
+          )}
 
           <div className="card" style={{ marginTop: 16 }}>
             <h3 className="section-h" style={{ marginTop: 0 }}>Leads <span className="muted small">({report.leads.length})</span></h3>
