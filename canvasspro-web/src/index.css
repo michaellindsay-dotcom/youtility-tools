@@ -2691,3 +2691,14 @@ body.modal-open .chat-fab-global { display: none; }
 .lb-top-medal { text-align: center; }
 .lb-top-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .lb-top-val { font-family: "Space Grotesk", sans-serif; font-weight: 700; font-variant-numeric: tabular-nums; }
+
+/* ── Pitch Library (training, ranked) ────────────────────── */
+.pl-list { display: grid; gap: 12px; }
+.pl-row { display: grid; grid-template-columns: 48px 1fr; gap: 12px; align-items: start; padding: 14px 16px; }
+.pl-rank { font-family: "Space Grotesk", sans-serif; font-weight: 800; font-size: 20px; text-align: center; }
+.pl-top { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.pl-name { font-weight: 600; }
+.pl-score, .pl-rank.ps-hi, .pl-rank.ps-mid, .pl-rank.ps-lo { font-variant-numeric: tabular-nums; }
+.pl-score { font-family: "Space Grotesk", sans-serif; font-weight: 700; }
+.pl-score small { font-size: 11px; color: var(--ink-mid); font-weight: 500; }
+.ps-hi { color: #34D399; } .ps-mid { color: #F59E0B; } .ps-lo { color: #F87171; }

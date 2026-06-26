@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { collection, onSnapshot, query, where } from "firebase/firestore";
-import { db } from "../firebase";
+import { ref as storageRef, getDownloadURL } from "firebase/storage";
+import { db, storage } from "../firebase";
 import { useAuth } from "../auth/AuthContext";
 import type { Pitch } from "../types";
 
@@ -9,6 +10,17 @@ const fmtDate = (ms: number) => ms ? new Date(ms).toLocaleString("en-US", { mont
 export default function Pitches() {
   const { profile } = useAuth();
   const [pitches, setPitches] = useState<Pitch[]>([]);
+  const [urls, setUrls] = useState<Record<string, string>>({});
+
+  const play = async (p: Pitch) => {
+    if (urls[p.id]) return;
+    try {
+      const url = await getDownloadURL(storageRef(storage, p.audioPath));
+      setUrls((u) => ({ ...u, [p.id]: url }));
+    } catch (e) {
+      console.error("pitch audio url", e);
+    }
+  };
 
   useEffect(() => {
     if (!profile) return;
@@ -50,6 +62,9 @@ export default function Pitches() {
                   {p.feedback && <p className="pitch-fb">{p.feedback}</p>}
                   {p.highlight && <p className="pitch-hi"><strong>✅ What worked:</strong> {p.highlight}</p>}
                   {p.lowlight && <p className="pitch-lo"><strong>⚠️ To improve:</strong> {p.lowlight}</p>}
+                  {urls[p.id]
+                    ? <audio controls preload="none" src={urls[p.id]} style={{ width: "100%", marginTop: 8 }} />
+                    : <button className="btn sm" style={{ marginTop: 8 }} onClick={() => play(p)}>▶️ Play recording</button>}
                 </>
               ) : p.status === "error" ? (
                 <p className="muted small">{p.feedback || "Couldn't analyze this recording."}</p>
