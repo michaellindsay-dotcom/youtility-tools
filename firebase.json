@@ -8,6 +8,7 @@
       { "source": "/demo-request", "function": "requestDemo" },
       { "source": "/stripe/**", "function": "stripeWebhook" },
       { "source": "/square/**", "function": "squareWebhook" },
+      { "source": "/sign-api/**", "function": "invoiceSign" },
       { "source": "/crm/**", "function": "crmApi" },
       { "source": "/app/**", "destination": "/app/index.html" }
     ],

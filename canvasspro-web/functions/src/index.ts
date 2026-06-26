@@ -421,6 +421,13 @@ export const createUser = onCall(async (request) => {
 // ───────────────────────────────────────────────────────────────────────────
 const APP_URL = process.env.APP_URL || "https://youtilityknock.web.app";
 
+// ── Provider / legal identity (used on contracts + invoices) ─────────────────
+// YoutilityKnock is the product; Sun Service is the legal entity behind it.
+const PROVIDER_LEGAL_NAME = "Sun Service";
+const PRODUCT_NAME = "YoutilityKnock";
+const PRIVACY_URL = "https://youtilityknock.web.app/privacy";
+const GOVERNING_LAW_STATE = "Utah";
+
 export const inviteUser = onCall(async (request) => {
   const caller = await getCaller(request);
   const { companyId, name, email, tier, roleId, title, teamId, managerId } =
@@ -750,7 +757,7 @@ interface EmailAttachment { filename: string; content: string; type: string } //
 // Send an email and return why it failed (so the console can show the real
 // SendGrid error instead of a generic "couldn't send").
 async function sendEmailDetailed(
-  cfg: NotifyConfig, to: string, subject: string, text: string, attachments?: EmailAttachment[]
+  cfg: NotifyConfig, to: string, subject: string, text: string, attachments?: EmailAttachment[], html?: string
 ): Promise<{ ok: boolean; detail: string }> {
   if (!to) return { ok: false, detail: "No recipient email." };
 
@@ -765,7 +772,7 @@ async function sendEmailDetailed(
       });
       await transporter.sendMail({
         from: cfg.smtpFromName ? `"${cfg.smtpFromName}" <${cfg.smtpFrom}>` : cfg.smtpFrom,
-        to, subject, text,
+        to, subject, text, ...(html ? { html } : {}),
         attachments: attachments?.map((a) => ({
           filename: a.filename, content: Buffer.from(a.content, "base64"), contentType: a.type,
         })),
@@ -785,7 +792,10 @@ async function sendEmailDetailed(
       personalizations: [{ to: [{ email: to }] }],
       from: { email: cfg.sendgridFrom, name: cfg.sendgridFromName },
       subject,
-      content: [{ type: "text/plain", value: text }],
+      // SendGrid requires text/plain before text/html when both are present.
+      content: html
+        ? [{ type: "text/plain", value: text }, { type: "text/html", value: html }]
+        : [{ type: "text/plain", value: text }],
     };
     if (attachments && attachments.length) {
       body.attachments = attachments.map((a) => ({
@@ -1924,10 +1934,10 @@ export const createOrganization = onCall(async (request) => {
 export const setOrganization = onCall(async (request) => {
   const caller = await getCaller(request);
   requireSuper(caller);
-  const { orgId, name, billingContactName, billingEmail, enterprise, perCompanyFee, orgFee } =
+  const { orgId, name, billingContactName, billingEmail, enterprise, perCompanyFee, orgFee, monthlyOverride } =
     (request.data || {}) as {
       orgId?: string; name?: string; billingContactName?: string; billingEmail?: string;
-      enterprise?: boolean; perCompanyFee?: number; orgFee?: number;
+      enterprise?: boolean; perCompanyFee?: number; orgFee?: number; monthlyOverride?: number;
     };
   if (!orgId) throw new HttpsError("invalid-argument", "orgId required.");
   const email = (billingEmail || "").trim();
@@ -1941,6 +1951,8 @@ export const setOrganization = onCall(async (request) => {
   if (typeof enterprise === "boolean") u.enterprise = enterprise;
   if (typeof perCompanyFee === "number" && isFinite(perCompanyFee)) u.perCompanyFee = Math.max(0, perCompanyFee);
   if (typeof orgFee === "number" && isFinite(orgFee)) u.orgFee = Math.max(0, orgFee);
+  // Explicit monthly that overrides the computed total (0 = use computed).
+  if (typeof monthlyOverride === "number" && isFinite(monthlyOverride)) u.monthlyOverride = Math.max(0, monthlyOverride);
   await db.doc(`organizations/${orgId}`).set(u, { merge: true });
   return { ok: true };
 });
@@ -2545,6 +2557,11 @@ export const saveCardAndSubscribe = onCall(async (request) => {
 function buildContractPdf(opts: {
   companyName: string; contactName: string; plan: string; monthly: number;
   enterprise: boolean; perCompanyFee: number; orgFee: number; dateStr: string;
+  referenceNumber?: string;
+  // When the customer has e-signed (sign-then-pay), stamp the acceptance block.
+  signedName?: string; signedDateStr?: string;
+  // When the Provider (super-admin) has counter-signed, stamp that block too.
+  providerSignedName?: string; providerSignedDateStr?: string;
 }): Promise<Buffer> {
   return new Promise((resolve, reject) => {
     const doc = new PDFDocument({ margin: 56, size: "LETTER" });
@@ -2554,39 +2571,71 @@ function buildContractPdf(opts: {
     doc.on("error", reject);
 
     const H = (t: string) => doc.moveDown(0.7).fontSize(13).fillColor("#0b2a44").text(t).moveDown(0.15).fillColor("#000").fontSize(11);
-    doc.fontSize(20).fillColor("#0EA5E9").text("YoutilityKnock");
+    doc.fontSize(20).fillColor("#0EA5E9").text(PRODUCT_NAME);
+    doc.fillColor("#666").fontSize(9).text(`a product of ${PROVIDER_LEGAL_NAME}`);
     doc.fillColor("#000").fontSize(14).text("Service Agreement").moveDown(0.2);
     doc.fontSize(10).fillColor("#555").text(`Date: ${opts.dateStr}`);
+    if (opts.referenceNumber) doc.fillColor("#555").text(`Agreement ref: ${opts.referenceNumber}`);
     doc.fillColor("#000").fontSize(11).moveDown(0.8);
 
-    doc.text(`This Service Agreement ("Agreement") is between Sun Service, provider of YoutilityKnock ("Provider"), and ${opts.companyName} ("Customer").`);
+    doc.text(`This Service Agreement ("Agreement") is between ${PROVIDER_LEGAL_NAME}, provider of the ${PRODUCT_NAME} platform ("Provider"), and ${opts.companyName} ("Customer").`);
 
     H("1. Service & Plan");
-    doc.text(`Provider will make the YoutilityKnock platform available to Customer under the "${opts.plan}" plan at $${opts.monthly} per month.`);
+    doc.text(`Provider will make the ${PRODUCT_NAME} platform available to Customer under the "${opts.plan}" plan at $${opts.monthly} per month.`);
     if (opts.enterprise) {
       doc.text(`Enterprise terms apply: an additional $${opts.perCompanyFee} per company and $${opts.orgFee} per organization, per month.`);
     }
 
-    H("2. Billing — Due on Receipt");
+    H("2. Recurring Billing & Cancellation");
+    doc.text(`This is a recurring monthly fee. The plan covers up to 100 users across all of Customer's organizations; each additional user beyond 100 is billed at $85 per user, per month. The card on file is automatically charged on a 30-day cycle based on the companies and users on the account. Customer must provide written notice of cancellation at least 30 days in advance; charges already billed for the then-current cycle are non-refundable.`);
+
+    H("3. Billing — Due on Receipt");
     doc.text("Invoices are due on receipt. If an invoice is not paid, Provider may suspend access to the platform until payment is received. Suspension does not delete Customer data.");
 
-    H("3. Term & Termination");
-    doc.text("This Agreement continues month-to-month until terminated by either party with written notice. Provider may suspend or terminate the service for non-payment.");
+    H("4. Term & Termination");
+    doc.text("This Agreement continues month-to-month until terminated by either party with written notice as described in Section 2. Provider may suspend or terminate the service for non-payment.");
 
-    H("4. Data");
-    doc.text("Customer owns its data. Provider stores and processes it solely to provide the service, in accordance with the Privacy Policy at https://youtilityknock.web.app/privacy.");
+    H("5. Data");
+    doc.text(`Customer owns its data. Provider stores and processes it solely to provide the service, in accordance with the Privacy Policy at ${PRIVACY_URL}.`);
 
-    H("5. Acceptance");
-    doc.text("By signing below, Customer agrees to the terms of this Agreement.");
+    H("6. Limitation of Liability");
+    doc.text(`To the maximum extent permitted by law, Provider's total liability arising out of or related to this Agreement will not exceed the amounts paid by Customer to Provider in the three (3) months preceding the claim. Neither party will be liable for indirect, incidental, special, or consequential damages. The service is provided "as is" without warranties of any kind.`);
 
-    doc.moveDown(2);
-    doc.text(`Customer: ${opts.companyName}`);
+    H("7. Governing Law");
+    doc.text(`This Agreement is governed by the laws of the State of ${GOVERNING_LAW_STATE}, without regard to its conflict-of-laws rules. The parties consent to the exclusive jurisdiction of the state and federal courts located in ${GOVERNING_LAW_STATE}.`);
+
+    H("8. Acceptance");
+    doc.text("This Agreement is executed by the Provider first and then by the Customer. By signing below, each party agrees to the terms of this Agreement.");
+
+    // Provider counter-signature (executed first) — stamped if signed.
     doc.moveDown(1.4);
-    doc.text("Signature: ________________________________");
-    doc.moveDown(0.8);
-    doc.text(`Printed name: ${opts.contactName || "________________________________"}`);
-    doc.moveDown(0.8);
-    doc.text("Date: ________________________________");
+    doc.text(`Provider: ${PROVIDER_LEGAL_NAME}`);
+    doc.moveDown(1);
+    if (opts.providerSignedName) {
+      doc.fillColor("#0b2a44").text(`Signed electronically by: ${opts.providerSignedName}`).fillColor("#000");
+      doc.moveDown(0.5);
+      doc.text(`Date: ${opts.providerSignedDateStr || opts.dateStr}`);
+    } else {
+      doc.text("Signature: ________________________________");
+      doc.moveDown(0.7);
+      doc.text("Date: ________________________________");
+    }
+
+    // Customer signature — stamped if e-signed, otherwise a blank line to sign.
+    doc.moveDown(1.4);
+    doc.text(`Customer: ${opts.companyName}`);
+    doc.moveDown(1);
+    if (opts.signedName) {
+      doc.fillColor("#0b2a44").text(`Signed electronically by: ${opts.signedName}`).fillColor("#000");
+      doc.moveDown(0.5);
+      doc.text(`Date: ${opts.signedDateStr || opts.dateStr}`);
+    } else {
+      doc.text("Signature: ________________________________");
+      doc.moveDown(0.7);
+      doc.text(`Printed name: ${opts.contactName || "________________________________"}`);
+      doc.moveDown(0.7);
+      doc.text("Date: ________________________________");
+    }
 
     doc.end();
   });
@@ -2594,7 +2643,15 @@ function buildContractPdf(opts: {
 
 // Build the company's per-plan service agreement PDF (with enterprise terms if
 // the company is in an enterprise org). Shared by the invoice email + preview.
-async function buildCompanyContractPdf(companyId: string): Promise<Buffer> {
+// `sig` stamps the acceptance block once the customer has e-signed.
+interface ContractSig {
+  referenceNumber?: string;
+  signedName?: string; signedAt?: number;
+  providerSignedName?: string; providerSignedAt?: number;
+}
+const contractDateFmt = (ms: number) => new Date(ms).toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" });
+
+async function buildCompanyContractPdf(companyId: string, opts?: ContractSig): Promise<Buffer> {
   const company = (await db.doc(`companies/${companyId}`).get()).data() || {};
   let enterprise = false, perCompanyFee = 0, orgFee = 0;
   if (company.organizationId) {
@@ -2611,56 +2668,327 @@ async function buildCompanyContractPdf(companyId: string): Promise<Buffer> {
     plan: (company.plan as string) || "Standard",
     monthly: Number(company.planPrice) || 0,
     enterprise, perCompanyFee, orgFee,
-    dateStr: new Date().toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" }),
+    dateStr: contractDateFmt(Date.now()),
+    referenceNumber: opts?.referenceNumber,
+    signedName: opts?.signedName,
+    signedDateStr: opts?.signedAt ? contractDateFmt(opts.signedAt) : undefined,
+    providerSignedName: opts?.providerSignedName,
+    providerSignedDateStr: opts?.providerSignedAt ? contractDateFmt(opts.providerSignedAt) : undefined,
   });
 }
 
-// Email an invoice (with the plan's contract attached) to the company's billing
-// contact. Shared by the emailInvoice callable and createInvoice.
-async function sendInvoiceEmail(companyId: string, invoiceId: string, includeContract: boolean): Promise<{ sent: number; contractAttached: boolean; error: string }> {
-  const inv = (await db.doc(`invoices/${invoiceId}`).get()).data();
-  if (!inv || inv.companyId !== companyId) throw new HttpsError("not-found", "Invoice not found.");
-  // Prefer the explicit billing contact; fall back to the company's admins.
-  const company = (await db.doc(`companies/${companyId}`).get()).data() || {};
-  const billingEmail = ((company.billingEmail as string) || "").trim();
-  const contactName = ((company.billingContactName as string) || "").trim();
-  const emails = billingEmail ? [billingEmail] : await companyAdminEmails(companyId);
-  if (!emails.length) throw new HttpsError("failed-precondition", "No billing email or company admin email on file.");
-  const cfg = await getNotifyConfig();
-  const amt = ((inv.amountDue || 0) / 100).toFixed(2);
-  const link = inv.payUrl || inv.hostedInvoiceUrl || inv.invoicePdf || "";
-  const greeting = contactName ? `Hi ${contactName},\n\n` : "";
+// Build a printable invoice PDF (itemized) for attaching to the invoice email
+// and downloading from the console. Works for company- and org-scoped invoices.
+function buildInvoicePdf(inv: Record<string, any>): Promise<Buffer> {
+  return new Promise((resolve, reject) => {
+    const doc = new PDFDocument({ margin: 56, size: "LETTER" });
+    const chunks: Buffer[] = [];
+    doc.on("data", (c: Buffer) => chunks.push(c));
+    doc.on("end", () => resolve(Buffer.concat(chunks)));
+    doc.on("error", reject);
 
-  // Attach the plan's service agreement for signature (default on).
-  let attachments: EmailAttachment[] | undefined;
-  let contractNote = "";
+    const money = (cents: number) => "$" + ((cents || 0) / 100).toFixed(2);
+    const dateFmt = (ms: number) => new Date(ms).toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" });
+
+    doc.fontSize(20).fillColor("#0EA5E9").text(PRODUCT_NAME);
+    doc.fillColor("#666").fontSize(9).text(`a product of ${PROVIDER_LEGAL_NAME}`).moveDown(0.6);
+    doc.fillColor("#000").fontSize(16).text("Invoice");
+    doc.fontSize(10).fillColor("#555")
+      .text(`Invoice #: ${inv.number || inv.id || ""}`)
+      .text(`Date: ${dateFmt(inv.created || Date.now())}`)
+      .text(`Due: ${inv.dueDate ? dateFmt(inv.dueDate) : "On receipt"}`)
+      .text(`Status: ${inv.status || "open"}`);
+    doc.moveDown(0.6).fillColor("#000").fontSize(11)
+      .text(`From: ${PROVIDER_LEGAL_NAME}`)
+      .text(`Bill to: ${inv.companyName || ""}`);
+
+    // Line-items table.
+    doc.moveDown(1);
+    const left = doc.page.margins.left;
+    const right = doc.page.width - doc.page.margins.right;
+    const amountX = right - 90;
+    doc.fontSize(10).fillColor("#0b2a44")
+      .text("Description", left, doc.y, { continued: true })
+      .text("Amount", amountX, doc.y, { align: "right" });
+    doc.moveTo(left, doc.y + 2).lineTo(right, doc.y + 2).strokeColor("#cccccc").stroke();
+    doc.moveDown(0.5).fillColor("#000").fontSize(11);
+    const lines: Array<{ description?: string; amount?: number }> =
+      Array.isArray(inv.lines) && inv.lines.length ? inv.lines : [{ description: "Subscription", amount: inv.amountDue }];
+    for (const l of lines) {
+      const y = doc.y;
+      doc.text(l.description || "Item", left, y, { width: amountX - left - 10 });
+      doc.text(money(l.amount || 0), amountX, y, { align: "right" });
+      doc.moveDown(0.3);
+    }
+    doc.moveTo(left, doc.y + 2).lineTo(right, doc.y + 2).strokeColor("#cccccc").stroke();
+    doc.moveDown(0.5);
+    const ty = doc.y;
+    doc.fontSize(13).fillColor("#0b2a44")
+      .text("Total due", left, ty, { continued: true })
+      .text(money(inv.amountDue || 0), amountX, ty, { align: "right" });
+
+    doc.moveDown(2).fontSize(9).fillColor("#888")
+      .text("Payment is due on receipt. A signed service agreement is required before payment.");
+    doc.end();
+  });
+}
+
+// All admin emails across the companies in an organization (org-invoice fallback
+// when no org billing email is on file).
+async function orgAdminEmails(orgId: string): Promise<string[]> {
+  const members = await db.collection("companies").where("organizationId", "==", orgId).get();
+  const all: string[] = [];
+  for (const d of members.docs) all.push(...await companyAdminEmails(d.id));
+  return Array.from(new Set(all));
+}
+
+// The organization's monthly amount: the super-admin's explicit override
+// (organizations/{id}.monthlyOverride, in dollars) when set, otherwise the
+// computed sum of member companies + enterprise fees.
+function computeOrgMonthly(org: Record<string, any>, memberCount: number, memberPlanTotal: number): number {
+  const override = Number(org.monthlyOverride) || 0;
+  if (override > 0) return override;
+  if (!org.enterprise) return memberPlanTotal;
+  return memberPlanTotal + memberCount * (Number(org.perCompanyFee) || 0) + (Number(org.orgFee) || 0);
+}
+
+// Build the service agreement for an organization (single agreement covering the
+// whole org). Stamped with the e-signatures once accepted.
+async function buildOrgContractPdf(orgId: string, opts?: ContractSig): Promise<Buffer> {
+  const org = (await db.doc(`organizations/${orgId}`).get()).data() || {};
+  const members = await db.collection("companies").where("organizationId", "==", orgId).get();
+  const base = members.docs.reduce((s, d) => s + (Number(d.data().planPrice) || 0), 0);
+  const monthly = computeOrgMonthly(org, members.size, base);
+  return buildContractPdf({
+    companyName: (org.name as string) || "Organization",
+    contactName: ((org.billingContactName as string) || "").trim(),
+    plan: "Organization", monthly,
+    enterprise: !!org.enterprise,
+    perCompanyFee: Number(org.perCompanyFee) || 0,
+    orgFee: Number(org.orgFee) || 0,
+    dateStr: contractDateFmt(Date.now()),
+    referenceNumber: opts?.referenceNumber,
+    signedName: opts?.signedName,
+    signedDateStr: opts?.signedAt ? contractDateFmt(opts.signedAt) : undefined,
+    providerSignedName: opts?.providerSignedName,
+    providerSignedDateStr: opts?.providerSignedAt ? contractDateFmt(opts.providerSignedAt) : undefined,
+  });
+}
+
+// Pick the right contract (company- or org-scoped) for an invoice, carrying
+// whatever signatures have been recorded so far.
+async function buildContractForInvoice(inv: Record<string, any>): Promise<Buffer> {
+  const sig: ContractSig = {
+    referenceNumber: inv.number,
+    signedName: inv.signedName, signedAt: inv.signedAt,
+    providerSignedName: inv.providerSignedName, providerSignedAt: inv.providerSignedAt,
+  };
+  return inv.organizationId
+    ? buildOrgContractPdf(inv.organizationId, sig)
+    : buildCompanyContractPdf(inv.companyId, sig);
+}
+
+// HTML body for an invoice email. The primary CTA routes through the sign page
+// (sign-then-pay) so the customer e-signs the agreement before paying.
+function invoiceEmailHtml(opts: {
+  contactName: string; billedTo: string; number: string; amt: string;
+  lines: Array<{ description?: string; amount?: number }>; signUrl: string;
+}): string {
+  const money = (c: number) => "$" + ((c || 0) / 100).toFixed(2);
+  const rows = opts.lines.map((l) =>
+    `<tr><td style="padding:6px 0;border-bottom:1px solid #eee;">${escEmail(l.description || "Item")}</td>`+
+    `<td style="padding:6px 0;border-bottom:1px solid #eee;text-align:right;">${money(l.amount || 0)}</td></tr>`).join("");
+  return `<div style="font-family:Arial,Helvetica,sans-serif;color:#111;max-width:560px;margin:0 auto;">
+    <div style="font-size:22px;font-weight:700;color:#0EA5E9;">${PRODUCT_NAME}</div>
+    <div style="font-size:11px;color:#888;margin-bottom:16px;">a product of ${PROVIDER_LEGAL_NAME}</div>
+    <p>${opts.contactName ? "Hi " + escEmail(opts.contactName) + "," : "Hello,"}</p>
+    <p>Your ${PRODUCT_NAME} invoice <strong>${escEmail(opts.number)}</strong> for <strong>${opts.amt}</strong> is ready.</p>
+    <table style="width:100%;border-collapse:collapse;margin:14px 0;font-size:14px;">${rows}
+      <tr><td style="padding:8px 0;font-weight:700;">Total due</td>
+      <td style="padding:8px 0;font-weight:700;text-align:right;">${opts.amt}</td></tr></table>
+    <p style="margin:20px 0;">
+      <a href="${escEmail(opts.signUrl)}" style="background:#0EA5E9;color:#fff;text-decoration:none;padding:12px 22px;border-radius:8px;font-weight:600;display:inline-block;">Review, sign &amp; pay</a>
+    </p>
+    <p style="color:#555;font-size:13px;">You'll review and electronically sign the service agreement, then pay securely. Payment is due on receipt.</p>
+    <p style="color:#888;font-size:12px;margin-top:24px;">Billed to: ${escEmail(opts.billedTo)}</p>
+  </div>`;
+}
+// Minimal HTML-escape for values interpolated into the email body.
+function escEmail(s: string): string {
+  return String(s == null ? "" : s).replace(/[&<>"]/g, (c) =>
+    ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c] as string));
+}
+
+// Every super-admin's email (the YoutilityKnock "Provider" side).
+async function superAdminEmails(): Promise<string[]> {
+  const snap = await db.collection("users").where("superAdmin", "==", true).get();
+  return Array.from(new Set(snap.docs
+    .map((d) => String(d.data()?.email || "").trim())
+    .filter((e) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e))));
+}
+
+// Stage 1 of two-stage signing: email the Provider (super-admins) a link to
+// counter-sign the agreement first. Once they sign, the customer is emailed.
+async function sendProviderSignEmail(invoiceId: string): Promise<{ sent: number; error: string }> {
+  const inv = (await db.doc(`invoices/${invoiceId}`).get()).data();
+  if (!inv) throw new HttpsError("not-found", "Invoice not found.");
+  const emails = await superAdminEmails();
+  if (!emails.length) return { sent: 0, error: "No super-admin email on file to sign as Provider." };
+  const cfg = await getNotifyConfig();
+  const amt = "$" + ((inv.amountDue || 0) / 100).toFixed(2);
+  const signUrl = `${APP_URL}/sign?inv=${invoiceId}&t=${inv.providerSignToken}&role=provider`;
+  const attachments: EmailAttachment[] = [];
+  try {
+    const pdf = await buildContractForInvoice({ id: invoiceId, ...inv });
+    attachments.push({ filename: `${PRODUCT_NAME}-Service-Agreement.pdf`, content: pdf.toString("base64"), type: "application/pdf" });
+  } catch (e) { logger.warn("provider contract pdf failed", e); }
+  const text = `Action needed: counter-sign the ${PRODUCT_NAME} service agreement for ${inv.companyName || ""} (invoice ${inv.number || ""}, ${amt}).`+
+    `\n\nSign as Provider here — the customer is emailed automatically once you sign:\n${signUrl}`;
+  const html = `<div style="font-family:Arial,Helvetica,sans-serif;color:#111;max-width:560px;margin:0 auto;">
+    <div style="font-size:22px;font-weight:700;color:#0EA5E9;">${PRODUCT_NAME}</div>
+    <div style="font-size:11px;color:#888;margin-bottom:16px;">a product of ${PROVIDER_LEGAL_NAME}</div>
+    <p>Counter-sign the service agreement for <strong>${escEmail(inv.companyName || "")}</strong> (invoice ${escEmail(inv.number || "")}, ${amt}).</p>
+    <p style="margin:20px 0;"><a href="${escEmail(signUrl)}" style="background:#0EA5E9;color:#fff;text-decoration:none;padding:12px 22px;border-radius:8px;font-weight:600;display:inline-block;">Sign as Provider</a></p>
+    <p style="color:#555;font-size:13px;">The customer is automatically emailed to review, sign, and pay once you've signed.</p>
+  </div>`;
+  let sent = 0, lastError = "";
+  for (const to of emails) {
+    const r = await sendEmailDetailed(cfg, to, `Sign required — agreement for ${inv.companyName || ""} (${inv.number || ""})`, text, attachments, html);
+    if (r.ok) sent++; else lastError = r.detail;
+  }
+  return { sent, error: sent ? "" : lastError };
+}
+
+// Stage 3: once both parties have signed, email the fully-executed agreement to
+// everyone — the customer/org billing contact AND every super-admin.
+async function sendSignedCopyToAllParties(invoiceId: string): Promise<void> {
+  const inv = (await db.doc(`invoices/${invoiceId}`).get()).data();
+  if (!inv) return;
+  const cfg = await getNotifyConfig();
+  const recipients = new Set<string>(await superAdminEmails());
+  if (inv.organizationId) {
+    const org = (await db.doc(`organizations/${inv.organizationId}`).get()).data() || {};
+    const e = ((org.billingEmail as string) || "").trim();
+    if (e) recipients.add(e); else (await orgAdminEmails(inv.organizationId)).forEach((x) => recipients.add(x));
+  } else {
+    const company = (await db.doc(`companies/${inv.companyId}`).get()).data() || {};
+    const e = ((company.billingEmail as string) || "").trim();
+    if (e) recipients.add(e); else (await companyAdminEmails(inv.companyId)).forEach((x) => recipients.add(x));
+  }
+  if (!recipients.size) return;
+  const attachments: EmailAttachment[] = [];
+  try {
+    const pdf = await buildContractForInvoice({ id: invoiceId, ...inv });
+    attachments.push({ filename: `${PRODUCT_NAME}-Signed-Agreement-${inv.number || invoiceId}.pdf`, content: pdf.toString("base64"), type: "application/pdf" });
+  } catch (e) { logger.warn("signed copy pdf failed", e); }
+  const text = `The ${PRODUCT_NAME} service agreement for ${inv.companyName || ""} (ref ${inv.number || ""}) is now fully signed by both parties. A copy is attached for your records.`;
+  for (const to of recipients) {
+    await sendEmailDetailed(cfg, to, `Signed agreement — ${inv.companyName || ""} (${inv.number || ""})`, text, attachments);
+  }
+}
+
+// Email an invoice (with the service agreement + a printable invoice PDF
+// attached) to the billing contact. Works for company- and org-scoped invoices.
+// Shared by the emailInvoice callable, createInvoice, and createOrgInvoice.
+async function sendInvoiceEmail(invoiceId: string, includeContract: boolean): Promise<{ sent: number; contractAttached: boolean; error: string }> {
+  const inv = (await db.doc(`invoices/${invoiceId}`).get()).data();
+  if (!inv) throw new HttpsError("not-found", "Invoice not found.");
+
+  // Resolve recipient(s): prefer the explicit billing email, then admins.
+  let billingEmail = "", contactName = "", billedTo = (inv.companyName as string) || "";
+  let emails: string[] = [];
+  if (inv.organizationId) {
+    const org = (await db.doc(`organizations/${inv.organizationId}`).get()).data() || {};
+    billingEmail = ((org.billingEmail as string) || "").trim();
+    contactName = ((org.billingContactName as string) || "").trim();
+    billedTo = (org.name as string) || billedTo;
+    emails = billingEmail ? [billingEmail] : await orgAdminEmails(inv.organizationId);
+  } else {
+    const company = (await db.doc(`companies/${inv.companyId}`).get()).data() || {};
+    billingEmail = ((company.billingEmail as string) || "").trim();
+    contactName = ((company.billingContactName as string) || "").trim();
+    billedTo = (company.name as string) || billedTo;
+    emails = billingEmail ? [billingEmail] : await companyAdminEmails(inv.companyId);
+  }
+  if (!emails.length) throw new HttpsError("failed-precondition", "No billing email or admin email on file.");
+
+  const cfg = await getNotifyConfig();
+  const amt = "$" + ((inv.amountDue || 0) / 100).toFixed(2);
+  const lines: Array<{ description?: string; amount?: number }> =
+    Array.isArray(inv.lines) && inv.lines.length ? inv.lines : [{ description: "Subscription", amount: inv.amountDue }];
+  const signUrl = inv.signToken
+    ? `${APP_URL}/sign?inv=${invoiceId}&t=${inv.signToken}`
+    : (inv.payUrl || inv.hostedInvoiceUrl || "");
+
+  // Attachments: printable invoice + the service agreement (default on).
+  const attachments: EmailAttachment[] = [];
+  try {
+    const invPdf = await buildInvoicePdf({ id: invoiceId, ...inv });
+    attachments.push({ filename: `Invoice-${inv.number || invoiceId}.pdf`, content: invPdf.toString("base64"), type: "application/pdf" });
+  } catch (e) { logger.warn("invoice pdf build failed", e); }
+  let contractAttached = false;
   if (includeContract) {
     try {
-      const pdf = await buildCompanyContractPdf(companyId);
-      attachments = [{ filename: "YoutilityKnock-Service-Agreement.pdf", content: pdf.toString("base64"), type: "application/pdf" }];
-      contractNote = "\n\nAttached is your service agreement — please review, sign, and return it.";
-    } catch (e) {
-      logger.warn("contract pdf build failed", e);
-    }
+      const pdf = await buildContractForInvoice({ id: invoiceId, ...inv });
+      attachments.push({ filename: `${PRODUCT_NAME}-Service-Agreement.pdf`, content: pdf.toString("base64"), type: "application/pdf" });
+      contractAttached = true;
+    } catch (e) { logger.warn("contract pdf build failed", e); }
   }
+
+  const greeting = contactName ? `Hi ${contactName},\n\n` : "";
+  const textBody = `${greeting}Your ${PRODUCT_NAME} invoice ${inv.number || ""} for ${amt} is ready.`+
+    `${signUrl ? "\n\nReview, sign & pay: " + signUrl : ""}`+
+    `${contractAttached ? "\n\nThe service agreement is attached — you'll sign it before payment." : ""}`;
+  const htmlBody = invoiceEmailHtml({ contactName, billedTo, number: (inv.number as string) || "", amt, lines, signUrl });
 
   let sent = 0, lastError = "";
   for (const to of emails) {
-    const r = await sendEmailDetailed(cfg, to, `Invoice ${inv.number || ""} — $${amt}`,
-      `${greeting}Your YoutilityKnock invoice ${inv.number || ""} for $${amt} is ${inv.status}.${link ? "\n\nPay online: " + link : ""}${contractNote}`,
-      attachments);
+    const r = await sendEmailDetailed(cfg, to, `Invoice ${inv.number || ""} — ${amt}`, textBody, attachments, htmlBody);
     if (r.ok) sent++; else lastError = r.detail;
   }
-  return { sent, contractAttached: !!attachments, error: sent ? "" : lastError };
+  return { sent, contractAttached, error: sent ? "" : lastError };
 }
 
 export const emailInvoice = onCall(async (request) => {
   const caller = await getCaller(request);
   const { companyId: cid, invoiceId, includeContract } =
     (request.data || {}) as { companyId?: string; invoiceId?: string; includeContract?: boolean };
-  const companyId = authorizeForCompany(caller, cid);
   if (!invoiceId) throw new HttpsError("invalid-argument", "invoiceId required.");
-  return { ok: true, ...(await sendInvoiceEmail(companyId, invoiceId, includeContract !== false)) };
+  const inv = (await db.doc(`invoices/${invoiceId}`).get()).data();
+  if (!inv) throw new HttpsError("not-found", "Invoice not found.");
+  // Org invoices are super-admin only; company invoices follow the company gate.
+  if (inv.organizationId) requireSuper(caller);
+  else authorizeForCompany(caller, inv.companyId || cid);
+  // While the Provider hasn't counter-signed yet, re-email goes to the Provider;
+  // afterward it goes to the customer (sign-then-pay).
+  if (inv.signStage === "awaiting_provider") {
+    const r = await sendProviderSignEmail(invoiceId);
+    return { ok: true, sent: r.sent, stage: "awaiting_provider", error: r.error };
+  }
+  return { ok: true, ...(await sendInvoiceEmail(invoiceId, includeContract !== false)) };
+});
+
+// Provider (super-admin) counter-signs from the console. Records the signature,
+// advances the stage, and triggers the customer's sign-then-pay email.
+export const providerSignInvoice = onCall(async (request) => {
+  const caller = await getCaller(request);
+  requireSuper(caller);
+  const { invoiceId, name } = (request.data || {}) as { invoiceId?: string; name?: string };
+  if (!invoiceId) throw new HttpsError("invalid-argument", "invoiceId required.");
+  const signerName = String(name || "").trim();
+  if (signerName.length < 2) throw new HttpsError("invalid-argument", "Enter your full name to sign.");
+  const ref = db.doc(`invoices/${invoiceId}`);
+  const inv = (await ref.get()).data();
+  if (!inv) throw new HttpsError("not-found", "Invoice not found.");
+  const now = Date.now();
+  if (!inv.providerSignedAt) {
+    await ref.set({ providerSignedAt: now, providerSignedName: signerName, signStage: "awaiting_customer", updatedAt: now }, { merge: true });
+  }
+  // Now email the customer to review, sign & pay.
+  let emailResult = { sent: 0, contractAttached: false, error: "" };
+  try { emailResult = await sendInvoiceEmail(invoiceId, true); }
+  catch (e: any) { emailResult.error = e?.message || "Email send failed."; logger.warn("providerSign customer email failed", e); }
+  return { ok: true, ...emailResult };
 });
 
 // Create a manual invoice (super-admin) and, by default, email it with the
@@ -2669,26 +2997,51 @@ export const emailInvoice = onCall(async (request) => {
 export const createInvoice = onCall(async (request) => {
   const caller = await getCaller(request);
   requireSuper(caller);
-  const { companyId, amount, description, lockUntilPaid, send } = (request.data || {}) as {
-    companyId?: string; amount?: number; description?: string; lockUntilPaid?: boolean; send?: boolean;
+  const { companyId, amount, description, lines: rawLines, lockUntilPaid, send } = (request.data || {}) as {
+    companyId?: string; amount?: number; description?: string;
+    lines?: Array<{ description?: string; amount?: number }>; lockUntilPaid?: boolean; send?: boolean;
   };
   if (!companyId) throw new HttpsError("invalid-argument", "companyId required.");
-  const dollars = Number(amount);
-  if (!isFinite(dollars) || dollars <= 0) throw new HttpsError("invalid-argument", "Enter an amount greater than 0.");
-  const cents = Math.round(dollars * 100);
   const company = (await db.doc(`companies/${companyId}`).get()).data() || {};
+  // Companies that belong to an organization are billed through the org — block
+  // standalone invoicing here so charges aren't duplicated.
+  if (company.organizationId) {
+    throw new HttpsError("failed-precondition", "This company is billed through its organization. Invoice the organization instead.");
+  }
+
+  // Accept either an explicit line-item array or a single amount + description.
+  const cleanLines = Array.isArray(rawLines)
+    ? rawLines
+        .map((l) => ({ description: String(l.description || "").trim() || "YoutilityKnock services", amount: Math.round(Number(l.amount) * 100) }))
+        .filter((l) => isFinite(l.amount) && l.amount > 0)
+    : [];
+  let lineItems: Array<{ description: string; amount: number }>;
+  if (cleanLines.length) {
+    lineItems = cleanLines;
+  } else {
+    const dollars = Number(amount);
+    if (!isFinite(dollars) || dollars <= 0) throw new HttpsError("invalid-argument", "Enter an amount greater than 0.");
+    lineItems = [{ description: (description || "").trim() || "YoutilityKnock services", amount: Math.round(dollars * 100) }];
+  }
+  const cents = lineItems.reduce((s, l) => s + l.amount, 0);
+
   const now = Date.now();
   const ref = db.collection("invoices").doc();
-  const desc = (description || "").trim() || "YoutilityKnock services";
   const number = `INV-${now.toString(36).toUpperCase()}`;
+  const signToken = crypto.randomBytes(16).toString("hex");
+  const providerSignToken = crypto.randomBytes(16).toString("hex");
   await ref.set({
     companyId, companyName: (company.name as string) || "",
     number,
     status: "open", manual: true,
     amountDue: cents, amountPaid: 0, currency: "usd",
     created: now, dueDate: now, // due on receipt
-    lines: [{ description: desc, amount: cents }],
+    lines: lineItems,
     lockUntilPaid: !!lockUntilPaid,
+    // Two-stage signing: Provider counter-signs first, then the customer.
+    signStage: "awaiting_provider",
+    signToken, signedAt: 0, signedName: "",
+    providerSignToken, providerSignedAt: 0, providerSignedName: "",
     updatedAt: now,
   });
   // Generate a Square hosted payment link so the customer can pay online. If
@@ -2700,25 +3053,122 @@ export const createInvoice = onCall(async (request) => {
     await db.doc(`companies/${companyId}`).set(
       { status: "suspended", billingHold: true, pastDueSince: now, updatedAt: now }, { merge: true });
   }
-  let emailResult = { sent: 0, contractAttached: false, error: "" };
+  // Stage 1: email the Provider (super-admins) to counter-sign first. The
+  // customer email goes out automatically once the Provider signs.
+  let providerEmail = { sent: 0, error: "" };
   if (send !== false) {
-    try { emailResult = await sendInvoiceEmail(companyId, ref.id, true); }
-    catch (e: any) { emailResult.error = e?.message || "Email send failed."; logger.warn("createInvoice send failed", e); }
+    try { providerEmail = await sendProviderSignEmail(ref.id); }
+    catch (e: any) { providerEmail.error = e?.message || "Email send failed."; logger.warn("createInvoice provider send failed", e); }
   }
-  return { ok: true, invoiceId: ref.id, payUrl, ...emailResult };
+  return { ok: true, invoiceId: ref.id, payUrl, stage: "awaiting_provider", sent: providerEmail.sent, error: providerEmail.error };
 });
 
-// Build the company's service-agreement PDF and return it (base64) so the
-// super-admin console can preview/download it without relying on email.
+// Create an invoice for an ORGANIZATION (super-admin). Itemizes one line per
+// member company (its monthly + the enterprise per-company fee) plus the org
+// fee, then sign-then-pay emails the org's billing contact. Locking cascades to
+// every company under the org.
+export const createOrgInvoice = onCall(async (request) => {
+  const caller = await getCaller(request);
+  requireSuper(caller);
+  const { orgId, description, lockUntilPaid, send } = (request.data || {}) as {
+    orgId?: string; description?: string; lockUntilPaid?: boolean; send?: boolean;
+  };
+  if (!orgId) throw new HttpsError("invalid-argument", "orgId required.");
+  const org = (await db.doc(`organizations/${orgId}`).get()).data();
+  if (!org) throw new HttpsError("not-found", "Organization not found.");
+  const members = await db.collection("companies").where("organizationId", "==", orgId).get();
+  if (members.empty) throw new HttpsError("failed-precondition", "This organization has no companies to bill.");
+
+  const enterprise = !!org.enterprise;
+  const perCompanyFee = Number(org.perCompanyFee) || 0;
+  const orgFee = Number(org.orgFee) || 0;
+  const override = Number(org.monthlyOverride) || 0;
+  const lines: Array<{ description: string; amount: number }> = [];
+  if (override > 0) {
+    // Flat organization monthly the super-admin entered — bill that exact amount.
+    lines.push({ description: "Organization monthly plan (up to 100 users)", amount: Math.round(override * 100) });
+  } else {
+    members.docs.forEach((d) => {
+      const co = d.data();
+      const base = Number(co.planPrice) || 0;
+      const each = enterprise ? base + perCompanyFee : base;
+      lines.push({ description: `${(co.name as string) || d.id}${enterprise ? " (incl. per-company fee)" : ""}`, amount: Math.round(each * 100) });
+    });
+    if (enterprise && orgFee > 0) lines.push({ description: "Organization fee", amount: Math.round(orgFee * 100) });
+  }
+  if (description && description.trim()) lines.push({ description: description.trim(), amount: 0 });
+  const cents = lines.reduce((s, l) => s + l.amount, 0);
+  if (cents <= 0) throw new HttpsError("invalid-argument", "Organization total is $0 — set a monthly amount, plan prices, or fees first.");
+
+  const now = Date.now();
+  const ref = db.collection("invoices").doc();
+  const number = `ORG-${now.toString(36).toUpperCase()}`;
+  const signToken = crypto.randomBytes(16).toString("hex");
+  const providerSignToken = crypto.randomBytes(16).toString("hex");
+  await ref.set({
+    organizationId: orgId, companyName: (org.name as string) || "",
+    number, status: "open", manual: true,
+    amountDue: cents, amountPaid: 0, currency: "usd",
+    created: now, dueDate: now,
+    lines, lockUntilPaid: !!lockUntilPaid,
+    signStage: "awaiting_provider",
+    signToken, signedAt: 0, signedName: "",
+    providerSignToken, providerSignedAt: 0, providerSignedName: "",
+    updatedAt: now,
+  });
+  const payUrl = await squarePaymentLink(cents, `${number} — ${(org.name as string) || "Organization"}`);
+  if (payUrl) await ref.set({ payUrl, hostedInvoiceUrl: payUrl, updatedAt: Date.now() }, { merge: true });
+  // Lock the whole org (and every member company) until paid.
+  if (lockUntilPaid) {
+    const patch = { status: "suspended", billingHold: true, pastDueSince: now, updatedAt: now };
+    await db.doc(`organizations/${orgId}`).set(patch, { merge: true });
+    const batch = db.batch();
+    members.docs.forEach((d) => batch.set(d.ref, patch, { merge: true }));
+    await batch.commit();
+  }
+  // Stage 1: Provider counter-signs first; customer email auto-sends after.
+  let providerEmail = { sent: 0, error: "" };
+  if (send !== false) {
+    try { providerEmail = await sendProviderSignEmail(ref.id); }
+    catch (e: any) { providerEmail.error = e?.message || "Email send failed."; logger.warn("createOrgInvoice provider send failed", e); }
+  }
+  return { ok: true, invoiceId: ref.id, payUrl, stage: "awaiting_provider", sent: providerEmail.sent, error: providerEmail.error };
+});
+
+// Build the company's (or an org's) service-agreement PDF and return it (base64)
+// so the super-admin console can preview/download it without relying on email.
 export const getContractPdf = onCall(async (request) => {
   const caller = await getCaller(request);
-  const companyId = authorizeForCompany(caller, (request.data || {}).companyId);
-  const pdf = await buildCompanyContractPdf(companyId);
-  return { filename: "YoutilityKnock-Service-Agreement.pdf", base64: pdf.toString("base64") };
+  const { companyId, orgId } = (request.data || {}) as { companyId?: string; orgId?: string };
+  let pdf: Buffer;
+  if (orgId) {
+    requireSuper(caller);
+    pdf = await buildOrgContractPdf(orgId);
+  } else {
+    pdf = await buildCompanyContractPdf(authorizeForCompany(caller, companyId));
+  }
+  return { filename: `${PRODUCT_NAME}-Service-Agreement.pdf`, base64: pdf.toString("base64") };
 });
 
-// Mark an invoice paid (super-admin). If it locked the company (due on receipt),
-// unlock it.
+// Lift a due-on-receipt lock once an invoice is paid — cascades to every member
+// company for an org invoice. Shared by markInvoicePaid + the sign/pay flow.
+async function unlockInvoiceTarget(inv: Record<string, any>): Promise<void> {
+  if (!inv.lockUntilPaid) return;
+  const now = Date.now();
+  const patch = { status: "active", billingHold: false, pastDueSince: 0, updatedAt: now };
+  if (inv.organizationId) {
+    await db.doc(`organizations/${inv.organizationId}`).set(patch, { merge: true });
+    const members = await db.collection("companies").where("organizationId", "==", inv.organizationId).get();
+    const batch = db.batch();
+    members.docs.forEach((d) => batch.set(d.ref, patch, { merge: true }));
+    await batch.commit();
+  } else if (inv.companyId) {
+    await db.doc(`companies/${inv.companyId}`).set(patch, { merge: true });
+  }
+}
+
+// Mark an invoice paid (super-admin). If it locked the account/org (due on
+// receipt), unlock it.
 export const markInvoicePaid = onCall(async (request) => {
   const caller = await getCaller(request);
   requireSuper(caller);
@@ -2729,11 +3179,96 @@ export const markInvoicePaid = onCall(async (request) => {
   if (!inv) throw new HttpsError("not-found", "Invoice not found.");
   const now = Date.now();
   await ref.set({ status: "paid", amountPaid: inv.amountDue || 0, updatedAt: now }, { merge: true });
-  if (inv.lockUntilPaid && inv.companyId) {
-    await db.doc(`companies/${inv.companyId}`).set(
-      { status: "active", billingHold: false, pastDueSince: 0, updatedAt: now }, { merge: true });
-  }
+  await unlockInvoiceTarget(inv);
   return { ok: true };
+});
+
+// ── Two-stage sign-then-pay: public endpoint behind /sign-api/** (no login). ──
+// The Provider (super-admin) counter-signs FIRST via ?role=provider using the
+// providerSignToken; that auto-emails the customer, who then signs with the
+// customer signToken before the pay link unlocks. The token decides the role.
+//   GET  /sign-api/<id>?t=<token>           → summary + role + signed state
+//   GET  /sign-api/<id>/contract?t=<token>  → the service-agreement PDF
+//   POST /sign-api/<id>  { t, name }        → record signature for that role
+export const invoiceSign = onRequest({ cors: true }, async (req, res) => {
+  try {
+    // Path may arrive with or without the "/sign-api" rewrite prefix.
+    const parts = req.path.split("/").filter(Boolean).filter((p) => p !== "sign-api");
+    const invoiceId = parts[0] || "";
+    const wantContract = parts[parts.length - 1] === "contract";
+    const token = String((req.method === "POST" ? (req.body?.t ?? req.query.t) : req.query.t) || "");
+    if (!invoiceId) { res.status(400).json({ error: "Missing invoice id." }); return; }
+    const ref = db.doc(`invoices/${invoiceId}`);
+    const inv = (await ref.get()).data();
+    if (!inv) { res.status(404).json({ error: "Invoice not found." }); return; }
+    // Identify the signer by which token matches.
+    const role = token && token === inv.providerSignToken ? "provider"
+      : token && token === inv.signToken ? "customer" : "";
+    if (!role) { res.status(404).json({ error: "Invoice not found." }); return; }
+
+    if (wantContract) {
+      const pdf = await buildContractForInvoice({ id: invoiceId, ...inv });
+      res.setHeader("Content-Type", "application/pdf");
+      res.setHeader("Content-Disposition", `inline; filename="${PRODUCT_NAME}-Service-Agreement.pdf"`);
+      res.status(200).send(pdf);
+      return;
+    }
+
+    const providerSigned = !!inv.providerSignedAt;
+    const customerSigned = !!inv.signedAt;
+    // The customer can only act once the Provider has signed.
+    const customerReady = providerSigned;
+    const summary = {
+      role, number: inv.number || "", companyName: inv.companyName || "",
+      amountDue: inv.amountDue || 0, currency: inv.currency || "usd",
+      status: inv.status || "open",
+      lines: Array.isArray(inv.lines) ? inv.lines : [],
+      providerSigned, providerSignedName: inv.providerSignedName || "",
+      customerSigned, signedName: inv.signedName || "",
+      // For the customer view: whether it's their turn yet.
+      ready: role === "provider" ? true : customerReady,
+      signed: role === "provider" ? providerSigned : customerSigned,
+      // Pay link only revealed to the customer after they've signed.
+      payUrl: (role === "customer" && customerSigned) ? (inv.payUrl || inv.hostedInvoiceUrl || "") : "",
+      governingLaw: GOVERNING_LAW_STATE, provider: PROVIDER_LEGAL_NAME, product: PRODUCT_NAME,
+    };
+
+    if (req.method === "GET") { res.status(200).json(summary); return; }
+
+    if (req.method === "POST") {
+      const name = String(req.body?.name || "").trim();
+      if (name.length < 2) { res.status(400).json({ error: "Type your full name to sign." }); return; }
+      const now = Date.now();
+      const ip = (req.headers["x-forwarded-for"] as string || "").split(",")[0].trim() || req.ip || "";
+
+      if (role === "provider") {
+        if (!inv.providerSignedAt) {
+          await ref.set({ providerSignedAt: now, providerSignedName: name, providerSignedIp: ip, signStage: "awaiting_customer", updatedAt: now }, { merge: true });
+          // Provider just signed → email the customer to review, sign & pay.
+          try { await sendInvoiceEmail(invoiceId, true); }
+          catch (e) { logger.warn("provider-sign customer email failed", e); }
+        }
+        res.status(200).json({ ok: true, role, signed: true, signedName: inv.providerSignedName || name });
+        return;
+      }
+
+      // role === "customer": the Provider must have signed first.
+      if (!inv.providerSignedAt) { res.status(409).json({ error: "This agreement is awaiting the provider's signature. Please try again shortly." }); return; }
+      if (!inv.signedAt) {
+        await ref.set({ signedAt: now, signedName: name, signedIp: ip, signStage: "fully_signed", updatedAt: now }, { merge: true });
+        // Fully signed → email the executed copy to all parties.
+        try { await sendSignedCopyToAllParties(invoiceId); }
+        catch (e) { logger.warn("signed-copy email failed", e); }
+      }
+      const payUrl = inv.payUrl || inv.hostedInvoiceUrl || "";
+      res.status(200).json({ ok: true, role, signed: true, signedName: inv.signedName || name, payUrl });
+      return;
+    }
+    res.status(405).json({ error: "Method not allowed." });
+  } catch (e: any) {
+    logger.error("invoiceSign error", e);
+    res.status(500).json({ error: "Server error." });
+  }
 });
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -2903,8 +3438,115 @@ export const squareSaveCardAndSubscribe = onCall(async (request) => {
   return { ok: true, brand: card.card_brand || "", last4: card.last_4 || "" };
 });
 
-// Daily Square recurring charge: re-bill each Square company when its 30-day
-// clock comes due. (Stripe companies are billed by Stripe's own subscriptions.)
+// ── Organization-level Square recurring ───────────────────────────────────
+// An org can keep its own card on file and be auto-billed its monthly (the
+// super-admin's override, else the computed total) every 30 days — the same
+// model as a company, but charged once for the whole org.
+async function orgMonthlyCents(orgId: string): Promise<number> {
+  const org = (await db.doc(`organizations/${orgId}`).get()).data() || {};
+  const members = await db.collection("companies").where("organizationId", "==", orgId).get();
+  const base = members.docs.reduce((s, d) => s + (Number(d.data().planPrice) || 0), 0);
+  return Math.round(computeOrgMonthly(org, members.size, base) * 100);
+}
+
+// Mirror an org Square payment into invoices/{paymentId} (org-scoped).
+async function mirrorSquareOrgPayment(orgId: string, payment: any): Promise<void> {
+  const orgName = (await db.doc(`organizations/${orgId}`).get()).data()?.name || "";
+  const cents = payment?.amount_money?.amount ?? 0;
+  const paid = payment?.status === "COMPLETED";
+  await db.doc(`invoices/${payment.id}`).set({
+    squarePaymentId: payment.id, organizationId: orgId, companyName: orgName,
+    number: payment.receipt_number || "",
+    status: paid ? "paid" : (payment.status || "open").toLowerCase(),
+    amountDue: cents, amountPaid: paid ? cents : 0,
+    currency: (payment?.amount_money?.currency || "USD").toLowerCase(),
+    created: payment.created_at ? new Date(payment.created_at).getTime() : Date.now(),
+    hostedInvoiceUrl: payment.receipt_url || "", invoicePdf: payment.receipt_url || "",
+    lines: [{ description: "YoutilityKnock — organization monthly", amount: cents }],
+    updatedAt: Date.now(),
+  }, { merge: true });
+}
+
+// Charge an org's saved card for its monthly; advance the 30-day clock + unlock
+// on success, mark past_due (and the whole org) on failure.
+async function runSquareChargeOrg(orgId: string): Promise<{ ok: boolean; error?: string }> {
+  const ref = db.doc(`organizations/${orgId}`);
+  const org = (await ref.get()).data() || {};
+  const cents = await orgMonthlyCents(orgId);
+  if (org.billingExempt || cents <= 0) return { ok: true };
+  const cardId = org.squareCardId as string | undefined;
+  const customerId = org.squareCustomerId as string | undefined;
+  if (!cardId || !customerId) return { ok: false, error: "No card on file." };
+  const cfg = await squareCfg();
+  try {
+    const { payment } = await squareApi(cfg, "/v2/payments", {
+      idempotency_key: crypto.randomUUID(),
+      source_id: cardId, customer_id: customerId,
+      location_id: cfg.locationId || undefined,
+      amount_money: { amount: cents, currency: "USD" },
+      note: `YoutilityKnock — ${(org.name as string) || "Organization"} monthly`,
+    });
+    await mirrorSquareOrgPayment(orgId, payment);
+    const now = Date.now();
+    const patch = { status: "active", pastDueSince: 0, billingHold: false, nextBillingAt: now + BILLING_INTERVAL_DAYS * 86400000, updatedAt: now };
+    await ref.set(patch, { merge: true });
+    // Lift any hold on member companies too.
+    const members = await db.collection("companies").where("organizationId", "==", orgId).get();
+    const batch = db.batch();
+    members.docs.forEach((d) => batch.set(d.ref, { status: "active", billingHold: false, pastDueSince: 0, updatedAt: now }, { merge: true }));
+    await batch.commit();
+    return { ok: true };
+  } catch (e: any) {
+    const patch: Record<string, unknown> = { status: "past_due", updatedAt: Date.now() };
+    if (!org.pastDueSince) patch.pastDueSince = Date.now();
+    await ref.set(patch, { merge: true });
+    return { ok: false, error: e?.message || "Charge failed." };
+  }
+}
+
+// Save an org's card on file and start its 30-day recurring billing.
+export const squareSaveOrgCardAndSubscribe = onCall(async (request) => {
+  const caller = await getCaller(request);
+  requireSuper(caller);
+  const { orgId, sourceId } = (request.data || {}) as { orgId?: string; sourceId?: string };
+  if (!orgId) throw new HttpsError("invalid-argument", "orgId required.");
+  if (!sourceId) throw new HttpsError("invalid-argument", "sourceId (card token) required.");
+  const cfg = await squareCfg();
+  const ref = db.doc(`organizations/${orgId}`);
+  const org = (await ref.get()).data();
+  if (!org) throw new HttpsError("not-found", "Organization not found.");
+
+  let customerId = org.squareCustomerId as string | undefined;
+  if (!customerId) {
+    const { customer } = await squareApi(cfg, "/v2/customers", {
+      idempotency_key: crypto.randomUUID(),
+      company_name: (org.name as string) || orgId,
+      reference_id: `org:${orgId}`,
+    });
+    customerId = customer.id;
+    await ref.set({ squareCustomerId: customerId, updatedAt: Date.now() }, { merge: true });
+  }
+  const { card } = await squareApi(cfg, "/v2/cards", {
+    idempotency_key: crypto.randomUUID(),
+    source_id: sourceId,
+    card: { customer_id: customerId },
+  });
+  const hadBilling = !!org.squareCardId && (Number(org.nextBillingAt) || 0) > Date.now();
+  await ref.set({
+    squareCardId: card.id, cardBrand: card.card_brand || "", cardLast4: card.last_4 || "",
+    updatedAt: Date.now(),
+  }, { merge: true });
+
+  const cents = await orgMonthlyCents(orgId);
+  if (!org.billingExempt && cents > 0 && !hadBilling) {
+    const r = await runSquareChargeOrg(orgId);
+    if (!r.ok) throw new HttpsError("internal", r.error || "Could not take first payment.");
+  }
+  return { ok: true, brand: card.card_brand || "", last4: card.last_4 || "" };
+});
+
+// Daily Square recurring charge: re-bill each Square company AND organization
+// when its 30-day clock comes due. (Stripe is billed by Stripe's subscriptions.)
 export const squareBillingCron = onSchedule("every 24 hours", async () => {
   const c = ((await db.doc("config/billing").get()).data() as Record<string, string>) || {};
   if (billingProvider(c) !== "square") return; // only when Square is the active gateway
@@ -2913,8 +3555,18 @@ export const squareBillingCron = onSchedule("every 24 hours", async () => {
   for (const d of snap.docs) {
     const co = d.data();
     if (co.billingExempt || co.status === "suspended") continue;
+    // A company billed through its org is charged by the org, not individually.
+    if (co.organizationId) continue;
     if ((Number(co.nextBillingAt) || 0) > now) continue; // not due yet
     await runSquareCharge(d.id);
+  }
+  // Organizations with their own card on file.
+  const orgSnap = await db.collection("organizations").where("squareCardId", ">", "").get();
+  for (const d of orgSnap.docs) {
+    const org = d.data();
+    if (org.billingExempt || org.status === "suspended") continue;
+    if ((Number(org.nextBillingAt) || 0) > now) continue;
+    await runSquareChargeOrg(d.id);
   }
 });
 
@@ -2939,6 +3591,16 @@ export const squareWebhook = onRequest({ cors: false }, async (req, res) => {
         await mirrorSquarePayment(companyId, payment);
         if (payment.status === "COMPLETED") {
           await snap.docs[0].ref.set({ status: "active", pastDueSince: 0, billingHold: false, updatedAt: Date.now() }, { merge: true });
+        }
+      } else {
+        // Not a company — it may be an organization's own card.
+        const orgSnap = await db.collection("organizations").where("squareCustomerId", "==", payment.customer_id).limit(1).get();
+        if (!orgSnap.empty) {
+          const orgId = orgSnap.docs[0].id;
+          await mirrorSquareOrgPayment(orgId, payment);
+          if (payment.status === "COMPLETED") {
+            await orgSnap.docs[0].ref.set({ status: "active", pastDueSince: 0, billingHold: false, updatedAt: Date.now() }, { merge: true });
+          }
         }
       }
     }
