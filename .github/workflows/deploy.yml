@@ -53,3 +53,14 @@ jobs:
         run: npx firebase-tools deploy --only hosting,functions,firestore:rules,storage --project youtilityknock --non-interactive --force
         env:
           GOOGLE_APPLICATION_CREDENTIALS: ${{ runner.temp }}/gcp-sa.json
+
+      # Deploy Firestore composite indexes separately and WITHOUT --force. New
+      # indexes (e.g. leads assignedTo+status that the weekly-close count needs)
+      # build asynchronously after this completes. No --force means it never
+      # deletes indexes that exist in the console but aren't in the repo, so this
+      # is safe to run on every push. Index builds can take a few minutes; the
+      # queries fall back gracefully until they're ready.
+      - name: Deploy Firestore indexes
+        run: npx firebase-tools deploy --only firestore:indexes --project youtilityknock --non-interactive
+        env:
+          GOOGLE_APPLICATION_CREDENTIALS: ${{ runner.temp }}/gcp-sa.json
