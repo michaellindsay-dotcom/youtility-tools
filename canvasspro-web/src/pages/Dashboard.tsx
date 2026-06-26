@@ -185,6 +185,9 @@ export default function Dashboard() {
   }, [f]);
 
   const pct = (n: number, d: number) => Math.min(100, Math.round((n / d) * 100));
+  // Close rate = closes ÷ appointments. Show "—" when there are no
+  // appointments yet so it never reads as a misleading 0% or 100%.
+  const closeRate = (closed: number, appt: number) => (appt > 0 ? `${Math.round((closed / appt) * 100)}%` : "—");
   const first = profile?.displayName?.split(" ")[0] ?? "there";
 
   return (
@@ -235,12 +238,17 @@ export default function Dashboard() {
       </div>
 
       {/* Today's funnel */}
-      <h2 className="section-h">Today's Funnel</h2>
+      <div className="row" style={{ alignItems: "baseline", gap: 12, flexWrap: "wrap" }}>
+        <h2 className="section-h" style={{ marginBottom: 0 }}>Today's Funnel</h2>
+        <span className="muted small">
+          This week: <strong>{f.week.closed}</strong> closed · <strong>{closeRate(f.week.closed, f.week.appt)}</strong> close rate
+        </span>
+      </div>
       <div className="stat-grid">
         <FunnelCard n={f.today.doors} label="Doors Knocked" sub={`${f.today.hours}h on shift`} />
         <FunnelCard n={f.today.conv} label="Conversations" sub={`${pct(f.today.conv, f.today.doors || 1)}% conv rate`} />
         <FunnelCard n={f.today.appt} label="Appts Set" sub={`${pct(f.today.appt, f.today.conv || 1)}% set rate`} />
-        <FunnelCard n={f.today.closed} label="Closed" sub={`${pct(f.today.closed, f.today.appt || 1)}% close rate`} />
+        <FunnelCard n={f.today.closed} label="Closed" sub={`${closeRate(f.today.closed, f.today.appt)} close rate`} />
       </div>
 
       {/* Goal progress (part of the Success Planner service) */}
@@ -253,7 +261,7 @@ export default function Dashboard() {
               ["Conversations", f.week.conv, GOALS.convWeek],
               ["Appointments", f.week.appt, GOALS.apptWeek],
               ["Sales", f.week.closed, GOALS.salesWeek],
-            ]} note={`${plan.weekPerDay} doors/day to goal · ${pct(f.week.closed, f.week.appt || 1)}% close rate`} />
+            ]} note={`${plan.weekPerDay} doors/day to goal · ${closeRate(f.week.closed, f.week.appt)} close rate`} />
           </div>
         </>
       )}

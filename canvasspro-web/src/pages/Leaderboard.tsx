@@ -18,6 +18,11 @@ interface Ranked extends UserStats {
 
 const VIEWS: SeasonView[] = ["week", "month", "year", "alltime"];
 
+// Close rate = closes ÷ appointments. "—" when no appointments yet, so it
+// never reads as a misleading 0% / 100%.
+const closeRate = (sales?: number, appts?: number) =>
+  (appts && appts > 0 ? `${Math.round(((sales ?? 0) / appts) * 100)}%` : "—");
+
 export default function Leaderboard() {
   const { profile, role, companyId } = useAuth();
   const [view, setView] = useState<SeasonView>("week");
@@ -196,6 +201,7 @@ function StandingHero({ me, total, prorated }: { me: Ranked; total: number; pror
           {lines.map((l) => (
             <span key={l.key} className="lb-chip" title={`${l.count} × ${l.per} = ${l.total}`}>{l.emoji} {l.count}</span>
           ))}
+          <span className="lb-chip" title="Closes ÷ appointments">🎯 {closeRate(me.sales, me.appointments)} close rate</span>
         </div>
       </div>
       <div className="lb-hero-pts">
@@ -242,7 +248,7 @@ function RankRow({ r, you, leaderScore }: { r: Ranked; you: boolean; leaderScore
         </div>
         <div className="lb-row-bar"><span style={{ width: `${barPct}%`, background: tier.color }} /></div>
         <div className="lb-row-stats muted small">
-          {r.sales ?? 0} 💰 · {r.appointments ?? 0} 📅 · {r.doorsKnocked ?? 0} 🚪 · {r.shifts ?? 0} ⏱️
+          {r.sales ?? 0} 💰 · {r.appointments ?? 0} 📅 · {r.doorsKnocked ?? 0} 🚪 · {closeRate(r.sales, r.appointments)} close
         </div>
       </div>
       <div className="lb-row-pts">
