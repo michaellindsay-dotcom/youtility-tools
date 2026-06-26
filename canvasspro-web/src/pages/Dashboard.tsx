@@ -74,16 +74,27 @@ export default function Dashboard() {
         );
         // All of the rep's sold leads (small set) — closes are counted from
         // these by close date, regardless of when the lead was first created.
-        // Resilient: if the composite index isn't built yet, fall back to the
-        // month-windowed leads so the dashboard still renders.
+        // We need the FULL sold history (not just this month) so a deal created
+        // in a prior month but closed this week still counts. The two-field
+        // assignedTo+status query needs a composite index that the deploy
+        // workflow doesn't ship; if it's missing, fall back to a single-field
+        // assignedTo query (no composite index required) and filter sold in JS —
+        // still all-time, so prior-month closes are never dropped.
         let soldDocs;
         try {
           soldDocs = (await getDocs(
             query(collection(db, "leads"), where("assignedTo", "==", profile.uid), where("status", "==", "sold"))
           )).docs;
         } catch (err) {
-          console.warn("sold leads query failed (index building?)", err);
-          soldDocs = leadSnap.docs.filter((d) => (d.data() as Lead).status === "sold");
+          console.warn("sold+status query failed (index building?) — falling back to assignedTo only", err);
+          try {
+            soldDocs = (await getDocs(
+              query(collection(db, "leads"), where("assignedTo", "==", profile.uid))
+            )).docs.filter((d) => (d.data() as Lead).status === "sold");
+          } catch (err2) {
+            console.warn("assignedTo-only sold fallback failed", err2);
+            soldDocs = leadSnap.docs.filter((d) => (d.data() as Lead).status === "sold");
+          }
         }
         // Top performers — scope to what this user is allowed to read (admins
         // see the company; everyone else their downstream), matching the
