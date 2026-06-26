@@ -1279,13 +1279,16 @@ async function loadTownHall(companyId) {
 
     // KPI tiles
     const pct = (n,d) => d>0 ? Math.round((n/d)*100) : 0;
+    // Close rate = closes ÷ appointments. "—" when no appointments yet, so it
+    // never reads as a misleading 0% / 100%.
+    const closeRate = (closed,appt) => appt>0 ? `${Math.round((closed/appt)*100)}%` : "—";
     $("thKpis").innerHTML = [
       `<div class="kpi accent"><div class="kpi-n">${activeCount}</div><div class="kpi-l">On shift now</div><div class="kpi-s">${liveDoorsToday} doors knocked live</div></div>`,
       `<div class="kpi"><div class="kpi-n">${teamSize}</div><div class="kpi-l">Team size</div><div class="kpi-s">${users.length} total accounts</div></div>`,
       `<div class="kpi"><div class="kpi-n">${today.doors}</div><div class="kpi-l">Doors today</div><div class="kpi-s">${week.doors} this week</div></div>`,
       `<div class="kpi"><div class="kpi-n">${today.conv}</div><div class="kpi-l">Convos today</div><div class="kpi-s">${week.conv} this week</div></div>`,
       `<div class="kpi"><div class="kpi-n">${today.appt}</div><div class="kpi-l">Appts today</div><div class="kpi-s">${week.appt} this week</div></div>`,
-      `<div class="kpi"><div class="kpi-n">${today.closed}</div><div class="kpi-l">Closed today</div><div class="kpi-s">${week.closed} this week · ${pct(week.closed,week.doors)}% of doors</div></div>`,
+      `<div class="kpi"><div class="kpi-n">${today.closed}</div><div class="kpi-l">Closed today</div><div class="kpi-s">${week.closed} this week · ${closeRate(week.closed,week.appt)} close rate</div></div>`,
     ].join("");
 
     // Live banner
@@ -1332,7 +1335,7 @@ async function loadTownHall(companyId) {
           `<td class="rank-name">${esc(r.name)}</td>`+
           `<td class="rank-num">${r.doors}</td><td class="rank-num">${r.conv}</td>`+
           `<td class="rank-num">${r.appt}</td><td class="rank-num">${r.closed}</td>`+
-          `<td class="rank-num">${pct(r.closed,r.doors)}%</td></tr>`
+          `<td class="rank-num">${closeRate(r.closed,r.appt)}</td></tr>`
         ).join("");
   } catch (e) {
     console.error("town hall", e);
