@@ -65,6 +65,8 @@ export interface Company {
   organizationId?: string; // parent organization, if grouped
   scheduling?: SchedulingSettings;
   maxTerritoriesPerUser?: number; // cap on territories one rep can hold (0 = unlimited)
+  // Battery tool: admin-set price + install adder per battery product id.
+  batteryPricing?: Record<string, { price: number; adder: number }>;
   createdAt?: number;
 }
 
@@ -138,6 +140,7 @@ export interface UserProfile {
 
 import type { LeadStatus } from "./lib/dispositions";
 export type { LeadStatus };
+import type { AreaIncentive } from "./lib/incentives";
 
 // Homeowner / property data attached to a lead from public-records enrichment.
 export interface LeadEnrichment {
@@ -182,6 +185,11 @@ export interface Lead {
   soldAt?: number; // when the deal was marked sold — drives close-date metrics
   companyId: string;
   territoryId?: string;
+  knockCount?: number; // doors knocked at this home (drives territory completion)
+  // Area energy incentives captured at set time, so they travel to the closer.
+  incentives?: AreaIncentive[];
+  incentivesUtility?: { name: string; rate: number | null } | null;
+  incentivesAt?: number;
   assignedTo?: string; // uid (owner)
   // Owner + every manager above them (owner first). Drives downstream
   // visibility: a manager sees a lead iff their uid is in this array.
@@ -331,6 +339,9 @@ export interface ScheduleEvent {
   dispositionDistanceFt?: number | null;
   dispositionVerified?: boolean; // was the closer on-site (≤100 ft) when dispositioning
   followUpForEventId?: string; // set on a follow-up appt created from a pitched_pending
+  // Area energy incentives carried from the lead so the closer has them at the door.
+  incentives?: AreaIncentive[];
+  incentivesUtility?: { name: string; rate: number | null } | null;
 }
 
 export interface AppNotification {

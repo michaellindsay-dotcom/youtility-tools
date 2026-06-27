@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
-import { addDoc, collection, onSnapshot, query, where } from "firebase/firestore";
+import { addDoc, collection, doc, getDoc, onSnapshot, query, where } from "firebase/firestore";
 import { httpsCallable } from "firebase/functions";
 import { db, functions } from "../firebase";
 import { useAuth } from "../auth/AuthContext";
@@ -10,6 +10,8 @@ import {
   appliancesByCategory,
   computeLoad,
   recommendSystems,
+  computeROI,
+  BATTERIES,
   type SolarInput,
   type LoadResult,
   type SizingGoal,
@@ -17,6 +19,12 @@ import {
   type SelectedLoad,
   type LoadCategory,
 } from "../lib/batteries";
+import {
+  fetchAreaIncentives,
+  incentiveDates,
+  type AreaIncentive,
+  type IncentiveReport,
+} from "../lib/incentives";
 
 const fmt = (ms: number) =>
   new Date(ms).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
@@ -70,11 +78,23 @@ interface SavedProposal {
     backupDaysAchieved: number;
   };
   aiSummary?: string | null;
+  pricing?: { pricePerUnit: number; installAdder: number };
+  incentives?: AreaIncentive[];
+  incentivesUtility?: { name: string; rate: number | null } | null;
+  roi?: {
+    grossCost: number;
+    incentives: number;
+    netCost: number;
+    monthlySavings: number;
+    lifetimeSavings: number;
+  };
   createdAt?: number;
 }
 
+const money = (n: number) => `$${Math.round(n).toLocaleString()}`;
+
 export default function BatteryTool() {
-  const { profile, companyId } = useAuth();
+  const { profile, companyId, role, company } = useAuth();
   const [searchParams] = useSearchParams();
 
   // 1. Customer
@@ -168,6 +188,182 @@ export default function BatteryTool() {
   useEffect(() => { setChosenId(recs[0]?.product.id ?? null); }, [recs]);
   const chosen = useMemo(() => recs.find((r) => r.product.id === chosenId) ?? recs[0], [recs, chosenId]);
 
+  // Customer geo (from a linked lead), used to sharpen incentive lookups.
+  const [leadGeo, setLeadGeo] = useState<{ lat?: number; lng?: number }>({});
+  useEffect(() => {
+    if (!leadId) {
+      setLeadGeo({});
+      return;
+    }
+    let active = true;
+    getDoc(doc(db, "leads", leadId))
+      .then((snap) => {
+        if (!active) return;
+        const d = snap.data() as { lat?: number; lng?: number } | undefined;
+        setLeadGeo(d?.lat != null && d?.lng != null ? { lat: d.lat, lng: d.lng } : {});
+      })
+      .catch(() => active && setLeadGeo({}));
+    return () => { active = false; };
+  }, [leadId]);
+
+  // 6b. Pricing — seed from company catalog for the chosen product, but allow a
+  // per-proposal override. Re-seed only when the chosen product *id* changes so
+  // we never clobber a value the rep has typed.
+  const [pricePerUnit, setPricePerUnit] = useState("");
+  const [installAdder, setInstallAdder] = useState("");
+  const seededProductId = useRef<string | null>(null);
+  useEffect(() => {
+    const pid = chosen?.product.id ?? null;
+    if (pid === seededProductId.current) return;
+    seededProductId.current = pid;
+    const entry = pid ? company?.batteryPricing?.[pid] : undefined;
+    setPricePerUnit(entry?.price != null ? String(entry.price) : "0");
+    setInstallAdder(entry?.adder != null ? String(entry.adder) : "0");
+  }, [chosen?.product.id, company?.batteryPricing]);
+
+  // Admin company-pricing editor (admin only).
+  const [showPricingAdmin, setShowPricingAdmin] = useState(false);
+  const [pricingDraft, setPricingDraft] = useState<Record<string, { price: string; adder: string }>>({});
+  const [pricingSaving, setPricingSaving] = useState(false);
+  const [pricingSaved, setPricingSaved] = useState(false);
+  const [pricingError, setPricingError] = useState("");
+  useEffect(() => {
+    const draft: Record<string, { price: string; adder: string }> = {};
+    for (const b of BATTERIES) {
+      const e = company?.batteryPricing?.[b.id];
+      draft[b.id] = { price: e?.price != null ? String(e.price) : "", adder: e?.adder != null ? String(e.adder) : "" };
+    }
+    setPricingDraft(draft);
+  }, [company?.batteryPricing]);
+
+  const saveCompanyPricing = async () => {
+    if (!companyId) return;
+    setPricingSaving(true);
+    setPricingSaved(false);
+    setPricingError("");
+    try {
+      const pricing: Record<string, { price: number; adder: number }> = {};
+      for (const [pid, v] of Object.entries(pricingDraft)) {
+        pricing[pid] = { price: Number(v.price) || 0, adder: Number(v.adder) || 0 };
+      }
+      await httpsCallable<
+        { companyId: string; pricing: Record<string, { price: number; adder: number }> },
+        { ok?: boolean; error?: string }
+      >(functions, "setBatteryPricing")({ companyId, pricing });
+      setPricingSaved(true);
+    } catch (e) {
+      setPricingError((e as Error).message || "Couldn't save pricing.");
+    } finally {
+      setPricingSaving(false);
+    }
+  };
+
+  // 6c. Incentives
+  const [incLoading, setIncLoading] = useState(false);
+  const [incError, setIncError] = useState("");
+  const [incReport, setIncReport] = useState<IncentiveReport | null>(null);
+  const [appliedKeys, setAppliedKeys] = useState<Set<string>>(new Set());
+  const incKey = (i: AreaIncentive, idx: number) => `${i.name || "incentive"}#${idx}`;
+
+  const findIncentives = async () => {
+    setIncLoading(true);
+    setIncError("");
+    try {
+      const st = address.match(/\b([A-Z]{2})\b/);
+      const zp = address.match(/\b(\d{5})\b/);
+      const report = await fetchAreaIncentives({
+        address: address || undefined,
+        state: st ? st[1] : undefined,
+        zip: zp ? zp[1] : undefined,
+        ...(leadGeo.lat != null ? { lat: leadGeo.lat } : {}),
+        ...(leadGeo.lng != null ? { lng: leadGeo.lng } : {}),
+      });
+      setIncReport(report);
+      // Default-check incentives that carry a dollar estimate.
+      const checked = new Set<string>();
+      report.incentives.forEach((i, idx) => {
+        if (typeof i.estValueUsd === "number") checked.add(incKey(i, idx));
+      });
+      setAppliedKeys(checked);
+    } catch (e) {
+      setIncReport(null);
+      setIncError((e as Error).message || "Couldn't find incentives.");
+    } finally {
+      setIncLoading(false);
+    }
+  };
+
+  const toggleApplied = (key: string) =>
+    setAppliedKeys((cur) => {
+      const next = new Set(cur);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+
+  const appliedIncentives = useMemo(
+    () => (incReport?.incentives ?? []).filter((i, idx) => appliedKeys.has(incKey(i, idx))),
+    [incReport, appliedKeys]
+  );
+  const incentivesTotalUsd = useMemo(
+    () => appliedIncentives.reduce((s, i) => s + (typeof i.estValueUsd === "number" ? i.estValueUsd : 0), 0),
+    [appliedIncentives]
+  );
+
+  // Email incentives to homeowner.
+  const [homeownerEmail, setHomeownerEmail] = useState("");
+  const [emailSending, setEmailSending] = useState(false);
+  const [emailSent, setEmailSent] = useState(false);
+  const [emailError, setEmailError] = useState("");
+  const emailIncentives = async () => {
+    if (!incReport) return;
+    setEmailSending(true);
+    setEmailSent(false);
+    setEmailError("");
+    try {
+      const items = appliedIncentives.length ? appliedIncentives : incReport.incentives;
+      await httpsCallable<
+        {
+          to: string;
+          customerName: string;
+          address: string;
+          incentives: AreaIncentive[];
+          utility: IncentiveReport["utility"];
+          companyName?: string;
+        },
+        { ok?: boolean; error?: string }
+      >(functions, "emailIncentivesToHomeowner")({
+        to: homeownerEmail,
+        customerName,
+        address,
+        incentives: items,
+        utility: incReport.utility ?? null,
+        companyName: company?.name,
+      });
+      setEmailSent(true);
+    } catch (e) {
+      setEmailError((e as Error).message || "Couldn't send the email.");
+    } finally {
+      setEmailSending(false);
+    }
+  };
+
+  // ROI for the chosen system at the current price + applied incentives.
+  const roi = useMemo(
+    () =>
+      chosen
+        ? computeROI({
+            rec: chosen,
+            pricePerUnit: Number(pricePerUnit) || 0,
+            installAdder: Number(installAdder) || 0,
+            incentivesTotalUsd,
+            ratePerKWh: bill.ratePerKWh,
+            dailyUsageKWh: bill.dailyKWh,
+          })
+        : null,
+    [chosen, pricePerUnit, installAdder, incentivesTotalUsd, bill.ratePerKWh, bill.dailyKWh]
+  );
+
   // 7. Proposal
   const [aiSummary, setAiSummary] = useState("");
   const [aiLoading, setAiLoading] = useState(false);
@@ -243,6 +439,18 @@ export default function BatteryTool() {
             backupDaysAchieved: chosen.backupDaysAchieved,
           },
           aiSummary: aiSummary || null,
+          pricing: { pricePerUnit: Number(pricePerUnit) || 0, installAdder: Number(installAdder) || 0 },
+          incentives: appliedIncentives,
+          incentivesUtility: incReport?.utility || null,
+          roi: roi
+            ? {
+                grossCost: roi.grossCost,
+                incentives: roi.incentives,
+                netCost: roi.netCost,
+                monthlySavings: roi.monthlySavings,
+                lifetimeSavings: roi.lifetimeSavings,
+              }
+            : null,
           createdAt: Date.now(),
         })
       );
@@ -288,7 +496,31 @@ export default function BatteryTool() {
     }
     if (p.goal) setGoal(p.goal);
     if (p.backupDays != null) setBackupDays(String(p.backupDays));
-    if (p.recommendation?.productId) setChosenId(p.recommendation.productId);
+    if (p.recommendation?.productId) {
+      setChosenId(p.recommendation.productId);
+      // Force the pricing seeder to re-run for the restored override values below.
+      seededProductId.current = p.recommendation.productId;
+    }
+    if (p.pricing) {
+      setPricePerUnit(String(p.pricing.pricePerUnit ?? 0));
+      setInstallAdder(String(p.pricing.installAdder ?? 0));
+    }
+    if (p.incentives && p.incentives.length) {
+      setIncReport({
+        location: p.address || "",
+        utility: p.incentivesUtility ?? null,
+        incentives: p.incentives,
+        sources: [],
+        usedWeb: false,
+        generatedAt: p.createdAt || Date.now(),
+        cacheId: "",
+        cached: true,
+      });
+      setAppliedKeys(new Set(p.incentives.map((i, idx) => `${i.name || "incentive"}#${idx}`)));
+    } else {
+      setIncReport(null);
+      setAppliedKeys(new Set());
+    }
     setAiSummary(p.aiSummary || "");
     setSaved(false);
     window.scrollTo({ top: 0, behavior: "smooth" });
@@ -499,6 +731,169 @@ export default function BatteryTool() {
                 </div>
               </>
             )}
+
+            {/* Pricing for the chosen system (per-proposal override). */}
+            <div className="field-label" style={{ marginTop: 14 }}>Pricing</div>
+            <div className="grid-2">
+              <label className="field">
+                <span>Price per unit $</span>
+                <input type="number" inputMode="decimal" value={pricePerUnit} placeholder="0" onChange={(e) => setPricePerUnit(e.target.value)} />
+              </label>
+              <label className="field">
+                <span>Install adder $</span>
+                <input type="number" inputMode="decimal" value={installAdder} placeholder="0" onChange={(e) => setInstallAdder(e.target.value)} />
+              </label>
+            </div>
+            <div className="muted small">
+              {chosen.units}× {money(Number(pricePerUnit) || 0)} + {money(Number(installAdder) || 0)} install
+              {company?.batteryPricing?.[chosen.product.id] ? " · seeded from company pricing" : ""}
+            </div>
+
+            {/* Admin-only company catalog pricing. */}
+            {role === "admin" && (
+              <div className="card" style={{ marginTop: 14 }}>
+                <div className="row" style={{ justifyContent: "space-between", alignItems: "center" }}>
+                  <span className="lb-row-name">Company battery pricing (admin)</span>
+                  <button className="btn ghost sm" onClick={() => setShowPricingAdmin((v) => !v)}>
+                    {showPricingAdmin ? "Hide" : "Edit"}
+                  </button>
+                </div>
+                {showPricingAdmin && (
+                  <>
+                    <div className="lb-list" style={{ marginTop: 10 }}>
+                      {BATTERIES.map((b) => {
+                        const d = pricingDraft[b.id] || { price: "", adder: "" };
+                        return (
+                          <div key={b.id} className="lb-row card" style={{ alignItems: "center" }}>
+                            <div className="lb-row-main">
+                              <div className="lb-row-name">{b.brand} {b.model}</div>
+                              <div className="muted small">{b.usableKWh} kWh · {b.chemistry}</div>
+                            </div>
+                            <div className="grid-2" style={{ gap: 8 }}>
+                              <label className="field" style={{ marginBottom: 0 }}>
+                                <span>Price $</span>
+                                <input
+                                  type="number"
+                                  inputMode="decimal"
+                                  value={d.price}
+                                  placeholder="0"
+                                  onChange={(e) =>
+                                    setPricingDraft((cur) => ({ ...cur, [b.id]: { ...cur[b.id], price: e.target.value } }))
+                                  }
+                                />
+                              </label>
+                              <label className="field" style={{ marginBottom: 0 }}>
+                                <span>Adder $</span>
+                                <input
+                                  type="number"
+                                  inputMode="decimal"
+                                  value={d.adder}
+                                  placeholder="0"
+                                  onChange={(e) =>
+                                    setPricingDraft((cur) => ({ ...cur, [b.id]: { ...cur[b.id], adder: e.target.value } }))
+                                  }
+                                />
+                              </label>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                    <div className="row" style={{ gap: 8, marginTop: 10, alignItems: "center" }}>
+                      <button className="btn primary sm" onClick={saveCompanyPricing} disabled={pricingSaving}>
+                        {pricingSaving ? "Saving…" : "Save pricing"}
+                      </button>
+                      {pricingSaved && <span className="muted small" style={{ color: "#34d399" }}>✅ Saved.</span>}
+                      {pricingError && <span className="muted small" style={{ color: "#ef4444" }}>{pricingError}</span>}
+                    </div>
+                  </>
+                )}
+              </div>
+            )}
+          </>
+        )}
+      </div>
+
+      {/* Local & utility incentives */}
+      <div className="card" style={{ marginBottom: 18 }}>
+        <h2 className="section-h" style={{ marginTop: 0 }}>⚡ Local &amp; utility incentives</h2>
+        <div className="row" style={{ gap: 8, flexWrap: "wrap" }}>
+          <button className="btn primary sm" onClick={findIncentives} disabled={incLoading}>
+            {incLoading ? "Searching…" : "Find incentives for this address"}
+          </button>
+        </div>
+        {incError && <p className="muted small" style={{ color: "#f59e0b", marginTop: 10 }}>{incError}</p>}
+
+        {incReport && (
+          <>
+            {incReport.utility && (
+              <div className="muted small" style={{ marginTop: 10 }}>
+                Utility: <strong>{incReport.utility.name}</strong>
+                {incReport.utility.rate != null ? ` · $${incReport.utility.rate}/kWh residential` : ""}
+              </div>
+            )}
+
+            {incReport.incentives.length === 0 ? (
+              <div className="empty" style={{ marginTop: 10 }}>No incentives found for this area.</div>
+            ) : (
+              <div className="lb-list" style={{ marginTop: 10 }}>
+                {incReport.incentives.map((i, idx) => {
+                  const key = incKey(i, idx);
+                  return (
+                    <div key={key} className="lb-row card">
+                      <div className="lb-row-main">
+                        <div className="lb-row-top">
+                          <span className="lb-row-name">{i.name}</span>
+                          {typeof i.estValueUsd === "number" && (
+                            <span className="badge" style={{ background: "#34d399", color: "#06121f", fontWeight: 700 }}>
+                              {money(i.estValueUsd)}
+                            </span>
+                          )}
+                        </div>
+                        <div className="muted small">
+                          {[i.administrator, i.type].filter(Boolean).join(" · ")}
+                          {(i.administrator || i.type) ? " · " : ""}
+                          {i.amount || ""}{i.amount ? " · " : ""}{incentiveDates(i)}
+                        </div>
+                        {i.summary && <div className="muted small" style={{ marginTop: 4 }}>{i.summary}</div>}
+                        <div className="row" style={{ gap: 12, alignItems: "center", marginTop: 6 }}>
+                          <label className="row" style={{ gap: 6, alignItems: "center" }}>
+                            <input
+                              type="checkbox"
+                              checked={appliedKeys.has(key)}
+                              onChange={() => toggleApplied(key)}
+                            />
+                            <span className="small">Apply to net cost</span>
+                          </label>
+                          {i.url && (
+                            <a className="small" href={i.url} target="_blank" rel="noreferrer">Verify source ↗</a>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
+            <div className="muted small" style={{ marginTop: 10 }}>
+              {incReport.usedWeb
+                ? "Researched live from official sources — verify each at its link."
+                : "From AI knowledge — verify each at its link."}
+            </div>
+
+            <div className="field-label" style={{ marginTop: 14 }}>Email to homeowner</div>
+            <div className="row" style={{ gap: 8, flexWrap: "wrap", alignItems: "flex-end" }}>
+              <label className="field" style={{ marginBottom: 0, flex: "1 1 220px" }}>
+                <span>Homeowner email</span>
+                <input type="email" value={homeownerEmail} placeholder="homeowner@email.com" onChange={(e) => setHomeownerEmail(e.target.value)} />
+              </label>
+              <button className="btn primary sm" onClick={emailIncentives} disabled={emailSending || !homeownerEmail}>
+                {emailSending ? "Sending…" : "✉️ Email incentives to homeowner"}
+              </button>
+            </div>
+            {emailSent && <p className="muted small" style={{ color: "#34d399" }}>✅ Email sent.</p>}
+            {emailError && <p className="muted small" style={{ color: "#ef4444" }}>{emailError}</p>}
           </>
         )}
       </div>
@@ -513,6 +908,19 @@ export default function BatteryTool() {
               {" · "}{chosen.totalUsableKWh} kWh usable · {bill.dailyKWh} kWh/day usage
               {solar.hasSolar ? ` · ${solarDaily} kWh/day solar` : ""}
             </div>
+
+            {roi && (
+              <>
+                <div className="field-label">Return on investment</div>
+                <div className="stat-grid" style={{ marginBottom: 8 }}>
+                  <div className="stat-card"><div className="stat-value">{money(roi.grossCost)}</div><div className="stat-label">Gross system cost</div></div>
+                  <div className="stat-card"><div className="stat-value" style={{ color: "#34d399" }}>− {money(roi.incentives)}</div><div className="stat-label">Incentives applied</div></div>
+                  <div className="stat-card"><div className="stat-value">{money(roi.netCost)}</div><div className="stat-label">Net cost</div></div>
+                  <div className="stat-card"><div className="stat-value">{money(roi.monthlySavings)}</div><div className="stat-label">Est. monthly savings</div></div>
+                  <div className="stat-card"><div className="stat-value">{money(roi.lifetimeSavings)}</div><div className="stat-label">Lifetime savings ({roi.warrantyYears} yr)</div></div>
+                </div>
+              </>
+            )}
 
             <div className="row" style={{ gap: 8, flexWrap: "wrap", marginBottom: 10 }}>
               <button className="btn primary sm" onClick={generateSummary} disabled={aiLoading}>

@@ -10,6 +10,7 @@ import { DISPOSITIONS } from "../lib/dispositions";
 import { lookupAddress, normalizeKnockstatResponse, buildEnrichment } from "../lib/knockstat";
 import { bumpStats } from "../lib/stats";
 import { hasFeature } from "../lib/features";
+import { fetchAreaIncentives, incentiveDates, type AreaIncentive } from "../lib/incentives";
 import { usePitchRecorder, pitchSupported } from "../lib/pitch";
 import { validAppointmentTime } from "../lib/scheduling";
 import { useShift } from "../shift/ShiftContext";
@@ -151,6 +152,33 @@ export default function DispositionModal({
   const setterSelect = closersOn && company?.scheduling?.closerAssignment === "setter_select";
   const [closers, setClosers] = useState<{ uid: string; name: string }[]>([]);
   const [closerUid, setCloserUid] = useState("");
+  // Area energy incentives — loaded on demand so the setter can mention them,
+  // and saved onto the lead so they travel to the closer with the appointment.
+  const [incentives, setIncentives] = useState<AreaIncentive[]>([]);
+  const [incUtility, setIncUtility] = useState<{ name: string; rate: number | null } | null>(null);
+  const [incLoading, setIncLoading] = useState(false);
+  const [incErr, setIncErr] = useState("");
+
+  const loadIncentives = async () => {
+    if (!d) return;
+    setIncErr("");
+    setIncLoading(true);
+    try {
+      const m = (d.address || "").match(/\b([A-Z]{2})\b[ ,]+(\d{5})/);
+      const rep = await fetchAreaIncentives({
+        address: d.address || "",
+        state: m?.[1], zip: m?.[2],
+        lat: typeof d.lat === "number" ? d.lat : undefined,
+        lng: typeof d.lng === "number" ? d.lng : undefined,
+      });
+      setIncentives(rep.incentives || []);
+      setIncUtility(rep.utility || null);
+    } catch (e) {
+      setIncErr((e as { message?: string })?.message || "Couldn't load incentives.");
+    } finally {
+      setIncLoading(false);
+    }
+  };
 
   useEffect(() => {
     if (!target) {
@@ -173,6 +201,10 @@ export default function DispositionModal({
     setPhotos({ home: null, bill: null });
     setCloserUid("");
     setErr(null);
+    // Pre-fill any incentives captured earlier on this lead; otherwise clear.
+    setIncentives(Array.isArray((target as { incentives?: AreaIncentive[] }).incentives) ? (target as { incentives?: AreaIncentive[] }).incentives! : []);
+    setIncUtility((target as { incentivesUtility?: { name: string; rate: number | null } | null }).incentivesUtility || null);
+    setIncErr("");
     // Load the closer list once if the setter must pick one.
     if (setterSelect && closers.length === 0) {
       listClosersFn({}).then((r) => setClosers(r.data.closers || [])).catch(() => {});
@@ -320,6 +352,10 @@ export default function DispositionModal({
         verified: geo.verified,
         distanceFt: geo.ft ?? null,
         knockedAt: now,
+        // Area incentives captured for this lead (travel to the closer).
+        incentives: incentives.length ? incentives : undefined,
+        incentivesUtility: incentives.length ? incUtility : undefined,
+        incentivesAt: incentives.length ? now : undefined,
         // Close date — set the moment a deal is marked sold so "closed today"
         // tracks when it closed, not when the door was first knocked. clean()
         // drops it (undefined) for any non-sold disposition.
@@ -560,6 +596,38 @@ export default function DispositionModal({
                 </div>
               )}
             </>
+          )}
+        </div>
+      )}
+
+      {d.address && (
+        <div className="dispo-schedule" style={{ marginTop: 10 }}>
+          <div className="row between" style={{ alignItems: "center" }}>
+            <span>⚡ Area incentives</span>
+            <button type="button" className="btn sm" disabled={incLoading} onClick={loadIncentives}>
+              {incLoading ? "Finding…" : incentives.length ? "Refresh" : "Find incentives"}
+            </button>
+          </div>
+          {incUtility?.name && (
+            <div className="muted small" style={{ marginTop: 4 }}>
+              Utility: {incUtility.name}{typeof incUtility.rate === "number" ? ` · $${incUtility.rate}/kWh` : ""}
+            </div>
+          )}
+          {incErr && <div className="muted small" style={{ marginTop: 4 }}>{incErr}</div>}
+          {incentives.length > 0 ? (
+            <div style={{ marginTop: 6, display: "flex", flexDirection: "column", gap: 6 }}>
+              {incentives.map((i, idx) => (
+                <div key={idx} className="muted small" style={{ borderLeft: "2px solid #34D399", paddingLeft: 8 }}>
+                  <strong style={{ color: "var(--text, #e5e7eb)" }}>{i.name}</strong>
+                  {i.amount ? ` — ${i.amount}` : ""}
+                  <div>{[i.administrator, incentiveDates(i)].filter(Boolean).join(" · ")}</div>
+                  {i.url && <a href={i.url} target="_blank" rel="noreferrer">Verify source ↗</a>}
+                </div>
+              ))}
+              <div className="muted small">Saved to this lead — they travel to the closer with the appointment.</div>
+            </div>
+          ) : (
+            !incLoading && !incErr && <div className="muted small" style={{ marginTop: 4 }}>Tap “Find incentives” to pull local & utility programs for this address.</div>
           )}
         </div>
       )}
