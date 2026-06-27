@@ -1242,6 +1242,10 @@ function thStartOfWeek() { const d = new Date(); const day = (d.getDay()+6)%7; d
 function thInitials(name) { return (name||"?").trim().split(/\s+/).slice(0,2).map((s)=>s[0]||"").join("").toUpperCase() || "?"; }
 function thColor(uid) { let h=0; const s=String(uid||""); for (let i=0;i<s.length;i++) h=(h*31+s.charCodeAt(i))>>>0; return TH_AV_COLORS[h%TH_AV_COLORS.length]; }
 function thKnockAt(l) { return l.knockedAt || l.createdAt || 0; }
+// When a deal counts as closed: its close date (set when marked sold). Lets a
+// deal knocked earlier — or closed via the closer flow — count in the week it
+// actually closed, independent of when the door was knocked.
+function thCloseAt(l) { return l.soldAt || l.updatedAt || l.knockedAt || l.createdAt || 0; }
 function thFmtElapsed(ms) {
   const s = Math.max(0, Math.floor(ms/1000)); const h=Math.floor(s/3600), m=Math.floor((s%3600)/60);
   return h>0 ? `${h}h ${m}m` : `${m}m`;
@@ -1264,10 +1268,22 @@ async function loadTownHall(companyId) {
         return (await getDocs(query(collection(db,"leads"), where("companyId","==",companyId)))).docs;
       }
     };
+    // All of the company's closed deals (small set), fetched all-time so a deal
+    // closed THIS week still counts even if its lead was created earlier — and
+    // so closer-flow closes (which flip an older appointment to sold) show up.
+    const fetchSold = async () => {
+      try {
+        return (await getDocs(query(collection(db,"leads"), where("companyId","==",companyId), where("status","==","sold")))).docs;
+      } catch (err) {
+        console.warn("town hall: sold leads query failed (index building?)", err);
+        return [];
+      }
+    };
     // Load each section independently so one failed query (permissions, a
     // missing index, an empty collection) can't blank the whole board.
-    const [leadDocs, shiftDocs, userDocs, companySnap] = await Promise.all([
+    const [leadDocs, soldDocs, shiftDocs, userDocs, companySnap] = await Promise.all([
       fetchWeekLeads().catch((e) => { console.warn("town hall: leads load failed", e); return []; }),
+      fetchSold().catch((e) => { console.warn("town hall: sold load failed", e); return []; }),
       getDocs(query(collection(db,"shifts"), where("companyId","==",companyId), where("status","==","active")))
         .then((s)=>s.docs).catch((e) => { console.warn("town hall: shifts load failed", e); return []; }),
       getDocs(query(collection(db,"users"), where("companyId","==",companyId)))
@@ -1275,7 +1291,11 @@ async function loadTownHall(companyId) {
       getDoc(doc(db,"companies",companyId)).catch(() => null),
     ]);
 
-    const leads = leadDocs.map((d)=>d.data()).filter((l)=>l.verified !== false);
+    // Keep every lead; the on-site (verified) check is applied per-metric below.
+    // Raw doors/convos require on-site integrity, but deliberate outcomes
+    // (appointments, closes) count regardless of geofence.
+    const leads = leadDocs.map((d)=>d.data());
+    const soldLeads = soldDocs.map((d)=>d.data());
     const shifts = shiftDocs.map((d)=>({ id:d.id, ...d.data() }));
     const users = userDocs.map((d)=>({ uid:d.id, ...d.data() }));
     const names = {}; users.forEach((u)=>{ names[u.uid] = u.displayName || u.email || "Rep"; });
@@ -1284,7 +1304,14 @@ async function loadTownHall(companyId) {
 
     const todayStart = thStartOfToday();
     const blank = () => ({ doors:0, conv:0, appt:0, closed:0 });
-    const tally = (acc, l) => { acc.doors++; if (TH_CONVO.has(l.status)) acc.conv++; if (l.status==="appointment") acc.appt++; if (l.status==="sold") acc.closed++; };
+    // Doors / convos / appts are counted by when the door was knocked. Doors
+    // and convos require on-site; appointments count regardless of geofence.
+    // Closes are tallied separately below, by close date, from the full sold set.
+    const tally = (acc, l) => {
+      const onsite = l.verified !== false;
+      if (onsite) { acc.doors++; if (TH_CONVO.has(l.status)) acc.conv++; }
+      if (l.status==="appointment") acc.appt++;
+    };
 
     const today = blank(), week = blank();
     const perRep = {}; // uid -> week funnel
@@ -1295,6 +1322,16 @@ async function loadTownHall(companyId) {
       if (t >= todayStart) tally(today, l);
       const uid = l.assignedTo; if (!uid) continue;
       (perRep[uid] ??= blank()); tally(perRep[uid], l);
+    }
+    // Closes by close date — credited to the lead's owner (the setter who
+    // generated it), regardless of when it was first knocked or created.
+    for (const l of soldLeads) {
+      const c = thCloseAt(l);
+      if (c < weekStart) continue;
+      week.closed++;
+      if (c >= todayStart) today.closed++;
+      const uid = l.assignedTo; if (!uid) continue;
+      (perRep[uid] ??= blank()); perRep[uid].closed++;
     }
 
     const activeCount = shifts.length;
