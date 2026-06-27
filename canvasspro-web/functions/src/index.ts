@@ -1304,6 +1304,21 @@ const TERRITORY_WORKED = new Set(["go_back", "pipeline", "appointment", "not_int
 
 type LatLng = { lat: number; lng: number };
 
+// Coordinates can arrive as numbers OR numeric strings (Firestore round-trips,
+// imported territories), so normalize every polygon to real numbers once —
+// matching the Map's defensive Number() coercion — and drop any bad vertex.
+// This guards arithmetic (string + number = concatenation) and `.toFixed`.
+function normalizePoly(raw: unknown): LatLng[] {
+  if (!Array.isArray(raw)) return [];
+  const out: LatLng[] = [];
+  for (const p of raw as Array<{ lat?: unknown; lng?: unknown }>) {
+    const lat = Number(p?.lat);
+    const lng = Number(p?.lng);
+    if (isFinite(lat) && isFinite(lng)) out.push({ lat, lng });
+  }
+  return out;
+}
+
 // Centroid + a covering radius (miles) that encloses every polygon vertex, so a
 // single ATTOM radius query around the centroid sweeps the whole territory.
 function polyCentroidRadiusMi(poly: LatLng[]): { lat: number; lng: number; radiusMi: number } {
@@ -1373,34 +1388,42 @@ export const getTerritoryStats = onCall({ timeoutSeconds: 180 }, async (request)
     db.collection("territories").where("companyId", "==", cid).get(),
   ]);
   const terrs = terrSnap.docs
-    .map((d) => ({ id: d.id, ref: d.ref, data: d.data() as any, polygon: (d.data() as any).polygon as LatLng[] }))
-    .filter((t) => Array.isArray(t.polygon) && t.polygon.length >= 3);
-  // Worked / sold come from dispositioned leads inside each polygon.
+    .map((d) => ({ id: d.id, ref: d.ref, data: d.data() as any, polygon: normalizePoly((d.data() as any).polygon) }))
+    .filter((t) => t.polygon.length >= 3);
+  // Worked / sold come from dispositioned leads inside each polygon. Coerce lead
+  // coords with Number() (they may be strings) so none are silently skipped.
   const agg: Record<string, { worked: number; sold: number }> = {};
   leadSnap.forEach((d) => {
     const l = d.data() as any;
-    if (typeof l.lat !== "number" || typeof l.lng !== "number") return;
-    const t = terrs.find((tt) => pinInPolygon({ lat: l.lat, lng: l.lng }, tt.polygon));
+    const lat = Number(l.lat);
+    const lng = Number(l.lng);
+    if (!isFinite(lat) || !isFinite(lng)) return;
+    const t = terrs.find((tt) => pinInPolygon({ lat, lng }, tt.polygon));
     if (!t) return;
     const a = (agg[t.id] ??= { worked: 0, sold: 0 });
     if (TERRITORY_WORKED.has(l.status)) a.worked++;
     if (l.status === "sold") a.sold++;
   });
   // homes = total addressable homes in the polygon (ATTOM), cached on the
-  // territory doc and only recomputed when the polygon shape changes.
+  // territory doc and only recomputed when the polygon shape changes. Each
+  // territory is isolated so an ATTOM hiccup can never zero out the whole map.
   const budget = { pages: 40 }; // shared ATTOM page budget for this whole call
   const stats: Record<string, { homes: number; completion: number; success: number }> = {};
   for (const t of terrs) {
     const a = agg[t.id] || { worked: 0, sold: 0 };
-    const hash = polyHash(t.polygon);
     let homes: number | null = null;
-    if (typeof t.data.homesTotal === "number" && t.data.homesPolyHash === hash) {
-      homes = t.data.homesTotal; // fresh cache for this exact shape
-    } else {
-      homes = await countHomesInPolygon(t.polygon, budget);
-      if (homes != null) {
-        try { await t.ref.set({ homesTotal: homes, homesPolyHash: hash, homesTotalAt: Date.now() }, { merge: true }); } catch { /* non-fatal */ }
+    try {
+      const hash = polyHash(t.polygon);
+      if (typeof t.data.homesTotal === "number" && t.data.homesPolyHash === hash) {
+        homes = t.data.homesTotal; // fresh cache for this exact shape
+      } else {
+        homes = await countHomesInPolygon(t.polygon, budget);
+        if (homes != null) {
+          try { await t.ref.set({ homesTotal: homes, homesPolyHash: hash, homesTotalAt: Date.now() }, { merge: true }); } catch { /* non-fatal */ }
+        }
       }
+    } catch (e) {
+      logger.warn("territory homes count failed", { territory: t.id, err: String(e) });
     }
     // Fall back to dispositioned-door count if ATTOM is unavailable/over budget.
     const denom = homes != null && homes > 0 ? homes : a.worked;
