@@ -261,6 +261,42 @@ export function recommendSystems(input: SizingInput): RecommendedSystem[] {
   return results.sort((a, b) => b.score - a.score);
 }
 
+// ── Pricing & ROI ────────────────────────────────────────────────────────────
+// Per-company catalog pricing (admin-set) with a per-proposal override. There is
+// NO federal ITC — savings come from incentive-adjusted net cost + bill savings.
+export interface PricingEntry { price: number; adder: number } // price per unit, fixed install adder
+export interface ROIInput {
+  rec: RecommendedSystem;
+  pricePerUnit: number;
+  installAdder: number;
+  incentivesTotalUsd: number; // sum of the incentives the rep marked as applicable
+  ratePerKWh: number;
+  dailyUsageKWh?: number; // from the bill — caps how much the battery can shift
+}
+export interface ROIResult {
+  grossCost: number;
+  incentives: number;
+  netCost: number;
+  monthlySavings: number;
+  annualSavings: number;
+  lifetimeSavings: number; // over the product's warranty period
+  warrantyYears: number;
+}
+export function computeROI(input: ROIInput): ROIResult {
+  const { rec, pricePerUnit, installAdder, incentivesTotalUsd, ratePerKWh } = input;
+  const grossCost = round2(pricePerUnit * rec.units + installAdder);
+  const incentives = round2(Math.min(Math.max(incentivesTotalUsd, 0), grossCost)); // can't exceed cost
+  const netCost = round2(Math.max(0, grossCost - incentives));
+  // Daily energy the battery realistically shifts (self-consumption / TOU), capped
+  // by usable capacity and the home's daily usage, derated by round-trip losses.
+  const dailyUse = input.dailyUsageKWh && input.dailyUsageKWh > 0 ? input.dailyUsageKWh : rec.totalUsableKWh;
+  const dailyShift = Math.min(rec.totalUsableKWh, dailyUse * 0.6);
+  const monthlySavings = round2(dailyShift * 30 * ratePerKWh * rec.product.roundTrip);
+  const annualSavings = round2(monthlySavings * 12);
+  const lifetimeSavings = round2(annualSavings * rec.product.warrantyYears);
+  return { grossCost, incentives, netCost, monthlySavings, annualSavings, lifetimeSavings, warrantyYears: rec.product.warrantyYears };
+}
+
 // ── helpers ──────────────────────────────────────────────────────────────────
 function round1(n: number) { return Math.round(n * 10) / 10; }
 function round2(n: number) { return Math.round(n * 100) / 100; }

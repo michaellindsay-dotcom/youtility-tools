@@ -119,6 +119,19 @@ export default function Closer() {
                   {e.address ? `${e.address} · ` : ""}set by {e.setterName || "a setter"}
                 </div>
                 {e.notes && <div className="muted small" style={{ marginTop: 4 }}>📝 {e.notes}</div>}
+                {e.incentives && e.incentives.length > 0 && (
+                  <details className="muted small" style={{ marginTop: 4 }}>
+                    <summary>⚡ {e.incentives.length} area incentive{e.incentives.length === 1 ? "" : "s"}{e.incentivesUtility?.name ? ` · ${e.incentivesUtility.name}` : ""}</summary>
+                    <div style={{ marginTop: 4, display: "flex", flexDirection: "column", gap: 4 }}>
+                      {e.incentives.map((i, idx) => (
+                        <div key={idx} style={{ borderLeft: "2px solid #34D399", paddingLeft: 8 }}>
+                          <strong>{i.name}</strong>{i.amount ? ` — ${i.amount}` : ""}
+                          {i.url && <> · <a href={i.url} target="_blank" rel="noreferrer">verify ↗</a></>}
+                        </div>
+                      ))}
+                    </div>
+                  </details>
+                )}
               </div>
               <button className="btn primary sm" onClick={() => setActive(e)}>Disposition</button>
             </div>

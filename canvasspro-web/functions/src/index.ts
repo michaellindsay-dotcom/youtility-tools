@@ -31,6 +31,10 @@ const ATTOM = {
   key: process.env.ATTOM_API_KEY || "",
 };
 
+// NREL (api.data.gov) — identifies the electric utility serving a lat/lng. Free
+// key; DEMO_KEY works for light testing but is rate-limited.
+const NREL = { key: process.env.NREL_API_KEY || "DEMO_KEY" };
+
 async function attomGet(path: string, params: Record<string, string | number | undefined>) {
   const url = new URL(ATTOM.baseUrl + path);
   Object.entries(params).forEach(([k, v]) => {
@@ -77,6 +81,7 @@ async function refreshApiConfig(): Promise<void> {
     const c = snap.data() as Record<string, unknown>;
     if (typeof c.attomKey === "string" && c.attomKey) ATTOM.key = c.attomKey;
     if (typeof c.attomUrl === "string" && c.attomUrl) ATTOM.baseUrl = c.attomUrl;
+    if (typeof c.nrelKey === "string" && c.nrelKey) NREL.key = c.nrelKey;
     if (typeof c.batchKey === "string" && c.batchKey) BATCH.key = c.batchKey;
     if (typeof c.batchUrl === "string" && c.batchUrl) BATCH.baseUrl = c.batchUrl;
     if (typeof c.batchEnabled === "boolean") BATCH.enabled = c.batchEnabled;
@@ -2010,6 +2015,17 @@ export const createCloserAppointment = onCall(async (request) => {
   const closerPath = (closer.closerManagerPath as string[]) || [];
   const visibility = Array.from(new Set([closer.uid, ...closerPath, setter.uid, ...setterPath]));
 
+  // Carry the area incentives the setter captured onto the appointment so the
+  // closer has them in hand at the door.
+  let incentives: any[] = [];
+  let incentivesUtility: any = null;
+  if (d.leadId) {
+    try {
+      const ld = (await db.doc(`leads/${d.leadId}`).get()).data() as any;
+      if (ld && Array.isArray(ld.incentives)) { incentives = ld.incentives; incentivesUtility = ld.incentivesUtility || null; }
+    } catch { /* non-fatal */ }
+  }
+
   const ev = {
     companyId,
     userId: closer.uid, // the closer owns the calendar event
@@ -2018,6 +2034,8 @@ export const createCloserAppointment = onCall(async (request) => {
     title: d.title || `Appointment${d.name ? ` — ${d.name}` : ""}`,
     address: d.address || "",
     leadId: d.leadId || null,
+    incentives,
+    incentivesUtility,
     startAt: d.startAt,
     endAt,
     durationMin: d.durationMin || sched.apptDurationMin,
@@ -2275,6 +2293,7 @@ export const getApiKeys = onCall(async (request) => {
   return {
     attomKey: ATTOM.key, attomUrl: ATTOM.baseUrl,
     batchKey: BATCH.key, batchUrl: BATCH.baseUrl, batchEnabled: BATCH.enabled,
+    nrelKey: NREL.key,
   };
 });
 
@@ -2288,6 +2307,7 @@ export const setApiKeys = onCall(async (request) => {
   if (typeof d.batchKey === "string" && d.batchKey.trim()) u.batchKey = d.batchKey.trim();
   if (typeof d.batchUrl === "string") u.batchUrl = (d.batchUrl as string).trim();
   if (typeof d.batchEnabled === "boolean") u.batchEnabled = d.batchEnabled;
+  if (typeof d.nrelKey === "string" && d.nrelKey.trim()) u.nrelKey = d.nrelKey.trim();
   await db.doc("config/api").set(u, { merge: true });
   return { ok: true };
 });
@@ -3021,6 +3041,163 @@ export const batteryProposalSummary = onCall(async (request) => {
     // Surface a typed, non-fatal signal so the UI degrades to the raw numbers.
     return { summary: "", error: e?.message || "AI summary unavailable." };
   }
+});
+
+// ════════════════════════════════════════════════════════════════════════════
+// ENERGY INCENTIVES — auto-discover local / AHJ / utility battery+solar
+// incentives for an address. Identifies the electric utility via NREL, then uses
+// Claude WITH LIVE WEB SEARCH to find current programs with real source links +
+// dates. Cached per area so we don't re-bill the AI for every lookup. (No ITC.)
+// ════════════════════════════════════════════════════════════════════════════
+function escHtml(s: unknown): string {
+  return String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c] as string));
+}
+
+// Claude with the server-side web_search tool. Returns the answer text plus the
+// real citation URLs the model used (our verification links). Falls back to a
+// knowledge-only call if web search isn't enabled on the key/model.
+async function claudeWebResearch(system: string, prompt: string, maxTokens = 2500): Promise<{ text: string; sources: Array<{ url: string; title: string }>; usedWeb: boolean }> {
+  const cfg = await readAiConfig();
+  if (!cfg.anthropicKey) throw new HttpsError("failed-precondition", "AI isn't configured — add an Anthropic key in the admin console.");
+  const headers = { "x-api-key": cfg.anthropicKey, "anthropic-version": "2023-06-01", "content-type": "application/json" };
+  const base = { model: cfg.anthropicModel, max_tokens: maxTokens, system, messages: [{ role: "user", content: prompt }] };
+  let usedWeb = true;
+  let res = await fetch("https://api.anthropic.com/v1/messages", {
+    method: "POST", headers,
+    body: JSON.stringify({ ...base, tools: [{ type: "web_search_20250305", name: "web_search", max_uses: 5 }] }),
+  });
+  let json: any = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    logger.warn("web_search unavailable, falling back to knowledge-only", json?.error?.message);
+    usedWeb = false;
+    res = await fetch("https://api.anthropic.com/v1/messages", { method: "POST", headers, body: JSON.stringify(base) });
+    json = await res.json().catch(() => ({}));
+    if (!res.ok) throw new HttpsError("internal", json?.error?.message || `Claude failed (${res.status})`);
+  }
+  const blocks: any[] = Array.isArray(json.content) ? json.content : [];
+  let text = "";
+  const sources: Array<{ url: string; title: string }> = [];
+  const seen = new Set<string>();
+  for (const b of blocks) {
+    if (b.type === "text") {
+      text += b.text || "";
+      for (const c of (b.citations || [])) {
+        if (c?.url && !seen.has(c.url)) { seen.add(c.url); sources.push({ url: c.url, title: c.title || c.url }); }
+      }
+    }
+  }
+  return { text, sources, usedWeb };
+}
+
+// Real electric-utility identification for a coordinate (NREL utility_rates v3).
+async function nrelUtility(lat: number, lng: number): Promise<{ name: string; rate: number | null } | null> {
+  try {
+    const url = `https://developer.nrel.gov/api/utility_rates/v3.json?api_key=${encodeURIComponent(NREL.key)}&lat=${lat}&lon=${lng}`;
+    const res = await fetch(url);
+    const j: any = await res.json().catch(() => ({}));
+    if (!res.ok) return null;
+    const o = j.outputs || {};
+    const name = o.utility_name || (Array.isArray(o.utility_info) ? o.utility_info[0]?.utility_name : "") || "";
+    const rate = typeof o.residential === "number" && o.residential > 0 ? o.residential : null;
+    return name || rate != null ? { name: name || "", rate } : null;
+  } catch { return null; }
+}
+
+const INCENTIVE_CACHE_TTL = 30 * 86400000; // 30 days — incentives change slowly
+function incentiveAreaKey(d: { zip?: string; state?: string; lat?: number; lng?: number }): string {
+  if (d.zip && /^\d{5}$/.test(String(d.zip))) return `z_${d.zip}`;
+  if (typeof d.lat === "number" && typeof d.lng === "number") return `g_${d.lat.toFixed(2)}_${d.lng.toFixed(2)}`;
+  if (d.state) return `s_${String(d.state).toLowerCase().replace(/[^a-z]/g, "")}`;
+  return "unknown";
+}
+
+export const getAreaIncentives = onCall({ timeoutSeconds: 120 }, async (request) => {
+  const caller = await getCaller(request);
+  const d = (request.data || {}) as { lat?: number; lng?: number; address?: string; city?: string; state?: string; zip?: string; refresh?: boolean };
+  await refreshApiConfig();
+  const key = incentiveAreaKey(d);
+  const ref = db.doc(`incentiveCache/${key}`);
+  if (!d.refresh) {
+    const cached = await ref.get();
+    if (cached.exists) {
+      const c = cached.data() as any;
+      if (c.generatedAt && Date.now() - c.generatedAt < INCENTIVE_CACHE_TTL) return { ...c, cacheId: key, cached: true };
+    }
+  }
+  let utility: { name: string; rate: number | null } | null = null;
+  if (typeof d.lat === "number" && typeof d.lng === "number") utility = await nrelUtility(d.lat, d.lng);
+  const loc = [d.address, d.city, d.state, d.zip].filter(Boolean).join(", ") || `${d.lat ?? "?"},${d.lng ?? "?"}`;
+  const today = new Date().toISOString().slice(0, 10);
+  const system =
+    `You are a home solar + battery incentives researcher. Use web search to find CURRENT (as of ${today}) financial incentives for installing HOME BATTERY / energy storage (and rooftop solar) at the given U.S. location: electric-utility rebates, state programs, county/city/AHJ incentives, SGIP-style storage rebates, performance/demand-response or VPP payments, and property/sales-tax exemptions. EXCLUDE the federal ITC entirely (assume it is gone). Only include programs you can source from an official utility or government page. Reply with ONLY a JSON array (no prose).`;
+  const utilLine = utility?.name ? `The electric utility serving this address is ${utility.name}. ` : "";
+  const prompt =
+    `Location: ${loc}. ${utilLine}\n` +
+    `Return a JSON array (max 6, most valuable first) of: {"name","administrator","level":"utility|state|county|city|ahj|other","type":"rebate|tax|performance|financing|exemption","amount":"<human readable e.g. $0.25/Wh up to $5,000>","estValueUsd":<number estimate for a typical single-battery home install, or null>,"startDate":"<ISO/text/null>","endDate":"<ISO/text/'ongoing'>","url":"<official source URL>","summary":"<1-2 sentences>"}. If none, return [].`;
+  let incentives: any[] = [];
+  let sources: Array<{ url: string; title: string }> = [];
+  let usedWeb = false;
+  try {
+    const r = await claudeWebResearch(system, prompt, 3000);
+    usedWeb = r.usedWeb; sources = r.sources;
+    const m = r.text.match(/\[[\s\S]*\]/);
+    if (m) incentives = JSON.parse(m[0]);
+  } catch (e) {
+    logger.warn("incentive research failed", e);
+  }
+  const report = {
+    location: loc, state: d.state || null, zip: d.zip || null,
+    utility: utility || null,
+    incentives: Array.isArray(incentives) ? incentives.slice(0, 8) : [],
+    sources, usedWeb, generatedAt: Date.now(), generatedBy: caller.uid,
+  };
+  try { await ref.set(report, { merge: true }); } catch (e) { logger.warn("incentive cache write", e); }
+  return { ...report, cacheId: key, cached: false };
+});
+
+// Email the discovered incentives (with dates + verification links) to the
+// homeowner as proof the programs are real — the closer/setter's trust builder.
+export const emailIncentivesToHomeowner = onCall(async (request) => {
+  await getCaller(request);
+  const d = (request.data || {}) as { to?: string; customerName?: string; address?: string; incentives?: any[]; utility?: { name?: string }; companyName?: string };
+  if (!d.to || !/.+@.+\..+/.test(d.to)) throw new HttpsError("invalid-argument", "A valid homeowner email is required.");
+  const items = Array.isArray(d.incentives) ? d.incentives : [];
+  const rows = items.map((i) => {
+    const dates = [i.startDate, i.endDate].filter(Boolean).join(" – ") || "see source";
+    return `<tr><td style="padding:10px;border-bottom:1px solid #eee">` +
+      `<strong>${escHtml(i.name)}</strong><br>` +
+      `<span style="color:#555">${escHtml(i.administrator || "")}${i.type ? " · " + escHtml(i.type) : ""}</span><br>` +
+      `${escHtml(i.summary || "")}<br>` +
+      `<span style="color:#555">Amount: ${escHtml(i.amount || "—")} · Dates: ${escHtml(dates)}</span>` +
+      `${i.url ? `<br><a href="${escHtml(i.url)}">Verify at the official source →</a>` : ""}</td></tr>`;
+  }).join("");
+  const html =
+    `<div style="font-family:system-ui,Arial,sans-serif;max-width:620px;color:#111">` +
+    `<h2>Energy incentives for your home</h2>` +
+    `${d.address ? `<p style="color:#555">${escHtml(d.address)}</p>` : ""}` +
+    `${d.utility?.name ? `<p>Electric utility: <strong>${escHtml(d.utility.name)}</strong></p>` : ""}` +
+    `<table style="width:100%;border-collapse:collapse">${rows || "<tr><td>No specific programs were found for your area yet — your rep can follow up.</td></tr>"}</table>` +
+    `<p style="color:#777;font-size:12px;margin-top:16px">These programs are gathered from public/official sources and can change — please confirm current terms at each linked source${d.companyName ? `, or ask your ${escHtml(d.companyName)} rep` : ""}.</p></div>`;
+  const text = items.map((i) => `• ${i.name} (${i.administrator || ""}) — ${i.amount || ""} — ${[i.startDate, i.endDate].filter(Boolean).join(" to ")} — ${i.url || ""}`).join("\n") || "No specific programs found yet.";
+  const cfg = await getNotifyConfig();
+  const r = await sendEmailDetailed(cfg, d.to, "Energy incentives for your home", text, undefined, html);
+  if (!r.ok) throw new HttpsError("failed-precondition", r.detail);
+  return { ok: true };
+});
+
+// Admin: set company-wide battery pricing (price + install adder per product).
+export const setBatteryPricing = onCall(async (request) => {
+  const caller = await getCaller(request);
+  const { companyId, pricing } = (request.data || {}) as { companyId?: string; pricing?: Record<string, { price?: number; adder?: number }> };
+  authorizeForCompany(caller, companyId);
+  const clean: Record<string, { price: number; adder: number }> = {};
+  for (const [pid, v] of Object.entries(pricing || {})) {
+    const price = Math.max(0, Number(v?.price) || 0);
+    const adder = Math.max(0, Number(v?.adder) || 0);
+    if (price > 0 || adder > 0) clean[pid] = { price, adder };
+  }
+  await db.doc(`companies/${companyId}`).set({ batteryPricing: clean, batteryPricingUpdatedAt: Date.now() }, { merge: true });
+  return { ok: true };
 });
 
 // ════════════════════════════════════════════════════════════════════════════
