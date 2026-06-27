@@ -28,25 +28,39 @@ export default function GoalPlanner() {
   const { profile } = useAuth();
   const uid = profile?.uid;
 
-  // Reps may only change their close goal on Sundays.
+  // Start of the current week (Sunday 00:00) — the goal resets each week.
+  const weekStartSun = useMemo(() => {
+    const d = new Date();
+    d.setDate(d.getDate() - d.getDay());
+    d.setHours(0, 0, 0, 0);
+    return d.getTime();
+  }, []);
   const isSunday = new Date().getDay() === 0;
 
   // Measured numbers from the rep's last-30-day history. These are VIEW-ONLY —
   // the planner's conversion rates come straight from the rep's real activity;
   // reps can't edit or reset their numbers.
   const [measured, setMeasured] = useState<Actuals>({ doors: 0, conv: 0, appt: 0, closes: 0, hours: 0 });
-  // The one number the rep sets: their monthly close goal.
-  const [goalCount, setGoalCount] = useState(10);
-  // True once the rep has logged any doors + hours — their pace then drives the
-  // doors/hours math instead of the baseline (adjusts from day one).
-  const [hasRealData, setHasRealData] = useState(false);
+  // The one number the rep sets: their WEEKLY close goal.
+  const [goalCount, setGoalCount] = useState(3);
+  // The week the goal was last set for — used to allow the first edit of a new
+  // week even if it isn't Sunday yet.
+  const [goalWeek, setGoalWeek] = useState(0);
+  // Days of logged activity (capped at 30) — drives the baseline→rolling blend.
+  const [daysActive, setDaysActive] = useState(0);
 
-  // Load the saved close goal (local to this device, per the spec).
+  // The goal is editable on Sundays OR the first time it's opened in a new week
+  // (incl. a rep's very first login), then locks for the rest of that week.
+  const canEditGoal = isSunday || goalWeek !== weekStartSun;
+
+  // Load the saved close goal + the week it was set for (local to this device).
   useEffect(() => {
     if (!uid) return;
     try {
       const c = localStorage.getItem(`yk_closegoal_${uid}`);
       if (c) setGoalCount(Math.max(1, Number(c)));
+      const w = localStorage.getItem(`yk_closegoal_week_${uid}`);
+      if (w) setGoalWeek(Number(w));
     } catch { /* ignore */ }
   }, [uid]);
 
@@ -73,8 +87,14 @@ export default function GoalPlanner() {
           hours: Math.round(hours * 10) / 10,
         };
         setMeasured(m);
-        // Adjust to real data as soon as there's any — from day one of working.
-        setHasRealData(m.doors > 0 && m.hours > 0);
+        // Days of logged activity (capped at the window): drives how much the
+        // doors/hours baseline has blended toward the rep's real rolling pace.
+        const stamps = [
+          ...leadSnap.docs.map((d) => (d.data() as Lead).createdAt || 0),
+          ...shiftSnap.docs.map((d) => (d.data() as Shift).startAt || 0),
+        ].filter((t) => t > 0);
+        const earliest = stamps.length ? Math.min(...stamps) : 0;
+        setDaysActive(earliest ? Math.min(WINDOW_DAYS, Math.floor((Date.now() - earliest) / 86400000) + 1) : 0);
       } catch (e) {
         console.error("planner data", e);
       }
@@ -85,7 +105,11 @@ export default function GoalPlanner() {
   const saveGoalCount = (n: number) => {
     const v = Math.max(1, n);
     setGoalCount(v);
-    if (uid) localStorage.setItem(`yk_closegoal_${uid}`, String(v));
+    setGoalWeek(weekStartSun); // lock it in for this week
+    if (uid) {
+      localStorage.setItem(`yk_closegoal_${uid}`, String(v));
+      localStorage.setItem(`yk_closegoal_week_${uid}`, String(weekStartSun));
+    }
   };
 
   // Derived conversion rates straight from the rep's measured activity (no
@@ -100,34 +124,34 @@ export default function GoalPlanner() {
     };
   }, [measured]);
 
-  // Reverse-plan the monthly close goal through the rep's rolling-average
-  // conversion rates into daily / weekly / monthly targets for every metric.
-  // Appointments & conversations always come from the conversion math; doors &
-  // hours use the weekly baseline only until the rep has logged real activity.
+  // Reverse-plan the WEEKLY close goal through the rep's conversion rates into
+  // daily / weekly / monthly targets. Appointments & conversations come from the
+  // conversion math; doors & hours start at the baseline and blend toward the
+  // rep's real rolling pace from day one, reaching a full 30-day average at day 30.
   const plan = useMemo(() => {
-    const closesMonth = goalCount;
-    const apptsMonth = closesMonth / (rates.closeRate || FALLBACK.closeRate);
-    const convMonth = apptsMonth / (rates.apptPerConv || FALLBACK.apptPerConv);
-    const doorsMonth = hasRealData
-      ? apptsMonth / (rates.apptPerDoor || FALLBACK.apptPerDoor)
-      : DEFAULT_DOORS_WEEK * WEEKS_PER_MONTH;
-    const hoursMonth = hasRealData
-      ? doorsMonth / (rates.doorsPerHour || FALLBACK.doorsPerHour)
-      : DEFAULT_HOURS_WEEK * WEEKS_PER_MONTH;
+    const closesWeek = goalCount;
+    const apptsWeek = closesWeek / (rates.closeRate || FALLBACK.closeRate);
+    const convWeek = apptsWeek / (rates.apptPerConv || FALLBACK.apptPerConv);
 
-    const per = (monthly: number) => ({
-      month: monthly,
-      week: monthly / WEEKS_PER_MONTH,
-      day: monthly / WEEKS_PER_MONTH / DAYS_PER_WEEK,
+    const w = Math.min(daysActive / WINDOW_DAYS, 1); // 0 = baseline, 1 = full rolling
+    const derivedDoorsWeek = apptsWeek / (rates.apptPerDoor || FALLBACK.apptPerDoor);
+    const doorsWeek = DEFAULT_DOORS_WEEK * (1 - w) + derivedDoorsWeek * w;
+    const derivedHoursWeek = doorsWeek / (rates.doorsPerHour || FALLBACK.doorsPerHour);
+    const hoursWeek = DEFAULT_HOURS_WEEK * (1 - w) + derivedHoursWeek * w;
+
+    const per = (weekly: number) => ({
+      week: weekly,
+      day: weekly / DAYS_PER_WEEK,
+      month: weekly * WEEKS_PER_MONTH,
     });
     return {
-      closes: per(closesMonth),
-      appts: per(apptsMonth),
-      conv: per(convMonth),
-      doors: per(doorsMonth),
-      hours: per(hoursMonth),
+      closes: per(closesWeek),
+      appts: per(apptsWeek),
+      conv: per(convWeek),
+      doors: per(doorsWeek),
+      hours: per(hoursWeek),
     };
-  }, [goalCount, rates, hasRealData]);
+  }, [goalCount, rates, daysActive]);
 
   // Persist the derived daily/weekly/monthly goals so the on-shift HUD and any
   // other consumer stay in sync with the planner.
@@ -158,12 +182,12 @@ export default function GoalPlanner() {
 
   return (
     <div className="planner-wrap">
-      {/* ── Monthly reverse goal calculator ─────────────────── */}
+      {/* ── Weekly reverse goal calculator ─────────────────── */}
       <div className="card">
-        <h2 className="planner-h">◎ Monthly Goal Planner</h2>
+        <h2 className="planner-h">◎ Weekly Goal Planner</h2>
         <p className="muted small">
-          Set your monthly close target and we'll work backward through <em>your</em> rolling-average conversion
-          rates into a daily, weekly, and monthly game plan.
+          Set your weekly close target and we'll work backward through <em>your</em> rolling-average conversion
+          rates into a daily and weekly game plan.
         </p>
 
         <div className="planner-goalbar">
@@ -171,16 +195,16 @@ export default function GoalPlanner() {
           <input
             type="number" min={1} className="input goal-input"
             value={goalCount}
-            disabled={!isSunday}
+            disabled={!canEditGoal}
             onChange={(e) => saveGoalCount(Number(e.target.value))}
           />
-          <span>per month</span>
+          <span>per week</span>
         </div>
 
-        {!isSunday && (
+        {!canEditGoal && (
           <div className="muted small" style={{ marginTop: 6 }}>
-            🔒 Your close goal is locked — it can only be changed on <strong>Sundays</strong>. Everything else
-            adjusts automatically from your rolling {WINDOW_DAYS}-day average.
+            🔒 Your close goal is set for this week — you can change it again on <strong>Sunday</strong> (or your
+            first login next week). Everything else adjusts automatically from your rolling {WINDOW_DAYS}-day average.
           </div>
         )}
 
@@ -192,10 +216,11 @@ export default function GoalPlanner() {
           <PlanStat n={r1(plan.hours.week)} label="Hours / wk" />
         </div>
 
-        {!hasRealData && (
+        {daysActive < WINDOW_DAYS && (
           <div className="muted small" style={{ marginTop: 4 }}>
-            Doors &amp; hours use a {DEFAULT_DOORS_WEEK}/{DEFAULT_HOURS_WEEK} weekly baseline — they'll adjust to your
-            real pace as soon as you log your first shift.
+            Doors &amp; hours start from a {DEFAULT_DOORS_WEEK}/{DEFAULT_HOURS_WEEK} weekly baseline and shift toward your
+            real pace from day one — reaching a full {WINDOW_DAYS}-day rolling average at day {WINDOW_DAYS}
+            {daysActive > 0 ? ` (day ${daysActive} so far)` : ""}.
           </div>
         )}
       </div>
