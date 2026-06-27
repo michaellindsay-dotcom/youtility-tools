@@ -82,6 +82,7 @@ export default function MapPage() {
   const [searchParams] = useSearchParams();
   const focusId = searchParams.get("focus");
   const focusDone = useRef(false);
+  const focusTerr = useRef<Territory | null>(null);
 
   // The status pill is now used only for transient errors / draw hints — the
   // persistent "N homes loaded · keep moving" counts were removed.
@@ -155,17 +156,18 @@ export default function MapPage() {
     if (!companyId) return;
     const snap = await getDocs(query(collection(db, "territories"), where("companyId", "==", companyId)));
     const mineIds = profile?.territoryIds || [];
-    let focusPoly: L.Polygon | null = null;
     snap.forEach((d) => {
       const t = { id: d.id, ...(d.data() as Omit<Territory, "id">) };
+      // Remember the territory we were sent to focus, even if it has no drawn
+      // area (form-created ones) — applyTerritoryFocus falls back to its homes.
+      if (focusId && d.id === focusId) focusTerr.current = t;
       if (!t.polygon || t.polygon.length < 3) return;
       const label = t.assignedToName ? `${t.name} · ${t.assignedToName}` : t.name;
-      const poly = L.polygon(t.polygon.map((p) => [p.lat, p.lng] as [number, number]), {
+      L.polygon(t.polygon.map((p) => [p.lat, p.lng] as [number, number]), {
         color: t.color || "#34D399", weight: 2, fillOpacity: 0.08,
       })
         .bindTooltip(label)
         .addTo(territoryLayer.current);
-      if (focusId && d.id === focusId) focusPoly = poly;
       // A rep's working area is the one assigned to them. If an area has no
       // assignee, fall back to the legacy territoryIds membership (or show-all).
       const isMine = t.assignedTo
@@ -173,12 +175,31 @@ export default function MapPage() {
         : !mineIds.length || mineIds.includes(t.id);
       if (isMine) assigned.current.push(t);
     });
-    // Zoom to the territory we were sent to view (once), and flash it open.
-    if (focusPoly && !focusDone.current && mapRef.current) {
+  }
+
+  // Zoom the map to the territory we were sent to view (double-click on a card).
+  // Drawn areas fit their polygon; form-created areas (no polygon) fall back to
+  // the homes/leads tagged to them, then to a clear "not mapped yet" notice.
+  function applyTerritoryFocus() {
+    const map = mapRef.current;
+    if (!focusId || focusDone.current || !map) return;
+    const t = focusTerr.current;
+    if (t?.polygon && t.polygon.length >= 3) {
       focusDone.current = true;
-      const fp = focusPoly as L.Polygon;
-      mapRef.current.fitBounds(fp.getBounds(), { maxZoom: 18, padding: [40, 40] });
-      fp.openTooltip();
+      map.fitBounds(L.polygon(t.polygon.map((p) => [p.lat, p.lng] as [number, number])).getBounds(), { maxZoom: 18, padding: [40, 40] });
+      return;
+    }
+    const pts = leadsRef.current
+      .filter((l) => l.territoryId === focusId && typeof l.lat === "number" && typeof l.lng === "number")
+      .map((l) => L.latLng(l.lat as number, l.lng as number));
+    if (pts.length) {
+      focusDone.current = true;
+      map.fitBounds(L.latLngBounds(pts), { maxZoom: 18, padding: [40, 40] });
+      return;
+    }
+    if (t) {
+      focusDone.current = true;
+      setStatus(`📍 "${t.name}" isn't drawn on the map yet — use ✏️ Draw to set its area.`);
     }
   }
 
@@ -573,7 +594,9 @@ export default function MapPage() {
       try {
         const pos = await Geolocation.getCurrentPosition({ enableHighAccuracy: true, timeout: 8000 });
         myLoc.current = { lat: pos.coords.latitude, lng: pos.coords.longitude };
-        map.setView([myLoc.current.lat, myLoc.current.lng], 18);
+        // Don't recenter on the rep when we were sent to view a specific
+        // territory — applyTerritoryFocus will frame that area instead.
+        if (!focusId) map.setView([myLoc.current.lat, myLoc.current.lng], 18);
         setYou(myLoc.current.lat, myLoc.current.lng);
         // Instantly repaint homes we've cached nearby (no network), then refresh.
         nearbyCachedHomes(myLoc.current.lat, myLoc.current.lng).forEach((h) => addHomeMarker(h));
@@ -582,6 +605,7 @@ export default function MapPage() {
       }
       await buildTerritories();
       await buildPins();
+      applyTerritoryFocus(); // zoom to the focused territory (polygon → its homes → notice)
       await loadHomes();
       void loadMovers(); // drop recent move-in pins for the area / live location
       void loadSolarPins(); // drop ☀️/🔥 solar-scanner pins (CRM add-on)
