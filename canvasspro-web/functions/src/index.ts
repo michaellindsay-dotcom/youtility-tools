@@ -3200,6 +3200,40 @@ export const setBatteryPricing = onCall(async (request) => {
   return { ok: true };
 });
 
+// Analyze an uploaded utility bill or solar-production document (image or PDF)
+// with Claude vision and return structured numbers for the battery tool.
+export const analyzeEnergyDocument = onCall({ timeoutSeconds: 120 }, async (request) => {
+  await getCaller(request);
+  const { base64, mediaType, kind } = (request.data || {}) as { base64?: string; mediaType?: string; kind?: "bill" | "solar" };
+  if (!base64 || !mediaType) throw new HttpsError("invalid-argument", "A file (base64 + mediaType) is required.");
+  // ~7MB raw → ~9.5MB base64; keep within the callable payload ceiling.
+  if (base64.length > 9_500_000) throw new HttpsError("invalid-argument", "File too large — please upload one under 7 MB.");
+  const cfg = await readAiConfig();
+  if (!cfg.anthropicKey) throw new HttpsError("failed-precondition", "Document analysis isn't configured — ask your admin to add an Anthropic key.");
+  const isPdf = mediaType === "application/pdf";
+  const fileBlock = isPdf
+    ? { type: "document", source: { type: "base64", media_type: "application/pdf", data: base64 } }
+    : { type: "image", source: { type: "base64", media_type: mediaType, data: base64 } };
+  const ask = kind === "solar"
+    ? 'This is a solar-monitoring screenshot or report. Extract the PV system + production info. Reply with ONLY a JSON object (no prose): {"systemKwDc":<number|null>,"annualProductionKWh":<number|null>,"monthlyProductionKWh":<number|null>,"inverterBrand":<string|null>,"notes":"<what you saw / caveats>"}.'
+    : 'This is a residential electricity (utility) bill. Extract usage + cost. Reply with ONLY a JSON object (no prose): {"monthlyKWh":<number|null>,"monthlyCost":<number|null>,"ratePerKWh":<number|null>,"utilityName":<string|null>,"billingDays":<number|null>,"notes":"<what you saw / caveats>"}. If the bill shows a billing period other than a month, still report the monthly figures (normalize to ~30 days).';
+  const res = await fetch("https://api.anthropic.com/v1/messages", {
+    method: "POST",
+    headers: { "x-api-key": cfg.anthropicKey, "anthropic-version": "2023-06-01", "content-type": "application/json" },
+    body: JSON.stringify({
+      model: cfg.anthropicModel, max_tokens: 700,
+      messages: [{ role: "user", content: [fileBlock, { type: "text", text: ask }] }],
+    }),
+  });
+  const json: any = await res.json().catch(() => ({}));
+  if (!res.ok) throw new HttpsError("internal", json?.error?.message || `Document analysis failed (${res.status})`);
+  const text = (Array.isArray(json.content) ? json.content : []).filter((b: any) => b.type === "text").map((b: any) => b.text).join("");
+  const m = text.match(/\{[\s\S]*\}/);
+  let data: any = {};
+  try { data = m ? JSON.parse(m[0]) : {}; } catch { data = {}; }
+  return { kind: kind || "bill", data };
+});
+
 // ════════════════════════════════════════════════════════════════════════════
 // STRIPE BILLING — checkout, billing portal, and a webhook that flips a
 // company's status from the live subscription state. Keys live in config/billing
