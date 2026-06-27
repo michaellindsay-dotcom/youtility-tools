@@ -64,6 +64,7 @@ export interface Company {
   pastDueSince?: number; // epoch ms the account first went unpaid
   organizationId?: string; // parent organization, if grouped
   scheduling?: SchedulingSettings;
+  maxTerritoriesPerUser?: number; // cap on territories one rep can hold (0 = unlimited)
   createdAt?: number;
 }
 

@@ -1296,6 +1296,50 @@ export const setCompanySettings = onCall(async (request) => {
   return { ok: true, scheduling: s };
 });
 
+// Per-territory rollup: homes (leads dropped in the area), completion (% of
+// them worked) and success (% sold). Computed server-side so it isn't blocked
+// by the per-lead read rules a blanket company query would trip for non-admins.
+const TERRITORY_WORKED = new Set(["go_back", "pipeline", "appointment", "not_interested", "sold", "dnc"]);
+export const getTerritoryStats = onCall(async (request) => {
+  const caller = await getCaller(request);
+  const cid = (request.data || {}).companyId || caller.companyId;
+  if (!cid) throw new HttpsError("invalid-argument", "companyId required.");
+  if (!caller.isSuper && cid !== caller.companyId) throw new HttpsError("permission-denied", "Wrong company.");
+  const leadSnap = await db.collection("leads").where("companyId", "==", cid).get();
+  const agg: Record<string, { homes: number; worked: number; sold: number }> = {};
+  leadSnap.forEach((d) => {
+    const l = d.data() as any;
+    const tid = l.territoryId;
+    if (!tid) return;
+    const a = (agg[tid] ??= { homes: 0, worked: 0, sold: 0 });
+    a.homes++;
+    if (TERRITORY_WORKED.has(l.status)) a.worked++;
+    if (l.status === "sold") a.sold++;
+  });
+  const stats: Record<string, { homes: number; completion: number; success: number }> = {};
+  for (const [tid, a] of Object.entries(agg)) {
+    stats[tid] = {
+      homes: a.homes,
+      completion: a.homes ? Math.round((a.worked / a.homes) * 100) : 0,
+      success: a.homes ? Math.round((a.sold / a.homes) * 100) : 0,
+    };
+  }
+  return { stats };
+});
+
+// Company-level options (currently: how many territories one rep may hold).
+export const setCompanyOptions = onCall(async (request) => {
+  const caller = await getCaller(request);
+  const { companyId, maxTerritoriesPerUser } = (request.data || {}) as { companyId?: string; maxTerritoriesPerUser?: number };
+  authorizeForCompany(caller, companyId);
+  const patch: Record<string, unknown> = { updatedAt: Date.now() };
+  if (maxTerritoriesPerUser !== undefined) {
+    patch.maxTerritoriesPerUser = Math.max(0, Math.floor(Number(maxTerritoriesPerUser) || 0));
+  }
+  await db.doc(`companies/${companyId}`).set(patch, { merge: true });
+  return { ok: true };
+});
+
 // ── self-service: a user sets their own phone (calendar handled via OAuth) ───
 export const setMyProfile = onCall(async (request) => {
   const caller = await getCaller(request);

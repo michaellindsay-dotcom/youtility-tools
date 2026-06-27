@@ -31,24 +31,22 @@ export default function GoalPlanner() {
   // Reps may only change their close goal on Sundays.
   const isSunday = new Date().getDay() === 0;
 
-  // Measured numbers from the rep's last-30-day history (defaults for the rates).
+  // Measured numbers from the rep's last-30-day history. These are VIEW-ONLY —
+  // the planner's conversion rates come straight from the rep's real activity;
+  // reps can't edit or reset their numbers.
   const [measured, setMeasured] = useState<Actuals>({ doors: 0, conv: 0, appt: 0, closes: 0, hours: 0 });
-  // Editable copy the rep can tweak to reflect their true rates.
-  const [actuals, setActuals] = useState<Actuals>({ doors: 0, conv: 0, appt: 0, closes: 0, hours: 0 });
   // The one number the rep sets: their monthly close goal.
   const [goalCount, setGoalCount] = useState(10);
   // True once the rep has logged any doors + hours — their pace then drives the
   // doors/hours math instead of the baseline (adjusts from day one).
   const [hasRealData, setHasRealData] = useState(false);
 
-  // Load saved close goal + rate overrides (local to this device, per the spec).
+  // Load the saved close goal (local to this device, per the spec).
   useEffect(() => {
     if (!uid) return;
     try {
       const c = localStorage.getItem(`yk_closegoal_${uid}`);
       if (c) setGoalCount(Math.max(1, Number(c)));
-      const r = localStorage.getItem(`yk_rates_${uid}`);
-      if (r) setActuals(JSON.parse(r));
     } catch { /* ignore */ }
   }, [uid]);
 
@@ -77,10 +75,6 @@ export default function GoalPlanner() {
         setMeasured(m);
         // Adjust to real data as soon as there's any — from day one of working.
         setHasRealData(m.doors > 0 && m.hours > 0);
-        // Seed editable rates from measured data only if the rep hasn't set their own.
-        setActuals((cur) =>
-          cur.doors || cur.appt || cur.closes || cur.hours ? cur : m
-        );
       } catch (e) {
         console.error("planner data", e);
       }
@@ -93,21 +87,18 @@ export default function GoalPlanner() {
     setGoalCount(v);
     if (uid) localStorage.setItem(`yk_closegoal_${uid}`, String(v));
   };
-  const saveActuals = (a: Actuals) => {
-    setActuals(a);
-    if (uid) localStorage.setItem(`yk_rates_${uid}`, JSON.stringify(a));
-  };
 
-  // Derived conversion rates (fall back to sane defaults when a field is 0).
+  // Derived conversion rates straight from the rep's measured activity (no
+  // manual overrides). Fall back to sane defaults when a field is still 0.
   const rates = useMemo(() => {
-    const a = actuals;
+    const a = measured;
     return {
       closeRate: a.appt > 0 ? a.closes / a.appt : FALLBACK.closeRate,
       apptPerDoor: a.doors > 0 ? a.appt / a.doors : FALLBACK.apptPerDoor,
       apptPerConv: a.conv > 0 ? a.appt / a.conv : FALLBACK.apptPerConv,
       doorsPerHour: a.hours > 0 ? a.doors / a.hours : FALLBACK.doorsPerHour,
     };
-  }, [actuals]);
+  }, [measured]);
 
   // Reverse-plan the monthly close goal through the rep's rolling-average
   // conversion rates into daily / weekly / monthly targets for every metric.
@@ -149,14 +140,11 @@ export default function GoalPlanner() {
     }));
   }, [uid, plan]);
 
-  const aField = (label: string, key: keyof Actuals, hint?: string) => (
+  // View-only number from the rep's measured data — not editable.
+  const aField = (label: string, key: keyof Actuals) => (
     <label className="field">
-      <span>{label}{hint ? <em className="muted"> {hint}</em> : null}</span>
-      <input
-        type="number" min={0} className="input"
-        value={actuals[key]}
-        onChange={(e) => saveActuals({ ...actuals, [key]: Number(e.target.value) })}
-      />
+      <span>{label}</span>
+      <input type="number" className="input" value={measured[key]} readOnly disabled />
     </label>
   );
 
@@ -212,16 +200,15 @@ export default function GoalPlanner() {
         )}
       </div>
 
-      {/* ── Your numbers (editable, seed the rates) ─────────── */}
+      {/* ── Your numbers (view-only — straight from your logged activity) ── */}
       <div className="card">
         <div className="planner-row-head">
           <h2 className="planner-h">Your numbers</h2>
-          <button className="btn ghost sm" onClick={() => saveActuals(measured)}>Reset to my data</button>
+          <span className="muted small">View only</span>
         </div>
         <p className="muted small">
-          Auto-filled from your rolling last {WINDOW_DAYS} days ({measured.doors} doors, {measured.appt} appts,{" "}
-          {measured.closes} closes, {measured.hours}h) — the more you log, the more accurate it gets. Tweak any
-          number to match your real rates.
+          Your real activity from the rolling last {WINDOW_DAYS} days — these drive the plan above and update
+          automatically as you log doors, appointments and closes. They can't be edited.
         </p>
         <div className="planner-actuals">
           {aField("Doors", "doors")}

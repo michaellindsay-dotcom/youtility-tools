@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import { addDoc, collection, getDocs, query, where } from "firebase/firestore";
@@ -76,6 +77,11 @@ export default function MapPage() {
   const drawPts = useRef<LatLng[]>([]);
   const drawLayer = useRef<L.Polygon | null>(null);
   const modeRef = useRef<MapMode>("view");
+  // When arriving from a territory card (double-click → /map?focus=<id>), zoom
+  // to that area once it's drawn.
+  const [searchParams] = useSearchParams();
+  const focusId = searchParams.get("focus");
+  const focusDone = useRef(false);
 
   // The status pill is now used only for transient errors / draw hints — the
   // persistent "N homes loaded · keep moving" counts were removed.
@@ -149,15 +155,17 @@ export default function MapPage() {
     if (!companyId) return;
     const snap = await getDocs(query(collection(db, "territories"), where("companyId", "==", companyId)));
     const mineIds = profile?.territoryIds || [];
+    let focusPoly: L.Polygon | null = null;
     snap.forEach((d) => {
       const t = { id: d.id, ...(d.data() as Omit<Territory, "id">) };
       if (!t.polygon || t.polygon.length < 3) return;
       const label = t.assignedToName ? `${t.name} · ${t.assignedToName}` : t.name;
-      L.polygon(t.polygon.map((p) => [p.lat, p.lng] as [number, number]), {
+      const poly = L.polygon(t.polygon.map((p) => [p.lat, p.lng] as [number, number]), {
         color: t.color || "#34D399", weight: 2, fillOpacity: 0.08,
       })
         .bindTooltip(label)
         .addTo(territoryLayer.current);
+      if (focusId && d.id === focusId) focusPoly = poly;
       // A rep's working area is the one assigned to them. If an area has no
       // assignee, fall back to the legacy territoryIds membership (or show-all).
       const isMine = t.assignedTo
@@ -165,6 +173,13 @@ export default function MapPage() {
         : !mineIds.length || mineIds.includes(t.id);
       if (isMine) assigned.current.push(t);
     });
+    // Zoom to the territory we were sent to view (once), and flash it open.
+    if (focusPoly && !focusDone.current && mapRef.current) {
+      focusDone.current = true;
+      const fp = focusPoly as L.Polygon;
+      mapRef.current.fitBounds(fp.getBounds(), { maxZoom: 18, padding: [40, 40] });
+      fp.openTooltip();
+    }
   }
 
   // A loaded home is "already a lead" only if it's the SAME house — matched by

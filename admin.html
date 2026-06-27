@@ -236,6 +236,7 @@
     <div class="home-grid">
       <button class="home-btn" data-card="usersCard"><span class="hb-ico">👥</span><b>Accounts</b><small>Add people, set setter/closer function &amp; managers, reset passwords</small></button>
       <button class="home-btn" data-card="schedulingCard"><span class="hb-ico">📅</span><b>Scheduling &amp; Closers</b><small>Booking window, business hours, appointment routing &amp; closers</small></button>
+      <button class="home-btn" data-card="companySettingsCard"><span class="hb-ico">🛠️</span><b>Company settings</b><small>Max territories per rep &amp; other company options</small></button>
       <button class="home-btn" data-card="rolesCard"><span class="hb-ico">🏷️</span><b>Roles &amp; titles</b><small>Custom titles and the access tier each grants</small></button>
       <button class="home-btn" data-card="teamsCard"><span class="hb-ico">🗂️</span><b>Teams</b><small>Group reps into teams</small></button>
       <button class="home-btn" data-card="rewardsCard"><span class="hb-ico">🎁</span><b>Rewards</b><small>Incentives, benchmarks &amp; the rewards store</small></button>
@@ -912,6 +913,21 @@
     <div id="schBanner" class="banner"></div>
   </section>
 
+  <!-- Company settings (per company) -->
+  <section id="companySettingsCard" class="card hidden">
+    <h2><span id="companySettingsTitle">Company settings</span></h2>
+    <p class="muted" style="margin:-6px 0 14px;font-size:13px;">General options for how this company operates.</p>
+    <div class="field" style="max-width:420px;">
+      <span>Max territories a rep can be assigned at once</span>
+      <input id="maxTerritories" type="number" min="0" step="1" placeholder="0 = unlimited" />
+    </div>
+    <p class="muted small" style="margin:6px 0 0;">0 means unlimited. The app blocks assigning a rep beyond this many territories.</p>
+    <div class="row" style="justify-content:flex-end;margin-top:14px;">
+      <button id="companySettingsSave" class="btn primary sm">Save settings</button>
+    </div>
+    <div id="companySettingsBanner" class="banner"></div>
+  </section>
+
   <!-- YoutilityCRM link (per company) -->
   <section id="crmCompanyCard" class="card hidden">
     <h2><span id="crmCompanyTitle">YoutilityCRM link</span></h2>
@@ -1067,6 +1083,7 @@ const setUserDisabled = httpsCallable(fns, "setUserDisabled");
 const setUserRole     = httpsCallable(fns, "setUserRole");
 const setUserCloser   = httpsCallable(fns, "setUserCloser");
 const setUserFunction = httpsCallable(fns, "setUserFunction");
+const setCompanyOptions = httpsCallable(fns, "setCompanyOptions");
 const createRole      = httpsCallable(fns, "createRole");
 const deleteRole      = httpsCallable(fns, "deleteRole");
 const createTeam      = httpsCallable(fns, "createTeam");
@@ -1162,7 +1179,7 @@ function showLogin() {
 }
 // ── Tabs (super-admin) ────────────────────────────────────────────────────
 const TAB_CARDS = {
-  companies: ["companiesCard","schedulingCard","crmCompanyCard","rolesCard","teamsCard","rewardsCard","redemptionsCard","companyBillingCard","usersCard"],
+  companies: ["companiesCard","schedulingCard","companySettingsCard","crmCompanyCard","rolesCard","teamsCard","rewardsCard","redemptionsCard","companyBillingCard","usersCard"],
   orgs: ["orgsCard"],
   demos: ["demoRequestsCard"],
   payments: ["plansCard","billingCard"],
@@ -1171,7 +1188,7 @@ const TAB_CARDS = {
   apis: ["apiKeysCard","integrationsCard","crmCard"],
   account: ["myAccountCard"],
 };
-const COMPANY_ONLY = new Set(["schedulingCard","crmCompanyCard","rolesCard","teamsCard","rewardsCard","redemptionsCard","companyBillingCard","usersCard"]);
+const COMPANY_ONLY = new Set(["schedulingCard","companySettingsCard","crmCompanyCard","rolesCard","teamsCard","rewardsCard","redemptionsCard","companyBillingCard","usersCard"]);
 const ALL_TAB_CARDS = Object.values(TAB_CARDS).flat();
 
 function renderTab() {
@@ -1219,7 +1236,7 @@ function enterConsole() {
 }
 
 // ── Company-admin view toggle: Town Hall ⇄ Settings ───────────────────────
-const COMPANY_SETTINGS_CARDS = ["schedulingCard","rolesCard","teamsCard","rewardsCard","redemptionsCard","companyBillingCard","usersCard"];
+const COMPANY_SETTINGS_CARDS = ["schedulingCard","companySettingsCard","rolesCard","teamsCard","rewardsCard","redemptionsCard","companyBillingCard","usersCard"];
 function hideAllSettingCards() {
   COMPANY_SETTINGS_CARDS.forEach((id) => { const el = $(id); if (el) el.classList.add("hidden"); });
 }
@@ -1278,7 +1295,7 @@ async function selectCompany(companyId, companyName) {
     // Company admins: card visibility is owned by showAdminView (Town Hall ⇄
     // Settings), so we don't reveal the settings cards here.
   }
-  await Promise.all([loadRoles(), loadTeams(), loadScheduling(companyId), loadCompanyCrm(companyId), loadRewards(companyId), loadRedemptions(companyId)]);
+  await Promise.all([loadRoles(), loadTeams(), loadScheduling(companyId), loadCompanySettings(companyId), loadCompanyCrm(companyId), loadRewards(companyId), loadRedemptions(companyId)]);
   await loadUsers();
   populateUserFormSelects();
   loadBilling(companyId, companyName);
@@ -1661,6 +1678,24 @@ $("schSave").addEventListener("click", async () => {
     banner($("schBanner"), "Scheduling saved.", "good");
   } catch (e) { banner($("schBanner"), e.message || "Save failed.", "error"); }
   finally { $("schSave").disabled = false; }
+});
+
+// ── Company settings (per company) ───────────────────────────────────────
+async function loadCompanySettings(companyId) {
+  try {
+    const snap = await getDoc(doc(db, "companies", companyId));
+    const c = snap.exists() ? snap.data() : {};
+    $("maxTerritories").value = c.maxTerritoriesPerUser ?? 0;
+  } catch (e) { /* leave default */ }
+}
+$("companySettingsSave").addEventListener("click", async () => {
+  if (!state.selectedCompany) return;
+  $("companySettingsSave").disabled = true;
+  try {
+    await setCompanyOptions({ companyId: state.selectedCompany, maxTerritoriesPerUser: Number($("maxTerritories").value) || 0 });
+    banner($("companySettingsBanner"), "Settings saved.", "good");
+  } catch (e) { banner($("companySettingsBanner"), e.message || "Save failed.", "error"); }
+  finally { $("companySettingsSave").disabled = false; }
 });
 
 // ── Data provider keys (super-admin) ─────────────────────────────────────
