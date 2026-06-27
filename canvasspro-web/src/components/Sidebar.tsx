@@ -7,7 +7,7 @@ import type { Role } from "../types";
 // when the plan has any one of several. `mobileHidden` hides the link on the
 // phone layout (Movers lives on the map; Leads/Team Chat are reachable from the
 // main flow), keeping the mobile nav lean while desktop keeps the full list.
-const links: { to: string; label: string; icon: string; end?: boolean; feat?: FeatureKey; anyFeat?: FeatureKey[]; roles?: Role[]; mobileHidden?: boolean }[] = [
+const links: { to: string; label: string; icon: string; end?: boolean; feat?: FeatureKey; anyFeat?: FeatureKey[]; roles?: Role[]; closer?: boolean; mobileHidden?: boolean }[] = [
   { to: "/", label: "Dashboard", icon: "▦", end: true },
   { to: "/map", label: "Map", icon: "◉" },
   { to: "/movers", label: "Movers", icon: "🚚", mobileHidden: true },
@@ -16,6 +16,7 @@ const links: { to: string; label: string; icon: string; end?: boolean; feat?: Fe
   { to: "/schedule", label: "Schedule", icon: "📅", feat: "scheduling" },
   { to: "/shifts", label: "Success Planner", icon: "◎", anyFeat: ["planner", "analytics"] },
   { to: "/team", label: "Team", icon: "⛩" },
+  { to: "/closer", label: "Closer", icon: "🤝", closer: true },
   { to: "/reports", label: "Reports", icon: "📊", roles: ["admin", "manager"] },
   { to: "/pitches", label: "My Pitches", icon: "🎙️", feat: "pitch" },
   { to: "/pitch-library", label: "Pitch Library", icon: "🎬", feat: "pitch", roles: ["admin", "manager"] },
@@ -28,7 +29,7 @@ const links: { to: string; label: string; icon: string; end?: boolean; feat?: Fe
 ];
 
 export default function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
-  const { company, role, logout } = useAuth();
+  const { company, role, profile, logout } = useAuth();
   const navigate = useNavigate();
   const onSignOut = async () => {
     await logout();
@@ -36,6 +37,7 @@ export default function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
     navigate("/login", { replace: true });
   };
   const visible = links.filter((l) => {
+    if (l.closer && !(profile?.isCloser || role === "admin" || role === "manager")) return false;
     if (l.roles && !(role && l.roles.includes(role))) return false;
     if (l.anyFeat) return l.anyFeat.some((f) => hasFeature(company, f));
     return !l.feat || hasFeature(company, l.feat);

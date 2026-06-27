@@ -1,9 +1,10 @@
 import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import { addDoc, collection, doc, updateDoc } from "firebase/firestore";
+import { httpsCallable } from "firebase/functions";
 import { ref as storageRef, uploadBytes, getDownloadURL } from "firebase/storage";
 import { Geolocation } from "@capacitor/geolocation";
-import { db, auth, storage } from "../firebase";
+import { db, auth, storage, functions } from "../firebase";
 import { useAuth } from "../auth/AuthContext";
 import { DISPOSITIONS } from "../lib/dispositions";
 import { lookupAddress, normalizeKnockstatResponse, buildEnrichment } from "../lib/knockstat";
@@ -15,6 +16,12 @@ import { useShift } from "../shift/ShiftContext";
 import type { LeadStatus, LeadEnrichment, EventType } from "../types";
 
 const ONSITE_FT = 100; // a knock only counts if you're within 100 ft of the home
+
+const createCloserAppointmentFn = httpsCallable<
+  { companyId: string; startAt: number; durationMin?: number; title?: string; address?: string; name?: string; notes?: string; leadId?: string; candidateCloserUid?: string },
+  { ok: boolean; eventId: string; closerUid: string; closerName: string }
+>(functions, "createCloserAppointment");
+const listClosersFn = httpsCallable<Record<string, never>, { closers: { uid: string; name: string }[] }>(functions, "listClosers");
 
 // Dispositions that warrant scheduling a follow-up on the spot. Each maps to a
 // calendar event type and a sensible default lead time.
@@ -138,6 +145,12 @@ export default function DispositionModal({
   const [scheduleAt, setScheduleAt] = useState("");
   // Photo capture: front of home + utility bill (File = newly picked).
   const [photos, setPhotos] = useState<{ home: File | null; bill: File | null }>({ home: null, bill: null });
+  // Closer workflow: when enabled, an appointment routes to a closer. For the
+  // "setter_select" method the setter picks the closer here.
+  const closersOn = !!company?.scheduling?.closersEnabled;
+  const setterSelect = closersOn && company?.scheduling?.closerAssignment === "setter_select";
+  const [closers, setClosers] = useState<{ uid: string; name: string }[]>([]);
+  const [closerUid, setCloserUid] = useState("");
 
   useEffect(() => {
     if (!target) {
@@ -158,7 +171,12 @@ export default function DispositionModal({
     setSchedule(true);
     setScheduleAt("");
     setPhotos({ home: null, bill: null });
+    setCloserUid("");
     setErr(null);
+    // Load the closer list once if the setter must pick one.
+    if (setterSelect && closers.length === 0) {
+      listClosersFn({}).then((r) => setClosers(r.data.closers || [])).catch(() => {});
+    }
     if (autoEnrich && !target.enrichment) void enrich(target.address);
     // Check how far the rep is from the home.
     if (target.lat != null && target.lng != null) void checkGeo(target.lat, target.lng);
@@ -263,6 +281,13 @@ export default function DispositionModal({
 
   async function save() {
     if (!profile || !companyId || !d) return;
+    // Require a closer up-front (setter_select) so we never save the lead +
+    // count the appointment, then bail before routing — which would double-count
+    // the setter's appointment when they re-save with a closer chosen.
+    if (d.status === "appointment" && setterSelect && schedule && !closerUid) {
+      setErr("Pick a closer for this appointment before saving.");
+      return;
+    }
     setSaving(true);
     setErr(null);
     try {
@@ -345,26 +370,42 @@ export default function DispositionModal({
           }
         }
         try {
-          await addDoc(collection(db, "events"), clean({
-            companyId,
-            userId: profile.uid,
-            userName: profile.displayName,
-            type: cfg.eventType,
-            title: `${cfg.label}${d.name ? ` — ${d.name}` : ""}`,
-            address: d.address || "",
-            leadId,
-            startAt: new Date(scheduleAt).getTime(),
-            durationMin: company?.scheduling?.apptDurationMin ?? 60,
-            endAt: new Date(scheduleAt).getTime() + (company?.scheduling?.apptDurationMin ?? 60) * 60000,
-            source: "self_gen",
-            notes: d.notes || "",
-            visibilityPath: [profile.uid, ...(profile.managerPath ?? [])],
-            reminded: false,
-            createdAt: now,
-          }));
+          // Appointments route to a closer when the company runs that workflow;
+          // go-backs / follow-ups always stay on the setter's own calendar.
+          if (d.status === "appointment" && closersOn) {
+            await createCloserAppointmentFn({
+              companyId: companyId as string,
+              startAt: new Date(scheduleAt).getTime(),
+              durationMin: company?.scheduling?.apptDurationMin ?? 60,
+              title: `Appointment${d.name ? ` — ${d.name}` : ""}`,
+              address: d.address || "",
+              name: d.name || "",
+              notes: d.notes || "",
+              leadId,
+              candidateCloserUid: setterSelect ? closerUid : undefined,
+            });
+          } else {
+            await addDoc(collection(db, "events"), clean({
+              companyId,
+              userId: profile.uid,
+              userName: profile.displayName,
+              type: cfg.eventType,
+              title: `${cfg.label}${d.name ? ` — ${d.name}` : ""}`,
+              address: d.address || "",
+              leadId,
+              startAt: new Date(scheduleAt).getTime(),
+              durationMin: company?.scheduling?.apptDurationMin ?? 60,
+              endAt: new Date(scheduleAt).getTime() + (company?.scheduling?.apptDurationMin ?? 60) * 60000,
+              source: "self_gen",
+              notes: d.notes || "",
+              visibilityPath: [profile.uid, ...(profile.managerPath ?? [])],
+              reminded: false,
+              createdAt: now,
+            }));
+          }
         } catch (e) {
           console.error("Scheduling failed", e);
-          setErr("Saved the lead, but couldn't add the calendar event. Add it from the Schedule page.");
+          setErr((e as Error)?.message || "Saved the lead, but couldn't add the calendar event. Add it from the Schedule page.");
           onSaved?.();
           return; // keep modal open so the warning is visible
         }
@@ -497,6 +538,22 @@ export default function DispositionModal({
                 <div className="muted small" style={{ marginTop: 6 }}>
                   {company.scheduling.apptDurationMin}-min appointment · book {company.scheduling.apptMinLeadHours}h+
                   out, within {company.scheduling.apptMaxDaysOut} days
+                </div>
+              )}
+              {d.status === "appointment" && setterSelect && (
+                <label className="field" style={{ marginTop: 10 }}>
+                  <span>Closer for this appointment</span>
+                  <select value={closerUid} onChange={(e) => setCloserUid(e.target.value)}>
+                    <option value="">— pick a closer —</option>
+                    {closers.map((c) => (
+                      <option key={c.uid} value={c.uid}>{c.name}</option>
+                    ))}
+                  </select>
+                </label>
+              )}
+              {d.status === "appointment" && closersOn && !setterSelect && (
+                <div className="muted small" style={{ marginTop: 6 }}>
+                  🤝 This appointment will be auto-assigned to a closer.
                 </div>
               )}
             </>

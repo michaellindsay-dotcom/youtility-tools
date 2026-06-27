@@ -867,6 +867,20 @@
       </select>
     </div>
 
+    <h3 style="font-size:13px;color:var(--ink-mid);text-transform:uppercase;letter-spacing:.5px;margin:18px 0 10px;">Closers</h3>
+    <div class="field" style="margin-bottom:10px;">
+      <label class="day-chip" style="display:inline-flex;"><input type="checkbox" id="schClosersEnabled" /> Route setter appointments to dedicated closers</label>
+    </div>
+    <div class="field" style="max-width:520px;">
+      <span>How appointments pick a closer</span>
+      <select id="schCloserAssignment">
+        <option value="round_robin">Round robin (rotate evenly)</option>
+        <option value="close_rate">Closing percentage (best closes ÷ sits)</option>
+        <option value="setter_select">Setter select (the setter picks)</option>
+      </select>
+    </div>
+    <p class="muted" style="font-size:12px;margin:8px 0 0;">Mark who's a closer in the Accounts list below. A closer dispositions each appointment on-site; off-site dispositions are logged as a closer no-show.</p>
+
     <div class="row" style="justify-content:flex-end;margin-top:14px;">
       <button id="schSave" class="btn primary sm">Save scheduling</button>
     </div>
@@ -1018,6 +1032,7 @@ const createUser      = httpsCallable(fns, "createUser");
 const inviteUser      = httpsCallable(fns, "inviteUser");
 const setUserDisabled = httpsCallable(fns, "setUserDisabled");
 const setUserRole     = httpsCallable(fns, "setUserRole");
+const setUserCloser   = httpsCallable(fns, "setUserCloser");
 const createRole      = httpsCallable(fns, "createRole");
 const deleteRole      = httpsCallable(fns, "deleteRole");
 const createTeam      = httpsCallable(fns, "createTeam");
@@ -1517,6 +1532,8 @@ async function loadScheduling(companyId) {
     const days = Array.isArray(s.workDays) ? s.workDays : [1,2,3,4,5,6];
     $("schDays").querySelectorAll("input").forEach((cb) => { cb.checked = days.includes(Number(cb.value)); });
     $("schAssignment").value = s.assignment || "self_gen";
+    $("schClosersEnabled").checked = !!s.closersEnabled;
+    $("schCloserAssignment").value = s.closerAssignment || "round_robin";
   } catch (e) {
     banner($("schBanner"), e.message || "Could not load scheduling.", "error");
   }
@@ -1539,6 +1556,8 @@ $("schSave").addEventListener("click", async () => {
         timezone: $("schTz").value,
         workDays,
         assignment: $("schAssignment").value,
+        closersEnabled: $("schClosersEnabled").checked,
+        closerAssignment: $("schCloserAssignment").value,
       },
     });
     banner($("schBanner"), "Scheduling saved.", "good");
@@ -2883,6 +2902,7 @@ async function loadUsers() {
         <td><select class="mgrSel">${mgrOptions}</select></td>
         <td>${u.disabled ? '<span class="badge disabled">disabled</span>' : '<span class="badge">active</span>'}</td>
         <td><div class="row">${mirrorBtn}
+          <button class="btn sm closerBtn ${u.isCloser?'primary':''}" title="Can be assigned appointments to close">${u.isCloser ? "✓ Closer" : "Closer"}</button>
           <button class="btn sm resetBtn" title="Email a password-reset link">Reset PW</button>
           <button class="btn sm ${u.disabled?'':'danger'} disBtn">${u.disabled ? "Enable" : "Disable"}</button></div></td>`;
 
@@ -2912,6 +2932,12 @@ async function loadUsers() {
       tr.querySelector(".disBtn").addEventListener("click", async () => {
         try { await setUserDisabled({ uid:u.id, disabled: !u.disabled }); loadUsers(); }
         catch (e) { banner($("banner"), e.message, "error"); }
+      });
+      tr.querySelector(".closerBtn").addEventListener("click", async (ev) => {
+        ev.target.disabled = true;
+        try { await setUserCloser({ uid:u.id, isCloser: !u.isCloser });
+          banner($("banner"), u.isCloser ? "Removed closer role." : "Marked as a closer.", "good"); loadUsers(); }
+        catch (e) { banner($("banner"), e.message, "error"); ev.target.disabled = false; }
       });
       const mb = tr.querySelector(".mirrorBtn");
       if (mb) mb.addEventListener("click", async () => {

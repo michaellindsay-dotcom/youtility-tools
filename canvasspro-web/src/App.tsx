@@ -12,6 +12,7 @@ import MapPage from "./pages/Map";
 import Movers from "./pages/Movers";
 import Team from "./pages/Team";
 import Reports from "./pages/Reports";
+import Closer from "./pages/Closer";
 import Pitches from "./pages/Pitches";
 import PitchLibrary from "./pages/PitchLibrary";
 import Shifts from "./pages/Shifts";
@@ -46,6 +47,13 @@ function RoleGate({ allow, children }: { allow: ("admin" | "manager")[]; childre
   return role && allow.includes(role as "admin" | "manager") ? <>{children}</> : <Navigate to="/" replace />;
 }
 
+// Gates a route to closers (managers/admins can also view).
+function CloserGate({ children }: { children: React.ReactNode }) {
+  const { profile, role } = useAuth();
+  const allowed = profile?.isCloser || role === "admin" || role === "manager";
+  return allowed ? <>{children}</> : <Navigate to="/" replace />;
+}
+
 export default function App() {
   return (
     <Routes>
@@ -64,6 +72,7 @@ export default function App() {
         <Route path="movers" element={<Movers />} />
         <Route path="team" element={<Team />} />
         <Route path="reports" element={<RoleGate allow={["admin", "manager"]}><Reports /></RoleGate>} />
+        <Route path="closer" element={<CloserGate><Closer /></CloserGate>} />
         <Route path="pitches" element={<Gated feature="pitch"><Pitches /></Gated>} />
         <Route path="pitch-library" element={<Gated feature="pitch"><RoleGate allow={["admin", "manager"]}><PitchLibrary /></RoleGate></Gated>} />
         <Route path="shifts" element={<Gated anyOf={["planner", "analytics"]}><Shifts /></Gated>} />
