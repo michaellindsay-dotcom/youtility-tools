@@ -2360,10 +2360,14 @@ function rStartOfMonth() { const d = new Date(); return new Date(d.getFullYear()
 const rKnock = (l: any) => l.knockedAt || l.createdAt || 0;
 const rClose = (l: any) => l.soldAt || l.updatedAt || l.knockedAt || l.createdAt || 0;
 function rFunnel(leads: any[], since: number) {
+  // Doors/convos require on-site (verified) integrity; appointments and closes
+  // are deliberate outcomes and count regardless of geofence. Closes count by
+  // close date so a deal closed in the window counts even if knocked earlier.
+  const onsite = (l: any) => l.verified !== false;
   const knocked = leads.filter((l) => rKnock(l) >= since);
   return {
-    doors: knocked.length,
-    conv: knocked.filter((l) => REPORT_CONVO.has(l.status)).length,
+    doors: knocked.filter(onsite).length,
+    conv: knocked.filter((l) => onsite(l) && REPORT_CONVO.has(l.status)).length,
     appt: knocked.filter((l) => l.status === "appointment").length,
     closed: leads.filter((l) => l.status === "sold" && rClose(l) >= since).length,
   };
@@ -2422,7 +2426,10 @@ export const getEmployeeReport = onCall(async (request) => {
     db.doc(`userStats/${repUid}`).get(),
     db.collection("pitches").where("companyId", "==", rep.companyId).where("uid", "==", repUid).get(),
   ]);
-  const leads = leadSnap.docs.map((d) => ({ id: d.id, ...d.data() }) as any).filter((l) => l.verified !== false);
+  // Keep all leads; rFunnel applies the on-site rule per metric (doors/convos
+  // require it, appointments/closes don't). Filtering here dropped off-site
+  // closes, zeroing the close rate.
+  const leads = leadSnap.docs.map((d) => ({ id: d.id, ...d.data() }) as any);
   const shifts = shiftSnap.docs.map((d) => d.data() as any);
   const today = rStartOfToday(), week = rStartOfWeek(), month = rStartOfMonth();
   const shiftHrs = (since: number) => Math.round(
@@ -2441,10 +2448,14 @@ export const getEmployeeReport = onCall(async (request) => {
   const best = scored.length ? scored.reduce((a, b) => (b.score! > a.score! ? b : a)) : null;
   const worst = scored.length ? scored.reduce((a, b) => (b.score! < a.score! ? b : a)) : null;
 
+  const all = rFunnel(leads, 0);
   return {
     rep: { uid: rep.uid, displayName: rep.displayName || "", email: rep.email || "", title: rep.title || rep.role || "", role: rep.role || "" },
-    funnel: { today: rFunnel(leads, today), week: rFunnel(leads, week), month: rFunnel(leads, month), all: rFunnel(leads, 0) },
+    funnel: { today: rFunnel(leads, today), week: rFunnel(leads, week), month: rFunnel(leads, month), all },
     stats: statSnap.exists ? statSnap.data() : {},
+    // Lifetime totals derived from the SAME lead set as the funnel, so the
+    // footer matches the ALL-TIME column (the userStats counters drift).
+    lifetime: { sold: all.closed, appts: all.appt, doors: all.doors },
     shiftHours: { week: shiftHrs(week), month: shiftHrs(month) },
     leads: leads
       .sort((a, b) => rKnock(b) - rKnock(a))

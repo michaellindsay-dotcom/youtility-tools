@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { collection, limit, onSnapshot, orderBy, query, where } from "firebase/firestore";
+import { collection, onSnapshot, orderBy, query, where } from "firebase/firestore";
 import { Capacitor } from "@capacitor/core";
 import { db } from "../firebase";
 import { useAuth } from "../auth/AuthContext";
@@ -11,9 +11,18 @@ import type { Shift } from "../types";
 // list (managers reviewing their team) — we'll organize that further later.
 const native = Capacitor.isNativePlatform();
 const DAYS_BACK = 30;
+const WEEKS_BACK = 4;
 
 function startOfDay(ms: number) {
   const d = new Date(ms);
+  d.setHours(0, 0, 0, 0);
+  return d.getTime();
+}
+// Monday-start week (matches the rest of the app's weekly windows).
+function startOfWeekMs(ms: number) {
+  const d = new Date(ms);
+  const day = (d.getDay() + 6) % 7;
+  d.setDate(d.getDate() - day);
   d.setHours(0, 0, 0, 0);
   return d.getTime();
 }
@@ -24,6 +33,9 @@ export default function ShiftsPanel() {
   const { profile, role, companyId } = useAuth();
   const { active, elapsedSec, doors, starting, startShift, stopShift } = useShift();
   const [shifts, setShifts] = useState<Shift[]>([]);
+  // Manager drill-down: rep → last 4 weeks → that week's days.
+  const [selRep, setSelRep] = useState<string | null>(null);
+  const [selWeek, setSelWeek] = useState<number | null>(null);
 
   useEffect(() => {
     if (!profile || !companyId) return;
@@ -34,21 +46,16 @@ export default function ShiftsPanel() {
       // (equality + range only) — we sort/aggregate client-side.
       const since = startOfDay(Date.now() - (DAYS_BACK - 1) * 86400000);
       q = query(base, where("userId", "==", profile.uid), where("startAt", ">=", since));
-    } else if (role === "admin") {
-      q = query(base, where("companyId", "==", companyId), orderBy("startAt", "desc"), limit(50));
     } else {
-      q = query(
-        base,
-        where("companyId", "==", companyId),
-        where("visibilityPath", "array-contains", profile.uid),
-        orderBy("startAt", "desc"),
-        limit(50)
-      );
+      // Manager/web: the team's shifts over the last 4 weeks, for the drill-down.
+      const since = startOfWeekMs(Date.now()) - (WEEKS_BACK - 1) * 7 * 86400000;
+      q = role === "admin"
+        ? query(base, where("companyId", "==", companyId), where("startAt", ">=", since), orderBy("startAt", "desc"))
+        : query(base, where("companyId", "==", companyId), where("visibilityPath", "array-contains", profile.uid), where("startAt", ">=", since), orderBy("startAt", "desc"));
     }
     return onSnapshot(q, (snap) => setShifts(snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<Shift, "id">) }))));
   }, [profile, role, companyId]);
 
-  const fmt = (ms?: number) => (ms ? new Date(ms).toLocaleString() : "—");
   const durMs = (s: Shift) => (s.endAt ?? Date.now()) - s.startAt;
   const fmtDur = (ms: number) => {
     const mins = Math.round(ms / 60000);
@@ -72,6 +79,53 @@ export default function ShiftsPanel() {
 
   const dayLabel = (ms: number) =>
     new Date(ms).toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" });
+
+  // ── Manager drill-down: team → rep → last 4 weeks → that week's days ──────
+  const weekStarts = useMemo(() => {
+    const cur = startOfWeekMs(Date.now());
+    return Array.from({ length: WEEKS_BACK }, (_, i) => cur - i * 7 * 86400000); // newest first
+  }, []);
+
+  // Level 0 — every rep in the downline with activity in the window.
+  const reps = useMemo(() => {
+    if (native) return [];
+    const byRep = new Map<string, { uid: string; name: string; ms: number; shifts: number }>();
+    for (const s of shifts) {
+      const row = byRep.get(s.userId) ?? { uid: s.userId, name: s.userName || s.userId, ms: 0, shifts: 0 };
+      row.ms += durMs(s); row.shifts += 1;
+      if (s.userName) row.name = s.userName;
+      byRep.set(s.userId, row);
+    }
+    return [...byRep.values()].sort((a, b) => a.name.localeCompare(b.name));
+  }, [shifts]);
+
+  // Level 1 — the selected rep's totals for each of the last 4 weeks.
+  const repWeeks = useMemo(() => {
+    if (!selRep) return [];
+    const mine = shifts.filter((s) => s.userId === selRep);
+    return weekStarts.map((ws) => {
+      const inWeek = mine.filter((s) => startOfWeekMs(s.startAt) === ws);
+      return { week: ws, ms: inWeek.reduce((t, s) => t + durMs(s), 0), doors: inWeek.reduce((t, s) => t + (s.doorsKnocked ?? 0), 0), shifts: inWeek.length };
+    });
+  }, [selRep, shifts, weekStarts]);
+
+  // Level 2 — that week's days for the selected rep (worked days only).
+  const weekDays = useMemo(() => {
+    if (!selRep || selWeek == null) return [];
+    const mine = shifts.filter((s) => s.userId === selRep && startOfWeekMs(s.startAt) === selWeek);
+    const byDay = new Map<number, { day: number; ms: number; doors: number; shifts: number }>();
+    for (const s of mine) {
+      const k = startOfDay(s.startAt);
+      const row = byDay.get(k) ?? { day: k, ms: 0, doors: 0, shifts: 0 };
+      row.ms += durMs(s); row.doors += s.doorsKnocked ?? 0; row.shifts += 1;
+      byDay.set(k, row);
+    }
+    return [...byDay.values()].sort((a, b) => a.day - b.day);
+  }, [selRep, selWeek, shifts]);
+
+  const weekLabel = (ms: number) =>
+    ms === startOfWeekMs(Date.now()) ? "This week" : `Week of ${new Date(ms).toLocaleDateString("en-US", { month: "short", day: "numeric" })}`;
+  const selRepName = reps.find((r) => r.uid === selRep)?.name || "";
 
   return (
     <>
@@ -121,28 +175,80 @@ export default function ShiftsPanel() {
         </>
       ) : (
         <>
-          <h2 className="section-h">Recent shifts</h2>
-          {shifts.length === 0 ? (
-            <div className="empty">No shifts logged yet.</div>
-          ) : (
+          <h2 className="section-h">Team shifts <span className="muted small" style={{ fontWeight: 400 }}>· last 4 weeks</span></h2>
+
+          {/* Breadcrumb back through the drill-down. */}
+          {(selRep || selWeek != null) && (
+            <div className="row" style={{ gap: 8, alignItems: "center", flexWrap: "wrap", marginBottom: 10 }}>
+              <button className="btn ghost sm" onClick={() => { setSelRep(null); setSelWeek(null); }}>← Team</button>
+              {selRep && <span className="muted small">{selRepName}</span>}
+              {selWeek != null && (
+                <>
+                  <span className="muted small">›</span>
+                  <button className="btn ghost sm" onClick={() => setSelWeek(null)}>{weekLabel(selWeek)}</button>
+                </>
+              )}
+            </div>
+          )}
+
+          {/* Level 0 — reps in the downline. */}
+          {!selRep && (
+            reps.length === 0 ? (
+              <div className="empty">No shifts logged in the last 4 weeks.</div>
+            ) : (
+              <div className="card table-card">
+                <table className="data-table">
+                  <thead><tr><th>Rep</th><th>Shifts</th><th>Time (4 wks)</th><th></th></tr></thead>
+                  <tbody>
+                    {reps.map((r) => (
+                      <tr key={r.uid} style={{ cursor: "pointer" }} onClick={() => { setSelRep(r.uid); setSelWeek(null); }}>
+                        <td>{r.name}</td><td>{r.shifts}</td><td>{fmtDur(r.ms)}</td><td className="muted">›</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )
+          )}
+
+          {/* Level 1 — the rep's last 4 weeks. */}
+          {selRep && selWeek == null && (
             <div className="card table-card">
               <table className="data-table">
-                <thead>
-                  <tr><th>Rep</th><th>Started</th><th>Duration</th><th>Doors</th><th>Status</th></tr>
-                </thead>
+                <thead><tr><th>Week</th><th>Shifts</th><th>Time</th><th>Doors</th><th></th></tr></thead>
                 <tbody>
-                  {shifts.map((s) => (
-                    <tr key={s.id}>
-                      <td>{s.userName || s.userId}</td>
-                      <td className="muted">{fmt(s.startAt)}</td>
-                      <td>{fmtDur(durMs(s))}</td>
-                      <td>{s.doorsKnocked ?? 0}</td>
-                      <td><span className={`badge ${s.status === "active" ? "" : "disabled"}`}>{s.status}</span></td>
+                  {repWeeks.map((w) => (
+                    <tr key={w.week} style={{ cursor: "pointer" }} onClick={() => setSelWeek(w.week)}>
+                      <td>{weekLabel(w.week)}</td><td>{w.shifts}</td><td>{fmtDur(w.ms)}</td><td>{w.doors}</td><td className="muted">›</td>
                     </tr>
                   ))}
                 </tbody>
               </table>
             </div>
+          )}
+
+          {/* Level 2 — that week's days (day name header + numeric date). */}
+          {selRep && selWeek != null && (
+            weekDays.length === 0 ? (
+              <div className="empty">No shifts that week.</div>
+            ) : (
+              <div className="card table-card">
+                <table className="data-table">
+                  <thead><tr><th>Day</th><th>Shifts</th><th>Time</th><th>Doors</th></tr></thead>
+                  <tbody>
+                    {weekDays.map((d) => (
+                      <tr key={d.day}>
+                        <td>
+                          <div style={{ fontWeight: 600 }}>{new Date(d.day).toLocaleDateString(undefined, { weekday: "long" })}</div>
+                          <div className="muted small">{new Date(d.day).toLocaleDateString("en-US", { month: "numeric", day: "numeric", year: "numeric" })}</div>
+                        </td>
+                        <td>{d.shifts}</td><td>{fmtDur(d.ms)}</td><td>{d.doors}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )
           )}
         </>
       )}

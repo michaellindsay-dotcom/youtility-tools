@@ -16,6 +16,7 @@ interface Report {
   rep: { uid: string; displayName: string; email: string; title: string; role: string };
   funnel: { today: Funnel; week: Funnel; month: Funnel; all: Funnel };
   stats: { sales?: number; appointments?: number; doorsKnocked?: number; shifts?: number };
+  lifetime?: { sold: number; appts: number; doors: number };
   shiftHours: { week: number; month: number };
   leads: ReportLead[];
   pitches?: { recent: PitchItem[]; best: PitchItem | null; worst: PitchItem | null; count: number };
@@ -137,7 +138,7 @@ export default function Reports() {
             </div>
 
             <div className="muted small" style={{ marginTop: 12 }}>
-              Lifetime: {report.stats.sales ?? 0} sold · {report.stats.appointments ?? 0} appts · {report.stats.doorsKnocked ?? 0} doors ·
+              Lifetime: {report.lifetime?.sold ?? report.funnel.all.closed} sold · {report.lifetime?.appts ?? report.funnel.all.appt} appts · {report.lifetime?.doors ?? report.funnel.all.doors} doors ·
               {" "}{report.shiftHours.week}h on shift this week
             </div>
           </div>
