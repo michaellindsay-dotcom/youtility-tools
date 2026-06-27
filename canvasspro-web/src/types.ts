@@ -227,6 +227,8 @@ export interface UserStats {
   closerAppts?: number; // closer: appointments routed to them
   closerSits?: number; // closer: appointments they actually sat/pitched
   closerCloses?: number; // closer: appointments they closed
+  closerNoShows?: number; // closer: dispositions logged off-site (>100 ft)
+  closerManagerPath?: string[]; // closer-chain ancestors (for manager roll-ups)
   updatedAt?: number;
   // Present on seasonStats docs (resetting week/month/year buckets).
   period?: string;

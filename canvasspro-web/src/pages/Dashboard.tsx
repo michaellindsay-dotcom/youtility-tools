@@ -4,6 +4,7 @@ import { collection, doc, getDoc, getDocs, query, where } from "firebase/firesto
 import { db } from "../firebase";
 import { useAuth } from "../auth/AuthContext";
 import { hasFeature } from "../lib/features";
+import CalendarBanner from "../components/CalendarBanner";
 import type { Lead, Shift, UserStats } from "../types";
 
 // Default targets (configurable later via a company `config` doc).
@@ -205,6 +206,8 @@ export default function Dashboard() {
         <h1>Welcome back, {first}!</h1>
         <p className="page-sub">Track your progress, crush your goals, and climb the leaderboard.</p>
       </div>
+
+      <CalendarBanner />
 
       <div className="dash-2col">
         {/* Success planner (optional service) */}

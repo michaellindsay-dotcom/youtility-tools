@@ -1,18 +1,22 @@
 import { useEffect, useMemo, useState } from "react";
-import { collection, doc, onSnapshot, query, where } from "firebase/firestore";
+import { collection, doc, getDocs, onSnapshot, query, where } from "firebase/firestore";
 import { db } from "../firebase";
 import { useAuth } from "../auth/AuthContext";
 import { APPT_LABEL, APPT_COLOR } from "../lib/closerDispositions";
 import CloserDispositionModal from "../components/CloserDispositionModal";
 import type { ScheduleEvent, UserStats } from "../types";
 
+const rate = (n: number, d: number) => (d > 0 ? `${Math.round((n / d) * 100)}%` : "—");
+
 const fmt = (ms: number) =>
   new Date(ms).toLocaleString("en-US", { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
 
 export default function Closer() {
-  const { profile } = useAuth();
+  const { profile, role, companyId } = useAuth();
+  const isManager = role === "admin" || role === "manager";
   const [events, setEvents] = useState<ScheduleEvent[]>([]);
   const [stats, setStats] = useState<UserStats | null>(null);
+  const [team, setTeam] = useState<UserStats[]>([]);
   const [active, setActive] = useState<ScheduleEvent | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -37,6 +41,27 @@ export default function Closer() {
     );
   }, [profile]);
 
+  // Manager/admin roll-up: the closers under this person's closer chain.
+  // Admins see every closer in the company.
+  useEffect(() => {
+    if (!profile || !companyId || !isManager) return;
+    (async () => {
+      try {
+        const base = collection(db, "userStats");
+        const q = role === "admin"
+          ? query(base, where("companyId", "==", companyId))
+          : query(base, where("companyId", "==", companyId), where("closerManagerPath", "array-contains", profile.uid));
+        const snap = await getDocs(q);
+        const rows = snap.docs
+          .map((d) => ({ uid: d.id, ...(d.data() as Omit<UserStats, "uid">) }))
+          .filter((r) => (r.closerAppts ?? 0) > 0 || (r.closerSits ?? 0) > 0 || (r.closerCloses ?? 0) > 0);
+        setTeam(rows.sort((a, b) => (b.closerCloses ?? 0) - (a.closerCloses ?? 0)));
+      } catch (err) {
+        console.warn("closer team roll-up failed (index building?)", err);
+      }
+    })();
+  }, [profile, companyId, role, isManager]);
+
   const { queue, worked } = useMemo(() => {
     const appts = events.filter((e) => e.type === "appointment");
     const isOpen = (e: ScheduleEvent) => !e.apptStatus || e.apptStatus === "scheduled";
@@ -49,6 +74,17 @@ export default function Closer() {
   const sits = stats?.closerSits ?? 0;
   const closes = stats?.closerCloses ?? 0;
   const closeRate = sits > 0 ? `${Math.round((closes / sits) * 100)}%` : "—";
+
+  const teamTotals = useMemo(() => {
+    return team.reduce(
+      (acc, r) => ({
+        sits: acc.sits + (r.closerSits ?? 0),
+        closes: acc.closes + (r.closerCloses ?? 0),
+        noShows: acc.noShows + (r.closerNoShows ?? 0),
+      }),
+      { sits: 0, closes: 0, noShows: 0 }
+    );
+  }, [team]);
 
   return (
     <div className="page-body">
@@ -110,6 +146,36 @@ export default function Closer() {
                     {e.dispositionVerified === false ? " · off-site" : ""}
                   </div>
                   {e.apptNotes && <div className="muted small" style={{ marginTop: 4 }}>📝 {e.apptNotes}</div>}
+                </div>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
+
+      {isManager && team.length > 0 && (
+        <>
+          <h2 className="section-h" style={{ marginTop: 24 }}>
+            {role === "admin" ? "Company closers" : "Your closer team"}
+          </h2>
+          <div className="stat-grid" style={{ marginBottom: 12 }}>
+            <div className="stat-card"><div className="stat-value">{team.length}</div><div className="stat-label">Closers</div></div>
+            <div className="stat-card"><div className="stat-value">{teamTotals.closes}</div><div className="stat-label">Closes</div><div className="muted small">{teamTotals.sits} sits</div></div>
+            <div className="stat-card"><div className="stat-value">{rate(teamTotals.closes, teamTotals.sits)}</div><div className="stat-label">Team close rate</div></div>
+            <div className="stat-card"><div className="stat-value">{teamTotals.noShows}</div><div className="stat-label">No-shows</div><div className="muted small">off-site dispositions</div></div>
+          </div>
+          <div className="lb-list">
+            {team.map((r) => (
+              <div key={r.uid} className="lb-row card" style={{ alignItems: "center" }}>
+                <div className="lb-row-main">
+                  <div className="lb-row-top">
+                    <span className="lb-row-name">{r.userName || r.uid}</span>
+                    <span className="muted small">{rate(r.closerCloses ?? 0, r.closerSits ?? 0)} close</span>
+                  </div>
+                  <div className="muted small">
+                    {r.closerCloses ?? 0} closed · {r.closerSits ?? 0} sat · {r.closerAppts ?? 0} assigned
+                    {(r.closerNoShows ?? 0) > 0 ? ` · ${r.closerNoShows} no-show${r.closerNoShows === 1 ? "" : "s"}` : ""}
+                  </div>
                 </div>
               </div>
             ))}
