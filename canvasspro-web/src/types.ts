@@ -117,10 +117,15 @@ export interface UserProfile {
   roleId?: string; // -> companies/{companyId}/roles/{roleId}
   title?: string; // denormalized role title for display
   teamId?: string;
-  managerId?: string | null; // direct manager
-  managerPath?: string[]; // ancestor uids, nearest first (excludes self)
+  managerId?: string | null; // direct setter manager
+  managerPath?: string[]; // setter-chain ancestors, nearest first (excludes self)
   territoryIds?: string[];
-  isCloser?: boolean; // can be assigned appointments to close (in addition to setting)
+  // Function flags — a user can be a setter, a closer, or both.
+  isSetter?: boolean; // knocks doors / sets appointments (default true)
+  isCloser?: boolean; // can be assigned appointments to close
+  // Separate closer org chart, parallel to the setter managerId/managerPath.
+  closerManagerId?: string | null; // direct closer manager
+  closerManagerPath?: string[]; // closer-chain ancestors, nearest first
   createdAt?: number;
   disabled?: boolean;
 }

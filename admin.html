@@ -922,7 +922,15 @@
         <div class="field"><span>Email *</span><input id="userEmail" type="email" /></div>
         <div class="field"><span id="pwLabel">Temporary password *</span><input id="userPassword" type="text" placeholder="min 6 chars" /></div>
         <div class="field"><span>Role / title</span><select id="userRole"></select></div>
-        <div class="field"><span>Reports to (manager)</span><select id="userManager"><option value="">— none —</option></select></div>
+        <div class="field"><span>Function</span>
+          <select id="userFunction">
+            <option value="setter">Setter</option>
+            <option value="closer">Closer</option>
+            <option value="both">Both</option>
+          </select>
+        </div>
+        <div class="field" id="userManagerWrap"><span>Setter manager</span><select id="userManager"><option value="">— none —</option></select></div>
+        <div class="field" id="userCloserManagerWrap" style="display:none;"><span>Closer manager</span><select id="userCloserManager"><option value="">— none —</option></select></div>
         <div class="field"><span>Team</span><select id="userTeam"><option value="">— none —</option></select></div>
       </div>
       <label class="day-chip" style="margin-top:4px;">
@@ -935,8 +943,8 @@
       <div id="inviteLinkBox" class="banner" style="word-break:break-all;"></div>
     </div>
     <table>
-      <thead><tr><th>Name</th><th>Email</th><th>Role / title</th><th>Reports to</th><th>Status</th><th></th></tr></thead>
-      <tbody id="usersBody"><tr><td colspan="6" class="muted">Select a company…</td></tr></tbody>
+      <thead><tr><th>Name</th><th>Email</th><th>Role / title</th><th>Function</th><th>Reports to (setter / closer)</th><th>Status</th><th></th></tr></thead>
+      <tbody id="usersBody"><tr><td colspan="7" class="muted">Select a company…</td></tr></tbody>
     </table>
   </section>
 
@@ -1033,6 +1041,7 @@ const inviteUser      = httpsCallable(fns, "inviteUser");
 const setUserDisabled = httpsCallable(fns, "setUserDisabled");
 const setUserRole     = httpsCallable(fns, "setUserRole");
 const setUserCloser   = httpsCallable(fns, "setUserCloser");
+const setUserFunction = httpsCallable(fns, "setUserFunction");
 const createRole      = httpsCallable(fns, "createRole");
 const deleteRole      = httpsCallable(fns, "deleteRole");
 const createTeam      = httpsCallable(fns, "createTeam");
@@ -2818,8 +2827,19 @@ function populateUserFormSelects() {
   const userOpts = `<option value="">— none —</option>` +
     state.users.map((u)=>`<option value="${u.id}">${esc(u.displayName||u.email)}</option>`).join("");
   $("userManager").innerHTML = userOpts;
+  // Closer-manager options: only people who are closers (the parallel chain).
+  const closerOpts = `<option value="">— none —</option>` +
+    state.users.filter((u)=>u.isCloser).map((u)=>`<option value="${u.id}">${esc(u.displayName||u.email)}</option>`).join("");
+  $("userCloserManager").innerHTML = closerOpts;
   $("userTeam").innerHTML = `<option value="">— none —</option>` +
     state.teams.map((t)=>`<option value="${t.id}">${esc(t.name)}</option>`).join("");
+}
+
+// Show the setter / closer manager selects that match the chosen function.
+function syncFunctionFields() {
+  const fn = $("userFunction").value;
+  $("userManagerWrap").style.display = (fn === "setter" || fn === "both") ? "" : "none";
+  $("userCloserManagerWrap").style.display = (fn === "closer" || fn === "both") ? "" : "none";
 }
 
 $("newUserBtn").addEventListener("click", () => {
@@ -2837,6 +2857,8 @@ function syncInviteMode() {
 }
 $("userInvite").addEventListener("change", syncInviteMode);
 syncInviteMode();
+$("userFunction").addEventListener("change", syncFunctionFields);
+syncFunctionFields();
 
 $("userSave").addEventListener("click", async () => {
   const name = $("userName").value.trim();
@@ -2847,8 +2869,12 @@ $("userSave").addEventListener("click", async () => {
   if (!invite && password.length < 6) { banner($("banner"), "Set a 6+ char password, or use the invite option.", "error"); return; }
 
   const roleVal = $("userRole").value; // "role:<id>" or "tier:admin"
+  const fn = $("userFunction").value; // setter | closer | both
   const payload = { companyId: state.selectedCompany, name, email,
-    managerId: $("userManager").value || null, teamId: $("userTeam").value || null };
+    managerId: $("userManager").value || null, teamId: $("userTeam").value || null,
+    isSetter: fn === "setter" || fn === "both",
+    isCloser: fn === "closer" || fn === "both",
+    closerManagerId: (fn === "closer" || fn === "both") ? ($("userCloserManager").value || null) : null };
   if (!invite) payload.password = password;
   if (roleVal.startsWith("role:")) payload.roleId = roleVal.slice(5);
   else if (roleVal.startsWith("tier:")) payload.tier = roleVal.slice(5);
@@ -2878,13 +2904,13 @@ $("userSave").addEventListener("click", async () => {
 
 async function loadUsers() {
   const body = $("usersBody");
-  if (!state.selectedCompany) { body.innerHTML = `<tr><td colspan="6" class="muted">Select a company…</td></tr>`; return; }
-  body.innerHTML = `<tr><td colspan="6" class="muted">Loading…</td></tr>`;
+  if (!state.selectedCompany) { body.innerHTML = `<tr><td colspan="7" class="muted">Select a company…</td></tr>`; return; }
+  body.innerHTML = `<tr><td colspan="7" class="muted">Loading…</td></tr>`;
   try {
     const snap = await getDocs(query(collection(db, "users"),
       where("companyId", "==", state.selectedCompany), orderBy("createdAt", "desc")));
     state.users = snap.docs.map((d) => ({ id:d.id, ...d.data() }));
-    if (!state.users.length) { body.innerHTML = `<tr><td colspan="6" class="muted">No accounts yet.</td></tr>`; return; }
+    if (!state.users.length) { body.innerHTML = `<tr><td colspan="7" class="muted">No accounts yet.</td></tr>`; return; }
     const nameOf = (uid) => { const u = state.users.find((x)=>x.id===uid); return u ? (u.displayName||u.email) : uid; };
     body.innerHTML = "";
     state.users.forEach((u) => {
@@ -2892,17 +2918,27 @@ async function loadUsers() {
       // role/title select: company roles + Admin
       const roleOptions = state.roles.map((r)=>`<option value="role:${r.id}" ${u.roleId===r.id?'selected':''}>${esc(r.title)}</option>`).join("")
         + `<option value="tier:admin" ${u.role==='admin'?'selected':''}>Company Admin</option>`;
-      // manager select (exclude self)
+      // setter-manager select (exclude self)
       const mgrOptions = `<option value="">— none —</option>` +
         state.users.filter((x)=>x.id!==u.id).map((x)=>`<option value="${x.id}" ${u.managerId===x.id?'selected':''}>${esc(x.displayName||x.email)}</option>`).join("");
+      // closer-manager select: only other closers (the parallel chain)
+      const closerMgrOptions = `<option value="">— none —</option>` +
+        state.users.filter((x)=>x.id!==u.id && x.isCloser).map((x)=>`<option value="${x.id}" ${u.closerManagerId===x.id?'selected':''}>${esc(x.displayName||x.email)}</option>`).join("");
+      // function select (setter / closer / both)
+      const fnVal = (u.isCloser && (u.isSetter!==false)) ? "both" : (u.isCloser ? "closer" : "setter");
+      const fnOptions = ["setter","closer","both"].map((v)=>`<option value="${v}" ${fnVal===v?'selected':''}>${v[0].toUpperCase()+v.slice(1)}</option>`).join("");
+      const isCloserFn = fnVal === "closer" || fnVal === "both";
       const mirrorBtn = state.isSuper ? `<button class="btn sm mirrorBtn">Mirror</button>` : "";
       tr.innerHTML = `<td>${esc(u.displayName||"—")}${u.role==='admin'?' <span class="badge admin">admin</span>':''}</td>
         <td class="muted">${esc(u.email||"")}</td>
         <td><select class="roleSel">${roleOptions}</select></td>
-        <td><select class="mgrSel">${mgrOptions}</select></td>
+        <td><select class="fnSel">${fnOptions}</select></td>
+        <td><div style="display:grid;gap:4px;">
+          <select class="mgrSel" title="Setter manager">${mgrOptions}</select>
+          <select class="closerMgrSel" title="Closer manager" ${isCloserFn?'':'disabled'}>${closerMgrOptions}</select>
+        </div></td>
         <td>${u.disabled ? '<span class="badge disabled">disabled</span>' : '<span class="badge">active</span>'}</td>
         <td><div class="row">${mirrorBtn}
-          <button class="btn sm closerBtn ${u.isCloser?'primary':''}" title="Can be assigned appointments to close">${u.isCloser ? "✓ Closer" : "Closer"}</button>
           <button class="btn sm resetBtn" title="Email a password-reset link">Reset PW</button>
           <button class="btn sm ${u.disabled?'':'danger'} disBtn">${u.disabled ? "Enable" : "Disable"}</button></div></td>`;
 
@@ -2926,18 +2962,23 @@ async function loadUsers() {
       });
       tr.querySelector(".mgrSel").addEventListener("change", async (ev) => {
         try { await assignUserHierarchy({ uid:u.id, managerId: ev.target.value || null });
-          banner($("banner"),"Manager updated.","good"); await loadUsers(); }
+          banner($("banner"),"Setter manager updated.","good"); await loadUsers(); }
+        catch (e) { banner($("banner"), e.message, "error"); loadUsers(); }
+      });
+      tr.querySelector(".closerMgrSel").addEventListener("change", async (ev) => {
+        try { await assignUserHierarchy({ uid:u.id, closerManagerId: ev.target.value || null });
+          banner($("banner"),"Closer manager updated.","good"); await loadUsers(); }
+        catch (e) { banner($("banner"), e.message, "error"); loadUsers(); }
+      });
+      tr.querySelector(".fnSel").addEventListener("change", async (ev) => {
+        const v = ev.target.value; // setter | closer | both
+        try { await setUserFunction({ uid:u.id, isSetter: v==="setter"||v==="both", isCloser: v==="closer"||v==="both" });
+          banner($("banner"),"Function updated.","good"); await loadUsers(); populateUserFormSelects(); }
         catch (e) { banner($("banner"), e.message, "error"); loadUsers(); }
       });
       tr.querySelector(".disBtn").addEventListener("click", async () => {
         try { await setUserDisabled({ uid:u.id, disabled: !u.disabled }); loadUsers(); }
         catch (e) { banner($("banner"), e.message, "error"); }
-      });
-      tr.querySelector(".closerBtn").addEventListener("click", async (ev) => {
-        ev.target.disabled = true;
-        try { await setUserCloser({ uid:u.id, isCloser: !u.isCloser });
-          banner($("banner"), u.isCloser ? "Removed closer role." : "Marked as a closer.", "good"); loadUsers(); }
-        catch (e) { banner($("banner"), e.message, "error"); ev.target.disabled = false; }
       });
       const mb = tr.querySelector(".mirrorBtn");
       if (mb) mb.addEventListener("click", async () => {
@@ -2953,7 +2994,7 @@ async function loadUsers() {
       body.appendChild(tr);
     });
     void nameOf;
-  } catch (e) { body.innerHTML = `<tr><td colspan="6" class="banner error show">${esc(e.message)}</td></tr>`; }
+  } catch (e) { body.innerHTML = `<tr><td colspan="7" class="banner error show">${esc(e.message)}</td></tr>`; }
 }
 
 function esc(s) { return String(s ?? "").replace(/[&<>"']/g, (c)=>({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;" }[c])); }
