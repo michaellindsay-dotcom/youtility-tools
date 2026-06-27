@@ -1296,32 +1296,118 @@ export const setCompanySettings = onCall(async (request) => {
   return { ok: true, scheduling: s };
 });
 
-// Per-territory rollup: homes (leads dropped in the area), completion (% of
-// them worked) and success (% sold). Computed server-side so it isn't blocked
-// by the per-lead read rules a blanket company query would trip for non-admins.
+// Per-territory rollup: homes (total addressable homes inside the polygon, via
+// ATTOM), completion (% worked) and success (% sold). Computed server-side so it
+// isn't blocked by the per-lead read rules a blanket company query would trip
+// for non-admins.
 const TERRITORY_WORKED = new Set(["go_back", "pipeline", "appointment", "not_interested", "sold", "dnc"]);
-export const getTerritoryStats = onCall(async (request) => {
+
+type LatLng = { lat: number; lng: number };
+
+// Centroid + a covering radius (miles) that encloses every polygon vertex, so a
+// single ATTOM radius query around the centroid sweeps the whole territory.
+function polyCentroidRadiusMi(poly: LatLng[]): { lat: number; lng: number; radiusMi: number } {
+  const lat = poly.reduce((s, p) => s + p.lat, 0) / poly.length;
+  const lng = poly.reduce((s, p) => s + p.lng, 0) / poly.length;
+  const milesPerDegLat = 69.0;
+  const milesPerDegLng = 69.0 * Math.cos((lat * Math.PI) / 180);
+  let maxMi = 0;
+  for (const p of poly) {
+    const dy = (p.lat - lat) * milesPerDegLat;
+    const dx = (p.lng - lng) * milesPerDegLng;
+    maxMi = Math.max(maxMi, Math.hypot(dx, dy));
+  }
+  // Small buffer for rooftop-vs-parcel jitter; ATTOM caps radius, so clamp.
+  return { lat, lng, radiusMi: Math.min(Math.max(maxMi + 0.05, 0.1), 5) };
+}
+
+// Total homes whose rooftop falls inside the polygon. Queries ATTOM's property
+// snapshot around the covering circle, then filters to the exact polygon. Bounded
+// by a shared page budget so one call can't run away on dense urban territories.
+async function countHomesInPolygon(poly: LatLng[], budget: { pages: number }): Promise<number | null> {
+  if (!ATTOM.key) return null;
+  const { lat, lng, radiusMi } = polyCentroidRadiusMi(poly);
+  const PAGE_SIZE = 200;
+  const PER_TERR_MAX_PAGES = 12;
+  let count = 0;
+  let total = Infinity;
+  for (let page = 1; page <= PER_TERR_MAX_PAGES && (page - 1) * PAGE_SIZE < total; page++) {
+    if (budget.pages <= 0) return null; // out of budget → treat as unknown, retry next call
+    budget.pages--;
+    let json: any;
+    try {
+      const r = await attomGet("/property/snapshot", { latitude: lat, longitude: lng, radius: radiusMi, pagesize: PAGE_SIZE, page });
+      if (!r.ok) return page === 1 ? null : count; // first-page failure = unknown
+      json = r.json;
+    } catch { return page === 1 ? null : count; }
+    const list: any[] = Array.isArray(json?.property) ? json.property : [];
+    total = Number(json?.status?.total ?? list.length);
+    for (const p of list) {
+      const loc = p.location || {};
+      const a = p.address || {};
+      const plat = Number(loc.latitude ?? a.latitude);
+      const plng = Number(loc.longitude ?? a.longitude);
+      if (!isFinite(plat) || !isFinite(plng)) continue;
+      if (pinInPolygon({ lat: plat, lng: plng }, poly)) count++;
+    }
+    if (list.length < PAGE_SIZE) break;
+  }
+  return count;
+}
+
+// Cheap stable hash of a polygon so we only re-bill ATTOM when the shape changes.
+function polyHash(poly: LatLng[]): string {
+  return poly.map((p) => `${p.lat.toFixed(5)},${p.lng.toFixed(5)}`).join("|");
+}
+
+export const getTerritoryStats = onCall({ timeoutSeconds: 180 }, async (request) => {
   const caller = await getCaller(request);
   const cid = (request.data || {}).companyId || caller.companyId;
   if (!cid) throw new HttpsError("invalid-argument", "companyId required.");
   if (!caller.isSuper && cid !== caller.companyId) throw new HttpsError("permission-denied", "Wrong company.");
-  const leadSnap = await db.collection("leads").where("companyId", "==", cid).get();
-  const agg: Record<string, { homes: number; worked: number; sold: number }> = {};
+  await refreshApiConfig(); // pick up super-admin ATTOM key override
+  // Leads are never stamped with a territoryId, so bucket each lead into a
+  // territory geometrically: test its lat/lng against every territory polygon.
+  const [leadSnap, terrSnap] = await Promise.all([
+    db.collection("leads").where("companyId", "==", cid).get(),
+    db.collection("territories").where("companyId", "==", cid).get(),
+  ]);
+  const terrs = terrSnap.docs
+    .map((d) => ({ id: d.id, ref: d.ref, data: d.data() as any, polygon: (d.data() as any).polygon as LatLng[] }))
+    .filter((t) => Array.isArray(t.polygon) && t.polygon.length >= 3);
+  // Worked / sold come from dispositioned leads inside each polygon.
+  const agg: Record<string, { worked: number; sold: number }> = {};
   leadSnap.forEach((d) => {
     const l = d.data() as any;
-    const tid = l.territoryId;
-    if (!tid) return;
-    const a = (agg[tid] ??= { homes: 0, worked: 0, sold: 0 });
-    a.homes++;
+    if (typeof l.lat !== "number" || typeof l.lng !== "number") return;
+    const t = terrs.find((tt) => pinInPolygon({ lat: l.lat, lng: l.lng }, tt.polygon));
+    if (!t) return;
+    const a = (agg[t.id] ??= { worked: 0, sold: 0 });
     if (TERRITORY_WORKED.has(l.status)) a.worked++;
     if (l.status === "sold") a.sold++;
   });
+  // homes = total addressable homes in the polygon (ATTOM), cached on the
+  // territory doc and only recomputed when the polygon shape changes.
+  const budget = { pages: 40 }; // shared ATTOM page budget for this whole call
   const stats: Record<string, { homes: number; completion: number; success: number }> = {};
-  for (const [tid, a] of Object.entries(agg)) {
-    stats[tid] = {
-      homes: a.homes,
-      completion: a.homes ? Math.round((a.worked / a.homes) * 100) : 0,
-      success: a.homes ? Math.round((a.sold / a.homes) * 100) : 0,
+  for (const t of terrs) {
+    const a = agg[t.id] || { worked: 0, sold: 0 };
+    const hash = polyHash(t.polygon);
+    let homes: number | null = null;
+    if (typeof t.data.homesTotal === "number" && t.data.homesPolyHash === hash) {
+      homes = t.data.homesTotal; // fresh cache for this exact shape
+    } else {
+      homes = await countHomesInPolygon(t.polygon, budget);
+      if (homes != null) {
+        try { await t.ref.set({ homesTotal: homes, homesPolyHash: hash, homesTotalAt: Date.now() }, { merge: true }); } catch { /* non-fatal */ }
+      }
+    }
+    // Fall back to dispositioned-door count if ATTOM is unavailable/over budget.
+    const denom = homes != null && homes > 0 ? homes : a.worked;
+    stats[t.id] = {
+      homes: homes != null ? homes : a.worked,
+      completion: denom ? Math.min(100, Math.round((a.worked / denom) * 100)) : 0,
+      success: denom ? Math.round((a.sold / denom) * 100) : 0,
     };
   }
   return { stats };
