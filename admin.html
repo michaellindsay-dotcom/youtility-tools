@@ -228,6 +228,27 @@
     <button class="tab" data-view="settings">⚙️ Settings</button>
   </nav>
 
+  <!-- Company-admin Settings hub: a menu of cards, each opening its own page so
+       the Settings tab stays clean instead of one long scroll. -->
+  <section id="settingsHub" class="card hidden">
+    <h2 style="margin:0 0 4px;">⚙️ Settings</h2>
+    <p class="muted" style="margin:0 0 14px;font-size:13px;">Pick a section to manage it.</p>
+    <div class="home-grid">
+      <button class="home-btn" data-card="usersCard"><span class="hb-ico">👥</span><b>Accounts</b><small>Add people, set setter/closer function &amp; managers, reset passwords</small></button>
+      <button class="home-btn" data-card="schedulingCard"><span class="hb-ico">📅</span><b>Scheduling &amp; Closers</b><small>Booking window, business hours, appointment routing &amp; closers</small></button>
+      <button class="home-btn" data-card="rolesCard"><span class="hb-ico">🏷️</span><b>Roles &amp; titles</b><small>Custom titles and the access tier each grants</small></button>
+      <button class="home-btn" data-card="teamsCard"><span class="hb-ico">🗂️</span><b>Teams</b><small>Group reps into teams</small></button>
+      <button class="home-btn" data-card="rewardsCard"><span class="hb-ico">🎁</span><b>Rewards</b><small>Incentives, benchmarks &amp; the rewards store</small></button>
+      <button class="home-btn" data-card="redemptionsCard"><span class="hb-ico">✅</span><b>Redemptions</b><small>Approve &amp; fulfill reward redemptions</small></button>
+      <button class="home-btn" data-card="companyBillingCard"><span class="hb-ico">💳</span><b>Billing &amp; invoices</b><small>Billing contact, card on file, contract &amp; invoices</small></button>
+    </div>
+  </section>
+
+  <!-- Back bar shown above an opened setting page. -->
+  <div id="settingBackBar" class="hidden" style="margin-bottom:12px;">
+    <button id="settingBack" class="btn ghost sm">← All settings</button>
+  </div>
+
   <!-- Town Hall: the company owner's at-a-glance overview (company admins). -->
   <section id="townHall" class="hidden">
     <div class="th-head">
@@ -1199,18 +1220,45 @@ function enterConsole() {
 
 // ── Company-admin view toggle: Town Hall ⇄ Settings ───────────────────────
 const COMPANY_SETTINGS_CARDS = ["schedulingCard","rolesCard","teamsCard","rewardsCard","redemptionsCard","companyBillingCard","usersCard"];
+function hideAllSettingCards() {
+  COMPANY_SETTINGS_CARDS.forEach((id) => { const el = $(id); if (el) el.classList.add("hidden"); });
+}
 function showAdminView(view) {
   state.adminView = view;
   const onTH = view === "townhall";
   $("townHall").classList.toggle("hidden", !onTH);
-  // The settings cards were revealed by selectCompany; hide them on the Town Hall.
-  COMPANY_SETTINGS_CARDS.forEach((id) => { const el = $(id); if (el) el.classList.toggle("hidden", onTH); });
   document.querySelectorAll("#adminViewToggle .tab").forEach((b) => b.classList.toggle("active", b.dataset.view === view));
-  if (onTH) loadTownHall(state.selectedCompany);
-  else if (thTick) { clearInterval(thTick); thTick = null; }
+  if (onTH) {
+    // Town Hall: hide the settings hub, the back bar, and every setting card.
+    $("settingsHub").classList.add("hidden");
+    $("settingBackBar").classList.add("hidden");
+    hideAllSettingCards();
+    loadTownHall(state.selectedCompany);
+  } else {
+    if (thTick) { clearInterval(thTick); thTick = null; }
+    showSettingsHub();
+  }
+  window.scrollTo({ top: 0, behavior: "smooth" });
+}
+// Settings → the hub menu (no individual section open).
+function showSettingsHub() {
+  $("townHall").classList.add("hidden");
+  $("settingBackBar").classList.add("hidden");
+  hideAllSettingCards();
+  $("settingsHub").classList.remove("hidden");
+  window.scrollTo({ top: 0, behavior: "smooth" });
+}
+// Open one setting in its own page (hub hidden, just this card + a back bar).
+function openSetting(cardId) {
+  $("townHall").classList.add("hidden");
+  $("settingsHub").classList.add("hidden");
+  COMPANY_SETTINGS_CARDS.forEach((id) => { const el = $(id); if (el) el.classList.toggle("hidden", id !== cardId); });
+  $("settingBackBar").classList.remove("hidden");
   window.scrollTo({ top: 0, behavior: "smooth" });
 }
 $("adminViewToggle").addEventListener("click", (e) => { const t = e.target.closest(".tab"); if (t) showAdminView(t.dataset.view); });
+$("settingsHub").addEventListener("click", (e) => { const b = e.target.closest(".home-btn"); if (b) openSetting(b.dataset.card); });
+$("settingBack").addEventListener("click", showSettingsHub);
 $("thRefresh").addEventListener("click", () => loadTownHall(state.selectedCompany));
 
 // Load everything for one company and reveal the roles/teams/users panels.
@@ -1740,6 +1788,9 @@ $("squareSave").addEventListener("click", async () => {
 
 // ── Company billing + invoices ───────────────────────────────────────────
 let stripeJs = null, cardElement = null, billingCompany = null, billingInvoices = [];
+// When a company belongs to an org and the viewer is an enterprise/org admin
+// (not super), billing self-service targets the ORG (card + invoices + contract).
+let billingOrgMode = null;
 let squarePublic = null, squarePayments = null, squareCard = null, billingProviderActive = "stripe";
 
 // Read which provider is active + its public (browser-safe) keys, cached.
@@ -1810,26 +1861,43 @@ async function loadBilling(companyId, companyName) {
   $("billContactName").value = c.billingContactName || "";
   $("billEmail").value = c.billingEmail || "";
 
-  // Companies that belong to an organization are billed through the org — block
-  // standalone card-on-file billing + per-company invoices to avoid double bills.
+  // Companies that belong to an organization are billed through the org.
+  billingOrgMode = null;
   const notice = $("orgBilledNotice");
   if (c.organizationId) {
-    let orgName = "its organization";
-    try { const os = await getDoc(doc(db, "organizations", c.organizationId)); if (os.exists()) orgName = os.data().name || orgName; } catch {}
+    let org = {};
+    try { const os = await getDoc(doc(db, "organizations", c.organizationId)); if (os.exists()) org = os.data(); } catch {}
+    const orgName = org.name || "its organization";
     notice.style.display = "block";
-    notice.innerHTML = `This company is billed through <strong>${esc(orgName)}</strong>. Manage its billing on the Organizations screen — individual invoices are disabled here.`;
-    $("cardOnFileBlock").style.display = "none";
-    $("createInvoiceBlock").style.display = "none";
+    if (state.isSuper) {
+      // Super-admin manages org billing on the Organizations screen.
+      notice.innerHTML = `This company is billed through <strong>${esc(orgName)}</strong>. Manage its billing on the Organizations screen — individual invoices are disabled here.`;
+      $("cardOnFileBlock").style.display = "none";
+      $("createInvoiceBlock").style.display = "none";
+    } else {
+      // Enterprise/org admin: self-service for the ORG (card + invoices + contract).
+      billingOrgMode = c.organizationId;
+      notice.innerHTML = `<strong>Enterprise billing</strong> — this account is billed through <strong>${esc(orgName)}</strong>. The card and invoices below cover the whole organization.`;
+      $("cardOnFileBlock").style.display = "";
+      $("createInvoiceBlock").style.display = "none";
+      $("billTotal").innerHTML = `Billed via ${esc(orgName)}`;
+      $("cardStatus").textContent = org.cardLast4 ? `${org.cardBrand || "card"} •••• ${org.cardLast4}` : "none on file";
+      $("nextBill").textContent = org.nextBillingAt ? `Next charge ${fmtDate(org.nextBillingAt)}` : "No card on file yet";
+    }
   } else {
     notice.style.display = "none";
     $("cardOnFileBlock").style.display = "";
     $("createInvoiceBlock").style.display = "";
   }
 
-  // Mount the card field for whichever provider is active.
+  // Mount the card field for whichever provider is active. Organization billing
+  // is processed via Square, so org-mode requires Square to be the active gateway.
   const pub = await loadBillingPublic();
   $("cardElement").innerHTML = "";
-  if (billingProviderActive === "square") {
+  if (billingOrgMode && billingProviderActive !== "square") {
+    $("cardElement").innerHTML = '<span class="muted small">Organization billing is processed via Square. Ask your provider to enable Square to add a card here.</span>';
+    $("saveCardBtn").disabled = true;
+  } else if (billingProviderActive === "square") {
     const card = await ensureSquareCard(pub);
     if (card) {
       $("saveCardBtn").disabled = false;
@@ -1873,7 +1941,8 @@ async function loadCompanyInvoices(companyId) {
   const sel = $("invoiceSelect");
   sel.innerHTML = '<option value="">— select an invoice —</option>';
   try {
-    const { data } = await listInvoices({ companyId });
+    // In org mode, list the organization's invoices instead of the company's.
+    const { data } = await listInvoices(billingOrgMode ? { orgId: billingOrgMode } : { companyId });
     billingInvoices = data.invoices || [];
     billingInvoices.forEach((inv) => {
       const opt = document.createElement("option");
@@ -1890,7 +1959,15 @@ $("saveCardBtn").addEventListener("click", async () => {
   $("saveCardBtn").disabled = true;
   try {
     let data;
-    if (billingProviderActive === "square") {
+    if (billingOrgMode) {
+      // Enterprise/org admin saving the organization's card (Square).
+      if (!squareCard) throw new Error("Card field isn't ready.");
+      const result = await squareCard.tokenize();
+      if (result.status !== "OK") {
+        throw new Error((result.errors && result.errors[0] && result.errors[0].message) || "Card could not be verified.");
+      }
+      ({ data } = await squareSaveOrgCardAndSubscribe({ orgId: billingOrgMode, sourceId: result.token }));
+    } else if (billingProviderActive === "square") {
       if (!squareCard) throw new Error("Card field isn't ready.");
       const result = await squareCard.tokenize();
       if (result.status !== "OK") {
@@ -1989,7 +2066,7 @@ $("contractViewSelf").addEventListener("click", async () => {
   if (!billingCompany) return;
   $("contractViewSelf").disabled = true;
   try {
-    const { data } = await getContractPdf({ companyId: billingCompany });
+    const { data } = await getContractPdf(billingOrgMode ? { orgId: billingOrgMode } : { companyId: billingCompany });
     const bin = atob(data.base64);
     const bytes = new Uint8Array(bin.length);
     for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
