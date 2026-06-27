@@ -13,6 +13,7 @@ import Movers from "./pages/Movers";
 import Team from "./pages/Team";
 import Reports from "./pages/Reports";
 import Closer from "./pages/Closer";
+import BatteryTool from "./pages/BatteryTool";
 import Pitches from "./pages/Pitches";
 import Training from "./pages/Training";
 import PitchLibrary from "./pages/PitchLibrary";
@@ -74,6 +75,7 @@ export default function App() {
         <Route path="team" element={<Team />} />
         <Route path="reports" element={<RoleGate allow={["admin", "manager"]}><Reports /></RoleGate>} />
         <Route path="closer" element={<CloserGate><Closer /></CloserGate>} />
+        <Route path="battery" element={<CloserGate><BatteryTool /></CloserGate>} />
         <Route path="pitches" element={<Gated feature="pitch"><Pitches /></Gated>} />
         <Route path="training" element={<Training />} />
         <Route path="pitch-library" element={<Gated feature="pitch"><RoleGate allow={["admin", "manager"]}><PitchLibrary /></RoleGate></Gated>} />

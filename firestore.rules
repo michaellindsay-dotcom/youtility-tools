@@ -170,6 +170,22 @@ service cloud.firestore {
       allow update, delete: if inMyCompany(resource.data.companyId) && isManagerOrAdmin();
     }
 
+    // ── battery proposals (closer tool) ──────────────────────────────────
+    // Created by the closer; visible to them and everyone in their
+    // visibilityPath (managers + admins). Owner or a manager may edit.
+    match /proposals/{proposalId} {
+      allow read: if isSuper()
+                  || (inMyCompany(resource.data.companyId)
+                      && (isManagerOrAdmin() || inPath(resource.data.visibilityPath)));
+      allow create: if isSignedIn()
+                    && request.resource.data.companyId == myCompany()
+                    && request.resource.data.closerUid == request.auth.uid;
+      allow update: if isSignedIn() && resource.data.companyId == myCompany()
+                    && (resource.data.closerUid == request.auth.uid || isManagerOrAdmin());
+      allow delete: if isSignedIn() && resource.data.companyId == myCompany()
+                    && (resource.data.closerUid == request.auth.uid || isCompanyAdmin());
+    }
+
     // ── lookups (audit) ──────────────────────────────────────────────────
     match /lookups/{lookupId} {
       allow read: if inMyCompany(resource.data.companyId)
