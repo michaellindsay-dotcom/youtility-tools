@@ -186,30 +186,48 @@ async function computeManagerPath(managerId: string | null | undefined): Promise
   return [managerId, ...((m.managerPath as string[]) || [])];
 }
 
+// The closer org chart is a SEPARATE chain from the setter one — walk it via
+// closerManagerId / closerManagerPath so closer managers see closer production.
+async function computeCloserManagerPath(closerManagerId: string | null | undefined): Promise<string[]> {
+  if (!closerManagerId) return [];
+  const snap = await db.doc(`users/${closerManagerId}`).get();
+  if (!snap.exists) return [];
+  const m = snap.data()!;
+  return [closerManagerId, ...((m.closerManagerPath as string[]) || [])];
+}
+
 // Recompute managerPath for every user in a company and visibilityPath for
 // every lead, from the current managerId links. Run after any reorg.
 async function rebuildCompanyHierarchy(companyId: string) {
   const usersSnap = await db.collection("users").where("companyId", "==", companyId).get();
   const managerOf: Record<string, string | null> = {};
-  usersSnap.forEach((d) => (managerOf[d.id] = (d.data().managerId as string) ?? null));
+  const closerManagerOf: Record<string, string | null> = {};
+  usersSnap.forEach((d) => {
+    managerOf[d.id] = (d.data().managerId as string) ?? null;
+    closerManagerOf[d.id] = (d.data().closerManagerId as string) ?? null;
+  });
 
-  // Walk up the chain for each user (cycle-guarded).
-  const pathCache: Record<string, string[]> = {};
-  function pathFor(uid: string, seen: Set<string> = new Set()): string[] {
-    if (pathCache[uid]) return pathCache[uid];
-    const mgr = managerOf[uid];
-    if (!mgr || seen.has(mgr)) return (pathCache[uid] = []);
-    seen.add(mgr);
-    const p = [mgr, ...pathFor(mgr, seen)];
-    return (pathCache[uid] = p);
-  }
+  // Walk up a chain for each user (cycle-guarded). One walker per org chart.
+  const makeWalker = (parentOf: Record<string, string | null>) => {
+    const cache: Record<string, string[]> = {};
+    const walk = (uid: string, seen: Set<string> = new Set()): string[] => {
+      if (cache[uid]) return cache[uid];
+      const mgr = parentOf[uid];
+      if (!mgr || seen.has(mgr)) return (cache[uid] = []);
+      seen.add(mgr);
+      return (cache[uid] = [mgr, ...walk(mgr, seen)]);
+    };
+    return walk;
+  };
+  const pathFor = makeWalker(managerOf); // setter chain
+  const closerPathFor = makeWalker(closerManagerOf); // closer chain
 
   let batch = db.batch();
   let ops = 0;
   const flush = async () => { if (ops) { await batch.commit(); batch = db.batch(); ops = 0; } };
 
   for (const d of usersSnap.docs) {
-    batch.update(d.ref, { managerPath: pathFor(d.id) });
+    batch.update(d.ref, { managerPath: pathFor(d.id), closerManagerPath: closerPathFor(d.id) });
     if (++ops >= 450) await flush();
   }
   await flush();
@@ -222,10 +240,28 @@ async function rebuildCompanyHierarchy(companyId: string) {
   }
   await flush();
 
+  // Appointments are visible up BOTH chains: the closer's closer-managers and
+  // the setter's setter-managers.
+  const apptSnap = await db.collection("events").where("companyId", "==", companyId).where("closerUid", "!=", null).get().catch(() => null);
+  if (apptSnap) {
+    for (const d of apptSnap.docs) {
+      const e = d.data();
+      const closerUid = e.closerUid as string;
+      const setterUid = (e.setterUid as string) || "";
+      const vis = Array.from(new Set([
+        closerUid, ...closerPathFor(closerUid),
+        ...(setterUid ? [setterUid, ...pathFor(setterUid)] : []),
+      ]));
+      batch.update(d.ref, { visibilityPath: vis });
+      if (++ops >= 450) await flush();
+    }
+    await flush();
+  }
+
   // Keep per-user stats roll-up reachable by the right managers.
   const statsSnap = await db.collection("userStats").where("companyId", "==", companyId).get();
   for (const d of statsSnap.docs) {
-    batch.update(d.ref, { managerPath: pathFor(d.id) });
+    batch.update(d.ref, { managerPath: pathFor(d.id), closerManagerPath: closerPathFor(d.id) });
     if (++ops >= 450) await flush();
   }
   await flush();
@@ -357,10 +393,11 @@ export const createCompany = onCall(async (request) => {
 // ───────────────────────────────────────────────────────────────────────────
 export const createUser = onCall(async (request) => {
   const caller = await getCaller(request);
-  const { companyId, name, email, password, tier, roleId, title, teamId, managerId } =
+  const { companyId, name, email, password, tier, roleId, title, teamId, managerId, isSetter, isCloser, closerManagerId } =
     request.data as {
       companyId?: string; name?: string; email?: string; password?: string;
       tier?: Tier; roleId?: string; title?: string; teamId?: string; managerId?: string;
+      isSetter?: boolean; isCloser?: boolean; closerManagerId?: string | null;
     };
   const targetCompany = authorizeForCompany(caller, companyId);
   if (!email?.trim() || !password || password.length < 6) {
@@ -394,6 +431,7 @@ export const createUser = onCall(async (request) => {
   }
 
   const managerPath = await computeManagerPath(managerId);
+  const closerManagerPath = await computeCloserManagerPath(closerManagerId);
   await getAuth().setCustomUserClaims(userRecord.uid, { role: baseTier, companyId: targetCompany });
   await db.doc(`users/${userRecord.uid}`).set({
     uid: userRecord.uid,
@@ -406,6 +444,11 @@ export const createUser = onCall(async (request) => {
     teamId: teamId || null,
     managerId: managerId || null,
     managerPath,
+    // Function flags (default to setter for back-compat) + the closer org chart.
+    isSetter: isSetter === undefined ? true : !!isSetter,
+    isCloser: !!isCloser,
+    closerManagerId: closerManagerId || null,
+    closerManagerPath,
     disabled: false,
     createdAt: Date.now(),
     createdBy: caller.uid,
@@ -430,10 +473,11 @@ const GOVERNING_LAW_STATE = "Utah";
 
 export const inviteUser = onCall(async (request) => {
   const caller = await getCaller(request);
-  const { companyId, name, email, tier, roleId, title, teamId, managerId } =
+  const { companyId, name, email, tier, roleId, title, teamId, managerId, isSetter, isCloser, closerManagerId } =
     request.data as {
       companyId?: string; name?: string; email?: string;
       tier?: Tier; roleId?: string; title?: string; teamId?: string; managerId?: string;
+      isSetter?: boolean; isCloser?: boolean; closerManagerId?: string | null;
     };
   const targetCompany = authorizeForCompany(caller, companyId);
   if (!email?.trim()) throw new HttpsError("invalid-argument", "A valid email is required.");
@@ -464,6 +508,7 @@ export const inviteUser = onCall(async (request) => {
   }
 
   const managerPath = await computeManagerPath(managerId);
+  const closerManagerPath = await computeCloserManagerPath(closerManagerId);
   await getAuth().setCustomUserClaims(userRecord.uid, { role: baseTier, companyId: targetCompany });
   await db.doc(`users/${userRecord.uid}`).set({
     uid: userRecord.uid,
@@ -476,6 +521,10 @@ export const inviteUser = onCall(async (request) => {
     teamId: teamId || null,
     managerId: managerId || null,
     managerPath,
+    isSetter: isSetter === undefined ? true : !!isSetter,
+    isCloser: !!isCloser,
+    closerManagerId: closerManagerId || null,
+    closerManagerPath,
     disabled: false,
     invitePending: true,
     createdAt: Date.now(),
@@ -602,13 +651,15 @@ export const deleteTeam = onCall(async (request) => {
 // ───────────────────────────────────────────────────────────────────────────
 export const assignUserHierarchy = onCall(async (request) => {
   const caller = await getCaller(request);
-  const { uid, roleId, teamId, managerId } = request.data as
-    { uid?: string; roleId?: string; teamId?: string | null; managerId?: string | null };
+  const { uid, roleId, teamId, managerId, closerManagerId, isSetter, isCloser } = request.data as
+    { uid?: string; roleId?: string; teamId?: string | null; managerId?: string | null;
+      closerManagerId?: string | null; isSetter?: boolean; isCloser?: boolean };
   if (!uid) throw new HttpsError("invalid-argument", "uid required.");
   const target = await authorizeForTargetUser(caller, uid);
   const company = target.companyId as string;
 
   if (managerId === uid) throw new HttpsError("invalid-argument", "A user can't report to themselves.");
+  if (closerManagerId === uid) throw new HttpsError("invalid-argument", "A user can't report to themselves.");
 
   const patch: Record<string, unknown> = {};
   if (roleId !== undefined) {
@@ -629,10 +680,26 @@ export const assignUserHierarchy = onCall(async (request) => {
   }
   if (teamId !== undefined) patch.teamId = teamId || null;
   if (managerId !== undefined) patch.managerId = managerId || null;
+  if (closerManagerId !== undefined) patch.closerManagerId = closerManagerId || null;
+  if (isSetter !== undefined) patch.isSetter = !!isSetter;
+  if (isCloser !== undefined) patch.isCloser = !!isCloser;
 
   await db.doc(`users/${uid}`).set(patch, { merge: true });
   await rebuildCompanyHierarchy(company);
   logger.info(`Hierarchy updated for ${uid} in ${company} by ${caller.uid}`);
+  return { ok: true };
+});
+
+// Set a user's function (setter / closer / both). Keeps isSetter + isCloser in
+// sync; rebuilds the org charts so both chains stay consistent.
+export const setUserFunction = onCall(async (request) => {
+  const caller = await getCaller(request);
+  const { uid, isSetter, isCloser } = (request.data || {}) as { uid?: string; isSetter?: boolean; isCloser?: boolean };
+  if (!uid) throw new HttpsError("invalid-argument", "uid required.");
+  const snap = await db.doc(`users/${uid}`).get();
+  if (!snap.exists) throw new HttpsError("not-found", "User not found.");
+  authorizeForCompany(caller, (snap.data() as any).companyId);
+  await db.doc(`users/${uid}`).set({ isSetter: !!isSetter, isCloser: !!isCloser }, { merge: true });
   return { ok: true };
 });
 
@@ -1740,8 +1807,10 @@ export const createCloserAppointment = onCall(async (request) => {
     : { uid: caller.uid, companyId };
   const closer = await pickCloser(companyId, sched, d.candidateCloserUid);
 
+  // Appointments roll up BOTH org charts: the closer's closer-managers and the
+  // setter's setter-managers.
   const setterPath = (setter.managerPath as string[]) || [];
-  const closerPath = (closer.managerPath as string[]) || [];
+  const closerPath = (closer.closerManagerPath as string[]) || [];
   const visibility = Array.from(new Set([closer.uid, ...closerPath, setter.uid, ...setterPath]));
 
   const ev = {
@@ -1882,7 +1951,7 @@ export const closerDisposition = onCall(async (request) => {
 
   // A closer no-show (dispositioned off-site) flags up to the closer's manager.
   if (finalStatus === "closer_no_show") {
-    const mgr = Array.isArray((closer as any).managerPath) ? (closer as any).managerPath[0] : null;
+    const mgr = Array.isArray((closer as any).closerManagerPath) ? (closer as any).closerManagerPath[0] : null;
     if (mgr) {
       await notifyUser({
         userId: mgr, type: "closer_no_show",
@@ -2307,7 +2376,8 @@ async function serverBumpStats(rep: any, deltas: Record<string, number>) {
   for (const [k, v] of Object.entries(deltas)) inc[k] = FieldValue.increment(v);
   const base = {
     uid: rep.uid, companyId: rep.companyId, userName: rep.displayName || rep.email || "Rep",
-    managerPath: rep.managerPath || [], ...inc, updatedAt: Date.now(),
+    managerPath: rep.managerPath || [], closerManagerPath: rep.closerManagerPath || [],
+    ...inc, updatedAt: Date.now(),
   };
   await Promise.all([
     db.doc(`userStats/${rep.uid}`).set(base, { merge: true }),
