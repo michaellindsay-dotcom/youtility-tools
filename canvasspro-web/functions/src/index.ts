@@ -1951,6 +1951,7 @@ export const closerDisposition = onCall(async (request) => {
 
   // A closer no-show (dispositioned off-site) flags up to the closer's manager.
   if (finalStatus === "closer_no_show") {
+    await serverBumpStats(closer, { closerNoShows: 1 });
     const mgr = Array.isArray((closer as any).closerManagerPath) ? (closer as any).closerManagerPath[0] : null;
     if (mgr) {
       await notifyUser({
