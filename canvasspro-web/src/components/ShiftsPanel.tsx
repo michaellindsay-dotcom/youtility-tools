@@ -1,10 +1,14 @@
 import { useEffect, useMemo, useState } from "react";
-import { collection, onSnapshot, orderBy, query, where } from "firebase/firestore";
+import { collection, getDocs, onSnapshot, orderBy, query, where } from "firebase/firestore";
 import { Capacitor } from "@capacitor/core";
 import { db } from "../firebase";
 import { useAuth } from "../auth/AuthContext";
 import { useShift, fmtElapsed } from "../shift/ShiftContext";
-import type { Shift } from "../types";
+import type { Lead, Shift } from "../types";
+
+// Appointment / close day attribution for the daily breakdown.
+const knockTime = (l: Lead) => l.knockedAt || l.createdAt || 0;
+const closeTime = (l: Lead) => l.soldAt || l.updatedAt || l.knockedAt || l.createdAt || 0;
 
 // In the phone app a rep only sees their OWN shifts, rolled up one row per day
 // for the last 30 days. The web/manager console keeps the per-shift downline
@@ -33,6 +37,7 @@ export default function ShiftsPanel() {
   const { profile, role, companyId } = useAuth();
   const { active, elapsedSec, doors, starting, startShift, stopShift } = useShift();
   const [shifts, setShifts] = useState<Shift[]>([]);
+  const [leads, setLeads] = useState<Lead[]>([]); // team leads (4 wks) for appt/close per day
   // Manager drill-down: rep → last 4 weeks → that week's days.
   const [selRep, setSelRep] = useState<string | null>(null);
   const [selWeek, setSelWeek] = useState<number | null>(null);
@@ -54,6 +59,20 @@ export default function ShiftsPanel() {
         : query(base, where("companyId", "==", companyId), where("visibilityPath", "array-contains", profile.uid), where("startAt", ">=", since), orderBy("startAt", "desc"));
     }
     return onSnapshot(q, (snap) => setShifts(snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<Shift, "id">) }))));
+  }, [profile, role, companyId]);
+
+  // Team leads over the last 4 weeks — to count appointments & closes per day in
+  // the manager drill-down. (Manager/web only.)
+  useEffect(() => {
+    if (native || !profile || !companyId) return;
+    const since = startOfWeekMs(Date.now()) - (WEEKS_BACK - 1) * 7 * 86400000;
+    const base = collection(db, "leads");
+    const q = role === "admin"
+      ? query(base, where("companyId", "==", companyId), where("createdAt", ">=", since))
+      : query(base, where("companyId", "==", companyId), where("visibilityPath", "array-contains", profile.uid), where("createdAt", ">=", since));
+    getDocs(q)
+      .then((snap) => setLeads(snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<Lead, "id">) }))))
+      .catch((e) => console.warn("team leads", e));
   }, [profile, role, companyId]);
 
   const durMs = (s: Shift) => (s.endAt ?? Date.now()) - s.startAt;
@@ -86,17 +105,19 @@ export default function ShiftsPanel() {
     return Array.from({ length: WEEKS_BACK }, (_, i) => cur - i * 7 * 86400000); // newest first
   }, []);
 
-  // Level 0 — every rep in the downline with activity in the window.
+  // Level 0 — every rep in the downline, with days worked (distinct shift days).
   const reps = useMemo(() => {
     if (native) return [];
-    const byRep = new Map<string, { uid: string; name: string; ms: number; shifts: number }>();
+    const byRep = new Map<string, { uid: string; name: string; ms: number; days: Set<number> }>();
     for (const s of shifts) {
-      const row = byRep.get(s.userId) ?? { uid: s.userId, name: s.userName || s.userId, ms: 0, shifts: 0 };
-      row.ms += durMs(s); row.shifts += 1;
+      const row = byRep.get(s.userId) ?? { uid: s.userId, name: s.userName || s.userId, ms: 0, days: new Set<number>() };
+      row.ms += durMs(s); row.days.add(startOfDay(s.startAt));
       if (s.userName) row.name = s.userName;
       byRep.set(s.userId, row);
     }
-    return [...byRep.values()].sort((a, b) => a.name.localeCompare(b.name));
+    return [...byRep.values()]
+      .map((r) => ({ uid: r.uid, name: r.name, ms: r.ms, daysWorked: r.days.size }))
+      .sort((a, b) => a.name.localeCompare(b.name));
   }, [shifts]);
 
   // Level 1 — the selected rep's totals for each of the last 4 weeks.
@@ -105,23 +126,43 @@ export default function ShiftsPanel() {
     const mine = shifts.filter((s) => s.userId === selRep);
     return weekStarts.map((ws) => {
       const inWeek = mine.filter((s) => startOfWeekMs(s.startAt) === ws);
-      return { week: ws, ms: inWeek.reduce((t, s) => t + durMs(s), 0), doors: inWeek.reduce((t, s) => t + (s.doorsKnocked ?? 0), 0), shifts: inWeek.length };
+      return {
+        week: ws,
+        ms: inWeek.reduce((t, s) => t + durMs(s), 0),
+        doors: inWeek.reduce((t, s) => t + (s.doorsKnocked ?? 0), 0),
+        daysWorked: new Set(inWeek.map((s) => startOfDay(s.startAt))).size,
+      };
     });
   }, [selRep, shifts, weekStarts]);
 
-  // Level 2 — that week's days for the selected rep (worked days only).
+  // Level 2 — that week's days for the selected rep: time, doors (shifts), plus
+  // appointments & closes (leads). Worked or productive days only.
   const weekDays = useMemo(() => {
     if (!selRep || selWeek == null) return [];
-    const mine = shifts.filter((s) => s.userId === selRep && startOfWeekMs(s.startAt) === selWeek);
-    const byDay = new Map<number, { day: number; ms: number; doors: number; shifts: number }>();
-    for (const s of mine) {
-      const k = startOfDay(s.startAt);
-      const row = byDay.get(k) ?? { day: k, ms: 0, doors: 0, shifts: 0 };
-      row.ms += durMs(s); row.doors += s.doorsKnocked ?? 0; row.shifts += 1;
-      byDay.set(k, row);
+    const byDay = new Map<number, { day: number; ms: number; doors: number; appts: number; closes: number }>();
+    const row = (k: number) => {
+      let r = byDay.get(k);
+      if (!r) { r = { day: k, ms: 0, doors: 0, appts: 0, closes: 0 }; byDay.set(k, r); }
+      return r;
+    };
+    for (const s of shifts) {
+      if (s.userId !== selRep || startOfWeekMs(s.startAt) !== selWeek) continue;
+      const r = row(startOfDay(s.startAt));
+      r.ms += durMs(s); r.doors += s.doorsKnocked ?? 0;
+    }
+    for (const l of leads) {
+      if (l.assignedTo !== selRep) continue;
+      if (l.status === "appointment") {
+        const k = startOfDay(knockTime(l));
+        if (startOfWeekMs(k) === selWeek) row(k).appts += 1;
+      }
+      if (l.status === "sold") {
+        const k = startOfDay(closeTime(l));
+        if (startOfWeekMs(k) === selWeek) row(k).closes += 1;
+      }
     }
     return [...byDay.values()].sort((a, b) => a.day - b.day);
-  }, [selRep, selWeek, shifts]);
+  }, [selRep, selWeek, shifts, leads]);
 
   const weekLabel = (ms: number) =>
     ms === startOfWeekMs(Date.now()) ? "This week" : `Week of ${new Date(ms).toLocaleDateString("en-US", { month: "short", day: "numeric" })}`;
@@ -198,11 +239,11 @@ export default function ShiftsPanel() {
             ) : (
               <div className="card table-card">
                 <table className="data-table">
-                  <thead><tr><th>Rep</th><th>Shifts</th><th>Time (4 wks)</th><th></th></tr></thead>
+                  <thead><tr><th>Rep</th><th>Days worked</th><th>Time (4 wks)</th><th></th></tr></thead>
                   <tbody>
                     {reps.map((r) => (
                       <tr key={r.uid} style={{ cursor: "pointer" }} onClick={() => { setSelRep(r.uid); setSelWeek(null); }}>
-                        <td>{r.name}</td><td>{r.shifts}</td><td>{fmtDur(r.ms)}</td><td className="muted">›</td>
+                        <td>{r.name}</td><td>{r.daysWorked}</td><td>{fmtDur(r.ms)}</td><td className="muted">›</td>
                       </tr>
                     ))}
                   </tbody>
@@ -215,11 +256,11 @@ export default function ShiftsPanel() {
           {selRep && selWeek == null && (
             <div className="card table-card">
               <table className="data-table">
-                <thead><tr><th>Week</th><th>Shifts</th><th>Time</th><th>Doors</th><th></th></tr></thead>
+                <thead><tr><th>Week</th><th>Days</th><th>Time</th><th>Doors</th><th></th></tr></thead>
                 <tbody>
                   {repWeeks.map((w) => (
                     <tr key={w.week} style={{ cursor: "pointer" }} onClick={() => setSelWeek(w.week)}>
-                      <td>{weekLabel(w.week)}</td><td>{w.shifts}</td><td>{fmtDur(w.ms)}</td><td>{w.doors}</td><td className="muted">›</td>
+                      <td>{weekLabel(w.week)}</td><td>{w.daysWorked}</td><td>{fmtDur(w.ms)}</td><td>{w.doors}</td><td className="muted">›</td>
                     </tr>
                   ))}
                 </tbody>
@@ -234,7 +275,7 @@ export default function ShiftsPanel() {
             ) : (
               <div className="card table-card">
                 <table className="data-table">
-                  <thead><tr><th>Day</th><th>Shifts</th><th>Time</th><th>Doors</th></tr></thead>
+                  <thead><tr><th>Day</th><th>Time</th><th>Doors</th><th>Appts</th><th>Closes</th></tr></thead>
                   <tbody>
                     {weekDays.map((d) => (
                       <tr key={d.day}>
@@ -242,7 +283,7 @@ export default function ShiftsPanel() {
                           <div style={{ fontWeight: 600 }}>{new Date(d.day).toLocaleDateString(undefined, { weekday: "long" })}</div>
                           <div className="muted small">{new Date(d.day).toLocaleDateString("en-US", { month: "numeric", day: "numeric", year: "numeric" })}</div>
                         </td>
-                        <td>{d.shifts}</td><td>{fmtDur(d.ms)}</td><td>{d.doors}</td>
+                        <td>{fmtDur(d.ms)}</td><td>{d.doors}</td><td>{d.appts}</td><td>{d.closes}</td>
                       </tr>
                     ))}
                   </tbody>
