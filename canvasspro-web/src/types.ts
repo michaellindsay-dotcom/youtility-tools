@@ -7,6 +7,11 @@ export type Role = "superadmin" | "admin" | "manager" | "user";
 // How company appointments (that a rep didn't self-generate) get routed.
 export type AssignmentMethod = "self_gen" | "round_robin" | "highest_production" | "manual";
 
+// How a setter's appointment is routed to a closer (when the closer workflow is
+// enabled). close_rate = the closer with the best closes ÷ sits; setter_select =
+// the setter picks the closer at booking time.
+export type CloserAssignment = "round_robin" | "close_rate" | "setter_select";
+
 export interface SchedulingSettings {
   apptMinLeadHours: number; // earliest bookable = now + this many hours
   apptMaxDaysOut: number; // latest bookable = now + this many days
@@ -18,6 +23,8 @@ export interface SchedulingSettings {
   dayEndMin: number; // latest time of day to book, minutes from midnight
   workDays: number[]; // bookable weekdays, 0=Sun … 6=Sat
   slotMin: number; // booking granularity, minutes
+  closersEnabled?: boolean; // route setter appointments to dedicated closers
+  closerAssignment?: CloserAssignment; // how appointments pick a closer
 }
 
 export const DEFAULT_SCHEDULING: SchedulingSettings = {
@@ -31,6 +38,8 @@ export const DEFAULT_SCHEDULING: SchedulingSettings = {
   dayEndMin: 20 * 60, // 8:00 PM
   workDays: [1, 2, 3, 4, 5, 6], // Mon–Sat
   slotMin: 30,
+  closersEnabled: false,
+  closerAssignment: "round_robin",
 };
 
 export interface Company {
@@ -111,6 +120,7 @@ export interface UserProfile {
   managerId?: string | null; // direct manager
   managerPath?: string[]; // ancestor uids, nearest first (excludes self)
   territoryIds?: string[];
+  isCloser?: boolean; // can be assigned appointments to close (in addition to setting)
   createdAt?: number;
   disabled?: boolean;
 }
@@ -202,10 +212,16 @@ export interface UserStats {
   userName?: string;
   managerPath: string[]; // ancestors, for downstream roll-up
   leadsCreated?: number;
-  appointments?: number;
+  appointments?: number; // appointments SET (setter side)
   sales?: number;
   doorsKnocked?: number;
   shifts?: number;
+  // Closer workflow. sits = appointments the setter's bookings actually sat;
+  // closerAppts/closerSits/closerCloses are the closer's own tallies.
+  sits?: number; // setter: of their set appointments, how many sat
+  closerAppts?: number; // closer: appointments routed to them
+  closerSits?: number; // closer: appointments they actually sat/pitched
+  closerCloses?: number; // closer: appointments they closed
   updatedAt?: number;
   // Present on seasonStats docs (resetting week/month/year buckets).
   period?: string;
@@ -257,6 +273,18 @@ export interface DmChannel {
 
 export type EventType = "appointment" | "go_back" | "follow_up";
 
+// A closer's outcome on an assigned appointment. closer_no_show is set
+// automatically when the closer dispositions away from the home (>100 ft).
+export type ApptStatus =
+  | "scheduled"
+  | "pitched_pending"
+  | "pitched_not_interested"
+  | "pitched_failed_credit"
+  | "closed_won"
+  | "no_show"
+  | "reschedule"
+  | "closer_no_show";
+
 export interface ScheduleEvent {
   id: string;
   companyId: string;
@@ -274,6 +302,17 @@ export interface ScheduleEvent {
   notes?: string;
   visibilityPath: string[];
   createdAt: number;
+  // Closer workflow (set when closers are enabled for the company).
+  setterUid?: string; // who set the appointment
+  setterName?: string;
+  closerUid?: string; // who's assigned to close it
+  closerName?: string;
+  apptStatus?: ApptStatus; // closer's disposition; "scheduled" until worked
+  apptNotes?: string; // closer's most recent disposition note (mandatory)
+  dispositionedAt?: number;
+  dispositionDistanceFt?: number | null;
+  dispositionVerified?: boolean; // was the closer on-site (≤100 ft) when dispositioning
+  followUpForEventId?: string; // set on a follow-up appt created from a pitched_pending
 }
 
 export interface AppNotification {

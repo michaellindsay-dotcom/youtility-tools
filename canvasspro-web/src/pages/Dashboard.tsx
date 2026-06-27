@@ -58,6 +58,7 @@ export default function Dashboard() {
   // closed in a window still counts even if the lead was created earlier.
   const [soldLeads, setSoldLeads] = useState<Lead[]>([]);
   const [top, setTop] = useState<UserStats[]>([]);
+  const [myStats, setMyStats] = useState<UserStats | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -129,6 +130,7 @@ export default function Dashboard() {
         setSoldLeads(soldDocs.map((d) => ({ id: d.id, ...(d.data() as Omit<Lead, "id">) })));
         topRows.sort((a, b) => (b.sales ?? 0) - (a.sales ?? 0));
         setTop(topRows.slice(0, 5));
+        setMyStats(topRows.find((r) => r.uid === profile.uid) ?? null);
         setLoading(false);
       } catch (e) {
         console.error(e);
@@ -188,6 +190,12 @@ export default function Dashboard() {
   // Close rate = closes ÷ appointments. Show "—" when there are no
   // appointments yet so it never reads as a misleading 0% or 100%.
   const closeRate = (closed: number, appt: number) => (appt > 0 ? `${Math.round((closed / appt) * 100)}%` : "—");
+  // Sit rate = of the appointments this setter set, how many actually sat
+  // (a closer pitched them). All-time, from rolled-up stats.
+  const sitRate =
+    myStats && (myStats.appointments ?? 0) > 0
+      ? `${Math.round(((myStats.sits ?? 0) / (myStats.appointments ?? 1)) * 100)}%`
+      : null;
   const first = profile?.displayName?.split(" ")[0] ?? "there";
 
   return (
@@ -242,6 +250,7 @@ export default function Dashboard() {
         <h2 className="section-h" style={{ marginBottom: 0 }}>Today's Funnel</h2>
         <span className="muted small">
           This week: <strong>{f.week.closed}</strong> closed · <strong>{closeRate(f.week.closed, f.week.appt)}</strong> close rate
+          {sitRate != null && <> · <strong>{sitRate}</strong> sit rate</>}
         </span>
       </div>
       <div className="stat-grid">

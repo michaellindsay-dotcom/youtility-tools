@@ -1154,6 +1154,8 @@ const DEFAULT_SCHEDULING = {
   dayEndMin: 20 * 60,
   workDays: [1, 2, 3, 4, 5, 6],
   slotMin: 30,
+  closersEnabled: false,
+  closerAssignment: "round_robin" as const,
 };
 
 // Weekday (0=Sun) + minutes-from-midnight of a timestamp in a given IANA tz.
@@ -1206,6 +1208,10 @@ export const setCompanySettings = onCall(async (request) => {
     dayEndMin: Math.min(1440, Math.max(0, Number(scheduling.dayEndMin) ?? DEFAULT_SCHEDULING.dayEndMin)),
     workDays: days.length ? days : DEFAULT_SCHEDULING.workDays,
     slotMin: Math.max(5, Number(scheduling.slotMin) || DEFAULT_SCHEDULING.slotMin),
+    closersEnabled: !!scheduling.closersEnabled,
+    closerAssignment: ["round_robin", "close_rate", "setter_select"].includes(String(scheduling.closerAssignment))
+      ? String(scheduling.closerAssignment)
+      : "round_robin",
   };
   await db.doc(`companies/${companyId}`).set({ scheduling: s }, { merge: true });
   return { ok: true, scheduling: s };
@@ -1646,6 +1652,272 @@ export const assignAppointment = onCall(async (request) => {
   });
 
   return { ok: true, eventId: ref.id, assignedTo: chosen.uid, assignedName: chosen.displayName || "" };
+});
+
+// ════════════════════════════════════════════════════════════════════════════
+// CLOSER WORKFLOW — setters book appointments that route to a closer; the
+// closer dispositions them on-site. Sit % (setter) and close % (closer) roll up
+// from the outcomes. Mirrors lib/closerDispositions.ts on the client.
+// ════════════════════════════════════════════════════════════════════════════
+const CLOSER_SIT_STATUSES = new Set([
+  "pitched_pending", "pitched_not_interested", "pitched_failed_credit", "closed_won",
+]);
+const APPT_STATUS_LABEL: Record<string, string> = {
+  scheduled: "Scheduled",
+  pitched_pending: "Pitched — Pending",
+  pitched_not_interested: "Pitched — Not Interested",
+  pitched_failed_credit: "Pitched — Failed Credit",
+  closed_won: "Closed / Won",
+  no_show: "No Show",
+  reschedule: "Reschedule",
+  closer_no_show: "Closer No Show",
+};
+
+// Choose the closer for a new appointment per company policy.
+async function pickCloser(companyId: string, sched: any, candidateUid?: string) {
+  const usersSnap = await db.collection("users").where("companyId", "==", companyId).get();
+  let closers = usersSnap.docs
+    .map((u): { uid: string; [k: string]: any } => ({ uid: u.id, ...(u.data() as Record<string, any>) }))
+    .filter((u) => u.disabled !== true && u.isCloser === true);
+  if (closers.length === 0) {
+    throw new HttpsError("failed-precondition", "No closers are set up for this company yet — turn a rep into a closer in Team settings.");
+  }
+  const method = sched.closerAssignment || "round_robin";
+  if (method === "setter_select") {
+    if (!candidateUid) throw new HttpsError("invalid-argument", "Pick a closer for this appointment.");
+    const found = closers.find((c) => c.uid === candidateUid);
+    if (!found) throw new HttpsError("failed-precondition", "That closer isn't available.");
+    return found;
+  }
+  if (method === "close_rate") {
+    const statsSnap = await db.collection("userStats").where("companyId", "==", companyId).get();
+    const rate: Record<string, number> = {};
+    statsSnap.forEach((s) => {
+      const d = s.data() as any;
+      const sits = Number(d.closerSits) || 0;
+      rate[s.id] = sits > 0 ? (Number(d.closerCloses) || 0) / sits : 0;
+    });
+    closers = closers.sort((a, b) => (rate[b.uid] || 0) - (rate[a.uid] || 0) || a.uid.localeCompare(b.uid));
+    return closers[0];
+  }
+  // round_robin among closers (stable order + a per-company cursor)
+  closers = closers.sort((a, b) => a.uid.localeCompare(b.uid));
+  const cur = Number((await db.doc(`companies/${companyId}`).get()).data()?.closerRrCursor) || 0;
+  const chosen = closers[cur % closers.length];
+  await db.doc(`companies/${companyId}`).set({ closerRrCursor: cur + 1 }, { merge: true });
+  return chosen;
+}
+
+// A setter books an appointment that routes to a closer. Called from the
+// disposition modal when the company has the closer workflow enabled.
+export const createCloserAppointment = onCall(async (request) => {
+  const caller = await getCaller(request);
+  const d = (request.data || {}) as {
+    companyId?: string; startAt?: number; durationMin?: number;
+    title?: string; address?: string; name?: string; notes?: string;
+    leadId?: string; candidateCloserUid?: string;
+  };
+  const companyId = d.companyId || caller.companyId || "";
+  if (!companyId || (caller.companyId !== companyId && !caller.isSuper)) {
+    throw new HttpsError("permission-denied", "Wrong company.");
+  }
+  if (!d.startAt) throw new HttpsError("invalid-argument", "startAt required.");
+
+  const sched = await companyScheduling(companyId);
+  const now = Date.now();
+  const minAt = now + sched.apptMinLeadHours * 3600 * 1000;
+  const maxAt = now + sched.apptMaxDaysOut * 86400 * 1000;
+  if (d.startAt < minAt) throw new HttpsError("failed-precondition", `Too soon — needs ${sched.apptMinLeadHours}h lead time.`);
+  if (d.startAt > maxAt) throw new HttpsError("failed-precondition", `Too far out — max ${sched.apptMaxDaysOut} days.`);
+  if (!withinBusinessHours(d.startAt, sched)) throw new HttpsError("failed-precondition", "Outside the company's booking hours/days.");
+
+  const dur = (d.durationMin || sched.apptDurationMin) * 60 * 1000;
+  const endAt = d.startAt + dur;
+
+  const setterSnap = await db.doc(`users/${caller.uid}`).get();
+  const setter: { uid: string; [k: string]: any } = setterSnap.exists
+    ? { uid: setterSnap.id, ...(setterSnap.data() as Record<string, any>) }
+    : { uid: caller.uid, companyId };
+  const closer = await pickCloser(companyId, sched, d.candidateCloserUid);
+
+  const setterPath = (setter.managerPath as string[]) || [];
+  const closerPath = (closer.managerPath as string[]) || [];
+  const visibility = Array.from(new Set([closer.uid, ...closerPath, setter.uid, ...setterPath]));
+
+  const ev = {
+    companyId,
+    userId: closer.uid, // the closer owns the calendar event
+    userName: closer.displayName || "",
+    type: "appointment",
+    title: d.title || `Appointment${d.name ? ` — ${d.name}` : ""}`,
+    address: d.address || "",
+    leadId: d.leadId || null,
+    startAt: d.startAt,
+    endAt,
+    durationMin: d.durationMin || sched.apptDurationMin,
+    assignedBy: caller.uid,
+    source: "assigned",
+    notes: d.notes || "",
+    setterUid: setter.uid,
+    setterName: setter.displayName || "",
+    closerUid: closer.uid,
+    closerName: closer.displayName || "",
+    apptStatus: "scheduled",
+    visibilityPath: visibility,
+    reminded: false,
+    createdAt: now,
+  };
+  const ref = await db.collection("events").add(ev);
+
+  // The setter's `appointments` stat is bumped client-side (same as before);
+  // here we only tally the closer's incoming queue.
+  await serverBumpStats(closer, { closerAppts: 1 });
+
+  await pushExternalEvent(closer.uid, { title: ev.title, address: ev.address, notes: ev.notes, startMs: d.startAt, endMs: endAt });
+  await notifyUser({
+    userId: closer.uid, type: "event",
+    title: "New appointment to close",
+    body: [ev.title, new Date(d.startAt).toLocaleString()].filter(Boolean).join(" — "),
+    link: "/app/closer",
+  });
+
+  return { ok: true, eventId: ref.id, closerUid: closer.uid, closerName: closer.displayName || "" };
+});
+
+// A closer records the outcome of an assigned appointment.
+export const closerDisposition = onCall(async (request) => {
+  const caller = await getCaller(request);
+  const d = (request.data || {}) as {
+    eventId?: string; status?: string; notes?: string;
+    distanceFt?: number | null; verified?: boolean; followUpAt?: number;
+  };
+  if (!d.eventId) throw new HttpsError("invalid-argument", "eventId required.");
+  if (!d.status || !APPT_STATUS_LABEL[d.status] || d.status === "scheduled" || d.status === "closer_no_show") {
+    throw new HttpsError("invalid-argument", "Pick a valid disposition.");
+  }
+  if (!d.notes || !d.notes.trim()) {
+    throw new HttpsError("invalid-argument", "Notes are required on every disposition.");
+  }
+
+  const evRef = db.doc(`events/${d.eventId}`);
+  const evSnap = await evRef.get();
+  if (!evSnap.exists) throw new HttpsError("not-found", "Appointment not found.");
+  const ev = evSnap.data() as any;
+
+  const isAssignedCloser = ev.closerUid === caller.uid;
+  const isMgr = caller.isSuper || (caller.companyId === ev.companyId && (caller.role === "admin" || caller.role === "manager"));
+  if (!isAssignedCloser && !isMgr) throw new HttpsError("permission-denied", "Not your appointment to disposition.");
+
+  // Geofence: a disposition only counts at the home. Off-site → closer no show.
+  const onSite = d.verified !== false;
+  const finalStatus = onSite ? d.status : "closer_no_show";
+  if (onSite && finalStatus === "pitched_pending" && !d.followUpAt) {
+    throw new HttpsError("invalid-argument", "Pick a follow-up date to schedule the next appointment.");
+  }
+  const now = Date.now();
+
+  await evRef.set({
+    apptStatus: finalStatus,
+    apptNotes: d.notes.trim(),
+    dispositionedAt: now,
+    dispositionDistanceFt: d.distanceFt ?? null,
+    dispositionVerified: onSite,
+    updatedAt: now,
+  }, { merge: true });
+
+  // Credit stats: a sit lifts both the setter's sit% and the closer's close%
+  // denominator; a closed_won also lifts the closer's closes (+ sales).
+  const closerUid = ev.closerUid || caller.uid;
+  const setterUid = ev.setterUid || null;
+  const [closerSnap, setterSnap] = await Promise.all([
+    db.doc(`users/${closerUid}`).get(),
+    setterUid ? db.doc(`users/${setterUid}`).get() : Promise.resolve(null as any),
+  ]);
+  const closer = closerSnap.exists ? { uid: closerSnap.id, ...(closerSnap.data() as any) } : { uid: closerUid, companyId: ev.companyId };
+  const setter = setterSnap && setterSnap.exists ? { uid: setterSnap.id, ...(setterSnap.data() as any) } : null;
+
+  if (CLOSER_SIT_STATUSES.has(finalStatus)) {
+    await serverBumpStats(closer, { closerSits: 1 });
+    if (setter) await serverBumpStats(setter, { sits: 1 });
+  }
+  if (finalStatus === "closed_won") {
+    await serverBumpStats(closer, { closerCloses: 1, sales: 1 });
+    if (ev.leadId) {
+      await db.doc(`leads/${ev.leadId}`).set({ status: "sold", soldAt: now, updatedAt: now }, { merge: true }).catch(() => {});
+    }
+  }
+
+  // pitched_pending / reschedule → schedule a follow-up appointment (same closer).
+  let followUpId: string | null = null;
+  if (onSite && (finalStatus === "pitched_pending" || finalStatus === "reschedule") && d.followUpAt) {
+    const dur = (ev.durationMin || 60) * 60 * 1000;
+    const fu = { ...ev };
+    delete fu.id;
+    Object.assign(fu, {
+      startAt: d.followUpAt,
+      endAt: d.followUpAt + dur,
+      apptStatus: "scheduled",
+      apptNotes: "",
+      dispositionedAt: null,
+      dispositionDistanceFt: null,
+      dispositionVerified: null,
+      followUpForEventId: d.eventId,
+      reminded: false,
+      createdAt: now,
+    });
+    const fuRef = await db.collection("events").add(fu);
+    followUpId = fuRef.id;
+    await notifyUser({ userId: closerUid, type: "event", title: "Follow-up scheduled", body: new Date(d.followUpAt).toLocaleString(), link: "/app/closer" });
+  }
+
+  // Alert the setter with the closer's notes — the communication loop.
+  if (setterUid) {
+    await notifyUser({
+      userId: setterUid, type: "closer_update",
+      title: `Your appt: ${APPT_STATUS_LABEL[finalStatus]}`,
+      body: [ev.address, d.notes.trim()].filter(Boolean).join(" — "),
+      link: "/app/schedule",
+    });
+  }
+
+  // A closer no-show (dispositioned off-site) flags up to the closer's manager.
+  if (finalStatus === "closer_no_show") {
+    const mgr = Array.isArray((closer as any).managerPath) ? (closer as any).managerPath[0] : null;
+    if (mgr) {
+      await notifyUser({
+        userId: mgr, type: "closer_no_show",
+        title: "Closer no-show",
+        body: `${(closer as any).displayName || "A closer"} dispositioned ${ev.address || "an appointment"} off-site (${d.distanceFt ?? "?"} ft away).`,
+        link: "/app/closer",
+      });
+    }
+  }
+
+  return { ok: true, status: finalStatus, onSite, followUpId };
+});
+
+// Toggle whether a user can be assigned appointments as a closer.
+export const setUserCloser = onCall(async (request) => {
+  const caller = await getCaller(request);
+  const { uid, isCloser } = (request.data || {}) as { uid?: string; isCloser?: boolean };
+  if (!uid) throw new HttpsError("invalid-argument", "uid required.");
+  const snap = await db.doc(`users/${uid}`).get();
+  if (!snap.exists) throw new HttpsError("not-found", "User not found.");
+  authorizeForCompany(caller, (snap.data() as any).companyId);
+  await db.doc(`users/${uid}`).set({ isCloser: !!isCloser }, { merge: true });
+  return { ok: true };
+});
+
+// List a company's closers (for the setter-select booking dropdown).
+export const listClosers = onCall(async (request) => {
+  const caller = await getCaller(request);
+  if (!caller.companyId) throw new HttpsError("permission-denied", "No company.");
+  const snap = await db.collection("users").where("companyId", "==", caller.companyId).get();
+  const closers = snap.docs
+    .map((dd): { uid: string; [k: string]: any } => ({ uid: dd.id, ...(dd.data() as Record<string, any>) }))
+    .filter((u) => u.disabled !== true && u.isCloser === true)
+    .map((u) => ({ uid: u.uid, name: u.displayName || u.email || "Closer" }));
+  return { closers };
 });
 
 // ════════════════════════════════════════════════════════════════════════════
