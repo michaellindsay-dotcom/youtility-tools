@@ -1,10 +1,12 @@
 import { useEffect, useMemo, useState } from "react";
-import { collection, doc, getDocs, onSnapshot, query, where } from "firebase/firestore";
+import { collection, getDocs, onSnapshot, query, where } from "firebase/firestore";
 import { db } from "../firebase";
 import { useAuth } from "../auth/AuthContext";
-import { APPT_LABEL, APPT_COLOR } from "../lib/closerDispositions";
+import { APPT_LABEL, APPT_COLOR, isSit } from "../lib/closerDispositions";
 import CloserDispositionModal from "../components/CloserDispositionModal";
-import type { ScheduleEvent, UserStats } from "../types";
+import type { ScheduleEvent } from "../types";
+
+interface CloserRow { uid: string; name: string; assigned: number; sits: number; closes: number; noShows: number }
 
 const rate = (n: number, d: number) => (d > 0 ? `${Math.round((n / d) * 100)}%` : "—");
 
@@ -15,8 +17,7 @@ export default function Closer() {
   const { profile, role, companyId } = useAuth();
   const isManager = role === "admin" || role === "manager";
   const [events, setEvents] = useState<ScheduleEvent[]>([]);
-  const [stats, setStats] = useState<UserStats | null>(null);
-  const [team, setTeam] = useState<UserStats[]>([]);
+  const [team, setTeam] = useState<CloserRow[]>([]);
   const [active, setActive] = useState<ScheduleEvent | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -34,33 +35,32 @@ export default function Closer() {
     return unsub;
   }, [profile]);
 
-  useEffect(() => {
-    if (!profile) return;
-    return onSnapshot(doc(db, "userStats", profile.uid), (snap) =>
-      setStats(snap.exists() ? ({ uid: snap.id, ...(snap.data() as Omit<UserStats, "uid">) }) : null)
-    );
-  }, [profile]);
-
-  // Manager/admin roll-up: the closers under this person's closer chain.
-  // Admins see every closer in the company.
+  // Manager/admin roll-up: aggregate the team's appointment EVENTS by closer
+  // (the source of truth), so the numbers match each closer's own view. Admins
+  // see the whole company; managers see their downline via visibilityPath.
+  // Re-runs when this closer's own events change (e.g. after a disposition).
   useEffect(() => {
     if (!profile || !companyId || !isManager) return;
-    (async () => {
-      try {
-        const base = collection(db, "userStats");
-        const q = role === "admin"
-          ? query(base, where("companyId", "==", companyId))
-          : query(base, where("companyId", "==", companyId), where("closerManagerPath", "array-contains", profile.uid));
-        const snap = await getDocs(q);
-        const rows = snap.docs
-          .map((d) => ({ uid: d.id, ...(d.data() as Omit<UserStats, "uid">) }))
-          .filter((r) => (r.closerAppts ?? 0) > 0 || (r.closerSits ?? 0) > 0 || (r.closerCloses ?? 0) > 0);
-        setTeam(rows.sort((a, b) => (b.closerCloses ?? 0) - (a.closerCloses ?? 0)));
-      } catch (err) {
-        console.warn("closer team roll-up failed (index building?)", err);
-      }
-    })();
-  }, [profile, companyId, role, isManager]);
+    const base = collection(db, "events");
+    const q = role === "admin"
+      ? query(base, where("companyId", "==", companyId))
+      : query(base, where("companyId", "==", companyId), where("visibilityPath", "array-contains", profile.uid));
+    getDocs(q).then((snap) => {
+      const byCloser = new Map<string, CloserRow>();
+      snap.docs.forEach((d) => {
+        const e = d.data() as ScheduleEvent;
+        if (e.type !== "appointment" || !e.closerUid) return;
+        const row = byCloser.get(e.closerUid) ?? { uid: e.closerUid, name: e.closerName || "Closer", assigned: 0, sits: 0, closes: 0, noShows: 0 };
+        row.assigned++;
+        if (isSit(e.apptStatus)) row.sits++;
+        if (e.apptStatus === "closed_won") row.closes++;
+        if (e.apptStatus === "closer_no_show") row.noShows++;
+        if (e.closerName) row.name = e.closerName;
+        byCloser.set(e.closerUid, row);
+      });
+      setTeam([...byCloser.values()].sort((a, b) => b.closes - a.closes));
+    }).catch((err) => console.warn("closer team roll-up", err));
+  }, [profile, companyId, role, isManager, events.length]);
 
   const { queue, worked } = useMemo(() => {
     const appts = events.filter((e) => e.type === "appointment");
@@ -71,17 +71,18 @@ export default function Closer() {
     };
   }, [events]);
 
-  const sits = stats?.closerSits ?? 0;
-  const closes = stats?.closerCloses ?? 0;
+  // Derive the closer's own stats from the LIVE appointment events (the source
+  // of truth) rather than rolled-up counters that can drift — so a close or
+  // sit recorded just now shows immediately and accurately.
+  const myAppts = useMemo(() => events.filter((e) => e.type === "appointment"), [events]);
+  const assigned = myAppts.length;
+  const sits = useMemo(() => myAppts.filter((e) => isSit(e.apptStatus)).length, [myAppts]);
+  const closes = useMemo(() => myAppts.filter((e) => e.apptStatus === "closed_won").length, [myAppts]);
   const closeRate = sits > 0 ? `${Math.round((closes / sits) * 100)}%` : "—";
 
   const teamTotals = useMemo(() => {
     return team.reduce(
-      (acc, r) => ({
-        sits: acc.sits + (r.closerSits ?? 0),
-        closes: acc.closes + (r.closerCloses ?? 0),
-        noShows: acc.noShows + (r.closerNoShows ?? 0),
-      }),
+      (acc, r) => ({ sits: acc.sits + r.sits, closes: acc.closes + r.closes, noShows: acc.noShows + r.noShows }),
       { sits: 0, closes: 0, noShows: 0 }
     );
   }, [team]);
@@ -94,7 +95,7 @@ export default function Closer() {
       </div>
 
       <div className="stat-grid" style={{ marginBottom: 18 }}>
-        <div className="stat-card"><div className="stat-value">{stats?.closerAppts ?? 0}</div><div className="stat-label">Assigned</div><div className="muted small">all-time</div></div>
+        <div className="stat-card"><div className="stat-value">{assigned}</div><div className="stat-label">Assigned</div><div className="muted small">appointments</div></div>
         <div className="stat-card"><div className="stat-value">{sits}</div><div className="stat-label">Sits</div><div className="muted small">pitched</div></div>
         <div className="stat-card"><div className="stat-value">{closes}</div><div className="stat-label">Closes</div><div className="muted small">won deals</div></div>
         <div className="stat-card"><div className="stat-value">{closeRate}</div><div className="stat-label">Close rate</div><div className="muted small">closes ÷ sits</div></div>
@@ -169,12 +170,12 @@ export default function Closer() {
               <div key={r.uid} className="lb-row card" style={{ alignItems: "center" }}>
                 <div className="lb-row-main">
                   <div className="lb-row-top">
-                    <span className="lb-row-name">{r.userName || r.uid}</span>
-                    <span className="muted small">{rate(r.closerCloses ?? 0, r.closerSits ?? 0)} close</span>
+                    <span className="lb-row-name">{r.name}</span>
+                    <span className="muted small">{rate(r.closes, r.sits)} close</span>
                   </div>
                   <div className="muted small">
-                    {r.closerCloses ?? 0} closed · {r.closerSits ?? 0} sat · {r.closerAppts ?? 0} assigned
-                    {(r.closerNoShows ?? 0) > 0 ? ` · ${r.closerNoShows} no-show${r.closerNoShows === 1 ? "" : "s"}` : ""}
+                    {r.closes} closed · {r.sits} sat · {r.assigned} assigned
+                    {r.noShows > 0 ? ` · ${r.noShows} no-show${r.noShows === 1 ? "" : "s"}` : ""}
                   </div>
                 </div>
               </div>
