@@ -714,7 +714,11 @@
           <button id="invoiceEmail" class="btn ghost sm">Re-email</button>
           <button id="invoiceMarkPaid" class="btn ghost sm">Mark paid</button>
         </div>
-        <div class="muted small" style="margin-top:8px;">New invoices need your <strong>provider signature</strong> first — sign here, and the customer is automatically emailed to review, sign &amp; pay.</div>
+        <div class="row" style="margin-top:8px;gap:8px;">
+          <button id="contractViewSelf" class="btn ghost sm" style="display:none;">📄 View signed contract</button>
+        </div>
+        <div id="invoiceProviderHelp" class="muted small" style="margin-top:8px;">New invoices need your <strong>provider signature</strong> first — sign here, and the customer is automatically emailed to review, sign &amp; pay.</div>
+        <div id="invoiceCustomerHelp" class="muted small" style="margin-top:8px;display:none;">Select an invoice and click <strong>Open</strong> to review, e-sign &amp; pay. Past invoices stay here for your records.</div>
       </div>
     </div>
 
@@ -1846,6 +1850,23 @@ async function loadBilling(companyId, companyName) {
     }
   }
   await loadCompanyInvoices(companyId);
+  applyBillingMode();
+}
+
+// Company/enterprise admins get a self-service view: edit billing contact,
+// change card on file, view their signed contract, and view + pay invoices.
+// Creating invoices, signing as provider, marking paid, and locking accounts
+// stay super-admin only.
+function applyBillingMode() {
+  const sup = !!state.isSuper;
+  const selfBtn = $("contractViewSelf"); if (selfBtn) selfBtn.style.display = sup ? "none" : "";
+  const provHelp = $("invoiceProviderHelp"); if (provHelp) provHelp.style.display = sup ? "" : "none";
+  const custHelp = $("invoiceCustomerHelp"); if (custHelp) custHelp.style.display = sup ? "none" : "";
+  if (sup) return; // super-admin keeps the full provider toolkit
+  // Hide provider-only actions for company/enterprise admins.
+  ["createInvoiceBlock","invoiceProviderSign","invoiceMarkPaid","invoiceEmail"].forEach((id) => {
+    const el = $(id); if (el) el.style.display = "none";
+  });
 }
 
 async function loadCompanyInvoices(companyId) {
@@ -1962,6 +1983,22 @@ $("invoiceMarkPaid").addEventListener("click", async () => {
 });
 $("invoiceProviderSign").addEventListener("click", () =>
   signAsProvider($("invoiceSelect").value, $("companyBillingBanner"), () => loadBilling(billingCompany)));
+// Self-service contract view (company/enterprise admins) — same PDF as the
+// provider's "Preview contract".
+$("contractViewSelf").addEventListener("click", async () => {
+  if (!billingCompany) return;
+  $("contractViewSelf").disabled = true;
+  try {
+    const { data } = await getContractPdf({ companyId: billingCompany });
+    const bin = atob(data.base64);
+    const bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    const url = URL.createObjectURL(new Blob([bytes], { type: "application/pdf" }));
+    window.open(url, "_blank");
+    setTimeout(() => URL.revokeObjectURL(url), 60000);
+  } catch (e) { banner($("companyBillingBanner"), e.message || "Could not open the contract.", "error"); }
+  finally { $("contractViewSelf").disabled = false; }
+});
 
 // Provider (super-admin) counter-signs an invoice's agreement, which then emails
 // the customer the sign-then-pay link. Used from both company + org billing.
@@ -2229,7 +2266,11 @@ function openInvoice(inv) {
     ${inv.dueDate ? `<p class="muted">Due ${new Date(inv.dueDate).toLocaleDateString()}</p>` : ""}
     <table><thead><tr><th>Description</th><th style="text-align:right;">Amount</th></tr></thead><tbody>${lines}</tbody>
     <tfoot><tr><td class="tot">Total due</td><td class="tot" style="text-align:right;">${money(inv.amountDue)}</td></tr></tfoot></table>
-    <div class="actions"><button onclick="window.print()">🖨 Print</button>${inv.hostedInvoiceUrl ? `<button onclick="window.open('${escHtml(inv.hostedInvoiceUrl)}','_blank')">Pay / view online</button>` : ""}</div>
+    <div class="actions"><button onclick="window.print()">🖨 Print</button>${
+      (inv.status !== "paid" && inv.signToken)
+        ? `<button onclick="window.open('/sign?inv=${escHtml(inv.id)}&t=${escHtml(inv.signToken)}&role=customer','_blank')">Review, sign &amp; pay</button>`
+        : (inv.hostedInvoiceUrl ? `<button onclick="window.open('${escHtml(inv.hostedInvoiceUrl)}','_blank')">Pay / view online</button>` : "")
+    }</div>
     </body></html>`);
   w.document.close();
 }
