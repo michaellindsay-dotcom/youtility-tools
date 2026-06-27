@@ -2996,6 +2996,33 @@ export const proposeTerritory = onCall(async (request) => {
   return { ok: true, id: ref.id };
 });
 
+// Battery proposal — turn the deterministic sizing numbers into a warm,
+// homeowner-facing narrative the closer can read or include in the proposal.
+// Best-effort: if AI isn't configured the client just falls back to the numbers.
+export const batteryProposalSummary = onCall(async (request) => {
+  await getCaller(request);
+  const d = (request.data || {}) as {
+    customerName?: string; bill?: any; load?: any; solar?: any;
+    recommendation?: any; goal?: string; backupDays?: number;
+  };
+  const rec = d.recommendation || {};
+  const prod = rec.product || {};
+  const system = `You are a top residential battery-storage consultant writing a short, persuasive but honest proposal summary for a homeowner. Plain text, warm and clear, no markdown headers, 4-6 short sentences. Explain what the recommended battery does for THEM (backup of their essentials, ${d.goal === "savings" ? "savings on their bill" : d.goal === "both" ? "backup plus bill savings" : "whole-home backup peace of mind"}), reference their actual numbers, and end with a confident next step. Don't invent prices.`;
+  const user =
+    `Homeowner: ${d.customerName || "the homeowner"}.\n` +
+    `Bill: ~${d.bill?.monthlyKWh ?? "?"} kWh/mo, ~$${d.bill?.monthlyCost ?? "?"}/mo at $${d.bill?.ratePerKWh ?? "?"}/kWh.\n` +
+    `Existing solar: ${d.solar?.hasSolar ? `${d.solar?.systemKwDc || "?"} kW` : "none"}.\n` +
+    `Backup load: ${d.load?.dailyKWh ?? "?"} kWh/day, ${d.load?.continuousKW ?? "?"} kW continuous, ${d.load?.peakKW ?? "?"} kW surge.\n` +
+    `Recommended: ${rec.units || 1}× ${prod.brand || ""} ${prod.model || ""} = ${rec.totalUsableKWh ?? "?"} kWh usable, ${rec.totalContinuousKW ?? "?"} kW continuous, covering ~${rec.backupDaysAchieved ?? "?"} days of their essentials. Goal: ${d.goal || "backup"} for ${d.backupDays || 1} day(s).`;
+  try {
+    const text = await claudeText(system, [{ role: "user", content: user }], 600);
+    return { summary: text.trim() };
+  } catch (e: any) {
+    // Surface a typed, non-fatal signal so the UI degrades to the raw numbers.
+    return { summary: "", error: e?.message || "AI summary unavailable." };
+  }
+});
+
 // ════════════════════════════════════════════════════════════════════════════
 // STRIPE BILLING — checkout, billing portal, and a webhook that flips a
 // company's status from the live subscription state. Keys live in config/billing
