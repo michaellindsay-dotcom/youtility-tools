@@ -159,6 +159,18 @@ function authorizeForCompany(caller: Caller, companyId: string | undefined): str
   throw new HttpsError("permission-denied", "Not allowed to manage this company.");
 }
 
+// An enterprise/org admin is the admin of any company that belongs to the org.
+// Used for org-level self-service billing (view invoices/contract, change card).
+async function authorizeForOrg(caller: Caller, orgId: string | undefined): Promise<string> {
+  if (!orgId) throw new HttpsError("invalid-argument", "orgId is required.");
+  if (caller.isSuper) return orgId;
+  if (caller.role === "admin" && caller.companyId) {
+    const company = (await db.doc(`companies/${caller.companyId}`).get()).data();
+    if (company && company.organizationId === orgId) return orgId;
+  }
+  throw new HttpsError("permission-denied", "Not allowed to manage this organization.");
+}
+
 async function authorizeForTargetUser(caller: Caller, targetUid: string) {
   if (caller.uid === targetUid && !caller.isSuper) {
     throw new HttpsError("permission-denied", "You can't change your own access.");
@@ -2810,9 +2822,13 @@ export const getBillingPublicConfig = onCall(async (request) => {
 // it doesn't depend on Firestore-rules deployment.
 export const listInvoices = onCall(async (request) => {
   const caller = await getCaller(request);
-  const { companyId } = (request.data || {}) as { companyId?: string };
+  const { companyId, orgId } = (request.data || {}) as { companyId?: string; orgId?: string };
   let q: FirebaseFirestore.Query = db.collection("invoices");
-  if (caller.isSuper) {
+  if (orgId) {
+    // Org/enterprise admins (and super) can list their organization's invoices.
+    await authorizeForOrg(caller, orgId);
+    q = q.where("organizationId", "==", orgId);
+  } else if (caller.isSuper) {
     if (companyId) q = q.where("companyId", "==", companyId);
   } else {
     if (caller.role !== "admin" || !caller.companyId) throw new HttpsError("permission-denied", "Company admins only.");
@@ -3485,7 +3501,7 @@ export const getContractPdf = onCall(async (request) => {
   const { companyId, orgId } = (request.data || {}) as { companyId?: string; orgId?: string };
   let pdf: Buffer;
   if (orgId) {
-    requireSuper(caller);
+    await authorizeForOrg(caller, orgId);
     pdf = await buildOrgContractPdf(orgId);
   } else {
     pdf = await buildCompanyContractPdf(authorizeForCompany(caller, companyId));
@@ -3850,8 +3866,8 @@ async function runSquareChargeOrg(orgId: string): Promise<{ ok: boolean; error?:
 // Save an org's card on file and start its 30-day recurring billing.
 export const squareSaveOrgCardAndSubscribe = onCall(async (request) => {
   const caller = await getCaller(request);
-  requireSuper(caller);
   const { orgId, sourceId } = (request.data || {}) as { orgId?: string; sourceId?: string };
+  await authorizeForOrg(caller, orgId); // super OR an admin of a member company
   if (!orgId) throw new HttpsError("invalid-argument", "orgId required.");
   if (!sourceId) throw new HttpsError("invalid-argument", "sourceId (card token) required.");
   const cfg = await squareCfg();
