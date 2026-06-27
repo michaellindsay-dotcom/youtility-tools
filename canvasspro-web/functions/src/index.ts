@@ -1305,13 +1305,23 @@ export const getTerritoryStats = onCall(async (request) => {
   const cid = (request.data || {}).companyId || caller.companyId;
   if (!cid) throw new HttpsError("invalid-argument", "companyId required.");
   if (!caller.isSuper && cid !== caller.companyId) throw new HttpsError("permission-denied", "Wrong company.");
-  const leadSnap = await db.collection("leads").where("companyId", "==", cid).get();
+  // Leads are never stamped with a territoryId, so bucket each lead into a
+  // territory geometrically: test its lat/lng against every territory polygon.
+  const [leadSnap, terrSnap] = await Promise.all([
+    db.collection("leads").where("companyId", "==", cid).get(),
+    db.collection("territories").where("companyId", "==", cid).get(),
+  ]);
+  const terrs = terrSnap.docs
+    .map((d) => ({ id: d.id, polygon: (d.data() as any).polygon as Array<{ lat: number; lng: number }> }))
+    .filter((t) => Array.isArray(t.polygon) && t.polygon.length >= 3);
   const agg: Record<string, { homes: number; worked: number; sold: number }> = {};
   leadSnap.forEach((d) => {
     const l = d.data() as any;
-    const tid = l.territoryId;
-    if (!tid) return;
-    const a = (agg[tid] ??= { homes: 0, worked: 0, sold: 0 });
+    if (typeof l.lat !== "number" || typeof l.lng !== "number") return;
+    // A lead can only sit in one drawn territory; first containing one wins.
+    const t = terrs.find((tt) => pinInPolygon({ lat: l.lat, lng: l.lng }, tt.polygon));
+    if (!t) return;
+    const a = (agg[t.id] ??= { homes: 0, worked: 0, sold: 0 });
     a.homes++;
     if (TERRITORY_WORKED.has(l.status)) a.worked++;
     if (l.status === "sold") a.sold++;
