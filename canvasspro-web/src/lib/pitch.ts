@@ -19,6 +19,9 @@ interface PitchMeta {
   managerPath: string[];
   leadId?: string | null;
   address?: string;
+  // "door" (default) = a real pitch at a door; "certification" = a practice/role-play
+  // pitch that, if it scores high enough, certifies the rep for full-credit knocks.
+  kind?: "door" | "certification";
 }
 
 // Records the rep's door pitch while the disposition flow is open, then uploads
@@ -99,6 +102,7 @@ export function usePitchRecorder() {
         address: meta.address || "",
         audioPath: path,
         durationMs,
+        kind: meta.kind || "door",
         status: "recorded",
         createdAt: Date.now(),
       });

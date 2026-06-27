@@ -3,8 +3,9 @@ import { useSearchParams } from "react-router-dom";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import { addDoc, collection, getDocs, query, where } from "firebase/firestore";
+import { httpsCallable } from "firebase/functions";
 import { Geolocation } from "@capacitor/geolocation";
-import { db, auth } from "../firebase";
+import { db, auth, functions } from "../firebase";
 import { useAuth } from "../auth/AuthContext";
 import { DISP_COLOR } from "../lib/dispositions";
 import { lookupArea, parseAreaProperties, lookupMovers, parseMovers, type MoverHome } from "../lib/knockstat";
@@ -113,7 +114,8 @@ export default function MapPage() {
   const [reps, setReps] = useState<UserProfile[]>([]);
   modeRef.current = mode;
 
-  const canDraw = role === "admin" || role === "manager";
+  const canManageAreas = role === "admin" || role === "manager";
+  const canDraw = !!profile; // reps can draw too — their areas become proposals
 
   async function fetchLeads(): Promise<Lead[]> {
     if (!companyId || !profile) return [];
@@ -656,19 +658,29 @@ export default function MapPage() {
   async function saveArea() {
     if (!companyId || !profile) return;
     if (drawPts.current.length < 3) { cancelDraw(); return; }
-    const rep = reps.find((r) => r.uid === drawAssignee);
     try {
-      await addDoc(collection(db, "territories"), {
-        companyId,
-        name: drawName.trim() || "New area",
-        color: "#34D399",
-        polygon: drawPts.current,
-        managerId: profile.uid,
-        assignedTo: rep ? rep.uid : null,
-        assignedToName: rep ? rep.displayName || rep.email || null : null,
-        createdAt: Date.now(),
-      });
-      setStatus(rep ? `Area assigned to ${rep.displayName || rep.email}.` : "Area saved.");
+      if (canManageAreas) {
+        const rep = reps.find((r) => r.uid === drawAssignee);
+        await addDoc(collection(db, "territories"), {
+          companyId,
+          name: drawName.trim() || "New area",
+          color: "#34D399",
+          polygon: drawPts.current,
+          managerId: profile.uid,
+          assignedTo: rep ? rep.uid : null,
+          assignedToName: rep ? rep.displayName || rep.email || null : null,
+          status: "active",
+          createdAt: Date.now(),
+        });
+        setStatus(rep ? `Area assigned to ${rep.displayName || rep.email}.` : "Area saved.");
+      } else {
+        // Reps can't assign their own area — file it as a proposal for a manager.
+        await httpsCallable(functions, "proposeTerritory")({
+          name: drawName.trim() || "New area",
+          polygon: drawPts.current,
+        });
+        setStatus("Area proposed — your manager will review it.");
+      }
       await buildTerritories();
       await loadHomes();
     } catch (e: any) {
@@ -761,25 +773,29 @@ export default function MapPage() {
       {/* Save panel: name the area + assign it to a rep */}
       {savePanel && (
         <div className="map-save-panel">
-          <div className="msp-title">Save area</div>
+          <div className="msp-title">{canManageAreas ? "Save area" : "Propose area"}</div>
           <label className="field">
             <span>Area name</span>
             <input value={drawName} onChange={(e) => setDrawName(e.target.value)} placeholder="e.g. Maple Heights" autoFocus />
           </label>
-          <label className="field">
-            <span>Assign to</span>
-            <select value={drawAssignee} onChange={(e) => setDrawAssignee(e.target.value)}>
-              <option value="">— Unassigned —</option>
-              {reps.map((r) => (
-                <option key={r.uid} value={r.uid}>
-                  {(r.displayName || r.email) + (r.uid === profile?.uid ? " (me)" : "")}
-                </option>
-              ))}
-            </select>
-          </label>
+          {canManageAreas ? (
+            <label className="field">
+              <span>Assign to</span>
+              <select value={drawAssignee} onChange={(e) => setDrawAssignee(e.target.value)}>
+                <option value="">— Unassigned —</option>
+                {reps.map((r) => (
+                  <option key={r.uid} value={r.uid}>
+                    {(r.displayName || r.email) + (r.uid === profile?.uid ? " (me)" : "")}
+                  </option>
+                ))}
+              </select>
+            </label>
+          ) : (
+            <p className="muted small" style={{ margin: "0 0 8px" }}>Your manager will review and assign this area.</p>
+          )}
           <div className="row end">
             <button className="btn sm" onClick={cancelDraw}>Cancel</button>
-            <button className="btn primary sm" onClick={saveArea}>Save area</button>
+            <button className="btn primary sm" onClick={saveArea}>{canManageAreas ? "Save area" : "Propose area"}</button>
           </div>
         </div>
       )}

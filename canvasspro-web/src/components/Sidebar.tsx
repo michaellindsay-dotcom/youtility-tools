@@ -19,6 +19,7 @@ const links: { to: string; label: string; icon: string; end?: boolean; feat?: Fe
   { to: "/closer", label: "Closer", icon: "🤝", closer: true },
   { to: "/reports", label: "Reports", icon: "📊", roles: ["admin", "manager"] },
   { to: "/pitches", label: "My Pitches", icon: "🎙️", feat: "pitch" },
+  { to: "/training", label: "Training", icon: "🎓" },
   { to: "/pitch-library", label: "Pitch Library", icon: "🎬", feat: "pitch", roles: ["admin", "manager"] },
   { to: "/working", label: "Who's Working", icon: "🔥", feat: "chat" },
   { to: "/leaderboard", label: "Leaderboard", icon: "🏆", feat: "rewards" },

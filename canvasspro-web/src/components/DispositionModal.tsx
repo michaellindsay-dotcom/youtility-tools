@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
-import { addDoc, collection, doc, updateDoc } from "firebase/firestore";
+import { addDoc, collection, doc, increment, updateDoc } from "firebase/firestore";
 import { httpsCallable } from "firebase/functions";
 import { ref as storageRef, uploadBytes, getDownloadURL } from "firebase/storage";
 import { Geolocation } from "@capacitor/geolocation";
@@ -327,16 +327,19 @@ export default function DispositionModal({
         updatedAt: now,
       });
 
-      // The lead is the core deliverable — save it first, on its own.
+      // The lead is the core deliverable — save it first, on its own. Each
+      // disposition is a knock, so bump knockCount (drives "3 knocks = a
+      // not-home is complete" in territory completion).
       let leadId = d.leadId;
       if (leadId) {
-        await updateDoc(doc(db, "leads", leadId), fields);
+        await updateDoc(doc(db, "leads", leadId), { ...fields, knockCount: increment(1) });
       } else {
         const refDoc = await addDoc(collection(db, "leads"), clean({
           ...fields,
           address: d.address,
           lat: d.lat ?? null,
           lng: d.lng ?? null,
+          knockCount: 1,
           companyId,
           assignedTo: profile.uid,
           visibilityPath: [profile.uid, ...(profile.managerPath ?? [])],

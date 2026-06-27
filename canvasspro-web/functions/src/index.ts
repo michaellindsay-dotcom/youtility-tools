@@ -1300,7 +1300,27 @@ export const setCompanySettings = onCall(async (request) => {
 // ATTOM), completion (% worked) and success (% sold). Computed server-side so it
 // isn't blocked by the per-lead read rules a blanket company query would trip
 // for non-admins.
-const TERRITORY_WORKED = new Set(["go_back", "pipeline", "appointment", "not_interested", "sold", "dnc"]);
+// ── Territory completion model ───────────────────────────────────────────────
+// A home only counts toward completion by how thoroughly it was worked:
+//   • appointment / sold / dnc → fully complete (1.0)
+//   • not interested → half a door (0.5)
+//   • not home → needs 3 knocks to be complete (knockCount/3, capped at 1.0)
+//   • go back / pipeline / new → not complete until it becomes an appointment (0)
+// Then the credit is scaled by whether the rep is PITCH-CERTIFIED: an
+// uncertified rep's doors only count as a partial knock until they pass the AI
+// pitch certification — so training is what unlocks full-credit canvassing.
+const NOT_HOME_KNOCKS_FOR_COMPLETE = 3;
+const UNCERTIFIED_DOOR_FACTOR = 0.5; // knocks by a not-yet-certified rep count half
+const TERRITORY_COMPLETE_PCT = 80; // an area is "complete" at ≥80% credited
+function leadDoorCredit(status: string, knockCount: number): number {
+  switch (status) {
+    case "appointment": case "sold": case "dnc": return 1;
+    case "not_interested": return 0.5;
+    case "not_home": case "not_home_2":
+      return Math.min(Math.max(knockCount, 1), NOT_HOME_KNOCKS_FOR_COMPLETE) / NOT_HOME_KNOCKS_FOR_COMPLETE;
+    default: return 0; // go_back, pipeline, new — incomplete until worked further
+  }
+}
 
 type LatLng = { lat: number; lng: number };
 
@@ -1383,16 +1403,20 @@ export const getTerritoryStats = onCall({ timeoutSeconds: 180 }, async (request)
   await refreshApiConfig(); // pick up super-admin ATTOM key override
   // Leads are never stamped with a territoryId, so bucket each lead into a
   // territory geometrically: test its lat/lng against every territory polygon.
-  const [leadSnap, terrSnap] = await Promise.all([
+  const [leadSnap, terrSnap, userSnap] = await Promise.all([
     db.collection("leads").where("companyId", "==", cid).get(),
     db.collection("territories").where("companyId", "==", cid).get(),
+    db.collection("users").where("companyId", "==", cid).get(),
   ]);
+  // Which reps have passed AI pitch certification → their doors count full credit.
+  const certified: Record<string, boolean> = {};
+  userSnap.forEach((d) => { certified[d.id] = (d.data() as any).pitchCertified === true; });
   const terrs = terrSnap.docs
     .map((d) => ({ id: d.id, ref: d.ref, data: d.data() as any, polygon: normalizePoly((d.data() as any).polygon) }))
     .filter((t) => t.polygon.length >= 3);
-  // Worked / sold come from dispositioned leads inside each polygon. Coerce lead
-  // coords with Number() (they may be strings) so none are silently skipped.
-  const agg: Record<string, { worked: number; sold: number }> = {};
+  // Bucket dispositioned leads by polygon and accumulate weighted door credit.
+  // Coerce lead coords with Number() (they may be strings) so none are skipped.
+  const agg: Record<string, { credit: number; sold: number; doors: number }> = {};
   leadSnap.forEach((d) => {
     const l = d.data() as any;
     const lat = Number(l.lat);
@@ -1400,17 +1424,21 @@ export const getTerritoryStats = onCall({ timeoutSeconds: 180 }, async (request)
     if (!isFinite(lat) || !isFinite(lng)) return;
     const t = terrs.find((tt) => pinInPolygon({ lat, lng }, tt.polygon));
     if (!t) return;
-    const a = (agg[t.id] ??= { worked: 0, sold: 0 });
-    if (TERRITORY_WORKED.has(l.status)) a.worked++;
+    const a = (agg[t.id] ??= { credit: 0, sold: 0, doors: 0 });
+    a.doors++;
+    let credit = leadDoorCredit(l.status, Number(l.knockCount) || 1);
+    // Until the rep is certified, their knocks only count as a partial door.
+    if (credit > 0 && l.assignedTo && certified[l.assignedTo] !== true) credit *= UNCERTIFIED_DOOR_FACTOR;
+    a.credit += credit;
     if (l.status === "sold") a.sold++;
   });
   // homes = total addressable homes in the polygon (ATTOM), cached on the
   // territory doc and only recomputed when the polygon shape changes. Each
   // territory is isolated so an ATTOM hiccup can never zero out the whole map.
   const budget = { pages: 40 }; // shared ATTOM page budget for this whole call
-  const stats: Record<string, { homes: number; completion: number; success: number }> = {};
+  const stats: Record<string, { homes: number; completion: number; success: number; complete: boolean; doors: number }> = {};
   for (const t of terrs) {
-    const a = agg[t.id] || { worked: 0, sold: 0 };
+    const a = agg[t.id] || { credit: 0, sold: 0, doors: 0 };
     let homes: number | null = null;
     try {
       const hash = polyHash(t.polygon);
@@ -1425,12 +1453,16 @@ export const getTerritoryStats = onCall({ timeoutSeconds: 180 }, async (request)
     } catch (e) {
       logger.warn("territory homes count failed", { territory: t.id, err: String(e) });
     }
-    // Fall back to dispositioned-door count if ATTOM is unavailable/over budget.
-    const denom = homes != null && homes > 0 ? homes : a.worked;
+    // Completion = weighted door credit ÷ total homes. Fall back to the count of
+    // dispositioned doors when ATTOM is unavailable/over budget.
+    const denom = homes != null && homes > 0 ? homes : a.doors;
+    const completion = denom ? Math.min(100, Math.round((a.credit / denom) * 100)) : 0;
     stats[t.id] = {
-      homes: homes != null ? homes : a.worked,
-      completion: denom ? Math.min(100, Math.round((a.worked / denom) * 100)) : 0,
+      homes: homes != null ? homes : a.doors,
+      completion,
       success: denom ? Math.round((a.sold / denom) * 100) : 0,
+      complete: completion >= TERRITORY_COMPLETE_PCT,
+      doors: a.doors,
     };
   }
   return { stats };
@@ -2649,6 +2681,7 @@ export const setLeadStatusForRep = onCall(async (request) => {
 // back onto the pitch doc. Keys live in config/ai (set in the super-admin
 // console). No keys → the pitch is marked "error" with a hint, nothing crashes.
 // ════════════════════════════════════════════════════════════════════════════
+const PITCH_CERT_PASS = 80; // a certification pitch scoring ≥ this certifies the rep
 async function readAiConfig() {
   const c = ((await db.doc("config/ai").get()).data() as Record<string, string>) || {};
   return {
@@ -2656,6 +2689,21 @@ async function readAiConfig() {
     anthropicKey: c.anthropicKey || process.env.ANTHROPIC_API_KEY || "",
     anthropicModel: c.anthropicModel || "claude-sonnet-4-6",
   };
+}
+
+// General-purpose Claude text call for the training/coaching features (role-play,
+// success plans, territory education). Reuses the same key/model as pitch grading.
+async function claudeText(system: string, messages: Array<{ role: string; content: string }>, maxTokens = 900): Promise<string> {
+  const cfg = await readAiConfig();
+  if (!cfg.anthropicKey) throw new HttpsError("failed-precondition", "AI coaching isn't configured yet — ask your admin to add an Anthropic key.");
+  const res = await fetch("https://api.anthropic.com/v1/messages", {
+    method: "POST",
+    headers: { "x-api-key": cfg.anthropicKey, "anthropic-version": "2023-06-01", "content-type": "application/json" },
+    body: JSON.stringify({ model: cfg.anthropicModel, max_tokens: maxTokens, system, messages }),
+  });
+  const json: any = await res.json().catch(() => ({}));
+  if (!res.ok) throw new HttpsError("internal", json?.error?.message || `Claude failed (${res.status})`);
+  return (json.content?.[0]?.text as string) || "";
 }
 
 // Transcode any browser recording (webm/opus on Android/desktop, mp4/aac on
@@ -2754,6 +2802,13 @@ export const onPitchCreated = onDocumentCreated(
         highlight: a.highlight || "", lowlight: a.lowlight || "", feedback: a.feedback || "",
         analyzedAt: Date.now(),
       }, { merge: true });
+      // A passing certification pitch unlocks full-credit canvassing for the rep.
+      if (p.kind === "certification" && typeof a.score === "number" && a.score >= PITCH_CERT_PASS && p.uid) {
+        await db.doc(`users/${p.uid}`).set(
+          { pitchCertified: true, pitchCertScore: a.score, pitchCertifiedAt: Date.now(), pitchCertPitchId: snap.id },
+          { merge: true }
+        );
+      }
     } catch (e: any) {
       logger.error("onPitchCreated failed", e);
       await snap.ref.set({ status: "error", feedback: (e?.message || "Analysis failed.").slice(0, 300) }, { merge: true });
@@ -2782,6 +2837,163 @@ export const setAiConfig = onCall(async (request) => {
   if (typeof d.anthropicModel === "string" && d.anthropicModel.trim()) update.anthropicModel = d.anthropicModel.trim();
   await db.doc("config/ai").set(update, { merge: true });
   return { ok: true };
+});
+
+// ════════════════════════════════════════════════════════════════════════════
+// TRAINING — AI homeowner role-play, personalized success plan, and a
+// data-driven recommended territory. All reuse the pitch-coaching Claude key.
+// ════════════════════════════════════════════════════════════════════════════
+
+// A stay-in-character skeptical homeowner the rep can practice pitching against.
+export const aiHomeowner = onCall(async (request) => {
+  await getCaller(request); // any signed-in rep may practice
+  const { messages, persona } = (request.data || {}) as { messages?: Array<{ role: string; content: string }>; persona?: string };
+  const history = (Array.isArray(messages) ? messages : []).slice(-20).map((m) => ({
+    role: m.role === "assistant" ? "assistant" : "user",
+    content: String(m.content || "").slice(0, 2000),
+  }));
+  if (history.length === 0) history.push({ role: "user", content: "(The rep knocks on your door.)" });
+  const system =
+    `You are role-playing as a SKEPTICAL HOMEOWNER who just opened the door to a door-to-door ${persona || "solar"} sales rep. ` +
+    "Stay fully in character as the homeowner for the entire conversation. Be realistic: start guarded and raise the common objections " +
+    "(no time, not interested, already got quotes, my spouse decides, I don't trust door knockers, too expensive). If the rep listens, " +
+    "builds value and handles objections well, gradually warm up; if they're pushy, vague or salesy, stay cold. Keep each reply to 1-3 " +
+    "conversational sentences. No narration, no stage directions, never break character, never say you are an AI.";
+  const reply = await claudeText(system, history, 300);
+  return { reply: reply.trim() };
+});
+
+// Personalized study guide + succession plan built from the rep's own door data
+// (notes, not-interested patterns) and recent pitch coaching.
+export const getSuccessPlan = onCall(async (request) => {
+  const caller = await getCaller(request);
+  const repUid = ((request.data || {}) as { repUid?: string }).repUid || caller.uid;
+  const repSnap = await db.doc(`users/${repUid}`).get();
+  const rep = repSnap.exists ? ({ uid: repSnap.id, ...repSnap.data() } as any) : null;
+  if (!rep) throw new HttpsError("not-found", "Rep not found.");
+  if (repUid !== caller.uid && !canManageRep(caller, rep)) throw new HttpsError("permission-denied", "Not allowed.");
+  const [leadSnap, pitchSnap] = await Promise.all([
+    db.collection("leads").where("assignedTo", "==", repUid).get(),
+    db.collection("pitches").where("uid", "==", repUid).get(),
+  ]);
+  const leads = leadSnap.docs.map((d) => d.data() as any);
+  const counts: Record<string, number> = {};
+  for (const l of leads) counts[l.status] = (counts[l.status] || 0) + 1;
+  const niNotes = leads.filter((l) => l.status === "not_interested" && l.notes).slice(0, 25).map((l) => String(l.notes).slice(0, 200));
+  const otherNotes = leads.filter((l) => l.notes && l.status !== "not_interested").slice(0, 30).map((l) => `[${l.status}] ${String(l.notes).slice(0, 160)}`);
+  const pitchFb = pitchSnap.docs.map((d) => d.data() as any).filter((p) => p.status === "analyzed")
+    .slice(0, 10).map((p) => `score ${p.score}: ${p.lowlight || p.feedback || ""}`.slice(0, 220));
+  const system =
+    "You are an elite door-to-door sales coach. Build a concrete, personalized improvement plan for this rep from their real field data. " +
+    'Reply with ONLY a JSON object (no prose) of the form {"summary":"<2-3 sentence read on where they are>",' +
+    '"focusAreas":["<3-5 short focus areas>"],"studyGuide":["<5-7 specific study/practice items>"],' +
+    '"successionPlan":["<ordered steps to level up over the next few weeks>"],' +
+    '"objectionScripts":[{"objection":"<a real objection they hit>","response":"<a crisp rebuttal to practice>"}]}.';
+  const user =
+    `Rep: ${rep.displayName || "rep"}. Disposition counts: ${JSON.stringify(counts)}.\n` +
+    `NOT-INTERESTED notes (reduce these):\n${niNotes.join("\n") || "(none)"}\n\n` +
+    `Other door notes:\n${otherNotes.join("\n") || "(none)"}\n\n` +
+    `Recent AI pitch coaching:\n${pitchFb.join("\n") || "(none)"}`;
+  const text = await claudeText(system, [{ role: "user", content: user }], 1600);
+  const m = text.match(/\{[\s\S]*\}/);
+  let plan: any;
+  try { plan = m ? JSON.parse(m[0]) : { summary: text.slice(0, 800) }; }
+  catch { plan = { summary: text.slice(0, 800) }; }
+  return { plan, certified: rep.pitchCertified === true, certScore: rep.pitchCertScore ?? null, stats: counts };
+});
+
+// Manager tool: from a rep's worked areas, recommend a new "pre-drawn" area
+// modeled on their best converter, plus AI coaching on what to replicate.
+export const recommendTerritory = onCall(async (request) => {
+  const caller = await getCaller(request);
+  const { repUid } = (request.data || {}) as { repUid?: string };
+  if (!repUid) throw new HttpsError("invalid-argument", "repUid required.");
+  const repSnap = await db.doc(`users/${repUid}`).get();
+  const rep = repSnap.exists ? ({ uid: repSnap.id, ...repSnap.data() } as any) : null;
+  if (!rep) throw new HttpsError("not-found", "Rep not found.");
+  if (!canManageRep(caller, rep)) throw new HttpsError("permission-denied", "Not allowed to manage this rep.");
+  const cid = rep.companyId;
+  const [terrSnap, leadSnap] = await Promise.all([
+    db.collection("territories").where("companyId", "==", cid).get(),
+    db.collection("leads").where("companyId", "==", cid).get(),
+  ]);
+  const repTerrs = terrSnap.docs
+    .map((d) => ({ id: d.id, data: d.data() as any, polygon: normalizePoly((d.data() as any).polygon) }))
+    .filter((t) => t.data.assignedTo === repUid && t.polygon.length >= 3);
+  if (repTerrs.length === 0) throw new HttpsError("failed-precondition", "This rep has no drawn areas to learn from yet.");
+  const leads = leadSnap.docs.map((d) => d.data() as any);
+  const scored = repTerrs.map((t) => {
+    let doors = 0, sold = 0, appt = 0; const notes: string[] = [];
+    for (const l of leads) {
+      const lat = Number(l.lat), lng = Number(l.lng);
+      if (!isFinite(lat) || !isFinite(lng) || !pinInPolygon({ lat, lng }, t.polygon)) continue;
+      doors++;
+      if (l.status === "sold") sold++;
+      if (l.status === "appointment") appt++;
+      if (l.notes) notes.push(`[${l.status}] ${String(l.notes).slice(0, 160)}`);
+    }
+    return { t, doors, sold, appt, success: doors ? sold / doors : 0, notes };
+  }).filter((s) => s.doors > 0).sort((a, b) => b.success - a.success);
+  if (scored.length === 0) throw new HttpsError("failed-precondition", "Not enough door data to recommend an area yet.");
+  const best = scored[0], worst = scored[scored.length - 1];
+  // Pre-draw an adjacent untouched block: clone the best polygon shifted east by
+  // its own width so the manager gets a ready-to-assign area near the winner.
+  const lngs = best.t.polygon.map((p) => p.lng);
+  const width = Math.max(...lngs) - Math.min(...lngs) || 0.003;
+  const polygon = best.t.polygon.map((p) => ({ lat: p.lat, lng: p.lng + width }));
+  let education = `Replicate "${best.t.data.name}" — it converted ${Math.round(best.success * 100)}% (${best.sold} sold / ${best.doors} doors).`;
+  try {
+    const sys = "You are a door-to-door sales coach addressing a manager. In 3-4 short sentences, explain what made this rep's best area convert and exactly what to replicate, plus one thing to avoid from their weakest area. Plain text only, no preamble.";
+    const out = await claudeText(sys, [{ role: "user", content:
+      `Best area "${best.t.data.name}": ${Math.round(best.success * 100)}% success (${best.sold}/${best.doors}).\nNotes:\n${best.notes.slice(0, 25).join("\n") || "(none)"}\n\n` +
+      `Weakest area "${worst.t.data.name}": ${Math.round(worst.success * 100)}% success.\nNotes:\n${worst.notes.slice(0, 15).join("\n") || "(none)"}` }], 500);
+    if (out.trim()) education = out.trim();
+  } catch (e) { logger.warn("recommendTerritory education failed", e); }
+  return {
+    recommendation: {
+      name: `Like ${best.t.data.name} — for ${rep.displayName || "rep"}`,
+      polygon, basedOnTerritoryId: best.t.id, basedOnName: best.t.data.name,
+      successRate: Math.round(best.success * 100), doors: best.doors, sold: best.sold,
+      rationale: `Modeled on the rep's best area "${best.t.data.name}" (${Math.round(best.success * 100)}% success).`,
+      education,
+    },
+  };
+});
+
+// Rep-facing: propose a new area for a manager to approve. Reps can't write
+// territories directly (rules block it), so this runs with admin credentials and
+// files the area as a pending proposal assigned to the proposing rep.
+export const proposeTerritory = onCall(async (request) => {
+  const caller = await getCaller(request);
+  if (!caller.companyId) throw new HttpsError("failed-precondition", "No company on your account.");
+  const { name, description, polygon, color } = (request.data || {}) as { name?: string; description?: string; polygon?: unknown; color?: string };
+  if (!name || !String(name).trim()) throw new HttpsError("invalid-argument", "An area name is required.");
+  const me = ((await db.doc(`users/${caller.uid}`).get()).data() as any) || {};
+  const poly = normalizePoly(polygon);
+  const ref = await db.collection("territories").add({
+    name: String(name).trim(),
+    description: description ? String(description).trim() : null,
+    color: color || "#0EA5E9",
+    companyId: caller.companyId,
+    managerId: me.managerId || null,
+    proposedBy: caller.uid,
+    assignedTo: caller.uid,
+    assignedToName: me.displayName || me.email || null,
+    polygon: poly.length >= 3 ? poly : null,
+    status: "pending",
+    createdAt: Date.now(),
+  });
+  const mgr = (me.managerPath || [])[0];
+  if (mgr) {
+    try {
+      await db.collection("notifications").add({
+        userId: mgr, type: "territory_proposal",
+        title: `${me.displayName || me.email || "A rep"} proposed an area`,
+        body: String(name).trim(), link: "/territories", read: false, createdAt: Date.now(),
+      });
+    } catch { /* non-fatal */ }
+  }
+  return { ok: true, id: ref.id };
 });
 
 // ════════════════════════════════════════════════════════════════════════════

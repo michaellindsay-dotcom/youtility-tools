@@ -127,6 +127,11 @@ export interface UserProfile {
   // Separate closer org chart, parallel to the setter managerId/managerPath.
   closerManagerId?: string | null; // direct closer manager
   closerManagerPath?: string[]; // closer-chain ancestors, nearest first
+  // AI pitch certification — passing a certification pitch unlocks full-credit
+  // canvassing (uncertified reps' knocks count as a partial door).
+  pitchCertified?: boolean;
+  pitchCertScore?: number;
+  pitchCertifiedAt?: number;
   createdAt?: number;
   disabled?: boolean;
 }
@@ -196,6 +201,10 @@ export interface Territory {
   assignedTo?: string | null; // uid of the rep this area is assigned to
   assignedToName?: string | null; // denormalized name for display
   polygon?: LatLng[]; // map boundary
+  // Approval workflow: reps PROPOSE areas (status "pending"); a manager approves
+  // them to "active". Undefined status = legacy active area.
+  status?: "pending" | "active" | "rejected";
+  proposedBy?: string; // uid of the rep who proposed it (when status started pending)
   createdAt: number;
 }
 
@@ -249,6 +258,7 @@ export interface Pitch {
   address?: string;
   audioPath: string; // Storage path
   durationMs?: number;
+  kind?: "door" | "certification"; // certification pitches can certify the rep
   status: "recorded" | "analyzing" | "analyzed" | "error";
   // Filled in by the AI pipeline (Cloud Function):
   transcript?: string;
