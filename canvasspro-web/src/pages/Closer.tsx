@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { collection, getDocs, onSnapshot, query, where } from "firebase/firestore";
 import { db } from "../firebase";
 import { useAuth } from "../auth/AuthContext";
@@ -15,6 +16,7 @@ const fmt = (ms: number) =>
 
 export default function Closer() {
   const { profile, role, companyId } = useAuth();
+  const navigate = useNavigate();
   const isManager = role === "admin" || role === "manager";
   const [events, setEvents] = useState<ScheduleEvent[]>([]);
   const [team, setTeam] = useState<CloserRow[]>([]);
@@ -133,7 +135,10 @@ export default function Closer() {
                   </details>
                 )}
               </div>
-              <button className="btn primary sm" onClick={() => setActive(e)}>Disposition</button>
+              <div className="row" style={{ gap: 8 }}>
+                <button className="btn sm" title="Build a battery proposal for this appointment" onClick={() => navigate(`/battery?eventId=${e.id}`)}>🔋 Proposal</button>
+                <button className="btn primary sm" onClick={() => setActive(e)}>Disposition</button>
+              </div>
             </div>
           ))}
         </div>

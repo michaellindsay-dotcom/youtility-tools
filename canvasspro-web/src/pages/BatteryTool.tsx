@@ -62,6 +62,7 @@ interface SavedProposal {
   customerName?: string;
   address?: string | null;
   leadId?: string | null;
+  eventId?: string | null;
   bill?: ReturnType<typeof analyzeBill>;
   solar?: SolarInput;
   load?: LoadResult;
@@ -93,6 +94,32 @@ interface SavedProposal {
 
 const money = (n: number) => `$${Math.round(n).toLocaleString()}`;
 
+// Read a File into a bare base64 string (drops the `data:...;base64,` prefix).
+const fileToBase64 = (f: File) =>
+  new Promise<string>((res, rej) => {
+    const r = new FileReader();
+    r.onload = () => res(String(r.result).split(",")[1] || "");
+    r.onerror = rej;
+    r.readAsDataURL(f);
+  });
+
+// Result shapes returned by the analyzeEnergyDocument callable.
+interface BillDocData {
+  monthlyKWh?: number | null;
+  monthlyCost?: number | null;
+  ratePerKWh?: number | null;
+  utilityName?: string | null;
+  billingDays?: number | null;
+  notes?: string | null;
+}
+interface SolarDocData {
+  systemKwDc?: number | null;
+  annualProductionKWh?: number | null;
+  monthlyProductionKWh?: number | null;
+  inverterBrand?: string | null;
+  notes?: string | null;
+}
+
 export default function BatteryTool() {
   const { profile, companyId, role, company } = useAuth();
   const [searchParams] = useSearchParams();
@@ -101,10 +128,44 @@ export default function BatteryTool() {
   const [customerName, setCustomerName] = useState("");
   const [address, setAddress] = useState("");
   const [leadId, setLeadId] = useState<string | null>(null);
+  const [eventId, setEventId] = useState<string | null>(null);
   useEffect(() => {
-    const id = searchParams.get("leadId");
-    if (id) setLeadId(id);
+    const lid = searchParams.get("leadId");
+    if (lid) setLeadId(lid);
+    const eid = searchParams.get("eventId");
+    if (eid) setEventId(eid);
   }, [searchParams]);
+
+  // Customer geo (from a linked lead), used to sharpen incentive lookups.
+  const [leadGeo, setLeadGeo] = useState<{ lat?: number; lng?: number }>({});
+
+  // Auto-populate from an appointment/event: read the event, derive its lead
+  // (or a name from the title) and address. Runs once per eventId.
+  const eventHydratedRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!eventId || eventHydratedRef.current === eventId) return;
+    eventHydratedRef.current = eventId;
+    let active = true;
+    getDoc(doc(db, "events", eventId))
+      .then((snap) => {
+        if (!active || !snap.exists()) return;
+        const d = snap.data() as { address?: string; leadId?: string; title?: string } | undefined;
+        if (d?.address) setAddress((cur) => cur || d.address || "");
+        if (d?.leadId) {
+          setLeadId((cur) => cur || d.leadId || null);
+        } else if (d?.title) {
+          const name = d.title.replace(/^\s*(?:Appointment|Closing)\s+—\s+/i, "").trim();
+          if (name) setCustomerName((cur) => cur || name);
+        }
+      })
+      .catch(() => {});
+    return () => { active = false; };
+  }, [eventId]);
+
+  // Auto-populate from a lead (whether passed directly or derived from an event):
+  // prefill name/address, capture geo for incentives, and seed any incentives the
+  // setter already captured. Runs once per leadId; never clobbers typed values.
+  const leadHydratedRef = useRef<string | null>(null);
 
   // 2. Bill analyzer
   const [monthlyKWh, setMonthlyKWh] = useState("");
@@ -133,6 +194,53 @@ export default function BatteryTool() {
     [hasSolar, systemKwDc, annualProductionKWh]
   );
   const solarDaily = useMemo(() => estimateSolarDailyKWh(solar), [solar]);
+
+  // Upload a bill / solar-production photo or PDF and AI-extract its numbers.
+  const [docLoading, setDocLoading] = useState<"bill" | "solar" | null>(null);
+  const [docError, setDocError] = useState<{ bill?: string; solar?: string }>({});
+  const [docNote, setDocNote] = useState<{ bill?: string; solar?: string }>({});
+  const analyzeDocument = async (e: React.ChangeEvent<HTMLInputElement>, kind: "bill" | "solar") => {
+    const file = e.target.files?.[0];
+    e.target.value = ""; // allow re-selecting the same file
+    if (!file) return;
+    setDocError((c) => ({ ...c, [kind]: undefined }));
+    setDocNote((c) => ({ ...c, [kind]: undefined }));
+    if (file.size > 7 * 1024 * 1024) {
+      setDocError((c) => ({ ...c, [kind]: "File is too large — keep it under 7 MB." }));
+      return;
+    }
+    setDocLoading(kind);
+    try {
+      const base64 = await fileToBase64(file);
+      const { data } = await httpsCallable<
+        { base64: string; mediaType: string; kind: "bill" | "solar" },
+        { kind: "bill" | "solar"; data: BillDocData | SolarDocData }
+      >(functions, "analyzeEnergyDocument")({ base64, mediaType: file.type, kind });
+      const notes: string[] = [];
+      if (kind === "bill") {
+        const d = data.data as BillDocData;
+        if (d.monthlyKWh != null) setMonthlyKWh(String(d.monthlyKWh));
+        if (d.monthlyCost != null) setMonthlyCost(String(d.monthlyCost));
+        if (d.ratePerKWh != null) setRatePerKWh(String(d.ratePerKWh));
+        if (d.utilityName) notes.push(`Utility: ${d.utilityName}`);
+        if (d.billingDays != null) notes.push(`${d.billingDays}-day billing period`);
+        if (d.notes) notes.push(d.notes);
+      } else {
+        const d = data.data as SolarDocData;
+        setHasSolar(true);
+        if (d.systemKwDc != null) setSystemKwDc(String(d.systemKwDc));
+        if (d.annualProductionKWh != null) setAnnualProductionKWh(String(d.annualProductionKWh));
+        else if (d.monthlyProductionKWh != null) setAnnualProductionKWh(String(Math.round(d.monthlyProductionKWh * 12)));
+        if (d.inverterBrand) notes.push(`Inverter: ${d.inverterBrand}`);
+        if (d.notes) notes.push(d.notes);
+      }
+      setDocNote((c) => ({ ...c, [kind]: notes.join(" · ") || "Done — fields filled in. Edit as needed." }));
+    } catch (err) {
+      setDocError((c) => ({ ...c, [kind]: (err as Error).message || "Couldn't analyze that document." }));
+    } finally {
+      setDocLoading(null);
+    }
+  };
 
   // 4. Load calculator
   const [mode, setMode] = useState<"essentials" | "whole">("essentials");
@@ -188,21 +296,53 @@ export default function BatteryTool() {
   useEffect(() => { setChosenId(recs[0]?.product.id ?? null); }, [recs]);
   const chosen = useMemo(() => recs.find((r) => r.product.id === chosenId) ?? recs[0], [recs, chosenId]);
 
-  // Customer geo (from a linked lead), used to sharpen incentive lookups.
-  const [leadGeo, setLeadGeo] = useState<{ lat?: number; lng?: number }>({});
   useEffect(() => {
-    if (!leadId) {
-      setLeadGeo({});
-      return;
-    }
+    if (!leadId || leadHydratedRef.current === leadId) return;
+    leadHydratedRef.current = leadId;
     let active = true;
     getDoc(doc(db, "leads", leadId))
       .then((snap) => {
-        if (!active) return;
-        const d = snap.data() as { lat?: number; lng?: number } | undefined;
+        if (!active || !snap.exists()) return;
+        const d = snap.data() as
+          | {
+              ownerName?: string;
+              address?: string;
+              lat?: number;
+              lng?: number;
+              incentives?: AreaIncentive[];
+              incentivesUtility?: { name: string; rate: number | null } | null;
+            }
+          | undefined;
+        if (d?.ownerName) setCustomerName((cur) => cur || d.ownerName || "");
+        if (d?.address) setAddress((cur) => cur || d.address || "");
         setLeadGeo(d?.lat != null && d?.lng != null ? { lat: d.lat, lng: d.lng } : {});
+        // Seed any incentives the setter already captured for this lead.
+        if (d?.incentives && d.incentives.length) {
+          const incs = d.incentives;
+          setIncReport((cur) =>
+            cur ?? {
+              location: d.address || "",
+              utility: d.incentivesUtility ?? null,
+              incentives: incs,
+              sources: [],
+              usedWeb: false,
+              generatedAt: Date.now(),
+              cacheId: "",
+              cached: true,
+            }
+          );
+          // Default-apply incentives that carry a dollar estimate.
+          setAppliedKeys((cur) => {
+            if (cur.size) return cur;
+            const checked = new Set<string>();
+            incs.forEach((i, idx) => {
+              if (typeof i.estValueUsd === "number") checked.add(incKey(i, idx));
+            });
+            return checked;
+          });
+        }
       })
-      .catch(() => active && setLeadGeo({}));
+      .catch(() => {});
     return () => { active = false; };
   }, [leadId]);
 
@@ -423,6 +563,7 @@ export default function BatteryTool() {
           customerName,
           address: address || null,
           leadId: leadId || null,
+          eventId: eventId || null,
           bill,
           solar,
           load,
@@ -484,6 +625,7 @@ export default function BatteryTool() {
     setCustomerName(p.customerName || "");
     setAddress(p.address || "");
     setLeadId(p.leadId || null);
+    setEventId(p.eventId || null);
     if (p.bill) {
       setMonthlyKWh(String(p.bill.monthlyKWh ?? ""));
       setMonthlyCost(String(p.bill.monthlyCost ?? ""));
@@ -545,12 +687,27 @@ export default function BatteryTool() {
           <input value={address} placeholder="123 Main St" onChange={(e) => setAddress(e.target.value)} />
         </label>
         {leadId && <div className="muted small">Linked to lead {leadId}</div>}
+        {eventId && <div className="muted small">Linked to appointment {eventId}</div>}
       </div>
 
       {/* 2. Bill analyzer */}
       <div className="card" style={{ marginBottom: 18 }}>
         <h2 className="section-h" style={{ marginTop: 0 }}>Bill analyzer</h2>
         <p className="muted small" style={{ marginTop: 0 }}>Enter any two — we'll derive the rest.</p>
+        <div className="row" style={{ gap: 8, flexWrap: "wrap", alignItems: "center", marginBottom: 10 }}>
+          <label className="btn ghost sm" style={{ cursor: "pointer", margin: 0 }}>
+            {docLoading === "bill" ? "📄 Analyzing…" : "📄 Upload bill photo/PDF to auto-fill"}
+            <input
+              type="file"
+              accept="image/*,application/pdf"
+              style={{ display: "none" }}
+              disabled={docLoading === "bill"}
+              onChange={(e) => analyzeDocument(e, "bill")}
+            />
+          </label>
+        </div>
+        {docError.bill && <p className="muted small" style={{ color: "#ef4444", marginTop: 0 }}>{docError.bill}</p>}
+        {docNote.bill && <p className="muted small" style={{ marginTop: 0 }}>{docNote.bill}</p>}
         <div className="grid-2">
           <label className="field">
             <span>Monthly usage (kWh)</span>
@@ -585,6 +742,20 @@ export default function BatteryTool() {
           <input type="checkbox" checked={hasSolar} onChange={(e) => setHasSolar(e.target.checked)} />
           <span>Homeowner already has solar</span>
         </label>
+        <div className="row" style={{ gap: 8, flexWrap: "wrap", alignItems: "center", marginTop: 10 }}>
+          <label className="btn ghost sm" style={{ cursor: "pointer", margin: 0 }}>
+            {docLoading === "solar" ? "📄 Analyzing…" : "📄 Upload solar app screenshot/PDF"}
+            <input
+              type="file"
+              accept="image/*,application/pdf"
+              style={{ display: "none" }}
+              disabled={docLoading === "solar"}
+              onChange={(e) => analyzeDocument(e, "solar")}
+            />
+          </label>
+        </div>
+        {docError.solar && <p className="muted small" style={{ color: "#ef4444", marginTop: 8 }}>{docError.solar}</p>}
+        {docNote.solar && <p className="muted small" style={{ marginTop: 8 }}>{docNote.solar}</p>}
         {hasSolar && (
           <>
             <div className="grid-2" style={{ marginTop: 10 }}>
