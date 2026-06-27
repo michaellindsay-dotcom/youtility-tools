@@ -25,6 +25,7 @@ import {
   type AreaIncentive,
   type IncentiveReport,
 } from "../lib/incentives";
+import SolarProposalShow from "./SolarProposalShow";
 
 const fmt = (ms: number) =>
   new Date(ms).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
@@ -511,6 +512,11 @@ export default function BatteryTool() {
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [saveError, setSaveError] = useState("");
+
+  // Interactive proposal "show" overlay.
+  const [showOpen, setShowOpen] = useState(false);
+  // EV charger is in the selected loads?
+  const hasEv = useMemo(() => selected.some((s) => s.applianceId === "ev_l2" && s.qty > 0), [selected]);
 
   const generateSummary = async () => {
     if (!chosen) return;
@@ -1093,6 +1099,14 @@ export default function BatteryTool() {
               </>
             )}
 
+            <button
+              className="btn primary block"
+              style={{ marginBottom: 12 }}
+              onClick={() => setShowOpen(true)}
+            >
+              🎬 Present interactive proposal
+            </button>
+
             <div className="row" style={{ gap: 8, flexWrap: "wrap", marginBottom: 10 }}>
               <button className="btn primary sm" onClick={generateSummary} disabled={aiLoading}>
                 {aiLoading ? "Generating…" : "✨ Generate AI summary"}
@@ -1136,6 +1150,41 @@ export default function BatteryTool() {
           ))}
         </div>
       )}
+
+      <SolarProposalShow
+        open={showOpen}
+        onClose={() => setShowOpen(false)}
+        customerName={customerName || undefined}
+        address={address || undefined}
+        companyName={company?.name}
+        monthlyBill={bill.monthlyCost}
+        monthlyKWh={bill.monthlyKWh}
+        recommendation={
+          chosen
+            ? {
+                brand: chosen.product.brand,
+                model: chosen.product.model,
+                units: chosen.units,
+                totalUsableKWh: chosen.totalUsableKWh,
+                backupDaysAchieved: chosen.backupDaysAchieved,
+              }
+            : null
+        }
+        roi={
+          roi
+            ? {
+                grossCost: roi.grossCost,
+                incentives: roi.incentives,
+                netCost: roi.netCost,
+                monthlySavings: roi.monthlySavings,
+                lifetimeSavings: roi.lifetimeSavings,
+              }
+            : null
+        }
+        incentives={appliedIncentives.length ? appliedIncentives : incReport?.incentives ?? []}
+        hasEv={hasEv}
+        hasExistingSolar={solar.hasSolar}
+      />
     </div>
   );
 }
