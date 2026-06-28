@@ -387,16 +387,15 @@ export default function SolarProposalShow(props: SolarShowProps) {
       { key: "cover" },
       { key: "interactive" },
     ];
-    // CRM proposal slides — only when an option set is provided.
-    if (hasOptions) {
-      list.push({ key: "whybattery" });
-      list.push({ key: "battery3d" });
-    }
-    if (effRoi) list.push({ key: "savings" });
-    if (effRec) list.push({ key: "backup" });
-    if (incentives && incentives.length) list.push({ key: "incentives" });
+    // CRM proposal slides — ordered: why this battery → compare → resilience →
+    // incentives → savings → choose how you pay → see it in your space → close.
+    if (hasOptions) list.push({ key: "whybattery" });
     if (hasOptions && (options?.length ?? 0) >= 2) list.push({ key: "compare" });
-    if (effRoi) list.push({ key: "pricing" });
+    if (effRec) list.push({ key: "backup" }); // Resilience
+    if (incentives && incentives.length) list.push({ key: "incentives" });
+    if (effRoi) list.push({ key: "savings" });
+    if (effRoi) list.push({ key: "pricing" }); // Choose how you pay
+    if (hasOptions) list.push({ key: "battery3d" }); // See it in your space (AR)
     list.push({ key: "cta" });
     return list;
   }, [hasOptions, options, effRoi, effRec, incentives]);
