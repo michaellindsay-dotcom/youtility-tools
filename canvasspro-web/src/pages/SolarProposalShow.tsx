@@ -111,7 +111,7 @@ const PHOTO = {
   solar: `${BASE}/proposal/solar.jpg`, // modern home with rooftop solar
   energy: `${BASE}/proposal/energy.jpg`, // home energy unit + charger + EV
   ev: `${BASE}/proposal/ev.jpg`, // EV charging
-  night: `${BASE}/proposal/night.jpg`, // architecture at dusk, warm glow
+  night: `${BASE}/proposal/night-home.jpg`, // two-story home at night, all lights on
   panels: `${BASE}/proposal/panels.jpg`, // solar panel detail / texture
 };
 const GLB = `${BASE}/battery.glb`;
