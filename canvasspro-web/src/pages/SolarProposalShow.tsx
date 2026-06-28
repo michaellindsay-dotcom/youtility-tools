@@ -1,6 +1,12 @@
 import type React from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import LivingEnergyScene from "./LivingEnergyScene";
+import {
+  FINANCE_OPTIONS,
+  SUNGAGE_PORTAL_URL,
+  computeFinance,
+  financeOptionById,
+} from "../lib/financing";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // SolarProposalShow — a full-screen, photography-led battery proposal a closer
@@ -88,6 +94,10 @@ export interface SolarShowProps {
   // When absent/empty the show behaves exactly as before.
   options?: ProposalOption[];
   chosenProductId?: string; // the battery currently selected in the tool
+  // Pricing slide: cash-reservation deposit (default $2,500) + the destination
+  // for the Sungage financing application (defaults to the dealer login portal).
+  depositUsd?: number;
+  sungageApplyUrl?: string;
 }
 
 // Energy palette — accent colors used by the savings/backup stat dots.
@@ -261,6 +271,8 @@ export default function SolarProposalShow(props: SolarShowProps) {
     homeImageIsStreetView = false,
     options,
     chosenProductId,
+    depositUsd = 2500,
+    sungageApplyUrl,
   } = props;
 
   const hasOptions = !!(options && options.length);
@@ -338,6 +350,7 @@ export default function SolarProposalShow(props: SolarShowProps) {
     if (effRec) list.push({ key: "backup" });
     if (incentives && incentives.length) list.push({ key: "incentives" });
     if (hasOptions && (options?.length ?? 0) >= 2) list.push({ key: "compare" });
+    if (effRoi) list.push({ key: "pricing" });
     list.push({ key: "cta" });
     return list;
   }, [hasOptions, options, effRoi, effRec, incentives]);
@@ -346,6 +359,13 @@ export default function SolarProposalShow(props: SolarShowProps) {
   const clamp = useCallback((n: number) => Math.max(0, Math.min(count - 1, n)), [count]);
   const next = useCallback(() => setIdx((i) => clamp(i + 1)), [clamp]);
   const prev = useCallback(() => setIdx((i) => clamp(i - 1)), [clamp]);
+  const goToKey = useCallback(
+    (key: string) => {
+      const i = slides.findIndex((sl) => sl.key === key);
+      if (i >= 0) setIdx(i);
+    },
+    [slides]
+  );
 
   // Reset to the first slide each time the show opens.
   useEffect(() => {
@@ -770,6 +790,37 @@ export default function SolarProposalShow(props: SolarShowProps) {
                         options={options}
                         compareIds={compareIds}
                         setCompareIds={setCompareIds}
+                        onChoose={(id) => {
+                          setSelectedId(id);
+                          goToKey("pricing");
+                        }}
+                      />
+                    </div>
+                  </>
+                )}
+
+                {/* ───────── Pricing (financing vs cash) ───────── */}
+                {s.key === "pricing" && effRoi && (
+                  <>
+                    <PhotoBackdrop src={PHOTO.night} active={isOn} dim position="center" />
+                    <div
+                      className={"sps-inner sps-rise" + (isOn ? " in" : "")}
+                      style={{ ["--accent" as string]: brandAccent }}
+                    >
+                      <div className="sps-eyebrow sps-light">Your investment</div>
+                      <h2 className="sps-h2">Choose how you pay</h2>
+                      {hasOptions && active && (
+                        <div className="sps-activePill" style={{ borderColor: brandAccent }}>
+                          <span className="sps-activePill-dot" style={{ background: brandAccent, boxShadow: `0 0 8px ${brandAccent}` }} />
+                          {active.units}× {active.brand} {active.model}
+                        </div>
+                      )}
+                      <PricingSlide
+                        roi={effRoi}
+                        accent={brandAccent}
+                        firstName={name.split(" ")[0]}
+                        depositUsd={depositUsd}
+                        sungageApplyUrl={sungageApplyUrl || SUNGAGE_PORTAL_URL}
                       />
                     </div>
                   </>
@@ -901,10 +952,12 @@ function CompareSlide({
   options,
   compareIds,
   setCompareIds,
+  onChoose,
 }: {
   options: ProposalOption[];
   compareIds: string[];
   setCompareIds: (ids: string[]) => void;
+  onChoose?: (productId: string) => void;
 }) {
   const aId = compareIds[0] || options[0]?.productId;
   const bId = compareIds[1] || options[1]?.productId;
@@ -989,6 +1042,141 @@ function CompareSlide({
           </ul>
         </div>
       </div>
+
+      {onChoose && (
+        <div className="sps-cmp-choose">
+          <div className="sps-cmp-spacer" />
+          <button className="sps-cmp-choosebtn" style={{ borderColor: a.accent }} onClick={() => onChoose(a.productId)}>
+            Choose {a.brand} {a.model} →
+          </button>
+          <button className="sps-cmp-choosebtn" style={{ borderColor: b.accent }} onClick={() => onChoose(b.productId)}>
+            Choose {b.brand} {b.model} →
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Pricing slide: financing (Sungage, 3 options, monthly-only) vs cash ───────
+function PricingSlide({
+  roi,
+  accent,
+  firstName,
+  depositUsd,
+  sungageApplyUrl,
+}: {
+  roi: { grossCost: number; incentives: number; netCost: number; monthlySavings: number; lifetimeSavings: number };
+  accent: string;
+  firstName: string;
+  depositUsd: number;
+  sungageApplyUrl: string;
+}) {
+  const [mode, setMode] = useState<"finance" | "cash">("finance");
+  const [optId, setOptId] = useState(FINANCE_OPTIONS[0].id);
+  const [deposit, setDeposit] = useState<"idle" | "card" | "cash">("idle");
+
+  // Finance the system sale price (grossed up by the dealer fee inside compute).
+  const financeBase = roi.grossCost > 0 ? roi.grossCost : roi.netCost;
+  const opt = financeOptionById(optId);
+  const fin = useMemo(() => computeFinance(opt, financeBase), [opt, financeBase]);
+
+  const cashPrice = roi.netCost > 0 ? roi.netCost : roi.grossCost;
+
+  return (
+    <div className="sps-pricing" style={{ ["--accent" as string]: accent }}>
+      <div className="sps-pay-toggle">
+        <button className={"sps-pay-tab" + (mode === "finance" ? " on" : "")} onClick={() => setMode("finance")}>
+          💳 Finance
+        </button>
+        <button className={"sps-pay-tab" + (mode === "cash" ? " on" : "")} onClick={() => setMode("cash")}>
+          💵 Cash
+        </button>
+      </div>
+
+      {mode === "finance" ? (
+        <div className="sps-glass sps-fin">
+          <div className="sps-fin-pick">
+            <label className="sps-fin-pick-l">Financing plan</label>
+            <select className="sps-fin-select" value={optId} onChange={(e) => setOptId(e.target.value as typeof optId)}>
+              {FINANCE_OPTIONS.map((o) => (
+                <option key={o.id} value={o.id}>
+                  {o.name}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div className="sps-fin-pay">
+            <div className="sps-fin-pay-num">{money0(fin.monthly)}</div>
+            <div className="sps-fin-pay-mo">/mo<span className="sps-fin-pay-est"> · estimated</span></div>
+          </div>
+          <div className="sps-fin-blurb">{opt.blurb}</div>
+          <div className="sps-fin-terms">
+            {(opt.apr * 100).toFixed(2)}% APR · {opt.termYears}-year term{fin.note ? ` · ${fin.note}` : ""}
+          </div>
+
+          <button
+            className="sps-pay-cta"
+            style={{ background: accent }}
+            onClick={() => window.open(sungageApplyUrl, "_blank", "noopener,noreferrer")}
+          >
+            Apply with Sungage ↗
+          </button>
+          <div className="sps-fin-foot">
+            Estimated payment for discussion — your exact rate and payment are confirmed by Sungage on approval.
+          </div>
+        </div>
+      ) : (
+        <div className="sps-glass sps-cash">
+          <div className="sps-cash-row">
+            <span>System price</span>
+            <strong>{money0(cashPrice)}</strong>
+          </div>
+          <div className="sps-cash-row sps-cash-deposit">
+            <span>Deposit to reserve today</span>
+            <strong style={{ color: accent }}>{money0(deposit === "idle" ? depositUsd : depositUsd)}</strong>
+          </div>
+          <div className="sps-cash-row sps-cash-balance">
+            <span>Balance due at install</span>
+            <strong>{money0(Math.max(0, cashPrice - depositUsd))}</strong>
+          </div>
+
+          {deposit === "idle" && (
+            <button className="sps-pay-cta" style={{ background: accent }} onClick={() => setDeposit("card")}>
+              Reserve with a {money0(depositUsd)} deposit
+            </button>
+          )}
+
+          {deposit !== "idle" && (
+            <div className="sps-cash-pay">
+              <div className="sps-cash-pay-tabs">
+                <button className={"sps-cash-paytab" + (deposit === "card" ? " on" : "")} onClick={() => setDeposit("card")}>
+                  Pay by card
+                </button>
+                <button className={"sps-cash-paytab" + (deposit === "cash" ? " on" : "")} onClick={() => setDeposit("cash")}>
+                  Cash / check
+                </button>
+              </div>
+              {deposit === "card" ? (
+                <p className="sps-cash-note">
+                  Your rep will send a secure payment link for the {money0(depositUsd)} deposit — it goes straight to{" "}
+                  the company's payment account. Nothing is charged here.
+                </p>
+              ) : (
+                <p className="sps-cash-note">
+                  Hand your rep a {money0(depositUsd)} check or cash to lock in today's pricing. They'll mark your
+                  reservation and email a receipt.
+                </p>
+              )}
+            </div>
+          )}
+          <div className="sps-fin-foot">
+            {firstName}, your deposit reserves today's price and your spot on the install schedule — fully credited
+            toward your system.
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -1410,6 +1598,60 @@ const CSS = `
   .sps-cmp-pick{font-size:11px;}
   .sps-cmp-featlist{font-size:10px;}
 }
+
+/* compare → choose-this-battery buttons */
+.sps-cmp-choose{display:grid;grid-template-columns:1.2fr 1fr 1fr;gap:8px;padding:14px 12px;
+  border-top:1px solid var(--line);align-items:center;}
+.sps-cmp-choosebtn{font-family:var(--font-head);font-size:12.5px;font-weight:600;color:#fff;
+  padding:11px 10px;border-radius:10px;border:1px solid var(--line-2);background:rgba(8,5,18,.5);
+  cursor:pointer;transition:background .2s,transform .1s;line-height:1.15;}
+.sps-cmp-choosebtn:hover{background:rgba(139,92,246,.22);}
+.sps-cmp-choosebtn:active{transform:scale(.97);}
+
+/* ── Pricing slide ── */
+.sps-pricing{width:min(560px,94vw);display:flex;flex-direction:column;gap:14px;}
+.sps-pay-toggle{display:inline-flex;gap:5px;align-self:center;background:rgba(8,5,18,.55);
+  border:1px solid var(--line-2);border-radius:999px;padding:4px;backdrop-filter:blur(10px);}
+.sps-pay-tab{font-family:var(--font-head);font-size:14px;font-weight:600;letter-spacing:.01em;
+  padding:9px 22px;border-radius:999px;border:0;background:transparent;color:var(--text-dim);cursor:pointer;
+  transition:all .2s;}
+.sps-pay-tab.on{background:rgba(139,92,246,.3);color:#fff;box-shadow:0 0 0 1px var(--accent);}
+
+.sps-fin,.sps-cash{position:relative;overflow:hidden;padding:22px;text-align:left;}
+.sps-fin::before,.sps-cash::before{content:'';position:absolute;top:0;left:0;width:3px;height:100%;
+  background:var(--accent);box-shadow:0 0 14px var(--accent);}
+.sps-fin-pick{display:flex;flex-direction:column;gap:6px;margin-bottom:16px;}
+.sps-fin-pick-l{font-family:var(--font-mono);font-size:10px;letter-spacing:.2em;text-transform:uppercase;
+  color:var(--text-dim);}
+.sps-fin-select{font-family:var(--font-head);font-size:15px;font-weight:600;padding:11px 12px;border-radius:10px;
+  border:1px solid var(--line-2);background:rgba(8,5,18,.6);color:#fff;cursor:pointer;width:100%;}
+.sps-fin-pay{display:flex;align-items:baseline;gap:8px;}
+.sps-fin-pay-num{font-family:var(--font-head);font-size:clamp(46px,11vw,72px);font-weight:700;line-height:1;
+  letter-spacing:-.03em;background:linear-gradient(135deg,#fff,var(--accent-bright));
+  -webkit-background-clip:text;background-clip:text;color:transparent;}
+.sps-fin-pay-mo{font-family:var(--font-head);font-size:20px;font-weight:600;color:var(--text-dim);}
+.sps-fin-pay-est{font-family:var(--font-mono);font-size:10px;letter-spacing:.1em;text-transform:uppercase;}
+.sps-fin-blurb{font-family:var(--font-body);font-size:14px;color:#e6e0f2;margin-top:8px;line-height:1.45;}
+.sps-fin-terms{font-family:var(--font-mono);font-size:11px;letter-spacing:.03em;color:var(--text-dim);margin-top:8px;}
+.sps-pay-cta{display:block;width:100%;margin-top:18px;font-family:var(--font-head);font-size:16px;font-weight:700;
+  color:#fff;border:0;border-radius:12px;padding:14px;cursor:pointer;transition:transform .1s,filter .2s;
+  box-shadow:0 10px 30px rgba(139,92,246,.35);}
+.sps-pay-cta:hover{filter:brightness(1.08);}
+.sps-pay-cta:active{transform:scale(.98);}
+.sps-fin-foot{font-family:var(--font-mono);font-size:10.5px;line-height:1.5;color:var(--text-dim);margin-top:14px;}
+
+.sps-cash-row{display:flex;justify-content:space-between;align-items:center;padding:11px 0;
+  border-bottom:1px dashed var(--line);font-family:var(--font-body);font-size:15px;color:#e6e0f2;}
+.sps-cash-row strong{font-family:var(--font-head);font-size:18px;}
+.sps-cash-deposit strong{font-size:24px;}
+.sps-cash-balance{border-bottom:0;}
+.sps-cash-pay{margin-top:14px;}
+.sps-cash-pay-tabs{display:flex;gap:8px;margin-bottom:10px;}
+.sps-cash-paytab{flex:1;font-family:var(--font-head);font-size:13px;font-weight:600;padding:10px;border-radius:10px;
+  border:1px solid var(--line-2);background:rgba(8,5,18,.5);color:var(--text);cursor:pointer;transition:all .2s;}
+.sps-cash-paytab.on{background:rgba(139,92,246,.22);border-color:var(--accent);color:#fff;}
+.sps-cash-note{font-family:var(--font-body);font-size:13px;line-height:1.55;color:#d8d1ea;margin:0;}
+@media(max-width:560px){.sps-cmp-choose{grid-template-columns:1fr;}.sps-cmp-choose .sps-cmp-spacer{display:none;}}
 
 @media(prefers-reduced-motion:reduce){
   .sps-bg-img,.sps-bg-img.kb{animation:none!important;transform:scale(1.04)!important;}

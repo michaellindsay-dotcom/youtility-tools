@@ -872,6 +872,15 @@ export default function BatteryTool() {
     [system, pricePerUnit, installAdder, incentivesTotalUsd, bill.ratePerKWh, bill.dailyKWh]
   );
 
+  // Cash-reservation deposit shown on the pricing slide. A company % override
+  // takes precedence over a flat $ override; both default to $2,500.
+  const depositUsd = useMemo(() => {
+    const pct = Number(company?.batteryDepositPct);
+    if (pct > 0 && roi && roi.netCost > 0) return Math.max(0, Math.round((roi.netCost * pct) / 100));
+    const usd = Number(company?.batteryDepositUsd);
+    return usd > 0 ? Math.round(usd) : 2500;
+  }, [company?.batteryDepositPct, company?.batteryDepositUsd, roi]);
+
   // Build the full option set for the interactive CRM proposal: every offered
   // recommendation, with marketing content + per-product pricing/ROI so the show
   // can re-theme to whichever battery the rep selects in front of the homeowner.
@@ -1054,6 +1063,8 @@ export default function BatteryTool() {
         hasExistingSolar: solar.hasSolar,
         options: proposalOptions,
         chosenProductId: system.product.id,
+        depositUsd,
+        sungageApplyUrl: company?.sungageApplyUrl,
         // homeImage intentionally omitted — too large to persist; the viewer
         // uses the photoreal scene.
       };
@@ -1864,6 +1875,8 @@ export default function BatteryTool() {
         homeImageIsStreetView={homeIsSV}
         options={proposalOptions}
         chosenProductId={system?.product.id}
+        depositUsd={depositUsd}
+        sungageApplyUrl={company?.sungageApplyUrl}
       />
     </div>
   );
