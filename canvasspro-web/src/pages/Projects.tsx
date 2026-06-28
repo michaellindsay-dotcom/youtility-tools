@@ -273,9 +273,14 @@ function ProjectCapture({
   const [err, setErr] = useState("");
   const placementInput = useRef<HTMLInputElement | null>(null);
 
-  const addPlacement = (file?: File) => {
-    if (!file || placement.length >= 3) return;
-    setPlacement((p) => [...p, { file, note: "" }]);
+  const addPlacementFiles = (files?: FileList | null) => {
+    if (!files || !files.length) return;
+    const arr = Array.from(files);
+    setPlacement((p) => {
+      const next = [...p];
+      for (const f of arr) { if (next.length >= 3) break; next.push({ file: f, note: "" }); }
+      return next;
+    });
   };
 
   const upload = async (key: string, file: File): Promise<string> => {
@@ -345,7 +350,7 @@ function ProjectCapture({
         {step === "placement" && (
           <>
             <p className="muted small">
-              View your <strong>{project.battery}</strong> in the room with AR, then take <strong>2–3 photos</strong> of where the homeowner wants it. <span className="muted">({placement.length}/3)</span>
+              Tap <strong>View in your space</strong> below to preview your <strong>{project.battery}</strong> in AR and snap photos of where it goes. Then tap <strong>+ Add photo</strong> and pick them from your library (or take a new one). <strong>2–3 photos.</strong> <span className="muted">({placement.length}/3)</span>
             </p>
             <div style={{ marginBottom: 12, borderRadius: 12, overflow: "hidden", border: "1px solid rgba(255,255,255,0.1)", background: "rgba(8,5,18,0.4)" }}>
               <BatteryAR accent={batteryContent(project.batteryProductId || "").accent} />
@@ -359,9 +364,11 @@ function ProjectCapture({
                 </div>
               ))}
               {placement.length < 3 && (
-                <button className="btn primary sm" style={{ width: 96, height: 96 }} onClick={() => placementInput.current?.click()}>+ Photo</button>
+                <button className="btn primary sm" style={{ width: 96, height: 96 }} onClick={() => placementInput.current?.click()}>+ Add photo</button>
               )}
-              <input ref={placementInput} type="file" accept="image/*" capture="environment" hidden onChange={(e) => { addPlacement(e.target.files?.[0]); e.currentTarget.value = ""; }} />
+              {/* No `capture` attribute → the picker offers Library OR Camera, so the
+                  rep can add the photos they took inside AR (saved to the camera roll). */}
+              <input ref={placementInput} type="file" accept="image/*" multiple hidden onChange={(e) => { addPlacementFiles(e.target.files); e.currentTarget.value = ""; }} />
             </div>
             {err && <p className="muted small" style={{ color: "#ef4444" }}>{err}</p>}
             <button className="btn primary block" style={{ marginTop: 14 }} onClick={goToChoice} disabled={busy || placement.length < 2}>
@@ -393,7 +400,7 @@ function ProjectCapture({
                     <span style={{ fontSize: 22, opacity: 0.6 }}>＋</span>
                   )}
                   <span style={{ fontSize: 11, lineHeight: 1.2, marginTop: 4, textAlign: "center" }}>{slot.label}</span>
-                  <input type="file" accept="image/*" capture="environment" hidden onChange={(e) => { const f = e.target.files?.[0]; if (f) setPhotos((m) => ({ ...m, [slot.key]: f })); e.currentTarget.value = ""; }} />
+                  <input type="file" accept="image/*" hidden onChange={(e) => { const f = e.target.files?.[0]; if (f) setPhotos((m) => ({ ...m, [slot.key]: f })); e.currentTarget.value = ""; }} />
                 </label>
               ))}
             </div>
