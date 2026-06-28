@@ -115,6 +115,7 @@ const PHOTO = {
   panels: `${BASE}/proposal/panels.jpg`, // solar panel detail / texture
 };
 const GLB = `${BASE}/battery.glb`;
+const USDZ = `${BASE}/battery.usdz`; // iPhone/iPad AR (Apple Quick Look)
 const ALL_PHOTOS = [PHOTO.solar, PHOTO.energy, PHOTO.ev, PHOTO.night, PHOTO.panels];
 
 const money0 = (n: number | undefined | null) =>
@@ -149,6 +150,7 @@ declare global {
       "model-viewer": React.DetailedHTMLProps<
         React.HTMLAttributes<HTMLElement> & {
           src?: string;
+          "ios-src"?: string;
           alt?: string;
           ar?: boolean;
           "ar-modes"?: string;
@@ -512,6 +514,14 @@ export default function SolarProposalShow(props: SolarShowProps) {
                     monthlyKWh={monthlyKWh}
                     hasEv={hasEv}
                     hasExistingSolar={hasExistingSolar}
+                    units={active?.units ?? effRec?.units}
+                    usableKWh={active?.totalUsableKWh ?? effRec?.totalUsableKWh}
+                    continuousKW={active?.totalContinuousKW}
+                    peakKW={active?.totalPeakKW}
+                    warrantyYears={active?.warrantyYears}
+                    chemistry={active?.chemistry}
+                    backupDays={active?.backupDaysAchieved ?? effRec?.backupDaysAchieved}
+                    bidirectionalEv={/sigen/i.test(active?.brand || "")}
                   />
                 )}
 
@@ -589,6 +599,7 @@ export default function SolarProposalShow(props: SolarShowProps) {
                           <model-viewer
                             ref={mvRef as unknown as React.Ref<HTMLElement>}
                             src={GLB}
+                            ios-src={USDZ}
                             alt={`${active.brand} ${active.model} 3D model`}
                             camera-controls
                             auto-rotate
