@@ -421,7 +421,7 @@ export default function SolarProposalShow(props: SolarShowProps) {
     if (incentives && incentives.length) list.push({ key: "incentives" });
     if (effRoi) list.push({ key: "savings" });
     if (effRoi) list.push({ key: "pricing" }); // Choose how you pay
-    if (hasOptions) list.push({ key: "battery3d" }); // See it in your space (AR)
+    // "See it in your space" (AR) moved to the site-survey step after signing.
     list.push({ key: "cta" });
     return list;
   }, [hasOptions, options, effRoi, effRec, incentives]);
@@ -1742,8 +1742,17 @@ const CSS = `
 @media(max-width:560px){
   .sps-cmp-label{font-size:9px;}
   .sps-cmp-val{font-size:12px;}
-  .sps-cmp-pick{font-size:11px;}
+  .sps-cmp-pick{font-size:11px;padding:6px 7px;max-width:none;}
   .sps-cmp-featlist{font-size:10px;}
+  /* tighten the whole card so both Choose buttons fit on screen */
+  .sps-cmp-heads{padding:10px 8px;gap:5px;}
+  .sps-cmp-row{padding:7px 8px;}
+  .sps-cmp-feats{display:none;} /* redundant with the "Why this battery" slide */
+  .sps-cmp-swatch{width:20px;height:6px;}
+  .sps-cmp-qty{gap:5px;padding:2px 3px;margin-top:6px;}
+  .sps-cmp-qbtn{width:21px;height:21px;font-size:14px;}
+  .sps-cmp-qval{font-size:10px;min-width:46px;}
+  .sps-cmp-badge{font-size:7px;padding:2px 5px;}
 }
 
 /* compare → choose-this-battery buttons */
@@ -1809,7 +1818,11 @@ const CSS = `
   border:1px solid var(--line-2);background:rgba(8,5,18,.5);color:var(--text);cursor:pointer;transition:all .2s;}
 .sps-cash-paytab.on{background:rgba(139,92,246,.22);border-color:var(--accent);color:#fff;}
 .sps-cash-note{font-family:var(--font-body);font-size:13px;line-height:1.55;color:#d8d1ea;margin:0;}
-@media(max-width:560px){.sps-cmp-choose{grid-template-columns:1fr;}.sps-cmp-choose .sps-cmp-spacer{display:none;}}
+@media(max-width:560px){
+  .sps-cmp-choose{grid-template-columns:1fr;gap:7px;padding:11px 8px;}
+  .sps-cmp-choose .sps-cmp-spacer{display:none;}
+  .sps-cmp-choosebtn{padding:13px 8px;font-size:13px;}
+}
 
 @media(prefers-reduced-motion:reduce){
   .sps-bg-img,.sps-bg-img.kb{animation:none!important;transform:scale(1.04)!important;}
