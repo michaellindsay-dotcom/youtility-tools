@@ -65,8 +65,10 @@ export interface Company {
   organizationId?: string; // parent organization, if grouped
   scheduling?: SchedulingSettings;
   maxTerritoriesPerUser?: number; // cap on territories one rep can hold (0 = unlimited)
-  // Battery tool: admin-set price + install adder per battery product id.
+  // Battery tool: admin-set price + install adder per battery product id, and
+  // which products reps may offer (unset/empty = all products offered).
   batteryPricing?: Record<string, { price: number; adder: number }>;
+  batteryOffered?: string[];
   createdAt?: number;
 }
 

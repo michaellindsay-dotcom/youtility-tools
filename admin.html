@@ -944,6 +944,7 @@
       <table style="width:100%;border-collapse:collapse;font-size:13px;">
         <thead>
           <tr style="text-align:left;color:var(--muted,#8a8199);">
+            <th style="padding:6px 8px;width:60px;">Offer</th>
             <th style="padding:6px 8px;">Battery</th>
             <th style="padding:6px 8px;width:130px;">Price / unit ($)</th>
             <th style="padding:6px 8px;width:130px;">Install adder ($)</th>
@@ -1743,12 +1744,17 @@ const BATTERY_PRODUCTS = [
   { id: "panasonic_evervolt", label: "Panasonic EverVolt 2.0" },
   { id: "generac_pwrcell", label: "Generac PWRcell M6" },
 ];
-function renderBatteryPricingRows(pricing) {
+function renderBatteryPricingRows(pricing, offered) {
+  // Unset/empty offered list = offer everything (don't break existing companies).
+  const offerAll = !Array.isArray(offered) || offered.length === 0;
+  const offerSet = new Set(offered || []);
   const rows = BATTERY_PRODUCTS.map((p) => {
     const e = (pricing && pricing[p.id]) || {};
     const price = e.price ? String(e.price) : "";
     const adder = e.adder ? String(e.adder) : "";
+    const checked = offerAll || offerSet.has(p.id) ? "checked" : "";
     return `<tr>
+      <td style="padding:6px 8px;text-align:center;"><input data-bp-offer="${p.id}" type="checkbox" ${checked} /></td>
       <td style="padding:6px 8px;">${p.label}</td>
       <td style="padding:6px 8px;"><input data-bp-price="${p.id}" type="number" min="0" step="1" value="${price}" placeholder="0" style="width:110px;" /></td>
       <td style="padding:6px 8px;"><input data-bp-adder="${p.id}" type="number" min="0" step="1" value="${adder}" placeholder="0" style="width:110px;" /></td>
@@ -1757,25 +1763,28 @@ function renderBatteryPricingRows(pricing) {
   $("batteryPricingRows").innerHTML = rows;
 }
 async function loadBatteryPricing(companyId) {
-  let pricing = {};
+  let pricing = {}, offered;
   try {
     const snap = await getDoc(doc(db, "companies", companyId));
     const c = snap.exists() ? snap.data() : {};
     pricing = c.batteryPricing || {};
+    offered = c.batteryOffered;
   } catch (e) { /* leave empty */ }
-  renderBatteryPricingRows(pricing);
+  renderBatteryPricingRows(pricing, offered);
 }
 $("batteryPricingSave").addEventListener("click", async () => {
   if (!state.selectedCompany) return;
   $("batteryPricingSave").disabled = true;
   try {
     const pricing = {};
+    const offered = [];
     BATTERY_PRODUCTS.forEach((p) => {
       const price = Number(document.querySelector(`[data-bp-price="${p.id}"]`)?.value) || 0;
       const adder = Number(document.querySelector(`[data-bp-adder="${p.id}"]`)?.value) || 0;
       if (price > 0 || adder > 0) pricing[p.id] = { price, adder };
+      if (document.querySelector(`[data-bp-offer="${p.id}"]`)?.checked) offered.push(p.id);
     });
-    await setBatteryPricing({ companyId: state.selectedCompany, pricing });
+    await setBatteryPricing({ companyId: state.selectedCompany, pricing, offered });
     banner($("batteryPricingBanner"), "Battery pricing saved.", "good");
   } catch (e) { banner($("batteryPricingBanner"), e.message || "Save failed.", "error"); }
   finally { $("batteryPricingSave").disabled = false; }

@@ -211,54 +211,62 @@ export interface RecommendedSystem {
   fit: "ideal" | "good" | "undersized";
   score: number;
 }
-export function recommendSystems(input: SizingInput): RecommendedSystem[] {
+// The usable-kWh target the system should hit, from the homeowner's goal.
+function energyTargetFor(input: SizingInput): number {
   const { load, goal, backupDays } = input;
   const dailyUse = input.dailyUsageKWh && input.dailyUsageKWh > 0 ? input.dailyUsageKWh : load.dailyKWh;
   const solar = Math.max(0, input.solarDailyKWh || 0);
   // Net daily backup load after solar recharges the battery during an outage.
   const netDailyBackup = Math.max(load.dailyKWh - solar * 0.6, load.dailyKWh * 0.35);
   const backupEnergy = netDailyBackup * Math.max(backupDays, 0.5);
-  // Self-consumption / TOU: shift roughly the evening half of daily usage.
-  const savingsEnergy = dailyUse * 0.5;
-  const energyTarget =
-    goal === "savings" ? savingsEnergy :
-    goal === "both" ? Math.max(backupEnergy, savingsEnergy) :
-    backupEnergy;
+  const savingsEnergy = dailyUse * 0.5; // self-consumption / TOU: shift the evening half
+  return goal === "savings" ? savingsEnergy : goal === "both" ? Math.max(backupEnergy, savingsEnergy) : backupEnergy;
+}
 
-  const results: RecommendedSystem[] = [];
-  for (const p of BATTERIES) {
+// Evaluate a specific product at a specific unit count — the single source of
+// truth for totals, fit, backup days and score. Used both for the auto
+// recommendation and when a rep overrides the quantity in the proposal. Units
+// are clamped to [1, product.maxUnits].
+export function systemForUnits(product: BatteryProduct, requestedUnits: number, input: SizingInput): RecommendedSystem {
+  const { load, backupDays } = input;
+  const solar = Math.max(0, input.solarDailyKWh || 0);
+  const energyTarget = energyTargetFor(input);
+  const units = Math.min(Math.max(1, Math.round(requestedUnits || 1)), product.maxUnits);
+  const totalUsableKWh = round1(product.usableKWh * units);
+  const totalContinuousKW = round1(product.continuousKW * units);
+  const totalPeakKW = round1(product.peakKW * units);
+  const meetsContinuous = totalContinuousKW + 1e-6 >= load.continuousKW;
+  const meetsSurge = totalPeakKW + 1e-6 >= load.peakKW;
+  const meetsEnergy = totalUsableKWh + 1e-6 >= energyTarget;
+  const backupDaysAchieved = load.dailyKWh > 0 ? round1((totalUsableKWh + solar * 0.6 * Math.max(backupDays, 1)) / load.dailyKWh) : 0;
+  const fit: RecommendedSystem["fit"] =
+    meetsEnergy && meetsContinuous && meetsSurge ? (totalUsableKWh <= energyTarget * 1.4 ? "ideal" : "good") : "undersized";
+  // Score: prefer systems that meet all needs, with the least overshoot and
+  // fewest units; nudge for LFP preference and longer warranty.
+  let score = 0;
+  if (meetsEnergy) score += 50;
+  if (meetsContinuous) score += 20;
+  if (meetsSurge) score += 15;
+  score -= Math.abs(totalUsableKWh - energyTarget) * 1.5;
+  score -= (units - 1) * 2;
+  score += product.warrantyYears * 0.4;
+  if (input.preferLFP && product.chemistry === "LFP") score += 6;
+  return {
+    product, units, totalUsableKWh, totalContinuousKW, totalPeakKW,
+    energyTargetKWh: round1(energyTarget), backupDaysAchieved,
+    meetsContinuous, meetsSurge, fit, score: round1(score),
+  };
+}
+
+// Rank candidate systems. `products` defaults to the full catalog; pass the
+// company's offered subset to limit what a rep can propose.
+export function recommendSystems(input: SizingInput, products: BatteryProduct[] = BATTERIES): RecommendedSystem[] {
+  const energyTarget = energyTargetFor(input);
+  return products.map((p) => {
     const byEnergy = Math.ceil(energyTarget / p.usableKWh);
-    const byPower = Math.ceil(load.continuousKW / p.continuousKW);
-    let units = Math.max(1, byEnergy, byPower);
-    const capped = units > p.maxUnits;
-    units = Math.min(units, p.maxUnits);
-    const totalUsableKWh = round1(p.usableKWh * units);
-    const totalContinuousKW = round1(p.continuousKW * units);
-    const totalPeakKW = round1(p.peakKW * units);
-    const meetsContinuous = totalContinuousKW + 1e-6 >= load.continuousKW;
-    const meetsSurge = totalPeakKW + 1e-6 >= load.peakKW;
-    const meetsEnergy = totalUsableKWh + 1e-6 >= energyTarget && !capped;
-    const backupDaysAchieved = load.dailyKWh > 0 ? round1((totalUsableKWh + solar * 0.6 * Math.max(backupDays, 1)) / load.dailyKWh) : 0;
-    const fit: RecommendedSystem["fit"] =
-      meetsEnergy && meetsContinuous && meetsSurge ? (totalUsableKWh <= energyTarget * 1.4 ? "ideal" : "good") :
-      "undersized";
-    // Score: prefer systems that meet all needs, with the least overshoot and
-    // fewest units; nudge for LFP preference and longer warranty.
-    let score = 0;
-    if (meetsEnergy) score += 50;
-    if (meetsContinuous) score += 20;
-    if (meetsSurge) score += 15;
-    score -= Math.abs(totalUsableKWh - energyTarget) * 1.5; // closeness to target
-    score -= (units - 1) * 2; // simplicity
-    score += p.warrantyYears * 0.4;
-    if (input.preferLFP && p.chemistry === "LFP") score += 6;
-    results.push({
-      product: p, units, totalUsableKWh, totalContinuousKW, totalPeakKW,
-      energyTargetKWh: round1(energyTarget), backupDaysAchieved,
-      meetsContinuous, meetsSurge, fit, score: round1(score),
-    });
-  }
-  return results.sort((a, b) => b.score - a.score);
+    const byPower = Math.ceil(input.load.continuousKW / p.continuousKW);
+    return systemForUnits(p, Math.max(1, byEnergy, byPower), input);
+  }).sort((a, b) => b.score - a.score);
 }
 
 // ── Pricing & ROI ────────────────────────────────────────────────────────────

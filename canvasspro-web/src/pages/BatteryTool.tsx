@@ -10,11 +10,13 @@ import {
   appliancesByCategory,
   computeLoad,
   recommendSystems,
+  systemForUnits,
   computeROI,
   BATTERIES,
   type SolarInput,
   type LoadResult,
   type SizingGoal,
+  type SizingInput,
   type RecommendedSystem,
   type SelectedLoad,
   type LoadCategory,
@@ -334,22 +336,54 @@ export default function BatteryTool() {
   const [preferLFP, setPreferLFP] = useState(false);
 
   // 6. Recommendation
-  const recs = useMemo(
-    () =>
-      recommendSystems({
-        load,
-        goal,
-        backupDays: Number(backupDays) || 1,
-        dailyUsageKWh: bill.dailyKWh,
-        solarDailyKWh: solarDaily,
-        preferLFP,
-      }),
+  // Limit recommendations to the products the company offers. Unset or empty =
+  // offer the full catalog (don't break existing companies).
+  const offeredProducts = useMemo(() => {
+    const ids = company?.batteryOffered;
+    return (Array.isArray(ids) && ids.length) ? BATTERIES.filter((b) => ids.includes(b.id)) : BATTERIES;
+  }, [company?.batteryOffered]);
+
+  // Sizing input — extracted so it can be reused when the rep overrides the unit count.
+  const sizing = useMemo<SizingInput>(
+    () => ({
+      load,
+      goal,
+      backupDays: Number(backupDays) || 1,
+      dailyUsageKWh: bill.dailyKWh,
+      solarDailyKWh: solarDaily,
+      preferLFP,
+    }),
     [load, goal, backupDays, bill.dailyKWh, solarDaily, preferLFP]
+  );
+
+  const recs = useMemo(
+    () => recommendSystems(sizing, offeredProducts),
+    [sizing, offeredProducts]
   );
   const [chosenId, setChosenId] = useState<string | null>(null);
   // Default the chosen system to the best rec; reset when the top rec changes.
   useEffect(() => { setChosenId(recs[0]?.product.id ?? null); }, [recs]);
   const chosen = useMemo(() => recs.find((r) => r.product.id === chosenId) ?? recs[0], [recs, chosenId]);
+
+  // Per-proposal override of the battery count. Null = use the auto recommendation.
+  const [unitsOverride, setUnitsOverride] = useState<number | null>(null);
+  // When restoring a saved proposal we set the product *and* its override together;
+  // skip the product-change reset for that one transition so the override survives.
+  const restoreUnitsForProduct = useRef<string | null>(null);
+  // Switching to a different product returns to its recommended count.
+  useEffect(() => {
+    const pid = chosen?.product.id ?? null;
+    if (pid && restoreUnitsForProduct.current === pid) {
+      restoreUnitsForProduct.current = null;
+      return;
+    }
+    setUnitsOverride(null);
+  }, [chosen?.product.id]);
+  // The effective system everything downstream (pricing, ROI, save, UI) reads from.
+  const system = useMemo(() => {
+    if (!chosen) return chosen;
+    return unitsOverride != null ? systemForUnits(chosen.product, unitsOverride, sizing) : chosen;
+  }, [chosen, unitsOverride, sizing]);
 
   useEffect(() => {
     if (!leadId || leadHydratedRef.current === leadId) return;
@@ -546,9 +580,9 @@ export default function BatteryTool() {
   // ROI for the chosen system at the current price + applied incentives.
   const roi = useMemo(
     () =>
-      chosen
+      system
         ? computeROI({
-            rec: chosen,
+            rec: system,
             pricePerUnit: Number(pricePerUnit) || 0,
             installAdder: Number(installAdder) || 0,
             incentivesTotalUsd,
@@ -556,7 +590,7 @@ export default function BatteryTool() {
             dailyUsageKWh: bill.dailyKWh,
           })
         : null,
-    [chosen, pricePerUnit, installAdder, incentivesTotalUsd, bill.ratePerKWh, bill.dailyKWh]
+    [system, pricePerUnit, installAdder, incentivesTotalUsd, bill.ratePerKWh, bill.dailyKWh]
   );
 
   // 7. Proposal
@@ -638,7 +672,7 @@ export default function BatteryTool() {
   };
 
   const generateSummary = async () => {
-    if (!chosen) return;
+    if (!system) return;
     setAiLoading(true);
     setAiError("");
     try {
@@ -658,7 +692,7 @@ export default function BatteryTool() {
         bill,
         load,
         solar,
-        recommendation: chosen,
+        recommendation: system,
         goal,
         backupDays: Number(backupDays) || 1,
       });
@@ -672,7 +706,7 @@ export default function BatteryTool() {
   };
 
   const save = async () => {
-    if (!profile || !companyId || !chosen) return;
+    if (!profile || !companyId || !system) return;
     setSaving(true);
     setSaveError("");
     setSaved(false);
@@ -695,14 +729,14 @@ export default function BatteryTool() {
           goal,
           backupDays: Number(backupDays) || 1,
           recommendation: {
-            productId: chosen.product.id,
-            brand: chosen.product.brand,
-            model: chosen.product.model,
-            units: chosen.units,
-            totalUsableKWh: chosen.totalUsableKWh,
-            totalContinuousKW: chosen.totalContinuousKW,
-            totalPeakKW: chosen.totalPeakKW,
-            backupDaysAchieved: chosen.backupDaysAchieved,
+            productId: system.product.id,
+            brand: system.product.brand,
+            model: system.product.model,
+            units: system.units,
+            totalUsableKWh: system.totalUsableKWh,
+            totalContinuousKW: system.totalContinuousKW,
+            totalPeakKW: system.totalPeakKW,
+            backupDaysAchieved: system.backupDaysAchieved,
           },
           aiSummary: aiSummary || null,
           pricing: { pricePerUnit: Number(pricePerUnit) || 0, installAdder: Number(installAdder) || 0 },
@@ -764,7 +798,12 @@ export default function BatteryTool() {
     if (p.goal) setGoal(p.goal);
     if (p.backupDays != null) setBackupDays(String(p.backupDays));
     if (p.recommendation?.productId) {
+      // Tell the product-change effect to preserve the override we set below.
+      restoreUnitsForProduct.current = p.recommendation.productId;
       setChosenId(p.recommendation.productId);
+      // Restore the rep's chosen quantity (shows as an override if it differs
+      // from the auto recommendation — that's fine).
+      setUnitsOverride(p.recommendation.units ?? null);
       // Force the pricing seeder to re-run for the restored override values below.
       seededProductId.current = p.recommendation.productId;
     }
@@ -1011,41 +1050,70 @@ export default function BatteryTool() {
       {/* 6. Recommendation */}
       <div className="card" style={{ marginBottom: 18 }}>
         <h2 className="section-h" style={{ marginTop: 0 }}>Recommendation</h2>
-        {!chosen ? (
+        {!system ? (
           <div className="empty">Add some loads to size a system.</div>
         ) : (
           <>
             <div
               className="card"
-              style={{ border: `2px solid ${FIT_COLOR[chosen.fit]}`, marginBottom: 12 }}
+              style={{ border: `2px solid ${FIT_COLOR[system.fit]}`, marginBottom: 12 }}
             >
               <div className="lb-row-top" style={{ marginBottom: 8 }}>
                 <span className="lb-row-name" style={{ fontSize: 18 }}>
-                  {chosen.units}× {chosen.product.brand} {chosen.product.model}
+                  {system.units}× {system.product.brand} {system.product.model}
                 </span>
-                <span className="badge" style={{ background: FIT_COLOR[chosen.fit], color: "#06121f", fontWeight: 700 }}>
-                  {FIT_LABEL[chosen.fit]}
+                <span className="badge" style={{ background: FIT_COLOR[system.fit], color: "#06121f", fontWeight: 700 }}>
+                  {FIT_LABEL[system.fit]}
                 </span>
               </div>
+
+              {/* Quantity stepper — rep can tune the number of batteries. */}
+              <div className="row" style={{ gap: 8, alignItems: "center", flexWrap: "wrap", marginBottom: 8 }}>
+                <span className="muted small">Batteries:</span>
+                <button
+                  className="btn ghost sm"
+                  disabled={system.units <= 1}
+                  onClick={() => setUnitsOverride(Math.max(1, system.units - 1))}
+                >
+                  −
+                </button>
+                <span style={{ minWidth: 24, textAlign: "center", fontWeight: 700 }}>{system.units}</span>
+                <button
+                  className="btn ghost sm"
+                  disabled={system.units >= system.product.maxUnits}
+                  onClick={() => setUnitsOverride(Math.min(system.product.maxUnits, system.units + 1))}
+                >
+                  +
+                </button>
+                {unitsOverride != null && chosen && unitsOverride !== chosen.units ? (
+                  <span className="muted small">
+                    Recommended: {chosen.units} ·{" "}
+                    <button className="btn ghost sm" onClick={() => setUnitsOverride(null)}>Reset</button>
+                  </span>
+                ) : (
+                  <span className="muted small">Recommended</span>
+                )}
+              </div>
+
               <div className="stat-grid" style={{ marginBottom: 8 }}>
-                <div className="stat-card"><div className="stat-value">{chosen.totalUsableKWh}</div><div className="stat-label">Usable kWh</div></div>
-                <div className="stat-card"><div className="stat-value">{chosen.totalContinuousKW}</div><div className="stat-label">Continuous kW</div></div>
-                <div className="stat-card"><div className="stat-value">{chosen.totalPeakKW}</div><div className="stat-label">Surge kW</div></div>
-                <div className="stat-card"><div className="stat-value">{chosen.backupDaysAchieved}</div><div className="stat-label">Backup days</div></div>
+                <div className="stat-card"><div className="stat-value">{system.totalUsableKWh}</div><div className="stat-label">Usable kWh</div></div>
+                <div className="stat-card"><div className="stat-value">{system.totalContinuousKW}</div><div className="stat-label">Continuous kW</div></div>
+                <div className="stat-card"><div className="stat-value">{system.totalPeakKW}</div><div className="stat-label">Surge kW</div></div>
+                <div className="stat-card"><div className="stat-value">{system.backupDaysAchieved}</div><div className="stat-label">Backup days</div></div>
               </div>
               <div className="muted small">
-                {chosen.product.chemistry} · {chosen.product.warrantyYears}-yr warranty
-                {chosen.product.acCoupled ? " · AC-coupled" : ""}
+                {system.product.chemistry} · {system.product.warrantyYears}-yr warranty
+                {system.product.acCoupled ? " · AC-coupled" : ""}
               </div>
               <div className="row" style={{ gap: 8, marginTop: 8 }}>
-                <span className="badge" style={{ background: chosen.meetsContinuous ? "#34d399" : "#ef4444", color: "#06121f", fontWeight: 700 }}>
-                  {chosen.meetsContinuous ? "✓" : "✗"} Meets continuous power
+                <span className="badge" style={{ background: system.meetsContinuous ? "#34d399" : "#ef4444", color: "#06121f", fontWeight: 700 }}>
+                  {system.meetsContinuous ? "✓" : "✗"} Meets continuous power
                 </span>
-                <span className="badge" style={{ background: chosen.meetsSurge ? "#34d399" : "#ef4444", color: "#06121f", fontWeight: 700 }}>
-                  {chosen.meetsSurge ? "✓" : "✗"} Meets surge
+                <span className="badge" style={{ background: system.meetsSurge ? "#34d399" : "#ef4444", color: "#06121f", fontWeight: 700 }}>
+                  {system.meetsSurge ? "✓" : "✗"} Meets surge
                 </span>
               </div>
-              {chosen.product.notes && <div className="muted small" style={{ marginTop: 8 }}>{chosen.product.notes}</div>}
+              {system.product.notes && <div className="muted small" style={{ marginTop: 8 }}>{system.product.notes}</div>}
             </div>
 
             {recs.length > 1 && (
@@ -1089,8 +1157,8 @@ export default function BatteryTool() {
               </label>
             </div>
             <div className="muted small">
-              {chosen.units}× {money(Number(pricePerUnit) || 0)} + {money(Number(installAdder) || 0)} install
-              {company?.batteryPricing?.[chosen.product.id] ? " · seeded from company pricing" : ""}
+              {system.units}× {money(Number(pricePerUnit) || 0)} + {money(Number(installAdder) || 0)} install
+              {company?.batteryPricing?.[system.product.id] ? " · seeded from company pricing" : ""}
             </div>
 
             {/* Admin-only company catalog pricing. */}
@@ -1245,11 +1313,11 @@ export default function BatteryTool() {
       {/* 7. Proposal */}
       <div className="card" style={{ marginBottom: 18 }}>
         <h2 className="section-h" style={{ marginTop: 0 }}>Proposal</h2>
-        {chosen ? (
+        {system ? (
           <>
             <div className="muted small" style={{ marginBottom: 10 }}>
-              {customerName || "Customer"}{address ? ` · ${address}` : ""} — {chosen.units}× {chosen.product.brand} {chosen.product.model}
-              {" · "}{chosen.totalUsableKWh} kWh usable · {bill.dailyKWh} kWh/day usage
+              {customerName || "Customer"}{address ? ` · ${address}` : ""} — {system.units}× {system.product.brand} {system.product.model}
+              {" · "}{system.totalUsableKWh} kWh usable · {bill.dailyKWh} kWh/day usage
               {solar.hasSolar ? ` · ${solarDaily} kWh/day solar` : ""}
             </div>
 
@@ -1327,13 +1395,13 @@ export default function BatteryTool() {
         monthlyBill={bill.monthlyCost}
         monthlyKWh={bill.monthlyKWh}
         recommendation={
-          chosen
+          system
             ? {
-                brand: chosen.product.brand,
-                model: chosen.product.model,
-                units: chosen.units,
-                totalUsableKWh: chosen.totalUsableKWh,
-                backupDaysAchieved: chosen.backupDaysAchieved,
+                brand: system.product.brand,
+                model: system.product.model,
+                units: system.units,
+                totalUsableKWh: system.totalUsableKWh,
+                backupDaysAchieved: system.backupDaysAchieved,
               }
             : null
         }
