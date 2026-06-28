@@ -3549,9 +3549,23 @@ export const listMyProjects = onCall(async (request) => {
       signedAt: x.signedAt || 0,
       submittedAt: x.surveySubmittedAt || 0,
     };
-    // Admin/manager get the full record (incl. survey + contact details).
+    // Admin/manager (and the PM portal) get the full record.
     return isMgr
-      ? { ...base, customerEmail: x.customerEmail || "", payment: pay, batteryDetail: bat, survey: x.survey || null, placement: x.placement || [], surveyNotes: x.surveyNotes || "" }
+      ? {
+          ...base,
+          customerEmail: x.customerEmail || "",
+          signedName: x.signedName || "",
+          payment: pay,
+          batteryDetail: bat,
+          survey: x.survey || null,
+          placement: x.placement || [],
+          surveyNotes: x.surveyNotes || "",
+          surveyScheduledFor: x.surveyScheduledFor || 0,
+          pmStatus: x.pmStatus || "",
+          pmNotes: x.pmNotes || "",
+          installerName: x.installerName || "",
+          installDate: x.installDate || 0,
+        }
       : base;
   });
   items.sort((a, b) => (b.signedAt || 0) - (a.signedAt || 0));
@@ -3701,6 +3715,48 @@ export const scheduleSiteSurvey = onCall(async (request) => {
     }
   } catch (e) { logger.warn("schedule notify failed", e); }
 
+  return { ok: true };
+});
+
+// PM portal: advance a project through the install pipeline. Manager/admin only.
+const PM_STAGES = ["review", "approved", "permitting", "scheduled", "installed", "on_hold"];
+export const updateProjectStatus = onCall(async (request) => {
+  const caller = await getCaller(request);
+  const d = (request.data || {}) as { projectId?: string; pmStatus?: string; pmNotes?: string; installerName?: string; installDate?: number };
+  const id = String(d.projectId || "").replace(/[^a-zA-Z0-9]/g, "").slice(0, 64);
+  if (!id) throw new HttpsError("invalid-argument", "Missing project id.");
+  const ref = db.doc(`soldCustomers/${id}`);
+  const snap = await ref.get();
+  if (!snap.exists) throw new HttpsError("not-found", "Project not found.");
+  const proj = snap.data() as Record<string, any>;
+  const isMgr = caller.isSuper || (caller.companyId === proj.companyId && (caller.role === "admin" || caller.role === "manager"));
+  if (!isMgr) throw new HttpsError("permission-denied", "Project-management access required.");
+
+  const now = Date.now();
+  const patch: Record<string, unknown> = { updatedAt: now };
+  if (d.pmStatus !== undefined) {
+    const s = String(d.pmStatus || "");
+    if (s && !PM_STAGES.includes(s)) throw new HttpsError("invalid-argument", "Unknown stage.");
+    patch.pmStatus = s;
+    patch.pmStatusAt = now;
+  }
+  if (d.pmNotes !== undefined) patch.pmNotes = String(d.pmNotes || "").slice(0, 4000);
+  if (d.installerName !== undefined) patch.installerName = String(d.installerName || "").slice(0, 200);
+  if (d.installDate !== undefined) patch.installDate = Math.max(0, Number(d.installDate) || 0);
+  await ref.set(patch, { merge: true });
+
+  // Let the rep know when the stage changes.
+  if (d.pmStatus && proj.closerUid) {
+    try {
+      const closer = (await db.doc(`users/${proj.closerUid}`).get()).data() as any;
+      if (closer?.email) {
+        const cfg = await getNotifyConfig();
+        const label = String(d.pmStatus).replace(/_/g, " ");
+        await sendEmailDetailed(cfg, closer.email, `Project update — ${proj.customerName || ""}`, `Your deal ${proj.customerName || ""} (${proj.reference || ""}) is now: ${label}.`, undefined,
+          `<div style="font-family:system-ui,Arial,sans-serif"><p>Your deal <strong>${escHtml(proj.customerName || "")}</strong> (${escHtml(proj.reference || "")}) is now: <strong>${escHtml(label)}</strong>.</p>${d.installDate ? `<p>Install date: <strong>${escHtml(agDate(Number(d.installDate)))}</strong></p>` : ""}</div>`);
+      }
+    } catch (e) { logger.warn("pm status notify failed", e); }
+  }
   return { ok: true };
 });
 

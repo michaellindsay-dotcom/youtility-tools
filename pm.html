@@ -1,0 +1,289 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>YoutilityKnock · Project Management</title>
+<style>
+  :root{
+    --bg:#0a0712; --card:#150f1f; --card2:#1c1530; --line:rgba(255,255,255,0.09);
+    --line2:rgba(255,255,255,0.16); --text:#ece8f5; --dim:#8a8199; --accent:#8b5cf6;
+    --accent-bright:#a78bfa; --good:#34d399; --warn:#f59e0b; --info:#38bdf8; --bad:#ef4444;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:var(--bg);color:var(--text);font-family:'Inter',system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;min-height:100vh}
+  a{color:var(--accent-bright)}
+  .hidden{display:none!important}
+  .topbar{display:flex;align-items:center;justify-content:space-between;padding:14px 20px;border-bottom:1px solid var(--line);position:sticky;top:0;background:rgba(10,7,18,0.92);backdrop-filter:blur(10px);z-index:5}
+  .brand{display:flex;align-items:center;gap:10px;font-weight:700}
+  .brand .mark{width:30px;height:30px;border-radius:8px;background:linear-gradient(135deg,#8b5cf6,#6d28d9);display:flex;align-items:center;justify-content:center;font-size:13px}
+  .brand small{display:block;font-weight:500;color:var(--dim);font-size:11px;letter-spacing:.12em;text-transform:uppercase}
+  .btn{font-family:inherit;font-weight:600;font-size:13px;padding:9px 14px;border-radius:9px;border:1px solid var(--line2);background:rgba(255,255,255,.04);color:var(--text);cursor:pointer;transition:all .15s}
+  .btn:hover{background:rgba(255,255,255,.08)}
+  .btn.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+  .btn.primary:hover{filter:brightness(1.08)}
+  .btn.sm{padding:6px 11px;font-size:12px}
+  .wrap{max-width:1100px;margin:0 auto;padding:20px}
+  input,select,textarea{font-family:inherit;font-size:14px;padding:10px 11px;border-radius:9px;border:1px solid var(--line2);background:rgba(8,5,18,.6);color:var(--text);width:100%}
+  textarea{min-height:64px;resize:vertical}
+  label.fl{display:block;font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--dim);margin:0 0 5px}
+  .banner{margin-top:12px;font-size:13px;padding:9px 12px;border-radius:8px}
+  .banner.error{background:rgba(239,68,68,.12);color:#fca5a5}
+  .banner.good{background:rgba(52,211,153,.12);color:#6ee7b7}
+
+  /* login */
+  #loginView{max-width:360px;margin:14vh auto 0;padding:0 20px}
+  #loginView h1{font-size:24px;margin-bottom:4px}
+  #loginView p{color:var(--dim);font-size:13px;margin-bottom:20px}
+  #loginView .row{display:flex;flex-direction:column;gap:12px}
+
+  .toolbar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:16px}
+  .chip{font-size:12px;font-weight:600;padding:7px 12px;border-radius:999px;border:1px solid var(--line2);background:transparent;color:var(--dim);cursor:pointer}
+  .chip.on{background:rgba(139,92,246,.18);border-color:var(--accent);color:#fff}
+  .count{font-size:11px;opacity:.7;margin-left:5px}
+
+  .proj{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px;margin-bottom:12px}
+  .proj-head{display:flex;justify-content:space-between;align-items:flex-start;gap:10px;cursor:pointer}
+  .proj-name{font-weight:700;font-size:16px}
+  .proj-sub{color:var(--dim);font-size:13px;margin-top:2px}
+  .stage{font-size:11px;font-weight:700;padding:4px 11px;border-radius:999px;white-space:nowrap}
+  .proj-bul{display:flex;gap:14px;flex-wrap:wrap;font-size:13px;color:#cfc7e2;margin-top:10px}
+  .proj-bul b{color:#fff}
+  .detail{margin-top:14px;border-top:1px solid var(--line);padding-top:14px}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+  @media(max-width:680px){.grid2{grid-template-columns:1fr}}
+  .ph{display:flex;gap:8px;flex-wrap:wrap;margin-top:6px}
+  .ph img{width:76px;height:76px;object-fit:cover;border-radius:8px;border:1px solid var(--line2)}
+  .h4{font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--dim);margin:14px 0 6px}
+  .chk{display:flex;flex-wrap:wrap;gap:6px 14px;font-size:12.5px}
+  .chk span.y{color:var(--good)} .chk span.n{color:var(--dim)}
+  .pm-controls{display:flex;flex-direction:column;gap:12px}
+  .muted{color:var(--dim)} .small{font-size:12.5px}
+  .empty{color:var(--dim);text-align:center;padding:40px 0}
+</style>
+</head>
+<body>
+
+<!-- LOGIN -->
+<div id="loginView">
+  <h1>Project Management</h1>
+  <p>Sign in with your YoutilityKnock manager account.</p>
+  <div class="row">
+    <input id="loginEmail" type="email" placeholder="you@company.com" autocomplete="username" />
+    <input id="loginPassword" type="password" placeholder="Password" autocomplete="current-password" />
+    <button id="loginBtn" class="btn primary">Sign in</button>
+    <button id="resetBtn" class="btn sm" style="align-self:flex-start;border:0;background:transparent;color:var(--accent-bright)">Forgot password?</button>
+  </div>
+  <div id="loginBanner" class="banner hidden"></div>
+</div>
+
+<!-- APP -->
+<div id="appView" class="hidden">
+  <div class="topbar">
+    <div class="brand">
+      <div class="mark">YK</div>
+      <div>Project Management<small id="scopePill">—</small></div>
+    </div>
+    <button id="signOutBtn" class="btn sm">Sign out</button>
+  </div>
+  <div class="wrap">
+    <div class="toolbar" id="filters"></div>
+    <div id="projects"></div>
+  </div>
+</div>
+
+<script type="module">
+const FIREBASE_CONFIG = {
+  apiKey: "AIzaSyAAfrLWkY_WS7yabCgW_WZJu973J5iGcBI",
+  authDomain: "youtilityknock.firebaseapp.com",
+  projectId: "youtilityknock",
+  storageBucket: "youtilityknock.firebasestorage.app",
+  messagingSenderId: "426528140931",
+  appId: "1:426528140931:web:91366949118c237fe1f5b6",
+};
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.13.2/firebase-app.js";
+import { getAuth, signInWithEmailAndPassword, onAuthStateChanged, signOut, sendPasswordResetEmail }
+  from "https://www.gstatic.com/firebasejs/10.13.2/firebase-auth.js";
+import { getFirestore, doc, getDoc } from "https://www.gstatic.com/firebasejs/10.13.2/firebase-firestore.js";
+import { getFunctions, httpsCallable } from "https://www.gstatic.com/firebasejs/10.13.2/firebase-functions.js";
+
+const app = initializeApp(FIREBASE_CONFIG);
+const auth = getAuth(app);
+const db = getFirestore(app);
+const fns = getFunctions(app);
+const listMyProjects = httpsCallable(fns, "listMyProjects");
+const updateProjectStatus = httpsCallable(fns, "updateProjectStatus");
+
+const $ = (id) => document.getElementById(id);
+const banner = (el, msg, kind) => { el.textContent = msg; el.className = "banner " + (kind || ""); el.classList.remove("hidden"); };
+const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;" }[c]));
+const money = (n) => (typeof n === "number" && isFinite(n) ? "$" + Math.round(n).toLocaleString() : "—");
+const date = (ms) => (ms ? new Date(ms).toLocaleDateString() : "—");
+
+// Stage model: pmStatus drives it once a PM acts; before that we derive from the survey.
+const STAGES = {
+  awaiting_survey: { t: "Awaiting survey", c: "var(--warn)" },
+  survey_scheduled:{ t: "Survey scheduled", c: "var(--info)" },
+  review:          { t: "In review", c: "var(--accent-bright)" },
+  approved:        { t: "Approved", c: "#22d3ee" },
+  permitting:      { t: "Permitting", c: "#a3e635" },
+  scheduled:       { t: "Scheduled install", c: "#38bdf8" },
+  installed:       { t: "Installed", c: "var(--good)" },
+  on_hold:         { t: "On hold", c: "var(--bad)" },
+};
+const PM_PICK = ["review","approved","permitting","scheduled","installed","on_hold"];
+function stageOf(p){
+  if (p.pmStatus && STAGES[p.pmStatus]) return p.pmStatus;
+  if (p.status === "survey_scheduled") return "survey_scheduled";
+  if (p.status === "submitted_for_review") return "review";
+  return "awaiting_survey";
+}
+
+let ALL = [];
+let activeFilter = "all";
+
+$("loginBtn").addEventListener("click", async () => {
+  try { await signInWithEmailAndPassword(auth, $("loginEmail").value.trim(), $("loginPassword").value); }
+  catch (e) { banner($("loginBanner"), e.message || "Sign-in failed.", "error"); }
+});
+$("loginPassword").addEventListener("keydown", (e) => { if (e.key === "Enter") $("loginBtn").click(); });
+$("resetBtn").addEventListener("click", async () => {
+  const em = $("loginEmail").value.trim();
+  if (!em) return banner($("loginBanner"), "Enter your email first.", "error");
+  try { await sendPasswordResetEmail(auth, em); banner($("loginBanner"), "Password reset email sent.", "good"); }
+  catch (e) { banner($("loginBanner"), e.message || "Couldn't send reset.", "error"); }
+});
+$("signOutBtn").addEventListener("click", () => signOut(auth));
+
+onAuthStateChanged(auth, async (user) => {
+  if (!user) { $("appView").classList.add("hidden"); $("loginView").classList.remove("hidden"); return; }
+  let role = null, isSuper = false;
+  try {
+    const tok = await user.getIdTokenResult();
+    isSuper = tok.claims.superAdmin === true;
+    const snap = await getDoc(doc(db, "users", user.uid));
+    role = snap.exists() ? (snap.data().role || null) : null;
+  } catch (e) { /* ignore */ }
+  if (!isSuper && role !== "admin" && role !== "manager") {
+    banner($("loginBanner"), "This account doesn't have project-management access. Ask an admin.", "error");
+    await signOut(auth);
+    return;
+  }
+  $("scopePill").textContent = isSuper ? "Super-admin" : (role === "admin" ? "Admin" : "Manager");
+  $("loginView").classList.add("hidden");
+  $("appView").classList.remove("hidden");
+  await loadProjects();
+});
+
+async function loadProjects() {
+  $("projects").innerHTML = '<div class="empty">Loading projects…</div>';
+  try {
+    const { data } = await listMyProjects({});
+    ALL = (data.items || []).slice().sort((a, b) => (b.signedAt || 0) - (a.signedAt || 0));
+    renderFilters();
+    renderProjects();
+  } catch (e) {
+    $("projects").innerHTML = `<div class="empty">${esc(e.message || "Couldn't load projects.")}</div>`;
+  }
+}
+
+function renderFilters() {
+  const counts = {};
+  for (const p of ALL) { const s = stageOf(p); counts[s] = (counts[s] || 0) + 1; }
+  const order = ["all","review","survey_scheduled","awaiting_survey","approved","permitting","scheduled","installed","on_hold"];
+  const seen = order.filter((k) => k === "all" || counts[k]);
+  $("filters").innerHTML = seen.map((k) => {
+    const label = k === "all" ? "All" : (STAGES[k]?.t || k);
+    const n = k === "all" ? ALL.length : (counts[k] || 0);
+    return `<button class="chip ${activeFilter === k ? "on" : ""}" data-f="${k}">${esc(label)}<span class="count">${n}</span></button>`;
+  }).join("");
+  $("filters").querySelectorAll(".chip").forEach((c) => c.addEventListener("click", () => { activeFilter = c.dataset.f; renderFilters(); renderProjects(); }));
+}
+
+function renderProjects() {
+  const list = ALL.filter((p) => activeFilter === "all" || stageOf(p) === activeFilter);
+  if (!list.length) { $("projects").innerHTML = '<div class="empty">No projects in this stage.</div>'; return; }
+  $("projects").innerHTML = list.map(cardHtml).join("");
+  for (const p of list) wireCard(p.id);
+}
+
+function cardHtml(p) {
+  const s = stageOf(p); const st = STAGES[s] || STAGES.awaiting_survey;
+  const pay = p.payment || {};
+  const payTxt = pay.method === "finance"
+    ? `Financed · ${esc(pay.finance?.name || "")} ${pay.finance?.monthly ? "· " + money(pay.finance.monthly) + "/mo" : ""}`
+    : pay.method === "cash" ? `Cash · ${money(pay.cash?.depositUsd)} deposit` : "—";
+  const place = (p.placement || []).map((x) => `<a href="${esc(x.url)}" target="_blank"><img src="${esc(x.url)}" title="${esc(x.note||"")}"></a>`).join("");
+  const survey = Object.entries(p.survey?.photos || {}).map(([k, u]) => `<a href="${esc(u)}" target="_blank"><img src="${esc(u)}" title="${esc(k)}"></a>`).join("");
+  const checks = Object.entries(p.survey?.checklist || {}).map(([k, v]) => `<span class="${v ? "y" : "n"}">${v ? "✓" : "○"} ${esc(k.replace(/_/g," "))}</span>`).join("");
+  const installDateStr = p.installDate ? new Date(p.installDate).toISOString().slice(0,10) : "";
+  return `
+  <div class="proj" id="card-${p.id}">
+    <div class="proj-head" data-toggle="${p.id}">
+      <div>
+        <div class="proj-name">${esc(p.customerName || "Customer")}</div>
+        <div class="proj-sub">${esc(p.address || "")}${p.reference ? " · ref " + esc(p.reference) : ""}</div>
+      </div>
+      <span class="stage" style="color:${st.c};border:1px solid ${st.c}">${esc(st.t)}</span>
+    </div>
+    <div class="proj-bul">
+      <span>System: <b>${esc(p.battery || "")}</b></span>
+      <span>${payTxt}</span>
+      <span>Signed: <b>${date(p.signedAt)}</b>${p.signedName ? " by " + esc(p.signedName) : ""}</span>
+      ${p.surveyScheduledFor ? `<span>Survey: <b>${date(p.surveyScheduledFor)}</b></span>` : ""}
+      ${p.installDate ? `<span>Install: <b>${date(p.installDate)}</b></span>` : ""}
+    </div>
+    <div class="detail hidden" id="detail-${p.id}">
+      <div class="grid2">
+        <div>
+          ${place ? `<div class="h4">Placement photos</div><div class="ph">${place}</div>` : ""}
+          ${survey ? `<div class="h4">Site-survey photos</div><div class="ph">${survey}</div>` : ""}
+          ${checks ? `<div class="h4">Checklist</div><div class="chk">${checks}</div>` : ""}
+          ${p.surveyNotes ? `<div class="h4">Rep notes</div><div class="small muted">“${esc(p.surveyNotes)}”</div>` : ""}
+          ${p.customerEmail ? `<div class="h4">Customer</div><div class="small">📧 ${esc(p.customerEmail)}</div>` : ""}
+        </div>
+        <div class="pm-controls">
+          <div><label class="fl">Stage</label>
+            <select id="stage-${p.id}">${PM_PICK.map((k) => `<option value="${k}" ${p.pmStatus===k?"selected":""}>${esc(STAGES[k].t)}</option>`).join("")}</select>
+          </div>
+          <div><label class="fl">Installer / crew</label><input id="inst-${p.id}" type="text" value="${esc(p.installerName || "")}" placeholder="Assigned installer"></div>
+          <div><label class="fl">Install date</label><input id="idate-${p.id}" type="date" value="${installDateStr}"></div>
+          <div><label class="fl">PM notes</label><textarea id="pmn-${p.id}" placeholder="Notes for the project / install team…">${esc(p.pmNotes || "")}</textarea></div>
+          <button class="btn primary" id="save-${p.id}">Save</button>
+          <div class="banner hidden" id="sb-${p.id}"></div>
+        </div>
+      </div>
+    </div>
+  </div>`;
+}
+
+function wireCard(id) {
+  const head = document.querySelector(`[data-toggle="${id}"]`);
+  if (head) head.addEventListener("click", () => $("detail-" + id).classList.toggle("hidden"));
+  const save = $("save-" + id);
+  if (save) save.addEventListener("click", async () => {
+    save.disabled = true;
+    const sb = $("sb-" + id);
+    try {
+      const idate = $("idate-" + id).value;
+      await updateProjectStatus({
+        projectId: id,
+        pmStatus: $("stage-" + id).value,
+        installerName: $("inst-" + id).value.trim(),
+        installDate: idate ? new Date(idate + "T12:00:00").getTime() : 0,
+        pmNotes: $("pmn-" + id).value,
+      });
+      banner(sb, "Saved. The rep was notified of the stage change.", "good");
+      // reflect locally
+      const p = ALL.find((x) => x.id === id);
+      if (p) { p.pmStatus = $("stage-" + id).value; p.installerName = $("inst-" + id).value.trim(); p.installDate = idate ? new Date(idate + "T12:00:00").getTime() : 0; p.pmNotes = $("pmn-" + id).value; }
+      renderFilters();
+    } catch (e) { banner(sb, e.message || "Save failed.", "error"); }
+    finally { save.disabled = false; }
+  });
+}
+
+if (FIREBASE_CONFIG.apiKey === "REPLACE_ME") banner($("loginBanner"), "Set FIREBASE_CONFIG in pm.html.", "error");
+</script>
+</body>
+</html>
