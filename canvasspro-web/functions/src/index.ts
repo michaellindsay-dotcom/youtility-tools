@@ -3542,6 +3542,7 @@ export const listMyProjects = onCall(async (request) => {
       customerName: x.customerName || "",
       address: x.address || "",
       battery: `${bat.units || 1}× ${bat.brand || ""} ${bat.model || ""}`.trim(),
+      batteryProductId: bat.productId || "",
       paymentMethod: pay.method || "",
       reference: x.reference || "",
       status: x.surveyStatus || "needs_survey",

@@ -1,8 +1,72 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { createElement, useCallback, useEffect, useRef, useState } from "react";
 import { httpsCallable } from "firebase/functions";
 import { ref as storageRef, uploadBytes, getDownloadURL } from "firebase/storage";
 import { functions, storage } from "../firebase";
 import { useAuth } from "../auth/AuthContext";
+import { batteryContent } from "../lib/batteries";
+
+const MV_BASE = (import.meta.env.BASE_URL || "/").replace(/\/$/, "");
+const AR_GLB = `${MV_BASE}/battery.glb`;
+const AR_USDZ = `${MV_BASE}/battery.usdz`;
+function hexRgb01(hex: string): [number, number, number, number] {
+  let h = (hex || "").trim().replace(/^#/, "");
+  if (h.length === 3) h = h.split("").map((c) => c + c).join("");
+  if (h.length !== 6 || /[^0-9a-fA-F]/.test(h)) return [0.545, 0.361, 0.965, 1];
+  return [parseInt(h.slice(0, 2), 16) / 255, parseInt(h.slice(2, 4), 16) / 255, parseInt(h.slice(4, 6), 16) / 255, 1];
+}
+
+// "See it in your space" AR for the ONE sold battery — used at the start of the
+// site survey so the rep can place it and photograph the spot.
+function BatteryAR({ accent }: { accent: string }) {
+  const ref = useRef<any>(null);
+  const [state, setState] = useState<"loading" | "ready" | "failed">("loading");
+
+  useEffect(() => {
+    const w = window as any;
+    if (w.customElements?.get?.("model-viewer")) { setState("ready"); return; }
+    if (!w.__spsMvInjected) {
+      w.__spsMvInjected = true;
+      const el = document.createElement("script");
+      el.type = "module";
+      el.src = "https://ajax.googleapis.com/ajax/libs/model-viewer/4.0.0/model-viewer.min.js";
+      el.onerror = () => setState("failed");
+      document.head.appendChild(el);
+    }
+    let tries = 0;
+    const poll = window.setInterval(() => {
+      if (w.customElements?.get?.("model-viewer")) { setState("ready"); window.clearInterval(poll); }
+      else if (++tries > 25) { setState("failed"); window.clearInterval(poll); }
+    }, 200);
+    return () => window.clearInterval(poll);
+  }, []);
+
+  useEffect(() => {
+    if (state !== "ready") return;
+    const el = ref.current;
+    if (!el) return;
+    const apply = () => {
+      try { el.model?.materials?.[0]?.pbrMetallicRoughness?.setBaseColorFactor?.(hexRgb01(accent)); } catch { /* not ready */ }
+    };
+    apply();
+    el.addEventListener("load", apply);
+    return () => el.removeEventListener("load", apply);
+  }, [state, accent]);
+
+  if (state === "failed") return null;
+  return createElement("model-viewer", {
+    ref,
+    src: AR_GLB,
+    "ios-src": AR_USDZ,
+    "camera-controls": true,
+    "auto-rotate": true,
+    ar: true,
+    "ar-modes": "webxr scene-viewer quick-look",
+    "shadow-intensity": "1",
+    exposure: "1",
+    "touch-action": "pan-y",
+    style: { width: "100%", height: 220, background: "transparent", borderRadius: 10, display: "block" },
+  });
+}
 
 // Sold-customer projects. Reps see their own deals as bullet summaries and run
 // the placement + site-survey capture; admins/managers see everything. The full
@@ -14,6 +78,7 @@ type ProjectItem = {
   customerName: string;
   address: string;
   battery: string;
+  batteryProductId?: string;
   paymentMethod: string;
   reference: string;
   status: string;
@@ -244,7 +309,12 @@ function ProjectCapture({
 
         {/* Placement */}
         <h3 style={h3}>1 · Where does the battery go? <span className="muted" style={{ fontWeight: 400 }}>({placement.length}/3, min 2)</span></h3>
-        <p className="muted small" style={{ marginTop: -4 }}>Use your camera to photograph the spot(s) the homeowner wants — like placing it in your space.</p>
+        <p className="muted small" style={{ marginTop: -4 }}>
+          Place your <strong>{project.battery}</strong> in the room with AR, then photograph the spot(s) the homeowner wants.
+        </p>
+        <div style={{ marginBottom: 12, borderRadius: 12, overflow: "hidden", border: "1px solid rgba(255,255,255,0.1)", background: "rgba(8,5,18,0.4)" }}>
+          <BatteryAR accent={batteryContent(project.batteryProductId || "").accent} />
+        </div>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "flex-start" }}>
           {placement.map((s, i) => (
             <div key={i} style={{ width: 96 }}>
