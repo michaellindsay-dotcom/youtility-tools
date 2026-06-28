@@ -953,7 +953,30 @@
         <tbody id="batteryPricingRows"></tbody>
       </table>
     </div>
-    <div class="row" style="justify-content:flex-end;margin-top:14px;">
+
+    <div style="margin-top:20px;border-top:1px solid var(--line,#23202e);padding-top:16px;">
+      <h3 style="font-size:15px;margin:0 0 4px;">Cash deposit &amp; financing</h3>
+      <p class="muted" style="margin:0 0 12px;font-size:13px;">The reservation deposit shown on the proposal's pricing slide, and your Sungage application link. Leave the deposit blank to use the $2,500 default.</p>
+      <div class="row" style="gap:12px;flex-wrap:wrap;align-items:flex-end;">
+        <label style="display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--muted,#8a8199);">
+          Deposit type
+          <select id="bpDepositType" style="width:170px;">
+            <option value="usd">Flat dollar amount</option>
+            <option value="pct">Percent of system</option>
+          </select>
+        </label>
+        <label style="display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--muted,#8a8199);">
+          <span id="bpDepositLabel">Deposit amount ($)</span>
+          <input id="bpDepositValue" type="number" min="0" step="1" placeholder="2500" style="width:150px;" />
+        </label>
+      </div>
+      <label style="display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--muted,#8a8199);margin-top:14px;max-width:600px;">
+        Sungage application link (optional)
+        <input id="bpSungageUrl" type="url" placeholder="https://auth.sungage.com/…  (blank = use the Sungage dealer login portal)" />
+      </label>
+    </div>
+
+    <div class="row" style="justify-content:flex-end;margin-top:16px;">
       <button id="batteryPricingSave" class="btn primary sm">Save pricing</button>
     </div>
     <div id="batteryPricingBanner" class="banner"></div>
@@ -1762,15 +1785,36 @@ function renderBatteryPricingRows(pricing, offered) {
   }).join("");
   $("batteryPricingRows").innerHTML = rows;
 }
+// Toggle the deposit value label between $ and % as the type changes.
+function syncDepositLabel() {
+  const pct = $("bpDepositType")?.value === "pct";
+  if ($("bpDepositLabel")) $("bpDepositLabel").textContent = pct ? "Deposit percent (%)" : "Deposit amount ($)";
+  if ($("bpDepositValue")) $("bpDepositValue").placeholder = pct ? "10" : "2500";
+}
+$("bpDepositType")?.addEventListener("change", syncDepositLabel);
+
 async function loadBatteryPricing(companyId) {
-  let pricing = {}, offered;
+  let pricing = {}, offered, depositUsd, depositPct, sungageApplyUrl;
   try {
     const snap = await getDoc(doc(db, "companies", companyId));
     const c = snap.exists() ? snap.data() : {};
     pricing = c.batteryPricing || {};
     offered = c.batteryOffered;
+    depositUsd = c.batteryDepositUsd;
+    depositPct = c.batteryDepositPct;
+    sungageApplyUrl = c.sungageApplyUrl;
   } catch (e) { /* leave empty */ }
   renderBatteryPricingRows(pricing, offered);
+  // Seed the deposit/financing fields. A positive % takes precedence.
+  if (Number(depositPct) > 0) {
+    $("bpDepositType").value = "pct";
+    $("bpDepositValue").value = String(depositPct);
+  } else {
+    $("bpDepositType").value = "usd";
+    $("bpDepositValue").value = Number(depositUsd) > 0 ? String(depositUsd) : "";
+  }
+  $("bpSungageUrl").value = sungageApplyUrl || "";
+  syncDepositLabel();
 }
 $("batteryPricingSave").addEventListener("click", async () => {
   if (!state.selectedCompany) return;
@@ -1784,7 +1828,16 @@ $("batteryPricingSave").addEventListener("click", async () => {
       if (price > 0 || adder > 0) pricing[p.id] = { price, adder };
       if (document.querySelector(`[data-bp-offer="${p.id}"]`)?.checked) offered.push(p.id);
     });
-    await setBatteryPricing({ companyId: state.selectedCompany, pricing, offered });
+    const depType = $("bpDepositType")?.value === "pct" ? "pct" : "usd";
+    const depVal = Number($("bpDepositValue")?.value) || 0;
+    await setBatteryPricing({
+      companyId: state.selectedCompany,
+      pricing,
+      offered,
+      depositUsd: depType === "usd" ? depVal : 0,
+      depositPct: depType === "pct" ? depVal : 0,
+      sungageApplyUrl: ($("bpSungageUrl")?.value || "").trim(),
+    });
     banner($("batteryPricingBanner"), "Battery pricing saved.", "good");
   } catch (e) { banner($("batteryPricingBanner"), e.message || "Save failed.", "error"); }
   finally { $("batteryPricingSave").disabled = false; }
