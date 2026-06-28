@@ -36,8 +36,13 @@ const ATTOM = {
 const NREL = { key: process.env.NREL_API_KEY || "DEMO_KEY" };
 
 // Google Maps — Street View + satellite imagery of the customer's actual home
-// for the proposal hero (Static Maps, Street View, Geocoding APIs).
-const GMAPS = { key: process.env.GOOGLE_MAPS_KEY || "" };
+// for the proposal hero (Static Maps, Street View, Geocoding APIs). Defaults to
+// the platform's existing youtilityknock project key (the same public web key
+// shipped in the app) so home imagery works for everyone out of the box; a
+// super-admin can still override it with a dedicated key in config/api. NOTE:
+// the Maps Static, Street View Static, and Geocoding APIs must be enabled on the
+// project for this key, and the key must not be API-restricted to exclude them.
+const GMAPS = { key: process.env.GOOGLE_MAPS_KEY || "AIzaSyAAfrLWkY_WS7yabCgW_WZJu973J5iGcBI" };
 
 async function attomGet(path: string, params: Record<string, string | number | undefined>) {
   const url = new URL(ATTOM.baseUrl + path);
