@@ -38,6 +38,87 @@ export const BATTERIES: BatteryProduct[] = [
 
 export const batteryById = (id: string) => BATTERIES.find((b) => b.id === id);
 
+// ── Per-product marketing content + 3D shape ─────────────────────────────────
+// Drives the CRM-style proposal (tagline + features + benefits matching the
+// selected battery) and the interactive 3D/AR model (brand accent + real-world
+// proportions in meters, W×H×D, so the rendered unit looks like the real thing).
+export interface BatteryContent {
+  tagline: string;
+  features: string[]; // spec-y bullets ("what it is")
+  benefits: string[]; // homeowner outcomes ("what it does for you")
+  accent: string; // brand accent color
+  dims: { w: number; h: number; d: number }; // meters, for the 3D model proportions
+}
+export const BATTERY_CONTENT: Record<string, BatteryContent> = {
+  tesla_pw3: {
+    tagline: "The all-in-one powerhouse with solar built in.",
+    features: ["13.5 kWh usable", "11.5 kW continuous — runs the whole home", "Integrated solar inverter (up to 20 kW PV)", "LFP — safe, long-life chemistry", "10-year warranty"],
+    benefits: ["Run your entire home, not just a few circuits", "Fewer parts on the wall — one sleek unit", "Start motors & AC without a flicker", "Expand to 4 units as your needs grow"],
+    accent: "#E82127", dims: { w: 0.61, h: 1.1, d: 0.19 },
+  },
+  tesla_pw2: {
+    tagline: "The proven classic — pairs with any existing solar.",
+    features: ["13.5 kWh usable", "5.8 kW continuous", "AC-coupled — works with your current solar", "10-year warranty", "Stack up to 10 units"],
+    benefits: ["Add storage without replacing your solar", "Keep essentials running through outages", "A battery with millions of installs behind it"],
+    accent: "#E82127", dims: { w: 0.75, h: 1.15, d: 0.15 },
+  },
+  franklin_apower2: {
+    tagline: "Heavy-duty backup with the muscle for well pumps & AC.",
+    features: ["15 kWh usable — most in class", "10 kW continuous / 22.5 kW surge", "LFP chemistry", "15-year warranty", "Stack up to 10 units"],
+    benefits: ["Start the biggest motors in your home", "More backup hours per unit", "Industry-leading 15-year peace of mind"],
+    accent: "#0091DA", dims: { w: 0.7, h: 1.12, d: 0.28 },
+  },
+  franklin_apower: {
+    tagline: "Reliable whole-home storage, built to last.",
+    features: ["13.6 kWh usable", "5 kW continuous / 10 kW surge", "LFP chemistry", "12-year warranty", "AC-coupled"],
+    benefits: ["Dependable backup for your essentials", "Pairs with existing or new solar", "Long-life LFP cells"],
+    accent: "#0091DA", dims: { w: 0.68, h: 1.08, d: 0.27 },
+  },
+  enphase_5p: {
+    tagline: "Modular storage — size it exactly to your home.",
+    features: ["5.0 kWh usable per unit", "3.84 kW continuous", "LFP chemistry", "15-year warranty", "Stack up to 8 units"],
+    benefits: ["Right-size now, add more later", "No single point of failure — each unit is independent", "One of the longest warranties in storage"],
+    accent: "#F3901D", dims: { w: 0.42, h: 0.4, d: 0.22 },
+  },
+  enphase_10c: {
+    tagline: "Bigger modular blocks, same bulletproof design.",
+    features: ["10.0 kWh usable per unit", "7.08 kW continuous", "LFP chemistry", "15-year warranty"],
+    benefits: ["Fewer units for more capacity", "Microinverter reliability you can trust", "Grows with your needs"],
+    accent: "#F3901D", dims: { w: 0.66, h: 0.55, d: 0.31 },
+  },
+  solaredge_home: {
+    tagline: "Tight integration with the SolarEdge ecosystem.",
+    features: ["9.7 kWh usable", "5 kW continuous", "94.5% round-trip efficiency", "10-year warranty"],
+    benefits: ["Excellent efficiency — more of your solar kept", "One app for solar + storage", "Clean, compact footprint"],
+    accent: "#E4002B", dims: { w: 0.54, h: 1.13, d: 0.25 },
+  },
+  lg_resu16: {
+    tagline: "High-capacity storage in a slim footprint.",
+    features: ["16.0 kWh usable", "7 kW continuous", "10-year warranty", "Compact wall mount"],
+    benefits: ["Lots of backup from a single unit", "Slim profile for tight installs", "Trusted global battery maker"],
+    accent: "#A50034", dims: { w: 0.74, h: 1.06, d: 0.21 },
+  },
+  panasonic_evervolt: {
+    tagline: "Big, flexible capacity from a name you know.",
+    features: ["17.1 kWh usable", "7.6 kW continuous", "AC-coupled", "12-year warranty"],
+    benefits: ["Among the most capacity per unit", "Works with new or existing solar", "Backed by Panasonic reliability"],
+    accent: "#0039A6", dims: { w: 0.66, h: 1.1, d: 0.31 },
+  },
+  generac_pwrcell: {
+    tagline: "Expandable DC-coupled stack for serious capacity.",
+    features: ["18.0 kWh usable", "9 kW continuous", "96.5% round-trip efficiency", "10-year warranty"],
+    benefits: ["Top-tier efficiency keeps more solar", "Scale capacity in modules", "Generator-grade backup heritage"],
+    accent: "#F58220", dims: { w: 0.66, h: 1.18, d: 0.31 },
+  },
+};
+const FALLBACK_CONTENT: BatteryContent = {
+  tagline: "Reliable home energy storage.",
+  features: ["Usable backup capacity", "Whole-home or essentials backup", "Long-life chemistry"],
+  benefits: ["Keep the lights on during outages", "Store solar for the evening", "Lower your reliance on the grid"],
+  accent: "#8b5cf6", dims: { w: 0.6, h: 1.05, d: 0.2 },
+};
+export const batteryContent = (id: string): BatteryContent => BATTERY_CONTENT[id] || FALLBACK_CONTENT;
+
 // ── Appliance / load library ─────────────────────────────────────────────────
 // runningW = steady draw; startingW = motor inrush surge; hoursPerDay = typical
 // daily runtime used for the energy estimate. `essential` ones default on for an
