@@ -98,6 +98,284 @@ interface SavedProposal {
 
 const money = (n: number) => `$${Math.round(n).toLocaleString()}`;
 
+// Injected, scoped styling for the premium dark "brand campaign" restyle.
+// Everything is namespaced under `.bt-root` so global app CSS is untouched.
+const BT_STYLES = `
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap');
+
+.bt-root {
+  --bt-bg: #0a0712;
+  --bt-card: #150f1f;
+  --bt-line: rgba(255,255,255,0.08);
+  --bt-line-hi: rgba(255,255,255,0.14);
+  --bt-accent: #8b5cf6;
+  --bt-accent-hi: #a78bfa;
+  --bt-gold: #ffd86b;
+  --bt-green: #34d399;
+  --bt-ink: #ece8f5;
+  --bt-dim: #9b93b3;
+  position: relative;
+  color: var(--bt-ink);
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  background:
+    radial-gradient(1100px 620px at 12% -8%, rgba(139,92,246,0.20), transparent 60%),
+    radial-gradient(900px 520px at 100% 8%, rgba(167,139,250,0.10), transparent 60%),
+    var(--bt-bg);
+  background-attachment: fixed;
+  margin: -16px;
+  padding: 28px 16px 64px;
+  border-radius: 0;
+}
+@media (min-width: 700px) {
+  .bt-root { margin: -24px; padding: 40px 28px 80px; }
+}
+
+/* ── Hero header ─────────────────────────────────────────── */
+.bt-hero { max-width: 980px; margin: 0 auto 26px; }
+.bt-eyebrow {
+  font-family: 'JetBrains Mono', monospace;
+  text-transform: uppercase;
+  font-size: 11px;
+  letter-spacing: 0.2em;
+  color: var(--bt-accent-hi);
+  margin-bottom: 12px;
+  opacity: 0.9;
+}
+.bt-title {
+  font-family: 'Space Grotesk', sans-serif;
+  font-weight: 700;
+  font-size: clamp(34px, 6vw, 56px);
+  line-height: 1.02;
+  letter-spacing: -0.02em;
+  background: linear-gradient(120deg, #fff 0%, #cdbcff 55%, var(--bt-accent-hi) 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  margin: 0 0 8px;
+}
+.bt-sub { color: var(--bt-dim); font-size: 15px; max-width: 60ch; margin: 0; }
+
+/* Center the column content like the hero. */
+.bt-root > .bt-panel,
+.bt-root > .bt-hero,
+.bt-root > .section-h,
+.bt-root > .bt-kicker,
+.bt-root > .lb-list,
+.bt-root > .empty { max-width: 980px; margin-left: auto; margin-right: auto; }
+
+/* ── Panels (cards) ──────────────────────────────────────── */
+.bt-root .card.bt-panel {
+  background: linear-gradient(180deg, rgba(33,24,48,0.72), rgba(21,15,31,0.72));
+  border: 1px solid var(--bt-line);
+  border-radius: 18px;
+  box-shadow: 0 18px 48px rgba(0,0,0,0.45), inset 0 1px 0 rgba(255,255,255,0.04);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  padding: 22px;
+}
+@media (min-width: 700px) { .bt-root .card.bt-panel { padding: 26px 28px; } }
+
+/* Nested cards inside a panel get the lighter glass treatment. */
+.bt-root .bt-panel .card {
+  background: rgba(255,255,255,0.03);
+  border: 1px solid var(--bt-line);
+  border-radius: 14px;
+}
+
+.bt-kicker {
+  font-family: 'JetBrains Mono', monospace;
+  text-transform: uppercase;
+  font-size: 11px;
+  letter-spacing: 0.2em;
+  color: var(--bt-dim);
+  margin-bottom: 8px;
+}
+.bt-root .bt-section-h {
+  font-family: 'Space Grotesk', sans-serif;
+  font-weight: 600;
+  font-size: 22px;
+  letter-spacing: -0.01em;
+  color: #fff;
+  border: none;
+  padding: 0;
+}
+.bt-root .bt-field-label,
+.bt-root .field-label {
+  font-family: 'JetBrains Mono', monospace;
+  text-transform: uppercase;
+  font-size: 11px;
+  letter-spacing: 0.18em;
+  color: var(--bt-dim);
+}
+
+/* ── Inputs ──────────────────────────────────────────────── */
+.bt-root .field > span { color: var(--bt-dim); font-size: 13px; }
+.bt-root input[type="text"],
+.bt-root input[type="email"],
+.bt-root input[type="number"],
+.bt-root input:not([type]) {
+  background: rgba(10,7,18,0.6);
+  border: 1px solid var(--bt-line);
+  border-radius: 12px;
+  color: var(--bt-ink);
+  padding: 11px 13px;
+  font-size: 14px;
+  transition: border-color .18s ease, box-shadow .18s ease, background .18s ease;
+}
+.bt-root input::placeholder { color: rgba(155,147,179,0.55); }
+.bt-root input:focus {
+  outline: none;
+  border-color: var(--bt-accent);
+  box-shadow: 0 0 0 3px rgba(139,92,246,0.28);
+  background: rgba(10,7,18,0.85);
+}
+.bt-root input[type="checkbox"] { accent-color: var(--bt-accent); width: 17px; height: 17px; }
+
+/* ── Buttons / pills ─────────────────────────────────────── */
+.bt-root .btn {
+  border-radius: 999px;
+  font-family: 'Inter', sans-serif;
+  transition: transform .15s ease, box-shadow .2s ease, background .2s ease, border-color .2s ease;
+}
+.bt-root .btn.ghost {
+  background: rgba(255,255,255,0.04);
+  border: 1px solid var(--bt-line-hi);
+  color: var(--bt-ink);
+}
+.bt-root .btn.ghost:hover { background: rgba(255,255,255,0.09); border-color: var(--bt-accent); }
+.bt-root .btn.primary {
+  background: linear-gradient(120deg, var(--bt-accent), var(--bt-accent-hi));
+  border: 1px solid rgba(255,255,255,0.18);
+  color: #fff;
+  box-shadow: 0 8px 22px rgba(139,92,246,0.35);
+}
+.bt-root .btn.primary:hover { transform: translateY(-1px); box-shadow: 0 12px 30px rgba(139,92,246,0.5); }
+.bt-root .btn:active { transform: translateY(0); }
+.bt-root .btn:disabled { opacity: 0.5; box-shadow: none; transform: none; }
+
+/* ── Customer search dropdown (contained, themed) ────────── */
+.bt-root .field button.row:hover { background: rgba(139,92,246,0.16) !important; }
+
+/* ── Stat cards (mono readouts) ──────────────────────────── */
+.bt-root .bt-stat-card {
+  background: rgba(255,255,255,0.03);
+  border: 1px solid var(--bt-line);
+  border-radius: 14px;
+  padding: 14px 14px 12px;
+  transition: border-color .2s ease, transform .2s ease;
+}
+.bt-root .bt-stat-card:hover { border-color: var(--bt-line-hi); }
+.bt-root .bt-stat-card .stat-value {
+  font-family: 'Space Grotesk', sans-serif;
+  font-weight: 700;
+  font-size: 26px;
+  letter-spacing: -0.01em;
+  color: #fff;
+}
+.bt-root .bt-stat-card .stat-label {
+  font-family: 'JetBrains Mono', monospace;
+  text-transform: uppercase;
+  font-size: 10px;
+  letter-spacing: 0.16em;
+  color: var(--bt-dim);
+  margin-top: 4px;
+}
+.bt-root .bt-stat--accent .stat-value { color: var(--bt-accent-hi); }
+.bt-root .bt-stat--gold .stat-value { color: var(--bt-gold); }
+.bt-root .bt-stat--green .stat-value { color: var(--bt-green); }
+
+/* ── Load list rows ──────────────────────────────────────── */
+.bt-root .lb-row.card {
+  background: rgba(255,255,255,0.025);
+  border: 1px solid var(--bt-line);
+  border-radius: 12px;
+  transition: border-color .18s ease, background .18s ease;
+}
+.bt-root .lb-row.card:hover { border-color: var(--bt-line-hi); background: rgba(255,255,255,0.045); }
+.bt-root .lb-row-name { color: var(--bt-ink); font-weight: 600; }
+
+/* ── Recommendation hero card ────────────────────────────── */
+.bt-root .bt-hero-card {
+  position: relative;
+  overflow: hidden;
+  background:
+    radial-gradient(700px 300px at 90% -30%, rgba(139,92,246,0.22), transparent 60%),
+    linear-gradient(180deg, rgba(40,28,60,0.8), rgba(21,15,31,0.85)) !important;
+  border-radius: 18px !important;
+  box-shadow: 0 20px 50px rgba(0,0,0,0.5), 0 0 0 1px rgba(139,92,246,0.12);
+}
+.bt-root .bt-hero-card::before {
+  content: "";
+  position: absolute; left: 0; top: 0; bottom: 0; width: 3px;
+  background: linear-gradient(180deg, var(--bt-fit, var(--bt-accent)), transparent);
+}
+.bt-root .bt-hero-card .lb-row-name { font-family: 'Space Grotesk', sans-serif; }
+
+/* Stepper */
+.bt-root .bt-stepper {
+  display: inline-flex; align-items: center; gap: 4px;
+  background: rgba(10,7,18,0.55);
+  border: 1px solid var(--bt-line-hi);
+  border-radius: 999px;
+  padding: 3px;
+}
+.bt-root .bt-stepper .bt-step-btn {
+  min-width: 34px; height: 34px; padding: 0;
+  border-radius: 999px; font-size: 18px; line-height: 1;
+  background: rgba(255,255,255,0.05); border: none;
+}
+.bt-root .bt-stepper .bt-step-btn:hover:not(:disabled) { background: var(--bt-accent); }
+.bt-root .bt-step-val { font-family: 'Space Grotesk', sans-serif; font-size: 16px; padding: 0 4px; }
+.bt-root .bt-mono-label {
+  font-family: 'JetBrains Mono', monospace; text-transform: uppercase;
+  font-size: 10px; letter-spacing: 0.16em; color: var(--bt-dim);
+}
+
+/* ── Alternatives / proposal chips ───────────────────────── */
+.bt-root .bt-alt {
+  border-radius: 14px;
+  transition: border-color .18s ease, transform .15s ease, box-shadow .2s ease;
+}
+.bt-root .bt-alt:hover { transform: translateY(-1px); box-shadow: 0 10px 26px rgba(0,0,0,0.4); }
+.bt-root .bt-alt--active {
+  background: rgba(139,92,246,0.1) !important;
+  box-shadow: 0 0 0 1px rgba(139,92,246,0.4), 0 10px 26px rgba(139,92,246,0.18);
+}
+
+/* ── Badges (kept contained) ─────────────────────────────── */
+.bt-root .badge { border-radius: 999px; max-width: 100%; white-space: nowrap; }
+
+/* ── Present CTA ─────────────────────────────────────────── */
+.bt-root .bt-present {
+  font-family: 'Space Grotesk', sans-serif;
+  font-size: 17px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  padding: 16px;
+  border-radius: 16px;
+  background: linear-gradient(120deg, var(--bt-accent), #c4b5fd) !important;
+  box-shadow: 0 14px 36px rgba(139,92,246,0.45);
+}
+.bt-root .bt-present:hover { box-shadow: 0 18px 46px rgba(139,92,246,0.6); }
+
+/* ── Misc ────────────────────────────────────────────────── */
+.bt-root .muted, .bt-root .small { color: var(--bt-dim); }
+.bt-root a.small { color: var(--bt-accent-hi); }
+.bt-root .empty {
+  background: rgba(255,255,255,0.02);
+  border: 1px dashed var(--bt-line-hi);
+  border-radius: 14px;
+  color: var(--bt-dim);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .bt-root *, .bt-root *::before, .bt-root *::after {
+    transition: none !important;
+    animation: none !important;
+  }
+}
+`;
+
 // Read a File into a bare base64 string (drops the `data:...;base64,` prefix).
 const fileToBase64 = (f: File) =>
   new Promise<string>((res, rej) => {
@@ -902,15 +1180,18 @@ export default function BatteryTool() {
   };
 
   return (
-    <div className="page-body">
-      <div className="page-head">
-        <h1>🔋 Battery Tool</h1>
-        <p className="page-sub">Analyze the bill, size the load, and build a battery proposal.</p>
+    <div className="page-body bt-root">
+      <style>{BT_STYLES}</style>
+      <div className="bt-hero">
+        <div className="bt-eyebrow">· Energy storage studio</div>
+        <h1 className="bt-title">Battery Tool</h1>
+        <p className="bt-sub">Analyze the bill, size the load, and craft a premium battery proposal.</p>
       </div>
 
       {/* 1. Customer */}
-      <div className="card" style={{ marginBottom: 18 }}>
-        <h2 className="section-h" style={{ marginTop: 0 }}>Customer</h2>
+      <div className="card bt-panel" style={{ marginBottom: 18 }}>
+        <div className="bt-kicker">· 01 — Who</div>
+        <h2 className="section-h bt-section-h" style={{ marginTop: 0 }}>Customer</h2>
         <label className="field" style={{ position: "relative" }}>
           <span>Find a customer <span className="muted small">(search your leads by name or address)</span></span>
           <input
@@ -980,8 +1261,9 @@ export default function BatteryTool() {
       </div>
 
       {/* 2. Bill analyzer */}
-      <div className="card" style={{ marginBottom: 18 }}>
-        <h2 className="section-h" style={{ marginTop: 0 }}>Bill analyzer</h2>
+      <div className="card bt-panel" style={{ marginBottom: 18 }}>
+        <div className="bt-kicker">· 02 — Usage</div>
+        <h2 className="section-h bt-section-h" style={{ marginTop: 0 }}>Bill analyzer</h2>
         <p className="muted small" style={{ marginTop: 0 }}>Enter any two — we'll derive the rest.</p>
         <div className="row" style={{ gap: 8, flexWrap: "wrap", alignItems: "center", marginBottom: 10 }}>
           <label className="btn ghost sm" style={{ cursor: "pointer", margin: 0 }}>
@@ -1025,8 +1307,9 @@ export default function BatteryTool() {
       </div>
 
       {/* 3. Existing solar */}
-      <div className="card" style={{ marginBottom: 18 }}>
-        <h2 className="section-h" style={{ marginTop: 0 }}>Existing solar</h2>
+      <div className="card bt-panel" style={{ marginBottom: 18 }}>
+        <div className="bt-kicker">· 03 — Solar</div>
+        <h2 className="section-h bt-section-h" style={{ marginTop: 0 }}>Existing solar</h2>
         <label className="row" style={{ gap: 8, alignItems: "center" }}>
           <input type="checkbox" checked={hasSolar} onChange={(e) => setHasSolar(e.target.checked)} />
           <span>Homeowner already has solar</span>
@@ -1066,8 +1349,9 @@ export default function BatteryTool() {
       </div>
 
       {/* 4. Load calculator */}
-      <div className="card" style={{ marginBottom: 18 }}>
-        <h2 className="section-h" style={{ marginTop: 0 }}>Load calculator</h2>
+      <div className="card bt-panel" style={{ marginBottom: 18 }}>
+        <div className="bt-kicker">· 04 — Loads</div>
+        <h2 className="section-h bt-section-h" style={{ marginTop: 0 }}>Load calculator</h2>
         <div className="row" style={{ gap: 8, marginBottom: 12 }}>
           <button className={"btn sm" + (mode === "essentials" ? " primary" : " ghost")} onClick={() => applyMode("essentials")}>Essentials backup</button>
           <button className={"btn sm" + (mode === "whole" ? " primary" : " ghost")} onClick={() => applyMode("whole")}>Whole home</button>
@@ -1097,16 +1381,17 @@ export default function BatteryTool() {
           </div>
         ))}
 
-        <div className="stat-grid" style={{ marginTop: 8 }}>
-          <div className="stat-card"><div className="stat-value">{load.dailyKWh}</div><div className="stat-label">Daily energy</div><div className="muted small">kWh</div></div>
-          <div className="stat-card"><div className="stat-value">{load.continuousKW}</div><div className="stat-label">Continuous</div><div className="muted small">kW</div></div>
-          <div className="stat-card"><div className="stat-value">{load.peakKW}</div><div className="stat-label">Surge</div><div className="muted small">kW</div></div>
+        <div className="stat-grid bt-stat-grid" style={{ marginTop: 8 }}>
+          <div className="stat-card bt-stat-card bt-stat--gold"><div className="stat-value">{load.dailyKWh}</div><div className="stat-label">Daily energy</div><div className="muted small">kWh</div></div>
+          <div className="stat-card bt-stat-card bt-stat--accent"><div className="stat-value">{load.continuousKW}</div><div className="stat-label">Continuous</div><div className="muted small">kW</div></div>
+          <div className="stat-card bt-stat-card bt-stat--green"><div className="stat-value">{load.peakKW}</div><div className="stat-label">Surge</div><div className="muted small">kW</div></div>
         </div>
       </div>
 
       {/* 5. Goal & backup */}
-      <div className="card" style={{ marginBottom: 18 }}>
-        <h2 className="section-h" style={{ marginTop: 0 }}>Goal &amp; backup</h2>
+      <div className="card bt-panel" style={{ marginBottom: 18 }}>
+        <div className="bt-kicker">· 05 — Intent</div>
+        <h2 className="section-h bt-section-h" style={{ marginTop: 0 }}>Goal &amp; backup</h2>
         <div className="row" style={{ gap: 8, marginBottom: 12 }}>
           {(["backup", "savings", "both"] as SizingGoal[]).map((g) => (
             <button key={g} className={"btn sm" + (goal === g ? " primary" : " ghost")} onClick={() => setGoal(g)}>
@@ -1125,15 +1410,16 @@ export default function BatteryTool() {
       </div>
 
       {/* 6. Recommendation */}
-      <div className="card" style={{ marginBottom: 18 }}>
-        <h2 className="section-h" style={{ marginTop: 0 }}>Recommendation</h2>
+      <div className="card bt-panel" style={{ marginBottom: 18 }}>
+        <div className="bt-kicker">· 06 — System</div>
+        <h2 className="section-h bt-section-h" style={{ marginTop: 0 }}>Recommendation</h2>
         {!system ? (
           <div className="empty">Add some loads to size a system.</div>
         ) : (
           <>
             <div
-              className="card"
-              style={{ border: `2px solid ${FIT_COLOR[system.fit]}`, marginBottom: 12 }}
+              className="card bt-hero-card"
+              style={{ border: `1px solid ${FIT_COLOR[system.fit]}`, marginBottom: 12, "--bt-fit": FIT_COLOR[system.fit] } as React.CSSProperties}
             >
               <div className="lb-row-top" style={{ marginBottom: 8 }}>
                 <span className="lb-row-name" style={{ fontSize: 18 }}>
@@ -1145,23 +1431,25 @@ export default function BatteryTool() {
               </div>
 
               {/* Quantity stepper — rep can tune the number of batteries. */}
-              <div className="row" style={{ gap: 8, alignItems: "center", flexWrap: "wrap", marginBottom: 8 }}>
-                <span className="muted small">Batteries:</span>
-                <button
-                  className="btn ghost sm"
-                  disabled={system.units <= 1}
-                  onClick={() => setUnitsOverride(Math.max(1, system.units - 1))}
-                >
-                  −
-                </button>
-                <span style={{ minWidth: 24, textAlign: "center", fontWeight: 700 }}>{system.units}</span>
-                <button
-                  className="btn ghost sm"
-                  disabled={system.units >= system.product.maxUnits}
-                  onClick={() => setUnitsOverride(Math.min(system.product.maxUnits, system.units + 1))}
-                >
-                  +
-                </button>
+              <div className="row bt-stepper-row" style={{ gap: 8, alignItems: "center", flexWrap: "wrap", marginBottom: 8 }}>
+                <span className="muted small bt-mono-label">Batteries</span>
+                <div className="bt-stepper">
+                  <button
+                    className="btn ghost sm bt-step-btn"
+                    disabled={system.units <= 1}
+                    onClick={() => setUnitsOverride(Math.max(1, system.units - 1))}
+                  >
+                    −
+                  </button>
+                  <span className="bt-step-val" style={{ minWidth: 24, textAlign: "center", fontWeight: 700 }}>{system.units}</span>
+                  <button
+                    className="btn ghost sm bt-step-btn"
+                    disabled={system.units >= system.product.maxUnits}
+                    onClick={() => setUnitsOverride(Math.min(system.product.maxUnits, system.units + 1))}
+                  >
+                    +
+                  </button>
+                </div>
                 {unitsOverride != null && chosen && unitsOverride !== chosen.units ? (
                   <span className="muted small">
                     Recommended: {chosen.units} ·{" "}
@@ -1172,11 +1460,11 @@ export default function BatteryTool() {
                 )}
               </div>
 
-              <div className="stat-grid" style={{ marginBottom: 8 }}>
-                <div className="stat-card"><div className="stat-value">{system.totalUsableKWh}</div><div className="stat-label">Usable kWh</div></div>
-                <div className="stat-card"><div className="stat-value">{system.totalContinuousKW}</div><div className="stat-label">Continuous kW</div></div>
-                <div className="stat-card"><div className="stat-value">{system.totalPeakKW}</div><div className="stat-label">Surge kW</div></div>
-                <div className="stat-card"><div className="stat-value">{system.backupDaysAchieved}</div><div className="stat-label">Backup days</div></div>
+              <div className="stat-grid bt-stat-grid bt-hero-stats" style={{ marginBottom: 8 }}>
+                <div className="stat-card bt-stat-card bt-stat--accent"><div className="stat-value">{system.totalUsableKWh}</div><div className="stat-label">Usable kWh</div></div>
+                <div className="stat-card bt-stat-card bt-stat--accent"><div className="stat-value">{system.totalContinuousKW}</div><div className="stat-label">Continuous kW</div></div>
+                <div className="stat-card bt-stat-card bt-stat--accent"><div className="stat-value">{system.totalPeakKW}</div><div className="stat-label">Surge kW</div></div>
+                <div className="stat-card bt-stat-card bt-stat--green"><div className="stat-value">{system.backupDaysAchieved}</div><div className="stat-label">Backup days</div></div>
               </div>
               <div className="muted small">
                 {system.product.chemistry} · {system.product.warrantyYears}-yr warranty
@@ -1195,12 +1483,12 @@ export default function BatteryTool() {
 
             {recs.length > 1 && (
               <>
-                <div className="field-label">Alternatives</div>
-                <div className="lb-list">
+                <div className="field-label bt-field-label">Alternatives</div>
+                <div className="lb-list bt-alts">
                   {recs.slice(1, 5).map((r) => (
                     <div
                       key={r.product.id}
-                      className="lb-row card"
+                      className={"lb-row card bt-alt" + (r.product.id === chosenId ? " bt-alt--active" : "")}
                       style={{ alignItems: "center", cursor: "pointer", ...(r.product.id === chosenId ? { borderColor: FIT_COLOR[r.fit] } : {}) }}
                       onClick={() => setChosenId(r.product.id)}
                     >
@@ -1304,8 +1592,9 @@ export default function BatteryTool() {
       </div>
 
       {/* Local & utility incentives */}
-      <div className="card" style={{ marginBottom: 18 }}>
-        <h2 className="section-h" style={{ marginTop: 0 }}>⚡ Local &amp; utility incentives</h2>
+      <div className="card bt-panel" style={{ marginBottom: 18 }}>
+        <div className="bt-kicker">· 07 — Incentives</div>
+        <h2 className="section-h bt-section-h" style={{ marginTop: 0 }}>⚡ Local &amp; utility incentives</h2>
         <div className="row" style={{ gap: 8, flexWrap: "wrap" }}>
           <button className="btn primary sm" onClick={findIncentives} disabled={incLoading}>
             {incLoading ? "Searching…" : "Find incentives for this address"}
@@ -1388,8 +1677,9 @@ export default function BatteryTool() {
       </div>
 
       {/* 7. Proposal */}
-      <div className="card" style={{ marginBottom: 18 }}>
-        <h2 className="section-h" style={{ marginTop: 0 }}>Proposal</h2>
+      <div className="card bt-panel bt-proposal" style={{ marginBottom: 18 }}>
+        <div className="bt-kicker">· 08 — Proposal</div>
+        <h2 className="section-h bt-section-h" style={{ marginTop: 0 }}>Proposal</h2>
         {system ? (
           <>
             <div className="muted small" style={{ marginBottom: 10 }}>
@@ -1400,19 +1690,19 @@ export default function BatteryTool() {
 
             {roi && (
               <>
-                <div className="field-label">Return on investment</div>
-                <div className="stat-grid" style={{ marginBottom: 8 }}>
-                  <div className="stat-card"><div className="stat-value">{money(roi.grossCost)}</div><div className="stat-label">Gross system cost</div></div>
-                  <div className="stat-card"><div className="stat-value" style={{ color: "#34d399" }}>− {money(roi.incentives)}</div><div className="stat-label">Incentives applied</div></div>
-                  <div className="stat-card"><div className="stat-value">{money(roi.netCost)}</div><div className="stat-label">Net cost</div></div>
-                  <div className="stat-card"><div className="stat-value">{money(roi.monthlySavings)}</div><div className="stat-label">Est. monthly savings</div></div>
-                  <div className="stat-card"><div className="stat-value">{money(roi.lifetimeSavings)}</div><div className="stat-label">Lifetime savings ({roi.warrantyYears} yr)</div></div>
+                <div className="field-label bt-field-label">Return on investment</div>
+                <div className="stat-grid bt-stat-grid bt-roi-grid" style={{ marginBottom: 8 }}>
+                  <div className="stat-card bt-stat-card"><div className="stat-value">{money(roi.grossCost)}</div><div className="stat-label">Gross system cost</div></div>
+                  <div className="stat-card bt-stat-card bt-stat--green"><div className="stat-value" style={{ color: "#34d399" }}>− {money(roi.incentives)}</div><div className="stat-label">Incentives applied</div></div>
+                  <div className="stat-card bt-stat-card bt-stat--accent"><div className="stat-value">{money(roi.netCost)}</div><div className="stat-label">Net cost</div></div>
+                  <div className="stat-card bt-stat-card bt-stat--gold"><div className="stat-value">{money(roi.monthlySavings)}</div><div className="stat-label">Est. monthly savings</div></div>
+                  <div className="stat-card bt-stat-card bt-stat--gold"><div className="stat-value">{money(roi.lifetimeSavings)}</div><div className="stat-label">Lifetime savings ({roi.warrantyYears} yr)</div></div>
                 </div>
               </>
             )}
 
             <button
-              className="btn primary block"
+              className="btn primary block bt-present"
               style={{ marginBottom: 12 }}
               onClick={presentShow}
             >
@@ -1440,13 +1730,14 @@ export default function BatteryTool() {
       </div>
 
       {/* My proposals */}
-      <h2 className="section-h">My proposals</h2>
+      <div className="bt-kicker" style={{ marginTop: 4 }}>· Archive</div>
+      <h2 className="section-h bt-section-h">My proposals</h2>
       {myProposals.length === 0 ? (
         <div className="empty">No saved proposals yet. Build one above and hit 💾 Save.</div>
       ) : (
-        <div className="lb-list">
+        <div className="lb-list bt-alts">
           {myProposals.map((p) => (
-            <div key={p.id} className="lb-row card" style={{ alignItems: "center", cursor: "pointer" }} onClick={() => loadProposal(p)}>
+            <div key={p.id} className="lb-row card bt-alt" style={{ alignItems: "center", cursor: "pointer" }} onClick={() => loadProposal(p)}>
               <div className="lb-row-main">
                 <div className="lb-row-top">
                   <span className="lb-row-name">{p.customerName || "Customer"}</span>
