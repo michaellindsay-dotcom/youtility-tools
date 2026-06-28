@@ -3279,7 +3279,14 @@ export const getSharedProposal = onCall(async (request) => {
 // Admin: set company-wide battery pricing (price + install adder per product).
 export const setBatteryPricing = onCall(async (request) => {
   const caller = await getCaller(request);
-  const { companyId, pricing, offered } = (request.data || {}) as { companyId?: string; pricing?: Record<string, { price?: number; adder?: number }>; offered?: string[] };
+  const { companyId, pricing, offered, depositUsd, depositPct, sungageApplyUrl } = (request.data || {}) as {
+    companyId?: string;
+    pricing?: Record<string, { price?: number; adder?: number }>;
+    offered?: string[];
+    depositUsd?: number;
+    depositPct?: number;
+    sungageApplyUrl?: string;
+  };
   authorizeForCompany(caller, companyId);
   const clean: Record<string, { price: number; adder: number }> = {};
   for (const [pid, v] of Object.entries(pricing || {})) {
@@ -3291,6 +3298,10 @@ export const setBatteryPricing = onCall(async (request) => {
   // Which products the company offers its reps. Only stored when provided so we
   // can treat "unset" as "offer everything" for existing companies.
   if (Array.isArray(offered)) patch.batteryOffered = offered.filter((x) => typeof x === "string").slice(0, 50);
+  // Proposal pricing-slide settings (only written when provided).
+  if (depositUsd !== undefined) patch.batteryDepositUsd = Math.max(0, Math.round(Number(depositUsd) || 0));
+  if (depositPct !== undefined) patch.batteryDepositPct = Math.max(0, Math.min(100, Number(depositPct) || 0));
+  if (sungageApplyUrl !== undefined) patch.sungageApplyUrl = String(sungageApplyUrl || "").trim().slice(0, 600);
   await db.doc(`companies/${companyId}`).set(patch, { merge: true });
   return { ok: true };
 });
