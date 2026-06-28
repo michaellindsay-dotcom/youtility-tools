@@ -48,6 +48,45 @@ export interface ProposalOption {
     lifetimeSavings: number;
   };
   recommended: boolean;
+  // Max stackable units + a precomputed variant per unit count, so the homeowner
+  // can change the quantity on the Compare slide and have backup/price/savings —
+  // and the whole proposal — recompute.
+  maxUnits?: number;
+  unitOptions?: UnitVariant[];
+}
+
+export interface UnitVariant {
+  units: number;
+  totalUsableKWh: number;
+  totalContinuousKW: number;
+  totalPeakKW: number;
+  backupDaysAchieved: number;
+  roi: {
+    grossCost: number;
+    incentives: number;
+    netCost: number;
+    monthlySavings: number;
+    lifetimeSavings: number;
+  };
+}
+
+// Apply a chosen unit count to an option (swap in the matching variant). Drives
+// effRec / effRoi / specs so every slide reflects the quantity.
+export function optionAtUnits(opt: ProposalOption | undefined, units: number | undefined): ProposalOption | undefined {
+  if (!opt) return opt;
+  const u = units ?? opt.units;
+  if (u === opt.units || !opt.unitOptions) return opt;
+  const v = opt.unitOptions.find((x) => x.units === u);
+  if (!v) return opt;
+  return {
+    ...opt,
+    units: v.units,
+    totalUsableKWh: v.totalUsableKWh,
+    totalContinuousKW: v.totalContinuousKW,
+    totalPeakKW: v.totalPeakKW,
+    backupDaysAchieved: v.backupDaysAchieved,
+    roi: v.roi,
+  };
 }
 
 export interface SolarShowProps {
@@ -287,11 +326,18 @@ export default function SolarProposalShow(props: SolarShowProps) {
   const [compareIds, setCompareIds] = useState<string[]>(
     options ? options.slice(0, 2).map((o) => o.productId) : []
   );
-
-  const active = useMemo(
-    () => options?.find((o) => o.productId === selectedId) || options?.[0],
-    [options, selectedId]
+  // Per-battery quantity overrides chosen on the Compare slide. Absent = the
+  // recommended unit count baked into the option.
+  const [unitsById, setUnitsById] = useState<Record<string, number>>({});
+  const setUnits = useCallback(
+    (productId: string, units: number) => setUnitsById((m) => ({ ...m, [productId]: units })),
+    []
   );
+
+  const active = useMemo(() => {
+    const base = options?.find((o) => o.productId === selectedId) || options?.[0];
+    return optionAtUnits(base, base ? unitsById[base.productId] : undefined);
+  }, [options, selectedId, unitsById]);
 
   // Effective recommendation / ROI the slides render: the selected battery's data
   // when options are provided, else the single legacy props (nothing breaks).
@@ -375,6 +421,7 @@ export default function SolarProposalShow(props: SolarShowProps) {
       if (options && options.length) {
         setSelectedId(chosenProductId || options[0].productId);
         setCompareIds(options.slice(0, 2).map((o) => o.productId));
+        setUnitsById({});
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -790,6 +837,8 @@ export default function SolarProposalShow(props: SolarShowProps) {
                         options={options}
                         compareIds={compareIds}
                         setCompareIds={setCompareIds}
+                        unitsById={unitsById}
+                        setUnits={setUnits}
                         onChoose={(id) => {
                           setSelectedId(id);
                           goToKey("pricing");
@@ -952,17 +1001,24 @@ function CompareSlide({
   options,
   compareIds,
   setCompareIds,
+  unitsById,
+  setUnits,
   onChoose,
 }: {
   options: ProposalOption[];
   compareIds: string[];
   setCompareIds: (ids: string[]) => void;
+  unitsById: Record<string, number>;
+  setUnits: (productId: string, units: number) => void;
   onChoose?: (productId: string) => void;
 }) {
   const aId = compareIds[0] || options[0]?.productId;
   const bId = compareIds[1] || options[1]?.productId;
-  const a = options.find((o) => o.productId === aId) || options[0];
-  const b = options.find((o) => o.productId === bId) || options[1];
+  const aBase = options.find((o) => o.productId === aId) || options[0];
+  const bBase = options.find((o) => o.productId === bId) || options[1];
+  // Apply each column's chosen quantity so every row reflects it.
+  const a = optionAtUnits(aBase, aBase ? unitsById[aBase.productId] : undefined) || aBase;
+  const b = optionAtUnits(bBase, bBase ? unitsById[bBase.productId] : undefined) || bBase;
 
   const pick = (slot: 0 | 1, id: string) => {
     const next: string[] = [compareIds[0] ?? aId, compareIds[1] ?? bId];
@@ -971,6 +1027,21 @@ function CompareSlide({
   };
 
   if (!a || !b) return null;
+
+  // Quantity stepper for a column, bounded by the product's max stackable units.
+  const Qty = ({ opt }: { opt: ProposalOption }) => {
+    const max = opt.maxUnits ?? (opt.unitOptions?.length ? Math.max(...opt.unitOptions.map((v) => v.units)) : opt.units);
+    const canStep = (opt.unitOptions?.length ?? 0) > 1;
+    if (!canStep) return null;
+    const set = (u: number) => setUnits(opt.productId, Math.max(1, Math.min(max, u)));
+    return (
+      <div className="sps-cmp-qty">
+        <button className="sps-cmp-qbtn" disabled={opt.units <= 1} onClick={() => set(opt.units - 1)} aria-label="Fewer units">−</button>
+        <span className="sps-cmp-qval">{opt.units} <em>{opt.units > 1 ? "units" : "unit"}</em></span>
+        <button className="sps-cmp-qbtn" disabled={opt.units >= max} onClick={() => set(opt.units + 1)} aria-label="More units">+</button>
+      </div>
+    );
+  };
 
   // higher = better for most rows; netCost lower is better.
   type Row = { label: string; av: number; bv: number; fmt: (n: number) => string; lowerBetter?: boolean };
@@ -1007,11 +1078,13 @@ function CompareSlide({
           <span className="sps-cmp-swatch" style={{ background: a.accent }} />
           <Picker slot={0} val={a.productId} side="a" />
           {a.recommended && <span className="sps-cmp-badge">★ Recommended</span>}
+          <Qty opt={a} />
         </div>
         <div className="sps-cmp-head">
           <span className="sps-cmp-swatch" style={{ background: b.accent }} />
           <Picker slot={1} val={b.productId} side="b" />
           {b.recommended && <span className="sps-cmp-badge">★ Recommended</span>}
+          <Qty opt={b} />
         </div>
       </div>
 
@@ -1607,6 +1680,17 @@ const CSS = `
   cursor:pointer;transition:background .2s,transform .1s;line-height:1.15;}
 .sps-cmp-choosebtn:hover{background:rgba(139,92,246,.22);}
 .sps-cmp-choosebtn:active{transform:scale(.97);}
+
+/* compare per-battery quantity stepper */
+.sps-cmp-qty{display:inline-flex;align-items:center;gap:8px;margin-top:8px;
+  background:rgba(8,5,18,.5);border:1px solid var(--line-2);border-radius:999px;padding:3px 4px;}
+.sps-cmp-qbtn{width:24px;height:24px;border-radius:50%;border:1px solid var(--line-2);
+  background:rgba(255,255,255,.04);color:#fff;font-size:16px;line-height:1;cursor:pointer;
+  display:flex;align-items:center;justify-content:center;transition:background .15s;}
+.sps-cmp-qbtn:hover:not(:disabled){background:rgba(139,92,246,.3);}
+.sps-cmp-qbtn:disabled{opacity:.3;cursor:default;}
+.sps-cmp-qval{font-family:var(--font-mono);font-size:11px;font-weight:600;color:#fff;min-width:54px;text-align:center;}
+.sps-cmp-qval em{font-style:normal;color:var(--text-dim);font-weight:500;}
 
 /* ── Pricing slide ── */
 .sps-pricing{width:min(560px,94vw);display:flex;flex-direction:column;gap:14px;}
