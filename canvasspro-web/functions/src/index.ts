@@ -3196,6 +3196,86 @@ export const emailIncentivesToHomeowner = onCall(async (request) => {
   return { ok: true };
 });
 
+// Save the interactive proposal and email the homeowner a link to open it. The
+// interactive experience can't live inside an email, so we persist the proposal
+// under an unguessable id and send a link to the live, no-login viewer plus an
+// HTML summary fallback.
+export const emailProposalToHomeowner = onCall(async (request) => {
+  const caller = await getCaller(request);
+  const d = (request.data || {}) as { to?: string; payload?: Record<string, any> };
+  if (!d.to || !/.+@.+\..+/.test(d.to)) throw new HttpsError("invalid-argument", "A valid homeowner email is required.");
+  const payload: Record<string, any> = { ...(d.payload || {}) };
+  // A home-photo data URI can be hundreds of KB — drop it so the saved doc stays
+  // comfortably under Firestore's 1 MB limit (the viewer falls back to the scene).
+  if (typeof payload.homeImage === "string" && payload.homeImage.length > 300_000) delete payload.homeImage;
+
+  const id = crypto.randomUUID().replace(/-/g, "");
+  await db.doc(`sharedProposals/${id}`).set({
+    payload, to: d.to, companyId: caller.companyId || payload.companyId || null,
+    closerUid: caller.uid, createdAt: Date.now(),
+  });
+  const url = `${APP_URL}/app/?pid=${id}`;
+
+  const money = (n: any) => (typeof n === "number" && isFinite(n) ? `$${Math.round(n).toLocaleString()}` : "—");
+  const rec = payload.recommendation as any;
+  const roi = payload.roi as any;
+  const first = payload.customerName ? String(payload.customerName).split(" ")[0] : "there";
+  const company = payload.companyName ? escHtml(payload.companyName) : "";
+  const incs = Array.isArray(payload.incentives) ? payload.incentives.slice(0, 6) : [];
+
+  const roiRows = roi
+    ? `<table style="width:100%;border-collapse:collapse;margin:14px 0"><tr>` +
+      `<td style="padding:10px 12px;background:#f5f3fb;border-radius:8px"><div style="font-size:20px;font-weight:700;color:#6d28d9">${money(roi.netCost)}</div><div style="font-size:11px;color:#666;text-transform:uppercase;letter-spacing:.04em">Net cost after incentives</div></td>` +
+      `<td style="width:10px"></td>` +
+      `<td style="padding:10px 12px;background:#f5f3fb;border-radius:8px"><div style="font-size:20px;font-weight:700;color:#0a7d33">${money(roi.monthlySavings)}/mo</div><div style="font-size:11px;color:#666;text-transform:uppercase;letter-spacing:.04em">Estimated monthly savings</div></td>` +
+      `</tr></table>`
+    : "";
+  const incRows = incs.length
+    ? `<div style="margin-top:14px"><div style="font-size:12px;text-transform:uppercase;letter-spacing:.1em;color:#888;margin-bottom:6px">Incentives you may qualify for</div>` +
+      incs.map((i: any) => `<div style="padding:6px 0;border-bottom:1px solid #eee"><strong>${escHtml(i.name)}</strong>${i.amount ? ` — ${escHtml(i.amount)}` : ""}${i.url ? ` · <a href="${escHtml(i.url)}" style="color:#7c3aed">verify</a>` : ""}</div>`).join("") +
+      `</div>`
+    : "";
+
+  const html =
+    `<div style="font-family:system-ui,Arial,sans-serif;max-width:600px;margin:0 auto;color:#111">` +
+    `<div style="background:linear-gradient(135deg,#1a1030,#0a0712);border-radius:16px;padding:26px 24px;color:#fff">` +
+      `<div style="font-size:11px;letter-spacing:.2em;text-transform:uppercase;color:#a78bfa">Your Energy Future${company ? ` · ${company}` : ""}</div>` +
+      `<h1 style="margin:8px 0 4px;font-size:25px">Hi ${escHtml(first)}, your proposal is ready</h1>` +
+      `${rec ? `<div style="color:#cfc7e2;font-size:14px">Recommended: <strong>${escHtml(String(rec.units))}× ${escHtml(rec.brand)} ${escHtml(rec.model)}</strong> · ${escHtml(String(rec.totalUsableKWh))} kWh usable · ~${escHtml(String(rec.backupDaysAchieved))} day backup</div>` : ""}` +
+    `</div>` +
+    `${roiRows}` +
+    `<div style="text-align:center;margin:22px 0">` +
+      `<a href="${url}" style="display:inline-block;background:#7c3aed;color:#fff;text-decoration:none;font-weight:600;font-size:16px;padding:14px 28px;border-radius:999px">▶ View your interactive proposal</a>` +
+      `<div style="font-size:12px;color:#999;margin-top:8px">Tap to explore your home as a living energy system — solar, battery, backup &amp; savings.</div>` +
+    `</div>` +
+    `${incRows}` +
+    `<p style="color:#999;font-size:12px;margin-top:20px">This link opens an interactive presentation${company ? ` from ${company}` : ""}. Figures are estimates for discussion and can change with final design and current incentive terms.</p>` +
+    `</div>`;
+
+  const text =
+    `Hi ${first}, your energy proposal is ready.\n` +
+    (rec ? `Recommended: ${rec.units}x ${rec.brand} ${rec.model} (${rec.totalUsableKWh} kWh usable, ~${rec.backupDaysAchieved} day backup).\n` : "") +
+    (roi ? `Net cost after incentives: ${money(roi.netCost)} · Est. monthly savings: ${money(roi.monthlySavings)}.\n` : "") +
+    `\nView your interactive proposal: ${url}\n`;
+
+  const subject = `${payload.companyName ? payload.companyName + " — " : ""}Your interactive energy proposal`;
+  const cfg = await getNotifyConfig();
+  const r = await sendEmailDetailed(cfg, d.to, subject, text, undefined, html);
+  if (!r.ok) throw new HttpsError("failed-precondition", r.detail);
+  return { ok: true, url };
+});
+
+// Public (no auth): fetch a shared proposal payload by its unguessable id so the
+// homeowner can open the interactive proposal from the emailed link.
+export const getSharedProposal = onCall(async (request) => {
+  const id = String(((request.data || {}) as { id?: string }).id || "").replace(/[^a-zA-Z0-9]/g, "").slice(0, 64);
+  if (!id) throw new HttpsError("invalid-argument", "Missing proposal id.");
+  const snap = await db.doc(`sharedProposals/${id}`).get();
+  if (!snap.exists) throw new HttpsError("not-found", "This proposal link is no longer available.");
+  const data = snap.data() || {};
+  return { payload: data.payload || {} };
+});
+
 // Admin: set company-wide battery pricing (price + install adder per product).
 export const setBatteryPricing = onCall(async (request) => {
   const caller = await getCaller(request);

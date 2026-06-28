@@ -1018,6 +1018,59 @@ export default function BatteryTool() {
     setShowOpen(true);
   };
 
+  // Email the interactive proposal to the homeowner: persist it server-side and
+  // send a link to the no-login viewer (same data the "Present" overlay uses).
+  const [propEmailing, setPropEmailing] = useState(false);
+  const [propEmailMsg, setPropEmailMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  const emailProposal = async () => {
+    if (!system || !homeownerEmail) return;
+    setPropEmailing(true);
+    setPropEmailMsg(null);
+    try {
+      const payload = {
+        customerName: customerName || undefined,
+        address: address || undefined,
+        companyName: company?.name,
+        monthlyBill: bill.monthlyCost,
+        monthlyKWh: bill.monthlyKWh,
+        recommendation: {
+          brand: system.product.brand,
+          model: system.product.model,
+          units: system.units,
+          totalUsableKWh: system.totalUsableKWh,
+          backupDaysAchieved: system.backupDaysAchieved,
+        },
+        roi: roi
+          ? {
+              grossCost: roi.grossCost,
+              incentives: roi.incentives,
+              netCost: roi.netCost,
+              monthlySavings: roi.monthlySavings,
+              lifetimeSavings: roi.lifetimeSavings,
+            }
+          : null,
+        incentives: appliedIncentives.length ? appliedIncentives : incReport?.incentives ?? [],
+        hasEv,
+        hasExistingSolar: solar.hasSolar,
+        options: proposalOptions,
+        chosenProductId: system.product.id,
+        // homeImage intentionally omitted — too large to persist; the viewer
+        // uses the photoreal scene.
+      };
+      const { data } = await httpsCallable<{ to: string; payload: unknown }, { ok?: boolean; url?: string }>(
+        functions,
+        "emailProposalToHomeowner"
+      )({ to: homeownerEmail, payload });
+      setPropEmailMsg(
+        data?.ok ? { ok: true, text: `Sent to ${homeownerEmail}.` } : { ok: false, text: "Couldn't send the email." }
+      );
+    } catch (e) {
+      setPropEmailMsg({ ok: false, text: (e as Error).message || "Couldn't send the email." });
+    } finally {
+      setPropEmailing(false);
+    }
+  };
+
   const generateSummary = async () => {
     if (!system) return;
     setAiLoading(true);
@@ -1708,6 +1761,26 @@ export default function BatteryTool() {
             >
               {homeImgLoading ? "🎬 Loading home photo…" : "🎬 Present interactive proposal"}
             </button>
+
+            {/* Email the interactive proposal to the homeowner (link to no-login viewer). */}
+            <div className="row" style={{ gap: 8, marginBottom: 8, alignItems: "center", flexWrap: "wrap" }}>
+              <input
+                type="email"
+                value={homeownerEmail}
+                placeholder="homeowner@email.com"
+                onChange={(e) => setHomeownerEmail(e.target.value)}
+                style={{ flex: "1 1 200px", minWidth: 0 }}
+              />
+              <button className="btn primary sm" onClick={emailProposal} disabled={propEmailing || !homeownerEmail}>
+                {propEmailing ? "Emailing…" : "📧 Email proposal to homeowner"}
+              </button>
+            </div>
+            {propEmailMsg && (
+              <p className="muted small" style={{ color: propEmailMsg.ok ? "#34d399" : "#ef4444", marginTop: 0 }}>
+                {propEmailMsg.ok ? "✅ " : ""}
+                {propEmailMsg.text}
+              </p>
+            )}
 
             <div className="row" style={{ gap: 8, flexWrap: "wrap", marginBottom: 10 }}>
               <button className="btn primary sm" onClick={generateSummary} disabled={aiLoading}>
