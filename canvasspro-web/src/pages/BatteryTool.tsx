@@ -895,13 +895,35 @@ export default function BatteryTool() {
       const isChosen = rec.product.id === (system?.product.id ?? chosen?.product.id);
       const ppu = isChosen ? (Number(pricePerUnit) || 0) : (entry?.price ?? 0);
       const adder = isChosen ? (Number(installAdder) || 0) : (entry?.adder ?? 0);
-      const r = computeROI({
-        rec,
-        pricePerUnit: ppu,
-        installAdder: adder,
-        incentivesTotalUsd,
-        ratePerKWh: bill.ratePerKWh,
-        dailyUsageKWh: bill.dailyKWh,
+      const roiFor = (s: typeof rec) =>
+        computeROI({
+          rec: s,
+          pricePerUnit: ppu,
+          installAdder: adder,
+          incentivesTotalUsd,
+          ratePerKWh: bill.ratePerKWh,
+          dailyUsageKWh: bill.dailyKWh,
+        });
+      const r = roiFor(rec);
+      // Precompute a variant for every stackable unit count so the homeowner can
+      // change the quantity inside the proposal and have everything recompute.
+      const unitOptions = Array.from({ length: rec.product.maxUnits }, (_, i) => i + 1).map((u) => {
+        const sys = systemForUnits(rec.product, u, sizing);
+        const sr = roiFor(sys);
+        return {
+          units: sys.units,
+          totalUsableKWh: sys.totalUsableKWh,
+          totalContinuousKW: sys.totalContinuousKW,
+          totalPeakKW: sys.totalPeakKW,
+          backupDaysAchieved: sys.backupDaysAchieved,
+          roi: {
+            grossCost: sr.grossCost,
+            incentives: sr.incentives,
+            netCost: sr.netCost,
+            monthlySavings: sr.monthlySavings,
+            lifetimeSavings: sr.lifetimeSavings,
+          },
+        };
       });
       return {
         productId: rec.product.id,
@@ -926,9 +948,11 @@ export default function BatteryTool() {
           lifetimeSavings: r.lifetimeSavings,
         },
         recommended: rec.product.id === topId,
+        maxUnits: rec.product.maxUnits,
+        unitOptions,
       };
     });
-  }, [recs, company?.batteryPricing, system?.product.id, chosen?.product.id, pricePerUnit, installAdder, incentivesTotalUsd, bill.ratePerKWh, bill.dailyKWh]);
+  }, [recs, company?.batteryPricing, system?.product.id, chosen?.product.id, pricePerUnit, installAdder, incentivesTotalUsd, bill.ratePerKWh, bill.dailyKWh, sizing]);
 
   // 7. Proposal
   const [aiSummary, setAiSummary] = useState("");
