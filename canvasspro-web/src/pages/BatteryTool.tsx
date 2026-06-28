@@ -572,6 +572,71 @@ export default function BatteryTool() {
   // EV charger is in the selected loads?
   const hasEv = useMemo(() => selected.some((s) => s.applianceId === "ev_l2" && s.qty > 0), [selected]);
 
+  // Real photo of the customer's home (Street View / satellite) for the show.
+  const [homeImg, setHomeImg] = useState<string | null>(null);
+  const [homeIsSV, setHomeIsSV] = useState(false);
+  const [homeImgLoading, setHomeImgLoading] = useState(false);
+  const [homeImgErr, setHomeImgErr] = useState("");
+  // Remember which address/geo the current photo was fetched for, so a changed
+  // address can re-fetch.
+  const homeImgKeyRef = useRef<string | null>(null);
+
+  const loadHomeImagery = async () => {
+    const latNum = typeof leadGeo.lat === "number" && isFinite(leadGeo.lat) ? leadGeo.lat : undefined;
+    const lngNum = typeof leadGeo.lng === "number" && isFinite(leadGeo.lng) ? leadGeo.lng : undefined;
+    const addr = address.trim();
+    // Guard: nothing to look up.
+    if (!addr && (latNum == null || lngNum == null)) return;
+    setHomeImgLoading(true);
+    setHomeImgErr("");
+    try {
+      const { data } = await httpsCallable<
+        { lat?: number; lng?: number; address?: string },
+        { streetView: string | null; satellite: string | null; hasStreetView: boolean; lat: number; lng: number }
+      >(functions, "getHomeImagery")({
+        ...(latNum != null && lngNum != null ? { lat: latNum, lng: lngNum } : {}),
+        ...(addr ? { address: addr } : {}),
+      });
+      const img = data.streetView || data.satellite || null;
+      setHomeImg(img);
+      setHomeIsSV(!!data.streetView);
+      homeImgKeyRef.current = `${addr}|${latNum ?? ""}|${lngNum ?? ""}`;
+    } catch (e) {
+      setHomeImgErr((e as Error).message || "Couldn't load the home photo.");
+    } finally {
+      setHomeImgLoading(false);
+    }
+  };
+
+  // If the address/geo no longer matches the photo we have, allow a re-fetch by
+  // clearing the stale image.
+  useEffect(() => {
+    const latNum = typeof leadGeo.lat === "number" && isFinite(leadGeo.lat) ? leadGeo.lat : undefined;
+    const lngNum = typeof leadGeo.lng === "number" && isFinite(leadGeo.lng) ? leadGeo.lng : undefined;
+    const key = `${address.trim()}|${latNum ?? ""}|${lngNum ?? ""}`;
+    if (homeImgKeyRef.current && homeImgKeyRef.current !== key) {
+      setHomeImg(null);
+      setHomeIsSV(false);
+      setHomeImgErr("");
+      homeImgKeyRef.current = null;
+    }
+  }, [address, leadGeo.lat, leadGeo.lng]);
+
+  // Open the show, best-effort pulling the home photo first if we don't have one.
+  const presentShow = async () => {
+    const latNum = typeof leadGeo.lat === "number" && isFinite(leadGeo.lat) ? leadGeo.lat : undefined;
+    const lngNum = typeof leadGeo.lng === "number" && isFinite(leadGeo.lng) ? leadGeo.lng : undefined;
+    const haveTarget = !!address.trim() || (latNum != null && lngNum != null);
+    if (!homeImg && haveTarget && !homeImgLoading) {
+      try {
+        await loadHomeImagery();
+      } catch {
+        /* best-effort — open the show regardless */
+      }
+    }
+    setShowOpen(true);
+  };
+
   const generateSummary = async () => {
     if (!chosen) return;
     setAiLoading(true);
@@ -774,6 +839,28 @@ export default function BatteryTool() {
         </label>
         {leadId && <div className="muted small">Linked to lead {leadId}</div>}
         {eventId && <div className="muted small">Linked to appointment {eventId}</div>}
+
+        {/* Real photo of the home — used as the hero in the interactive proposal. */}
+        <div className="row" style={{ gap: 8, flexWrap: "wrap", alignItems: "center", marginTop: 10 }}>
+          <button
+            className="btn ghost sm"
+            onClick={loadHomeImagery}
+            disabled={homeImgLoading || (!address.trim() && (leadGeo.lat == null || leadGeo.lng == null))}
+          >
+            {homeImgLoading ? "🏠 Loading…" : homeImg ? "🏠 Refresh home photo" : "🏠 Add home photo"}
+          </button>
+          {homeImg && (
+            <div className="row" style={{ gap: 8, alignItems: "center" }}>
+              <img
+                src={homeImg}
+                alt="Customer's home"
+                style={{ width: 72, height: 54, objectFit: "cover", borderRadius: 8, border: "1px solid rgba(255,255,255,0.14)" }}
+              />
+              <span className="muted small">{homeIsSV ? "Street View" : "Satellite"}</span>
+            </div>
+          )}
+        </div>
+        {homeImgErr && <p className="muted small" style={{ color: "#f59e0b", marginTop: 8 }}>{homeImgErr}</p>}
       </div>
 
       {/* 2. Bill analyzer */}
@@ -1182,9 +1269,9 @@ export default function BatteryTool() {
             <button
               className="btn primary block"
               style={{ marginBottom: 12 }}
-              onClick={() => setShowOpen(true)}
+              onClick={presentShow}
             >
-              🎬 Present interactive proposal
+              {homeImgLoading ? "🎬 Loading home photo…" : "🎬 Present interactive proposal"}
             </button>
 
             <div className="row" style={{ gap: 8, flexWrap: "wrap", marginBottom: 10 }}>
@@ -1264,6 +1351,8 @@ export default function BatteryTool() {
         incentives={appliedIncentives.length ? appliedIncentives : incReport?.incentives ?? []}
         hasEv={hasEv}
         hasExistingSolar={solar.hasSolar}
+        homeImage={homeImg || undefined}
+        homeImageIsStreetView={homeIsSV}
       />
     </div>
   );
