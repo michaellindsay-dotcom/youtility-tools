@@ -111,6 +111,7 @@ const CHECKLIST: Array<{ key: string; label: string }> = [
 
 const STATUS_LABEL: Record<string, { t: string; c: string }> = {
   needs_survey: { t: "Needs site survey", c: "#f59e0b" },
+  survey_scheduled: { t: "Survey scheduled", c: "#38bdf8" },
   submitted_for_review: { t: "Submitted for review", c: "#34d399" },
 };
 
@@ -131,6 +132,14 @@ export default function Projects() {
       const { data } = await httpsCallable<unknown, { items: ProjectItem[]; isManager: boolean }>(functions, "listMyProjects")({});
       setItems(data.items || []);
       setIsMgr(!!data.isManager);
+      // Auto-open the capture flow when the rep just signed and was routed here
+      // with ?capture=<projectId>.
+      const want = new URLSearchParams(window.location.search).get("capture");
+      if (want) {
+        const hit = (data.items || []).find((x) => x.id === want);
+        if (hit) setCapture(hit);
+        window.history.replaceState({}, "", window.location.pathname);
+      }
     } catch (e) {
       setErr((e as Error).message || "Couldn't load projects.");
     } finally {
@@ -202,12 +211,14 @@ export default function Projects() {
                 </div>
               )}
 
-              {/* Rep: capture action */}
-              {!isMgr && (
-                <button className="btn primary sm" style={{ marginTop: 12 }} onClick={() => setCapture(p)}>
-                  {p.status === "submitted_for_review" ? "↻ Update site survey" : "📸 Capture placement & site survey"}
-                </button>
-              )}
+              {/* Capture action — available to the rep and to admins/managers. */}
+              <button className="btn primary sm" style={{ marginTop: 12 }} onClick={() => setCapture(p)}>
+                {p.status === "submitted_for_review"
+                  ? "↻ Update site survey"
+                  : p.status === "survey_scheduled"
+                  ? "📋 Site survey scheduled — open"
+                  : "📸 Placement & site survey"}
+              </button>
             </div>
           );
         })}
@@ -239,6 +250,8 @@ function PhotoRow({ urls, notes }: { urls: string[]; notes?: string[] }) {
 
 type Shot = { file?: File; url?: string; note: string };
 
+type Step = "placement" | "choice" | "survey" | "schedule";
+
 function ProjectCapture({
   project,
   companyId,
@@ -250,10 +263,12 @@ function ProjectCapture({
   onClose: () => void;
   onDone: () => void;
 }) {
+  const [step, setStep] = useState<Step>("placement");
   const [placement, setPlacement] = useState<Shot[]>([]);
   const [photos, setPhotos] = useState<Record<string, File | undefined>>({});
   const [checklist, setChecklist] = useState<Record<string, boolean>>({});
   const [notes, setNotes] = useState("");
+  const [when, setWhen] = useState("");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
   const placementInput = useRef<HTMLInputElement | null>(null);
@@ -270,98 +285,150 @@ function ProjectCapture({
     return getDownloadURL(r);
   };
 
-  const submit = async () => {
-    if (placement.length < 2) { setErr("Take at least 2 placement photos (max 3)."); return; }
+  // Upload the placement photos once, cache the URLs on the shots, then advance.
+  const goToChoice = async () => {
+    if (placement.length < 2) { setErr("Take at least 2 placement photos first (max 3)."); return; }
     setBusy(true);
     setErr("");
     try {
-      const placeOut: Array<{ url: string; note: string }> = [];
+      const out: Shot[] = [];
       for (let i = 0; i < placement.length; i++) {
         const s = placement[i];
-        const url = s.file ? await upload(`placement${i}`, s.file) : s.url || "";
-        if (url) placeOut.push({ url, note: s.note });
+        const url = s.url || (s.file ? await upload(`placement${i}`, s.file) : "");
+        out.push({ ...s, url, file: undefined });
       }
-      const photoOut: Record<string, string> = {};
-      for (const slot of SURVEY_PHOTOS) {
-        const f = photos[slot.key];
-        if (f) photoOut[slot.key] = await upload(slot.key, f);
-      }
-      await httpsCallable<unknown, { ok?: boolean }>(functions, "submitProjectSurvey")({
-        projectId: project.id,
-        placement: placeOut,
-        survey: { photos: photoOut, checklist },
-        notes,
-      });
-      onDone();
+      setPlacement(out);
+      setStep("choice");
     } catch (e) {
-      setErr((e as Error).message || "Couldn't submit. Try again.");
+      setErr((e as Error).message || "Couldn't upload the photos. Try again.");
     } finally {
       setBusy(false);
     }
+  };
+
+  const placeOut = () => placement.filter((s) => s.url).map((s) => ({ url: s.url as string, note: s.note }));
+
+  const submitNow = async () => {
+    setBusy(true); setErr("");
+    try {
+      const photoOut: Record<string, string> = {};
+      for (const slot of SURVEY_PHOTOS) { const f = photos[slot.key]; if (f) photoOut[slot.key] = await upload(slot.key, f); }
+      await httpsCallable<unknown, { ok?: boolean }>(functions, "submitProjectSurvey")({
+        projectId: project.id, placement: placeOut(), survey: { photos: photoOut, checklist }, notes,
+      });
+      onDone();
+    } catch (e) { setErr((e as Error).message || "Couldn't submit. Try again."); } finally { setBusy(false); }
+  };
+
+  const doSchedule = async () => {
+    const startAt = when ? new Date(when).getTime() : 0;
+    if (!startAt) { setErr("Pick a date and time for the survey."); return; }
+    setBusy(true); setErr("");
+    try {
+      await httpsCallable<unknown, { ok?: boolean }>(functions, "scheduleSiteSurvey")({
+        projectId: project.id, startAt, placement: placeOut(), notes,
+      });
+      onDone();
+    } catch (e) { setErr((e as Error).message || "Couldn't schedule. Try again."); } finally { setBusy(false); }
   };
 
   return (
     <div onClick={() => !busy && onClose()} style={overlay}>
       <div onClick={(e) => e.stopPropagation()} style={sheet}>
         <button onClick={() => !busy && onClose()} aria-label="Close" style={closeX}>✕</button>
-        <h2 className="section-h" style={{ marginTop: 0 }}>Site &amp; placement capture</h2>
+        <h2 className="section-h" style={{ marginTop: 0 }}>
+          {step === "survey" ? "Site survey" : step === "schedule" ? "Schedule site survey" : "Place the battery"}
+        </h2>
         <p className="muted small" style={{ marginTop: -6 }}>{project.customerName} · {project.address}</p>
 
-        {/* Placement */}
-        <h3 style={h3}>1 · Where does the battery go? <span className="muted" style={{ fontWeight: 400 }}>({placement.length}/3, min 2)</span></h3>
-        <p className="muted small" style={{ marginTop: -4 }}>
-          Place your <strong>{project.battery}</strong> in the room with AR, then photograph the spot(s) the homeowner wants.
-        </p>
-        <div style={{ marginBottom: 12, borderRadius: 12, overflow: "hidden", border: "1px solid rgba(255,255,255,0.1)", background: "rgba(8,5,18,0.4)" }}>
-          <BatteryAR accent={batteryContent(project.batteryProductId || "").accent} />
-        </div>
-        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "flex-start" }}>
-          {placement.map((s, i) => (
-            <div key={i} style={{ width: 96 }}>
-              <img src={s.file ? URL.createObjectURL(s.file) : s.url} alt="" style={{ width: 96, height: 96, objectFit: "cover", borderRadius: 8 }} />
-              <input value={s.note} placeholder="note" onChange={(e) => setPlacement((p) => p.map((x, j) => (j === i ? { ...x, note: e.target.value } : x)))} style={{ width: "100%", marginTop: 4, fontSize: 11 }} />
-              <button className="btn ghost sm" style={{ width: "100%", marginTop: 2 }} onClick={() => setPlacement((p) => p.filter((_, j) => j !== i))}>Remove</button>
+        {/* STEP 1 — AR placement photos */}
+        {step === "placement" && (
+          <>
+            <p className="muted small">
+              View your <strong>{project.battery}</strong> in the room with AR, then take <strong>2–3 photos</strong> of where the homeowner wants it. <span className="muted">({placement.length}/3)</span>
+            </p>
+            <div style={{ marginBottom: 12, borderRadius: 12, overflow: "hidden", border: "1px solid rgba(255,255,255,0.1)", background: "rgba(8,5,18,0.4)" }}>
+              <BatteryAR accent={batteryContent(project.batteryProductId || "").accent} />
             </div>
-          ))}
-          {placement.length < 3 && (
-            <button className="btn primary sm" style={{ width: 96, height: 96 }} onClick={() => placementInput.current?.click()}>+ Photo</button>
-          )}
-          <input ref={placementInput} type="file" accept="image/*" capture="environment" hidden onChange={(e) => { addPlacement(e.target.files?.[0]); e.currentTarget.value = ""; }} />
-        </div>
-
-        {/* Survey photos */}
-        <h3 style={h3}>2 · Site survey photos</h3>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(150px,1fr))", gap: 10 }}>
-          {SURVEY_PHOTOS.map((slot) => (
-            <label key={slot.key} style={photoSlot(!!photos[slot.key])}>
-              {photos[slot.key] ? (
-                <img src={URL.createObjectURL(photos[slot.key] as File)} alt="" style={{ width: "100%", height: 80, objectFit: "cover", borderRadius: 6 }} />
-              ) : (
-                <span style={{ fontSize: 22, opacity: 0.6 }}>＋</span>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "flex-start" }}>
+              {placement.map((s, i) => (
+                <div key={i} style={{ width: 96 }}>
+                  <img src={s.file ? URL.createObjectURL(s.file) : s.url} alt="" style={{ width: 96, height: 96, objectFit: "cover", borderRadius: 8 }} />
+                  <input value={s.note} placeholder="note" onChange={(e) => setPlacement((p) => p.map((x, j) => (j === i ? { ...x, note: e.target.value } : x)))} style={{ width: "100%", marginTop: 4, fontSize: 11 }} />
+                  <button className="btn ghost sm" style={{ width: "100%", marginTop: 2 }} onClick={() => setPlacement((p) => p.filter((_, j) => j !== i))}>Remove</button>
+                </div>
+              ))}
+              {placement.length < 3 && (
+                <button className="btn primary sm" style={{ width: 96, height: 96 }} onClick={() => placementInput.current?.click()}>+ Photo</button>
               )}
-              <span style={{ fontSize: 11, lineHeight: 1.2, marginTop: 4, textAlign: "center" }}>{slot.label}</span>
-              <input type="file" accept="image/*" capture="environment" hidden onChange={(e) => { const f = e.target.files?.[0]; if (f) setPhotos((m) => ({ ...m, [slot.key]: f })); e.currentTarget.value = ""; }} />
-            </label>
-          ))}
-        </div>
+              <input ref={placementInput} type="file" accept="image/*" capture="environment" hidden onChange={(e) => { addPlacement(e.target.files?.[0]); e.currentTarget.value = ""; }} />
+            </div>
+            {err && <p className="muted small" style={{ color: "#ef4444" }}>{err}</p>}
+            <button className="btn primary block" style={{ marginTop: 14 }} onClick={goToChoice} disabled={busy || placement.length < 2}>
+              {busy ? "Saving photos…" : "Next →"}
+            </button>
+          </>
+        )}
 
-        {/* Checklist */}
-        <h3 style={h3}>3 · Checklist</h3>
-        <div style={{ display: "grid", gap: 6 }}>
-          {CHECKLIST.map((c) => (
-            <label key={c.key} style={{ display: "flex", gap: 9, alignItems: "center", fontSize: 13.5, cursor: "pointer" }}>
-              <input type="checkbox" checked={!!checklist[c.key]} onChange={(e) => setChecklist((m) => ({ ...m, [c.key]: e.target.checked }))} />
-              {c.label}
-            </label>
-          ))}
-        </div>
+        {/* STEP 2 — complete now or schedule */}
+        {step === "choice" && (
+          <>
+            <p className="muted small">Placement photos saved. What's next?</p>
+            <button className="btn primary block" style={{ marginTop: 12 }} onClick={() => { setErr(""); setStep("survey"); }}>✅ Complete site survey now</button>
+            <button className="btn block" style={{ marginTop: 10 }} onClick={() => { setErr(""); setStep("schedule"); }}>📅 Schedule site survey</button>
+            <button className="btn ghost sm" style={{ marginTop: 10 }} onClick={() => setStep("placement")}>← Back to photos</button>
+          </>
+        )}
 
-        <textarea value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Notes for the project manager (access, gate codes, panel details, anything special)…" style={{ width: "100%", marginTop: 14, minHeight: 70 }} />
+        {/* STEP 3a — full survey */}
+        {step === "survey" && (
+          <>
+            <h3 style={h3}>Site-survey photos</h3>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(150px,1fr))", gap: 10 }}>
+              {SURVEY_PHOTOS.map((slot) => (
+                <label key={slot.key} style={photoSlot(!!photos[slot.key])}>
+                  {photos[slot.key] ? (
+                    <img src={URL.createObjectURL(photos[slot.key] as File)} alt="" style={{ width: "100%", height: 80, objectFit: "cover", borderRadius: 6 }} />
+                  ) : (
+                    <span style={{ fontSize: 22, opacity: 0.6 }}>＋</span>
+                  )}
+                  <span style={{ fontSize: 11, lineHeight: 1.2, marginTop: 4, textAlign: "center" }}>{slot.label}</span>
+                  <input type="file" accept="image/*" capture="environment" hidden onChange={(e) => { const f = e.target.files?.[0]; if (f) setPhotos((m) => ({ ...m, [slot.key]: f })); e.currentTarget.value = ""; }} />
+                </label>
+              ))}
+            </div>
+            <h3 style={h3}>Checklist</h3>
+            <div style={{ display: "grid", gap: 6 }}>
+              {CHECKLIST.map((c) => (
+                <label key={c.key} style={{ display: "flex", gap: 9, alignItems: "center", fontSize: 13.5, cursor: "pointer" }}>
+                  <input type="checkbox" checked={!!checklist[c.key]} onChange={(e) => setChecklist((m) => ({ ...m, [c.key]: e.target.checked }))} />
+                  {c.label}
+                </label>
+              ))}
+            </div>
+            <textarea value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Notes for the project manager (access, gate codes, panel details…)" style={{ width: "100%", marginTop: 14, minHeight: 70 }} />
+            {err && <p className="muted small" style={{ color: "#ef4444" }}>{err}</p>}
+            <button className="btn primary block" style={{ marginTop: 10 }} onClick={submitNow} disabled={busy}>
+              {busy ? "Uploading & submitting…" : "Submit for project-management review"}
+            </button>
+            <button className="btn ghost sm" style={{ marginTop: 8 }} onClick={() => setStep("choice")}>← Back</button>
+          </>
+        )}
 
-        {err && <p className="muted small" style={{ color: "#ef4444" }}>{err}</p>}
-        <button className="btn primary block" style={{ marginTop: 10 }} onClick={submit} disabled={busy}>
-          {busy ? "Uploading & submitting…" : "Submit for project-management review"}
-        </button>
+        {/* STEP 3b — schedule */}
+        {step === "schedule" && (
+          <>
+            <p className="muted small">Pick when you'll return to complete the full site survey. The placement photos are already saved.</p>
+            <label className="field-label bt-field-label">Site survey date &amp; time</label>
+            <input type="datetime-local" value={when} onChange={(e) => setWhen(e.target.value)} style={{ width: "100%" }} />
+            <textarea value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Notes for the project manager…" style={{ width: "100%", marginTop: 12, minHeight: 60 }} />
+            {err && <p className="muted small" style={{ color: "#ef4444" }}>{err}</p>}
+            <button className="btn primary block" style={{ marginTop: 10 }} onClick={doSchedule} disabled={busy || !when}>
+              {busy ? "Scheduling…" : "Create site survey appointment"}
+            </button>
+            <button className="btn ghost sm" style={{ marginTop: 8 }} onClick={() => setStep("choice")}>← Back</button>
+          </>
+        )}
       </div>
     </div>
   );

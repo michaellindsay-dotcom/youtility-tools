@@ -3624,6 +3624,86 @@ export const submitProjectSurvey = onCall(async (request) => {
   return { ok: true };
 });
 
+// Schedule the site survey for later instead of doing it now. Saves the AR
+// placement photos already taken, creates a site-survey calendar event for the
+// rep, and notifies the company.
+export const scheduleSiteSurvey = onCall(async (request) => {
+  const caller = await getCaller(request);
+  const d = (request.data || {}) as {
+    projectId?: string;
+    startAt?: number;
+    placement?: Array<{ url?: string; note?: string }>;
+    notes?: string;
+  };
+  const id = String(d.projectId || "").replace(/[^a-zA-Z0-9]/g, "").slice(0, 64);
+  if (!id) throw new HttpsError("invalid-argument", "Missing project id.");
+  if (!d.startAt || d.startAt < Date.now() - 86400000) throw new HttpsError("invalid-argument", "Pick a valid date/time.");
+  const ref = db.doc(`soldCustomers/${id}`);
+  const snap = await ref.get();
+  if (!snap.exists) throw new HttpsError("not-found", "Project not found.");
+  const proj = snap.data() as Record<string, any>;
+  const isMgr = caller.isSuper || (caller.companyId === proj.companyId && (caller.role === "admin" || caller.role === "manager"));
+  if (proj.closerUid !== caller.uid && !isMgr) throw new HttpsError("permission-denied", "Not your project.");
+
+  const placement = (Array.isArray(d.placement) ? d.placement : [])
+    .slice(0, 3)
+    .map((p) => ({ url: String(p?.url || "").slice(0, 800), note: String(p?.note || "").slice(0, 300) }))
+    .filter((p) => p.url);
+
+  const now = Date.now();
+  const me = (await db.doc(`users/${caller.uid}`).get()).data() as any || {};
+  const visibility = Array.from(new Set([caller.uid, ...((me.managerPath as string[]) || []), ...((me.closerManagerPath as string[]) || [])]));
+  const ev = {
+    companyId: proj.companyId || caller.companyId || "",
+    userId: caller.uid,
+    userName: me.displayName || me.email || "",
+    type: "site_survey",
+    title: `Site survey — ${proj.customerName || ""}`.trim(),
+    address: proj.address || "",
+    leadId: proj.leadId || null,
+    projectId: id,
+    customerName: proj.customerName || "",
+    startAt: d.startAt,
+    endAt: d.startAt + 60 * 60 * 1000,
+    durationMin: 60,
+    source: "site_survey",
+    notes: String(d.notes || "").slice(0, 2000),
+    apptStatus: "scheduled",
+    visibilityPath: visibility,
+    reminded: false,
+    createdAt: now,
+  };
+  const evRef = await db.collection("events").add(ev);
+
+  await ref.set({
+    placement,
+    surveyNotes: String(d.notes || "").slice(0, 2000),
+    surveyStatus: "survey_scheduled",
+    surveyScheduledFor: d.startAt,
+    surveyEventId: evRef.id,
+    updatedAt: now,
+  }, { merge: true });
+
+  // Notify PMs/admins.
+  try {
+    const recipients = new Set<string>();
+    (proj.ccEmails || []).forEach((e: string) => { if (e) recipients.add(e); });
+    if (proj.companyId) {
+      const mgrs = await db.collection("users").where("companyId", "==", proj.companyId).where("role", "in", ["admin", "manager"]).get();
+      mgrs.forEach((u) => { const e = (u.data() as any).email; if (e) recipients.add(e); });
+    }
+    if (recipients.size) {
+      const cfg = await getNotifyConfig();
+      const when = agDate(d.startAt);
+      const subject = `Site survey scheduled — ${proj.customerName || ""} (${proj.reference || id.slice(0, 8)})`;
+      const html = `<div style="font-family:system-ui,Arial,sans-serif;max-width:560px;margin:0 auto;color:#111"><h2>Site survey scheduled</h2><p><strong>${escHtml(proj.customerName || "")}</strong> — ${escHtml(proj.address || "")}</p><p>Scheduled for <strong>${escHtml(when)}</strong>. ${placement.length} placement photo(s) already captured.</p></div>`;
+      for (const to of recipients) { try { await sendEmailDetailed(cfg, to, subject, `Site survey for ${proj.customerName} scheduled ${when}.`, undefined, html); } catch { /* best effort */ } }
+    }
+  } catch (e) { logger.warn("schedule notify failed", e); }
+
+  return { ok: true };
+});
+
 // Admin: set company-wide battery pricing (price + install adder per product).
 export const setBatteryPricing = onCall(async (request) => {
   const caller = await getCaller(request);

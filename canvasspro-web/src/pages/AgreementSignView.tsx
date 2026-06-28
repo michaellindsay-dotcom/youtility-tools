@@ -96,6 +96,13 @@ export default function AgreementSignView() {
           {ag?.companyName ? ` and to ${ag.companyName}` : ""}. Your rep will be in touch about scheduling your site survey
           and installation.
         </p>
+        {/* Rep continues into the site-survey flow on the same device. */}
+        <a
+          href={`${window.location.origin}/app/projects?capture=${encodeURIComponent(id)}`}
+          style={{ ...repBtn }}
+        >
+          Rep: continue to site survey →
+        </a>
       </Shell>
     );
 
@@ -221,3 +228,4 @@ const card: React.CSSProperties = { marginTop: 16, textAlign: "left", background
 const lbl: React.CSSProperties = { fontFamily: "'JetBrains Mono', monospace", fontSize: 10, letterSpacing: "0.18em", textTransform: "uppercase", color: "#8a8199" };
 const input: React.CSSProperties = { width: "100%", marginTop: 6, padding: "11px 12px", borderRadius: 10, border: "1px solid rgba(255,255,255,0.18)", background: "rgba(8,5,18,0.6)", color: "#fff", fontSize: 15, fontFamily: "'Space Grotesk', sans-serif" };
 const cta: React.CSSProperties = { width: "100%", marginTop: 18, background: "#7c3aed", color: "#fff", border: 0, borderRadius: 12, fontWeight: 700, fontSize: 16, padding: 14, fontFamily: "'Space Grotesk', sans-serif", boxShadow: "0 10px 30px rgba(139,92,246,0.35)" };
+const repBtn: React.CSSProperties = { display: "inline-block", marginTop: 22, background: "#7c3aed", color: "#fff", textDecoration: "none", fontWeight: 700, fontSize: 15, padding: "13px 24px", borderRadius: 999, fontFamily: "'Space Grotesk', sans-serif", boxShadow: "0 10px 30px rgba(139,92,246,0.35)" };
