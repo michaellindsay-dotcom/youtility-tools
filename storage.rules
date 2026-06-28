@@ -17,6 +17,14 @@ service firebase.storage {
                    && request.resource.contentType.matches('image/.*');
     }
 
+    // Project capture (placement + site-survey photos): signed-in, images only, <12 MB.
+    match /projects/{companyId}/{fileName} {
+      allow read: if request.auth != null;
+      allow write: if request.auth != null
+                   && request.resource.size < 12 * 1024 * 1024
+                   && request.resource.contentType.matches('image/.*');
+    }
+
     // Reward images (admin-uploaded incentives): signed-in, images only, <8 MB.
     match /rewards/{companyId}/{fileName} {
       allow read: if request.auth != null;

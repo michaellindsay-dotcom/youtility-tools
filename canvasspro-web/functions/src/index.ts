@@ -3522,6 +3522,107 @@ export const signBatteryAgreement = onCall(async (request) => {
   return { ok: true };
 });
 
+// Sold projects for the field app. Reps see only their own (bullet summary);
+// admins/managers see the whole company with full survey detail.
+export const listMyProjects = onCall(async (request) => {
+  const caller = await getCaller(request);
+  const isMgr = caller.isSuper || caller.role === "admin" || caller.role === "manager";
+  if (!caller.companyId && !caller.isSuper) return { items: [], isManager: false };
+  let q: FirebaseFirestore.Query = db.collection("soldCustomers");
+  if (isMgr) q = q.where("companyId", "==", caller.companyId);
+  else q = q.where("closerUid", "==", caller.uid);
+  let snap;
+  try { snap = await q.get(); } catch (e) { logger.warn("listMyProjects query failed", e); return { items: [], isManager: isMgr }; }
+  const items = snap.docs.map((doc) => {
+    const x = doc.data() as Record<string, any>;
+    const bat = x.battery || {};
+    const pay = x.payment || {};
+    const base = {
+      id: doc.id,
+      customerName: x.customerName || "",
+      address: x.address || "",
+      battery: `${bat.units || 1}× ${bat.brand || ""} ${bat.model || ""}`.trim(),
+      paymentMethod: pay.method || "",
+      reference: x.reference || "",
+      status: x.surveyStatus || "needs_survey",
+      signedAt: x.signedAt || 0,
+      submittedAt: x.surveySubmittedAt || 0,
+    };
+    // Admin/manager get the full record (incl. survey + contact details).
+    return isMgr
+      ? { ...base, customerEmail: x.customerEmail || "", payment: pay, batteryDetail: bat, survey: x.survey || null, placement: x.placement || [], surveyNotes: x.surveyNotes || "" }
+      : base;
+  });
+  items.sort((a, b) => (b.signedAt || 0) - (a.signedAt || 0));
+  return { items, isManager: isMgr };
+});
+
+// A rep submits the placement photos + site survey for a sold project; notify
+// the company's project managers/admins for review.
+export const submitProjectSurvey = onCall(async (request) => {
+  const caller = await getCaller(request);
+  const d = (request.data || {}) as {
+    projectId?: string;
+    placement?: Array<{ url?: string; note?: string }>;
+    survey?: { photos?: Record<string, string>; checklist?: Record<string, boolean> };
+    notes?: string;
+  };
+  const id = String(d.projectId || "").replace(/[^a-zA-Z0-9]/g, "").slice(0, 64);
+  if (!id) throw new HttpsError("invalid-argument", "Missing project id.");
+  const ref = db.doc(`soldCustomers/${id}`);
+  const snap = await ref.get();
+  if (!snap.exists) throw new HttpsError("not-found", "Project not found.");
+  const proj = snap.data() as Record<string, any>;
+  const isMgr = caller.isSuper || (caller.companyId === proj.companyId && (caller.role === "admin" || caller.role === "manager"));
+  if (proj.closerUid !== caller.uid && !isMgr) throw new HttpsError("permission-denied", "Not your project.");
+
+  const placement = (Array.isArray(d.placement) ? d.placement : [])
+    .slice(0, 3)
+    .map((p) => ({ url: String(p?.url || "").slice(0, 800), note: String(p?.note || "").slice(0, 300) }))
+    .filter((p) => p.url);
+  const photos: Record<string, string> = {};
+  for (const [k, v] of Object.entries(d.survey?.photos || {})) {
+    if (typeof v === "string" && v) photos[k.slice(0, 40)] = v.slice(0, 800);
+  }
+  const checklist: Record<string, boolean> = {};
+  for (const [k, v] of Object.entries(d.survey?.checklist || {})) checklist[k.slice(0, 40)] = !!v;
+
+  const now = Date.now();
+  await ref.set({
+    placement,
+    survey: { photos, checklist },
+    surveyNotes: String(d.notes || "").slice(0, 2000),
+    surveyStatus: "submitted_for_review",
+    surveySubmittedAt: now,
+    surveySubmittedBy: caller.uid,
+    updatedAt: now,
+  }, { merge: true });
+
+  // Notify the company's PMs/admins.
+  try {
+    const recipients = new Set<string>();
+    (proj.ccEmails || []).forEach((e: string) => { if (e) recipients.add(e); });
+    if (proj.companyId) {
+      const mgrs = await db.collection("users").where("companyId", "==", proj.companyId).where("role", "in", ["admin", "manager"]).get();
+      mgrs.forEach((u) => { const e = (u.data() as any).email; if (e) recipients.add(e); });
+    }
+    if (recipients.size) {
+      const cfg = await getNotifyConfig();
+      const subject = `Site survey submitted — ${proj.customerName || ""} (${proj.reference || id.slice(0, 8)})`;
+      const html =
+        `<div style="font-family:system-ui,Arial,sans-serif;max-width:560px;margin:0 auto;color:#111">` +
+        `<h2>Site survey ready for review</h2>` +
+        `<p><strong>${escHtml(proj.customerName || "")}</strong> — ${escHtml(proj.address || "")}</p>` +
+        `<p>${placement.length} placement photo(s) and ${Object.keys(photos).length} survey photo(s) submitted by the sales rep. Open the admin portal to review and schedule.</p></div>`;
+      for (const to of recipients) {
+        try { await sendEmailDetailed(cfg, to, subject, `${proj.customerName} site survey submitted for review.`, undefined, html); } catch { /* best effort */ }
+      }
+    }
+  } catch (e) { logger.warn("survey notify failed", e); }
+
+  return { ok: true };
+});
+
 // Admin: set company-wide battery pricing (price + install adder per product).
 export const setBatteryPricing = onCall(async (request) => {
   const caller = await getCaller(request);
