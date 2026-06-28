@@ -1,3 +1,4 @@
+import type React from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -11,6 +12,33 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 // neon marching-ants energy flows, and a grain + glow atmosphere. Mirrors (and
 // extends) the sigenstor_home reference. All classes prefixed `sps-`.
 // ─────────────────────────────────────────────────────────────────────────────
+
+// A single battery the rep can select / compare inside the interactive proposal.
+// Built in BatteryTool from the offered recommendations + marketing content.
+export interface ProposalOption {
+  productId: string;
+  brand: string;
+  model: string;
+  units: number;
+  totalUsableKWh: number;
+  totalContinuousKW: number;
+  totalPeakKW: number;
+  backupDaysAchieved: number;
+  warrantyYears: number;
+  chemistry: string;
+  tagline: string;
+  features: string[];
+  benefits: string[];
+  accent: string;
+  roi: {
+    grossCost: number;
+    incentives: number;
+    netCost: number;
+    monthlySavings: number;
+    lifetimeSavings: number;
+  };
+  recommended: boolean;
+}
 
 export interface SolarShowProps {
   open: boolean;
@@ -50,6 +78,12 @@ export interface SolarShowProps {
   // rendered full-bleed on the cover + as the night backdrop on the backup slide.
   homeImage?: string;
   homeImageIsStreetView?: boolean; // true → Street View, false → Satellite
+  // Interactive CRM proposal: the full set of offered batteries the rep can pick
+  // and compare. When present, the recommendation/savings/backup slides re-theme
+  // to the selected battery and extra slides (3D/AR, features, compare) appear.
+  // When absent/empty the show behaves exactly as before.
+  options?: ProposalOption[];
+  chosenProductId?: string; // the battery currently selected in the tool
 }
 
 type Scenario = "nosolar" | "solar" | "battery" | "ev";
@@ -69,6 +103,50 @@ const PALETTE = {
 
 const money0 = (n: number | undefined | null) =>
   typeof n === "number" && isFinite(n) ? `$${Math.round(n).toLocaleString()}` : "—";
+
+// Parse a #rrggbb / #rgb hex string into [r,g,b,1] floats 0–1 for the 3D model's
+// base-color factor. Falls back to the brand purple on anything unparseable.
+function hexToRgb01(hex: string): [number, number, number, number] {
+  let h = (hex || "").trim().replace(/^#/, "");
+  if (h.length === 3) h = h.split("").map((c) => c + c).join("");
+  if (h.length !== 6 || /[^0-9a-fA-F]/.test(h)) return [0.545, 0.361, 0.965, 1]; // #8b5cf6
+  const r = parseInt(h.slice(0, 2), 16) / 255;
+  const g = parseInt(h.slice(2, 4), 16) / 255;
+  const b = parseInt(h.slice(4, 6), 16) / 255;
+  return [r, g, b, 1];
+}
+
+// model-viewer is a custom element loaded from a CDN — declare it so TSX/JSX
+// accepts the tag and its attributes without pulling in an npm dependency.
+type ModelViewerElement = HTMLElement & {
+  model?: {
+    materials?: Array<{
+      pbrMetallicRoughness?: { setBaseColorFactor?: (rgba: [number, number, number, number]) => void };
+    }>;
+  };
+  activateAR?: () => void;
+};
+declare global {
+  // eslint-disable-next-line @typescript-eslint/no-namespace
+  namespace JSX {
+    interface IntrinsicElements {
+      "model-viewer": React.DetailedHTMLProps<
+        React.HTMLAttributes<HTMLElement> & {
+          src?: string;
+          alt?: string;
+          ar?: boolean;
+          "ar-modes"?: string;
+          "camera-controls"?: boolean;
+          "auto-rotate"?: boolean;
+          "shadow-intensity"?: string;
+          exposure?: string;
+          "touch-action"?: string;
+        },
+        HTMLElement
+      >;
+    }
+  }
+}
 
 // ── count-up hook (rAF easing) ───────────────────────────────────────────────
 function useCountUp(target: number | undefined | null, active: boolean, durationMs = 1100) {
@@ -466,12 +544,49 @@ export default function SolarProposalShow(props: SolarShowProps) {
     videoUrls,
     homeImage,
     homeImageIsStreetView = false,
+    options,
+    chosenProductId,
   } = props;
+
+  const hasOptions = !!(options && options.length);
 
   const [idx, setIdx] = useState(0);
   // The interactive home scenario + day/night.
   const [scenario, setScenario] = useState<Scenario>("nosolar");
   const [night, setNight] = useState(false);
+
+  // CRM proposal: which battery is selected (drives specs/savings/3D/features) and
+  // which two are being compared (max 2). Defaults to the chosen/top option.
+  const [selectedId, setSelectedId] = useState<string>(
+    chosenProductId || options?.[0]?.productId || ""
+  );
+  const [compareIds, setCompareIds] = useState<string[]>(
+    options ? options.slice(0, 2).map((o) => o.productId) : []
+  );
+
+  const active = useMemo(
+    () => options?.find((o) => o.productId === selectedId) || options?.[0],
+    [options, selectedId]
+  );
+
+  // Effective recommendation / ROI the slides render: the selected battery's data
+  // when options are provided, else the single legacy props (nothing breaks).
+  const effRec = useMemo(
+    () =>
+      active
+        ? {
+            brand: active.brand,
+            model: active.model,
+            units: active.units,
+            totalUsableKWh: active.totalUsableKWh,
+            backupDaysAchieved: active.backupDaysAchieved,
+          }
+        : recommendation,
+    [active, recommendation]
+  );
+  const effRoi = useMemo(() => (active ? active.roi : roi), [active, roi]);
+  // The accent that re-themes the whole proposal to the selected battery.
+  const brandAccent = active?.accent || PALETTE.accent;
 
   const reduceMotion = useRef(false);
   useEffect(() => {
@@ -480,18 +595,29 @@ export default function SolarProposalShow(props: SolarShowProps) {
       !!window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
   }, []);
 
+  // model-viewer load state: "idle" (not requested), "loading", "ready" (custom
+  // element defined) or "failed" (didn't define in time → CSS/SVG fallback).
+  const [mvState, setMvState] = useState<"idle" | "loading" | "ready" | "failed">("idle");
+  const mvRef = useRef<ModelViewerElement | null>(null);
+
   // Build the slide list — hide the savings slide if there's no roi data.
   const slides = useMemo(() => {
     const list: Array<{ key: string }> = [
       { key: "cover" },
       { key: "interactive" },
     ];
-    if (roi) list.push({ key: "savings" });
-    if (recommendation) list.push({ key: "backup" });
+    // CRM proposal slides — only when an option set is provided.
+    if (hasOptions) {
+      list.push({ key: "battery3d" });
+      list.push({ key: "whybattery" });
+    }
+    if (effRoi) list.push({ key: "savings" });
+    if (effRec) list.push({ key: "backup" });
+    if (hasOptions && (options?.length ?? 0) >= 2) list.push({ key: "compare" });
     if (incentives && incentives.length) list.push({ key: "incentives" });
     list.push({ key: "cta" });
     return list;
-  }, [roi, recommendation, incentives]);
+  }, [hasOptions, options, effRoi, effRec, incentives]);
 
   const count = slides.length;
   const clamp = useCallback((n: number) => Math.max(0, Math.min(count - 1, n)), [count]);
@@ -504,7 +630,13 @@ export default function SolarProposalShow(props: SolarShowProps) {
       setIdx(0);
       setScenario(hasExistingSolar ? "solar" : "nosolar");
       setNight(false);
+      // Re-seed the battery selection from the current props on (re)open.
+      if (options && options.length) {
+        setSelectedId(chosenProductId || options[0].productId);
+        setCompareIds(options.slice(0, 2).map((o) => o.productId));
+      }
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, hasExistingSolar]);
 
   // Keyboard nav + Esc.
@@ -536,9 +668,66 @@ export default function SolarProposalShow(props: SolarShowProps) {
 
   // count-ups become active when the savings slide is the current one.
   const activeKey = slides[idx]?.key;
-  const netUp = useCountUp(roi?.netCost, open && activeKey === "savings");
-  const moUp = useCountUp(roi?.monthlySavings, open && activeKey === "savings", 900);
-  const lifeUp = useCountUp(roi?.lifetimeSavings, open && activeKey === "savings", 1400);
+  const netUp = useCountUp(effRoi?.netCost, open && activeKey === "savings");
+  const moUp = useCountUp(effRoi?.monthlySavings, open && activeKey === "savings", 900);
+  const lifeUp = useCountUp(effRoi?.lifetimeSavings, open && activeKey === "savings", 1400);
+
+  // Lazy-load Google's <model-viewer> web component the first time the 3D slide is
+  // shown. Inject the module script once (guard against double-inject across mounts
+  // via a window flag), then poll customElements until it defines — or fall back to
+  // the CSS/SVG battery after a few seconds on a slow/blocked connection.
+  useEffect(() => {
+    if (!open || activeKey !== "battery3d") return;
+    if (typeof window === "undefined") return;
+    if (window.customElements?.get?.("model-viewer")) {
+      setMvState("ready");
+      return;
+    }
+    setMvState((s) => (s === "ready" || s === "failed" ? s : "loading"));
+    const w = window as unknown as { __spsMvInjected?: boolean };
+    if (!w.__spsMvInjected) {
+      w.__spsMvInjected = true;
+      const el = document.createElement("script");
+      el.type = "module";
+      el.src = "https://ajax.googleapis.com/ajax/libs/model-viewer/4.0.0/model-viewer.min.js";
+      el.onerror = () => setMvState((s) => (s === "ready" ? s : "failed"));
+      document.head.appendChild(el);
+    }
+    let tries = 0;
+    const poll = window.setInterval(() => {
+      tries++;
+      if (window.customElements?.get?.("model-viewer")) {
+        setMvState("ready");
+        window.clearInterval(poll);
+      } else if (tries > 25) {
+        // ~5s at 200ms — give up and show the graceful fallback.
+        setMvState((s) => (s === "ready" ? s : "failed"));
+        window.clearInterval(poll);
+      }
+    }, 200);
+    return () => window.clearInterval(poll);
+  }, [open, activeKey]);
+
+  // Recolor the loaded model to the selected battery's brand accent. Runs when the
+  // model-viewer is ready and whenever the selection changes; also re-applies on
+  // the element's `load` event (the model may finish loading after mount).
+  useEffect(() => {
+    if (mvState !== "ready" || activeKey !== "battery3d") return;
+    const el = mvRef.current;
+    if (!el) return;
+    const accent = active?.accent || PALETTE.accent;
+    const apply = () => {
+      try {
+        const mat = el.model?.materials?.[0];
+        mat?.pbrMetallicRoughness?.setBaseColorFactor?.(hexToRgb01(accent));
+      } catch {
+        /* model not ready yet — the load event will retry */
+      }
+    };
+    apply();
+    el.addEventListener("load", apply);
+    return () => el.removeEventListener("load", apply);
+  }, [mvState, activeKey, active?.accent, selectedId]);
 
   if (!open) return null;
 
@@ -693,16 +882,132 @@ export default function SolarProposalShow(props: SolarShowProps) {
                 </div>
               )}
 
-              {s.key === "savings" && roi && (
+              {s.key === "battery3d" && active && (
+                <div className={"sps-inner sps-rise" + (activeKey === "battery3d" ? " in" : "")}>
+                  <div className="sps-eyebrow">Your battery</div>
+                  <h2 className="sps-h2">Meet your {active.brand} {active.model}</h2>
+
+                  <BatterySelector
+                    options={options || []}
+                    selectedId={selectedId}
+                    onSelect={setSelectedId}
+                  />
+
+                  <div className="sps-3dwrap" style={{ ["--accent" as string]: brandAccent }}>
+                    {mvState === "failed" ? (
+                      <BatteryFallback accent={brandAccent} label={`${active.brand} ${active.model}`} />
+                    ) : (
+                      <model-viewer
+                        ref={mvRef as unknown as React.Ref<HTMLElement>}
+                        src="/app/battery.glb"
+                        alt={`${active.brand} ${active.model} 3D model`}
+                        camera-controls
+                        auto-rotate
+                        ar
+                        ar-modes="webxr scene-viewer quick-look"
+                        shadow-intensity="1"
+                        exposure="1"
+                        touch-action="pan-y"
+                        style={{ width: "100%", height: "100%", background: "transparent", ["--poster-color" as string]: "transparent" }}
+                      />
+                    )}
+
+                    {/* HTML overlay: model name + key specs + AR launch */}
+                    <div className="sps-3dover">
+                      <div className="sps-3dname">
+                        {active.units}× {active.brand} {active.model}
+                      </div>
+                      <div className="sps-3dspecs">
+                        <span><b>{active.totalUsableKWh}</b> kWh usable</span>
+                        <span><b>{active.totalContinuousKW}</b> kW cont.</span>
+                        <span><b>{active.backupDaysAchieved}</b> day backup</span>
+                      </div>
+                    </div>
+                    {mvState === "failed" && (
+                      <div className="sps-3dnote">3D viewer unavailable on this connection.</div>
+                    )}
+                    {mvState !== "failed" && (
+                      <button
+                        className="sps-arbtn"
+                        style={{ borderColor: brandAccent }}
+                        onClick={() => {
+                          try { mvRef.current?.activateAR?.(); } catch { /* AR unsupported */ }
+                        }}
+                      >
+                        📱 View in your space (AR)
+                      </button>
+                    )}
+                  </div>
+                  <p className="sps-caption">
+                    Spin it, zoom in, or place it on your wall in AR — this is the unit we'd install.
+                  </p>
+                </div>
+              )}
+
+              {s.key === "whybattery" && active && (
+                <div className={"sps-inner sps-rise" + (activeKey === "whybattery" ? " in" : "")}>
+                  <div className="sps-eyebrow">Why this battery</div>
+                  <h2 className="sps-h2">{active.brand} {active.model}</h2>
+
+                  <BatterySelector
+                    options={options || []}
+                    selectedId={selectedId}
+                    onSelect={setSelectedId}
+                  />
+
+                  <div className="sps-crm" style={{ ["--accent" as string]: brandAccent }}>
+                    <div className="sps-crm-col sps-crm-feat">
+                      <div className="sps-crm-tagline">{active.tagline}</div>
+                      <div className="sps-crm-h">Features</div>
+                      <ul className="sps-crm-list">
+                        {active.features.map((f, i) => (
+                          <li key={i}><span className="sps-crm-check" style={{ color: brandAccent }}>✦</span>{f}</li>
+                        ))}
+                      </ul>
+                    </div>
+                    <div className="sps-crm-col sps-crm-ben">
+                      <div className="sps-crm-h">What it means for you</div>
+                      <ul className="sps-crm-list">
+                        {active.benefits.map((b, i) => (
+                          <li key={i}><span className="sps-crm-dot" style={{ background: brandAccent, boxShadow: `0 0 8px ${brandAccent}` }} />{b}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {s.key === "compare" && options && options.length >= 2 && (
+                <div className={"sps-inner sps-rise" + (activeKey === "compare" ? " in" : "")}>
+                  <div className="sps-eyebrow">Side by side</div>
+                  <h2 className="sps-h2">Compare two batteries</h2>
+                  <CompareSlide
+                    options={options}
+                    compareIds={compareIds}
+                    setCompareIds={setCompareIds}
+                  />
+                </div>
+              )}
+
+              {s.key === "savings" && effRoi && (
                 <div className={"sps-inner sps-rise" + (activeKey === "savings" ? " in" : "")}>
                   <div className="sps-eyebrow">The numbers</div>
                   <h2 className="sps-h2">Your savings</h2>
-                  <div className="sps-bignum sps-theme-battery">
+                  {hasOptions && active && (
+                    <div className="sps-activePill" style={{ borderColor: brandAccent }}>
+                      <span className="sps-activePill-dot" style={{ background: brandAccent, boxShadow: `0 0 8px ${brandAccent}` }} />
+                      {active.units}× {active.brand} {active.model}
+                    </div>
+                  )}
+                  <div
+                    className="sps-bignum"
+                    style={{ ["--accent" as string]: brandAccent, ["--accent-bright" as string]: brandAccent, ["--battery" as string]: brandAccent }}
+                  >
                     <div className="sps-bignum-label">Net cost after incentives</div>
                     <div className="sps-bignum-value">{money0(netUp)}</div>
                     <div className="sps-bignum-eq">
-                      {money0(roi.grossCost)} gross − {money0(roi.incentives)} incentives ={" "}
-                      <strong>{money0(roi.netCost)}</strong>
+                      {money0(effRoi.grossCost)} gross − {money0(effRoi.incentives)} incentives ={" "}
+                      <strong>{money0(effRoi.netCost)}</strong>
                     </div>
                   </div>
                   <div className="sps-savegrid">
@@ -724,7 +1029,7 @@ export default function SolarProposalShow(props: SolarShowProps) {
                 </div>
               )}
 
-              {s.key === "backup" && recommendation && (
+              {s.key === "backup" && effRec && (
                 <div className={"sps-inner sps-rise" + (activeKey === "backup" ? " in" : "")}>
                   <div className="sps-eyebrow">Resilience</div>
                   <h2 className="sps-h2">Peace of mind, day and night</h2>
@@ -743,22 +1048,25 @@ export default function SolarProposalShow(props: SolarShowProps) {
                         <HomeScene scenario="battery" night hasEv={false} />
                       </div>
                     )}
-                    <div className="sps-syscard sps-theme-battery">
+                    <div
+                      className="sps-syscard"
+                      style={{ ["--battery" as string]: brandAccent, ["--accent-bright" as string]: brandAccent }}
+                    >
                       <div className="sps-tag">System recommendation</div>
                       <div className="sps-sysname">
-                        {recommendation.units}× {recommendation.brand} {recommendation.model}
+                        {effRec.units}× {effRec.brand} {effRec.model}
                       </div>
                       <div className="sps-sysstats">
                         <div>
-                          <div className="sps-sysn">{recommendation.totalUsableKWh}</div>
+                          <div className="sps-sysn">{effRec.totalUsableKWh}</div>
                           <div className="sps-sysl">kWh usable</div>
                         </div>
                         <div>
-                          <div className="sps-sysn">{recommendation.backupDaysAchieved}</div>
+                          <div className="sps-sysn">{effRec.backupDaysAchieved}</div>
                           <div className="sps-sysl">days backup</div>
                         </div>
                         <div>
-                          <div className="sps-sysn">{recommendation.units}</div>
+                          <div className="sps-sysn">{effRec.units}</div>
                           <div className="sps-sysl">units</div>
                         </div>
                       </div>
@@ -808,10 +1116,10 @@ export default function SolarProposalShow(props: SolarShowProps) {
                   <p className="sps-ctaSub">
                     Lower bills, real backup, and energy on your terms — starting now.
                   </p>
-                  {monthlyBill != null && roi?.monthlySavings != null && (
+                  {monthlyBill != null && effRoi?.monthlySavings != null && (
                     <p className="sps-ctaLine">
                       From {money0(monthlyBill)}/mo on the grid to about{" "}
-                      {money0(roi.monthlySavings)}/mo back in your pocket.
+                      {money0(effRoi.monthlySavings)}/mo back in your pocket.
                     </p>
                   )}
                   {company && <div className="sps-ctaCompany">{company}</div>}
@@ -907,6 +1215,166 @@ function CoverSlide({
         <h1 className="sps-title">Your Energy Future</h1>
         <div className="sps-coverName">{name}</div>
         {address && <div className="sps-coverAddr">{address}</div>}
+      </div>
+    </div>
+  );
+}
+
+// ── Battery selector (persistent across CRM slides) ──────────────────────────
+function BatterySelector({
+  options,
+  selectedId,
+  onSelect,
+}: {
+  options: ProposalOption[];
+  selectedId: string;
+  onSelect: (id: string) => void;
+}) {
+  if (!options.length) return null;
+  return (
+    <div className="sps-batsel" role="tablist" aria-label="Choose your battery">
+      {options.map((o) => {
+        const on = o.productId === selectedId;
+        return (
+          <button
+            key={o.productId}
+            role="tab"
+            aria-selected={on}
+            className={"sps-batsel-item" + (on ? " on" : "")}
+            style={on ? { borderColor: o.accent, boxShadow: `0 0 0 2px ${o.accent}55` } : undefined}
+            onClick={() => onSelect(o.productId)}
+          >
+            <span className="sps-batsel-swatch" style={{ background: o.accent }} />
+            <span className="sps-batsel-txt">
+              <span className="sps-batsel-name">{o.brand} {o.model}</span>
+              <span className="sps-batsel-kwh">{o.totalUsableKWh} kWh{o.units > 1 ? ` · ${o.units} units` : ""}</span>
+            </span>
+            {o.recommended && <span className="sps-batsel-badge">★ Recommended</span>}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+// ── CSS/SVG fallback battery (when model-viewer can't load) ──────────────────
+function BatteryFallback({ accent, label }: { accent: string; label: string }) {
+  return (
+    <div className="sps-batfb" aria-label={`${label} (stylized)`}>
+      <svg viewBox="0 0 120 220" className="sps-batfb-svg" preserveAspectRatio="xMidYMid meet">
+        <defs>
+          <linearGradient id="sps-fbbody" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0" stopColor={accent} stopOpacity="0.5" />
+            <stop offset="1" stopColor={accent} stopOpacity="0.14" />
+          </linearGradient>
+        </defs>
+        {/* terminal */}
+        <rect x="46" y="6" width="28" height="10" rx="3" fill={accent} />
+        {/* body */}
+        <rect x="20" y="16" width="80" height="196" rx="18" fill="url(#sps-fbbody)" stroke={accent} strokeWidth="2" />
+        {/* glowing charge bar */}
+        <rect x="34" y="150" width="52" height="46" rx="8" fill={accent} opacity="0.9" className="sps-batfb-charge" />
+        <rect x="34" y="40" width="52" height="100" rx="8" fill={accent} opacity="0.12" />
+        {/* bolt */}
+        <path d="M64 60 L48 104 L60 104 L54 144 L74 96 L62 96 Z" fill="#fff" opacity="0.9" />
+      </svg>
+      <div className="sps-batfb-label">{label}</div>
+    </div>
+  );
+}
+
+// ── Compare two batteries ────────────────────────────────────────────────────
+function CompareSlide({
+  options,
+  compareIds,
+  setCompareIds,
+}: {
+  options: ProposalOption[];
+  compareIds: string[];
+  setCompareIds: (ids: string[]) => void;
+}) {
+  const aId = compareIds[0] || options[0]?.productId;
+  const bId = compareIds[1] || options[1]?.productId;
+  const a = options.find((o) => o.productId === aId) || options[0];
+  const b = options.find((o) => o.productId === bId) || options[1];
+
+  const pick = (slot: 0 | 1, id: string) => {
+    const next: string[] = [compareIds[0] ?? aId, compareIds[1] ?? bId];
+    next[slot] = id;
+    setCompareIds(next);
+  };
+
+  if (!a || !b) return null;
+
+  // higher = better for most rows; netCost lower is better.
+  type Row = { label: string; av: number; bv: number; fmt: (n: number) => string; lowerBetter?: boolean };
+  const rows: Row[] = [
+    { label: "Usable kWh", av: a.totalUsableKWh, bv: b.totalUsableKWh, fmt: (n) => `${n} kWh` },
+    { label: "Continuous kW", av: a.totalContinuousKW, bv: b.totalContinuousKW, fmt: (n) => `${n} kW` },
+    { label: "Surge kW", av: a.totalPeakKW, bv: b.totalPeakKW, fmt: (n) => `${n} kW` },
+    { label: "Backup days", av: a.backupDaysAchieved, bv: b.backupDaysAchieved, fmt: (n) => `${n}` },
+    { label: "Warranty", av: a.warrantyYears, bv: b.warrantyYears, fmt: (n) => `${n} yr` },
+    { label: "Net cost", av: a.roi.netCost, bv: b.roi.netCost, fmt: (n) => money0(n), lowerBetter: true },
+    { label: "Est. monthly savings", av: a.roi.monthlySavings, bv: b.roi.monthlySavings, fmt: (n) => `${money0(n)}/mo` },
+  ];
+
+  const Picker = ({ slot, val, side }: { slot: 0 | 1; val: string; side: "a" | "b" }) => (
+    <select
+      className="sps-cmp-pick"
+      value={val}
+      style={{ borderColor: side === "a" ? a.accent : b.accent }}
+      onChange={(e) => pick(slot, e.target.value)}
+    >
+      {options.map((o) => (
+        <option key={o.productId} value={o.productId}>
+          {o.brand} {o.model}
+        </option>
+      ))}
+    </select>
+  );
+
+  return (
+    <div className="sps-cmp" style={{ ["--a-accent" as string]: a.accent, ["--b-accent" as string]: b.accent }}>
+      <div className="sps-cmp-heads">
+        <div className="sps-cmp-spacer" />
+        <div className="sps-cmp-head">
+          <span className="sps-cmp-swatch" style={{ background: a.accent }} />
+          <Picker slot={0} val={a.productId} side="a" />
+          {a.recommended && <span className="sps-cmp-badge">★ Recommended</span>}
+        </div>
+        <div className="sps-cmp-head">
+          <span className="sps-cmp-swatch" style={{ background: b.accent }} />
+          <Picker slot={1} val={b.productId} side="b" />
+          {b.recommended && <span className="sps-cmp-badge">★ Recommended</span>}
+        </div>
+      </div>
+
+      <div className="sps-cmp-rows">
+        <div className="sps-cmp-row sps-cmp-chem">
+          <div className="sps-cmp-label">Chemistry</div>
+          <div className="sps-cmp-val">{a.chemistry}</div>
+          <div className="sps-cmp-val">{b.chemistry}</div>
+        </div>
+        {rows.map((r) => {
+          const aWins = r.lowerBetter ? r.av < r.bv : r.av > r.bv;
+          const bWins = r.lowerBetter ? r.bv < r.av : r.bv > r.av;
+          return (
+            <div className="sps-cmp-row" key={r.label}>
+              <div className="sps-cmp-label">{r.label}</div>
+              <div className={"sps-cmp-val" + (aWins ? " win" : "")}>{r.fmt(r.av)}</div>
+              <div className={"sps-cmp-val" + (bWins ? " win" : "")}>{r.fmt(r.bv)}</div>
+            </div>
+          );
+        })}
+        <div className="sps-cmp-row sps-cmp-feats">
+          <div className="sps-cmp-label">Top features</div>
+          <ul className="sps-cmp-val sps-cmp-featlist">
+            {a.features.slice(0, 3).map((f, i) => <li key={i}>{f}</li>)}
+          </ul>
+          <ul className="sps-cmp-val sps-cmp-featlist">
+            {b.features.slice(0, 3).map((f, i) => <li key={i}>{f}</li>)}
+          </ul>
+        </div>
       </div>
     </div>
   );
@@ -1265,7 +1733,119 @@ const CSS = `
   .sps-scbtn{min-width:calc(50% - 4px);flex:1 1 calc(50% - 4px);}
 }
 
+/* ── CRM: battery selector ── */
+.sps-batsel{display:flex;flex-wrap:wrap;gap:8px;justify-content:center;width:min(940px,96vw);}
+.sps-batsel-item{position:relative;display:flex;align-items:center;gap:10px;
+  padding:9px 13px;border-radius:12px;border:1px solid var(--line-2);
+  background:rgba(255,255,255,.025);color:var(--text);cursor:pointer;text-align:left;
+  transition:border-color .2s,background .2s,box-shadow .2s,transform .1s;min-height:48px;}
+.sps-batsel-item:hover{background:rgba(255,255,255,.05);}
+.sps-batsel-item:active{transform:scale(.98);}
+.sps-batsel-item.on{background:rgba(255,255,255,.06);}
+.sps-batsel-swatch{width:14px;height:22px;border-radius:4px;flex-shrink:0;
+  box-shadow:inset 0 0 0 1px rgba(255,255,255,.18);}
+.sps-batsel-txt{display:flex;flex-direction:column;gap:2px;}
+.sps-batsel-name{font-family:var(--font-head);font-size:13px;font-weight:600;line-height:1.1;}
+.sps-batsel-kwh{font-family:var(--font-mono);font-size:9px;letter-spacing:.08em;color:var(--text-dim);}
+.sps-batsel-badge{font-family:var(--font-mono);font-size:8px;letter-spacing:.1em;font-weight:600;
+  color:#06121f;background:linear-gradient(135deg,#ffe9a8,var(--solar));
+  padding:3px 7px;border-radius:999px;margin-left:2px;white-space:nowrap;}
+
+/* ── CRM: interactive 3D / AR ── */
+.sps-3dwrap{position:relative;width:min(620px,94vw);aspect-ratio:4/5;max-height:62vh;
+  background:radial-gradient(120% 100% at 50% 30%,rgba(255,255,255,.05),rgba(10,7,18,.6));
+  border:1px solid var(--line);border-radius:20px;overflow:hidden;
+  box-shadow:0 24px 70px rgba(0,0,0,.5),inset 0 1px 0 rgba(255,255,255,.05);}
+.sps-3dwrap::before{content:'';position:absolute;top:0;left:0;width:3px;height:100%;
+  background:var(--accent);z-index:4;border-radius:3px 0 0 3px;}
+.sps-3dwrap model-viewer{width:100%;height:100%;display:block;}
+.sps-3dover{position:absolute;left:0;right:0;top:0;z-index:3;padding:14px 16px;
+  display:flex;flex-direction:column;gap:6px;pointer-events:none;
+  background:linear-gradient(180deg,rgba(10,7,18,.55),transparent);}
+.sps-3dname{font-family:var(--font-head);font-size:clamp(15px,2.6vw,20px);font-weight:600;
+  text-align:left;letter-spacing:-.01em;}
+.sps-3dspecs{display:flex;flex-wrap:wrap;gap:6px 14px;font-family:var(--font-mono);
+  font-size:10.5px;letter-spacing:.04em;color:var(--text-dim);}
+.sps-3dspecs b{color:var(--accent-bright);font-weight:700;font-size:13px;}
+.sps-arbtn{position:absolute;left:50%;bottom:14px;transform:translateX(-50%);z-index:5;
+  font-family:var(--font-head);font-size:13px;font-weight:600;letter-spacing:.01em;
+  padding:11px 18px;border-radius:999px;border:1px solid var(--accent);color:#fff;cursor:pointer;
+  background:rgba(10,7,18,.7);backdrop-filter:blur(8px);transition:background .2s,transform .1s;
+  white-space:nowrap;}
+.sps-arbtn:hover{background:rgba(139,92,246,.28);}
+.sps-arbtn:active{transform:translateX(-50%) scale(.96);}
+.sps-3dnote{position:absolute;left:0;right:0;bottom:60px;z-index:5;text-align:center;
+  font-family:var(--font-mono);font-size:10px;letter-spacing:.06em;color:var(--text-dim);}
+/* CSS/SVG fallback battery */
+.sps-batfb{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;
+  justify-content:center;gap:12px;padding:20px;}
+.sps-batfb-svg{width:auto;height:62%;max-width:60%;
+  filter:drop-shadow(0 12px 30px rgba(0,0,0,.5));}
+.sps-batfb-charge{animation:sps-fbpulse 2.4s ease-in-out infinite;transform-origin:center bottom;}
+@keyframes sps-fbpulse{0%,100%{opacity:.65;}50%{opacity:1;}}
+.sps-batfb-label{font-family:var(--font-head);font-size:15px;font-weight:600;}
+
+/* ── CRM: features & benefits ── */
+.sps-activePill{display:inline-flex;align-items:center;gap:8px;align-self:center;
+  font-family:var(--font-mono);font-size:11px;letter-spacing:.06em;
+  padding:6px 13px;border-radius:999px;border:1px solid var(--line-2);
+  background:rgba(10,7,18,.5);}
+.sps-activePill-dot{width:8px;height:8px;border-radius:50%;}
+.sps-crm{display:grid;grid-template-columns:1fr 1fr;gap:16px;width:min(900px,96vw);text-align:left;}
+.sps-crm-col{position:relative;overflow:hidden;background:var(--card);
+  border:1px solid var(--line);border-radius:16px;padding:20px 22px;}
+.sps-crm-col::before{content:'';position:absolute;top:0;left:0;width:3px;height:100%;background:var(--accent);}
+.sps-crm-tagline{font-family:var(--font-head);font-size:16px;font-weight:600;line-height:1.35;
+  margin-bottom:14px;color:#efeaf8;}
+.sps-crm-h{font-family:var(--font-mono);font-size:10px;letter-spacing:.18em;text-transform:uppercase;
+  color:var(--text-dim);margin-bottom:10px;}
+.sps-crm-list{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:9px;}
+.sps-crm-list li{display:flex;align-items:flex-start;gap:10px;font-family:var(--font-body);
+  font-size:14px;line-height:1.45;color:#d6cfe6;}
+.sps-crm-check{flex-shrink:0;font-size:13px;line-height:1.4;}
+.sps-crm-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0;margin-top:6px;}
+@media(max-width:680px){.sps-crm{grid-template-columns:1fr;}}
+
+/* ── CRM: compare two ── */
+.sps-cmp{width:min(900px,96vw);background:var(--card);border:1px solid var(--line);
+  border-radius:16px;overflow:hidden;box-shadow:0 24px 70px rgba(0,0,0,.5);}
+.sps-cmp-heads,.sps-cmp-row{display:grid;grid-template-columns:1.2fr 1fr 1fr;}
+.sps-cmp-heads{padding:14px 12px;border-bottom:1px solid var(--line);gap:8px;align-items:start;}
+.sps-cmp-spacer{}
+.sps-cmp-head{display:flex;flex-direction:column;align-items:center;gap:7px;text-align:center;}
+.sps-cmp-swatch{width:26px;height:8px;border-radius:4px;}
+.sps-cmp-pick{width:100%;max-width:170px;font-family:var(--font-head);font-size:12.5px;font-weight:600;
+  padding:7px 9px;border-radius:9px;border:1px solid var(--line-2);
+  background:var(--card-2);color:var(--text);cursor:pointer;}
+.sps-cmp-badge{font-family:var(--font-mono);font-size:8px;letter-spacing:.1em;font-weight:600;
+  color:#06121f;background:linear-gradient(135deg,#ffe9a8,var(--solar));
+  padding:3px 7px;border-radius:999px;}
+.sps-cmp-rows{display:flex;flex-direction:column;}
+.sps-cmp-row{padding:11px 12px;gap:8px;align-items:center;border-bottom:1px solid var(--line);}
+.sps-cmp-row:last-child{border-bottom:0;}
+.sps-cmp-row:nth-child(even){background:rgba(255,255,255,.015);}
+.sps-cmp-label{font-family:var(--font-mono);font-size:10.5px;letter-spacing:.06em;
+  text-transform:uppercase;color:var(--text-dim);}
+.sps-cmp-val{font-family:var(--font-head);font-size:14px;font-weight:600;text-align:center;
+  color:#d6cfe6;}
+.sps-cmp-val.win{color:#fff;}
+.sps-cmp-val.win::after{content:'▲';font-size:8px;margin-left:6px;color:#34d399;
+  vertical-align:middle;}
+.sps-cmp-feats{align-items:start;}
+.sps-cmp-featlist{list-style:none;margin:0;padding:0;text-align:left;font-family:var(--font-body);
+  font-size:11.5px;font-weight:400;line-height:1.4;color:var(--text-dim);
+  display:flex;flex-direction:column;gap:5px;}
+.sps-cmp-featlist li{position:relative;padding-left:12px;}
+.sps-cmp-featlist li::before{content:'·';position:absolute;left:2px;color:var(--accent-bright);}
+@media(max-width:560px){
+  .sps-cmp-label{font-size:9px;}
+  .sps-cmp-val{font-size:12px;}
+  .sps-cmp-pick{font-size:11px;}
+  .sps-cmp-featlist{font-size:10px;}
+}
+
 @media(prefers-reduced-motion:reduce){
+  .sps-batfb-charge{animation:none!important;opacity:.9;}
   .sps-flow.on,.sps-flow.rev.on{animation:none!important;opacity:1;}
   .sps-sun.on,.sps-window.lit,.sps-shine,.sps-batfill.filling,
   .sps-evcharge.on,.sps-star,.sps-outage,.sps-ctaGlow,.sps-live-dot,.sps-grain{animation:none!important;}

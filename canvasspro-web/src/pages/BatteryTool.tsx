@@ -12,6 +12,7 @@ import {
   recommendSystems,
   systemForUnits,
   computeROI,
+  batteryContent,
   BATTERIES,
   type SolarInput,
   type LoadResult,
@@ -27,7 +28,7 @@ import {
   type AreaIncentive,
   type IncentiveReport,
 } from "../lib/incentives";
-import SolarProposalShow from "./SolarProposalShow";
+import SolarProposalShow, { type ProposalOption } from "./SolarProposalShow";
 
 const fmt = (ms: number) =>
   new Date(ms).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
@@ -592,6 +593,55 @@ export default function BatteryTool() {
         : null,
     [system, pricePerUnit, installAdder, incentivesTotalUsd, bill.ratePerKWh, bill.dailyKWh]
   );
+
+  // Build the full option set for the interactive CRM proposal: every offered
+  // recommendation, with marketing content + per-product pricing/ROI so the show
+  // can re-theme to whichever battery the rep selects in front of the homeowner.
+  const proposalOptions = useMemo<ProposalOption[]>(() => {
+    const topId = recs[0]?.product.id;
+    return recs.map((rec) => {
+      const content = batteryContent(rec.product.id);
+      // Per-product pricing from the company catalog. Fall back to the page's
+      // current typed price only for the chosen product (so the live edit shows
+      // through); otherwise use the company entry, defaulting to 0.
+      const entry = company?.batteryPricing?.[rec.product.id];
+      const isChosen = rec.product.id === (system?.product.id ?? chosen?.product.id);
+      const ppu = isChosen ? (Number(pricePerUnit) || 0) : (entry?.price ?? 0);
+      const adder = isChosen ? (Number(installAdder) || 0) : (entry?.adder ?? 0);
+      const r = computeROI({
+        rec,
+        pricePerUnit: ppu,
+        installAdder: adder,
+        incentivesTotalUsd,
+        ratePerKWh: bill.ratePerKWh,
+        dailyUsageKWh: bill.dailyKWh,
+      });
+      return {
+        productId: rec.product.id,
+        brand: rec.product.brand,
+        model: rec.product.model,
+        units: rec.units,
+        totalUsableKWh: rec.totalUsableKWh,
+        totalContinuousKW: rec.totalContinuousKW,
+        totalPeakKW: rec.totalPeakKW,
+        backupDaysAchieved: rec.backupDaysAchieved,
+        warrantyYears: rec.product.warrantyYears,
+        chemistry: rec.product.chemistry,
+        tagline: content.tagline,
+        features: content.features,
+        benefits: content.benefits,
+        accent: content.accent,
+        roi: {
+          grossCost: r.grossCost,
+          incentives: r.incentives,
+          netCost: r.netCost,
+          monthlySavings: r.monthlySavings,
+          lifetimeSavings: r.lifetimeSavings,
+        },
+        recommended: rec.product.id === topId,
+      };
+    });
+  }, [recs, company?.batteryPricing, system?.product.id, chosen?.product.id, pricePerUnit, installAdder, incentivesTotalUsd, bill.ratePerKWh, bill.dailyKWh]);
 
   // 7. Proposal
   const [aiSummary, setAiSummary] = useState("");
@@ -1448,6 +1498,8 @@ export default function BatteryTool() {
         hasExistingSolar={solar.hasSolar}
         homeImage={homeImg || undefined}
         homeImageIsStreetView={homeIsSV}
+        options={proposalOptions}
+        chosenProductId={system?.product.id}
       />
     </div>
   );
