@@ -69,6 +69,11 @@ export interface Company {
   // which products reps may offer (unset/empty = all products offered).
   batteryPricing?: Record<string, { price: number; adder: number }>;
   batteryOffered?: string[];
+  // Proposal pricing slide: cash-reservation deposit (a flat $ amount OR a % of
+  // the system price), and the Sungage financing-application destination.
+  batteryDepositUsd?: number; // flat deposit (default $2,500 when unset)
+  batteryDepositPct?: number; // % of system price; takes precedence when > 0
+  sungageApplyUrl?: string; // dealer's Sungage application link (else portal fallback)
   createdAt?: number;
 }
 
