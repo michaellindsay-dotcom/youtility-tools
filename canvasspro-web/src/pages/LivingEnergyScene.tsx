@@ -3,18 +3,19 @@ import { useMemo, useState } from "react";
 // ─────────────────────────────────────────────────────────────────────────────
 // LivingEnergyScene — a photoreal, interactive "your home as a living energy
 // system" centerpiece for the battery proposal. A real 3D-rendered home cutaway
-// (rooftop solar + Sigen Gateway + SigenStor battery tower + EV in the garage +
-// grid pole) sits behind an SVG overlay whose animated energy-flow lines are
-// anchored to the actual components in the render. The homeowner picks a setup
-// (Solar only / + Battery / + EV / Planning) and a mode (Self-consumption,
-// Battery→Home, DC-charge EV, V2H outage, V2G, Grid pull…); the flows, live
-// System-Status numbers, atmosphere (day/night/outage) and the explainer card
-// all update together. Tapping any glowing hotspot explains that component.
+// (rooftop solar + gateway + battery tower + EV in the garage + grid pole) sits
+// behind an SVG overlay whose animated energy-flow lines are anchored to the
+// actual components in the render. The homeowner picks a setup (Solar only / +
+// Battery / + EV / Planning) and a mode; the flows, live System-Status numbers,
+// atmosphere (day/night/outage) and the explainer card all update together.
+// Tapping any glowing hotspot explains that component.
 //
-// Ported from the hand-authored sigenstor_home.html (same render + flow geometry)
-// into React so it lives inside the proposal, themes to the selected battery's
-// accent, and is fed the customer's real usage. Self-contained: one <style>
-// block, all classes prefixed `les-`.
+// All explainer copy and the available modes are built from the SELECTED
+// battery's real specs (name, usable kWh, continuous/surge kW, warranty,
+// chemistry, backup days) and capabilities — so it reads correctly for any
+// product. Bidirectional-EV modes (DC-DC charge / V2H / V2G) only appear when
+// the chosen battery actually supports them. Self-contained: one <style> block,
+// all classes prefixed `les-`.
 // ─────────────────────────────────────────────────────────────────────────────
 
 const BASE = (import.meta.env.BASE_URL || "/").replace(/\/$/, "");
@@ -29,8 +30,9 @@ type InfoCard = {
 };
 
 type Stats = { solar: number; home: number; battery: number; ev: number; exportKW: number; importKW: number };
-
 type Mode = InfoCard & { flows: string[]; stats: Stats; cable: boolean; atmo: "" | "night" | "outage" };
+type SetupKey = "solar-only" | "solar-battery" | "full" | "planning";
+type SetupDef = { label: string; ico: string; modes: Array<{ key: string; title: string; sub: string }>; defaultMode: string };
 
 // ── Flow path geometry (anchored to the real render, viewBox 1600×817) ───────
 type FlowDef = { id: string; d: string; stroke: string; width: number; reverse?: boolean };
@@ -53,8 +55,8 @@ const FLOWS: FlowDef[] = [
 ];
 
 // ── Hotspots (glowing dots on each real component) ───────────────────────────
-type Hotspot = { key: keyof typeof HOTSPOT_CONTENT; x: number; y: number; color: string; label: string };
-const HOTSPOTS: Hotspot[] = [
+type HotKey = "solar" | "gateway" | "sigenstor" | "ev" | "home" | "grid";
+const HOTSPOTS: Array<{ key: HotKey; x: number; y: number; color: string; label: string }> = [
   { key: "solar", x: 450, y: 180, color: "#ffd86b", label: "SOLAR PV" },
   { key: "gateway", x: 695, y: 510, color: "#8b5cf6", label: "GATEWAY" },
   { key: "sigenstor", x: 875, y: 560, color: "#8b5cf6", label: "BATTERY" },
@@ -63,304 +65,370 @@ const HOTSPOTS: Hotspot[] = [
   { key: "grid", x: 1540, y: 420, color: "#ef4444", label: "GRID" },
 ];
 
-const HOTSPOT_CONTENT: Record<string, InfoCard> = {
-  solar: {
-    theme: "solar",
-    tag: "Rooftop PV Array",
-    title: "The <em>source</em> — 8 to 12 kW on the roof",
-    body: "Premium monocrystalline panels feed DC power directly into the battery's energy controller through independent MPPT channels. Complex roof layouts with multiple orientations still harvest maximum energy.",
-    spec: "<strong>2:1 DC/AC ratio compatible.</strong> Oversize panels vs inverter for maximum solar harvest — every cloudy-morning watt counts.",
-  },
-  sigenstor: {
-    theme: "sigenstor",
-    tag: "5-in-1 Home ESS",
-    title: "One stack. <em>Five devices in one.</em>",
-    body: "Solar hybrid inverter, battery PCS, LiFePO₄ modules, a DC bi-directional EV charger, and the EMS brain — all in a single integrated tower. Every component speaks native DC on one bus, eliminating conversion losses.",
-    spec: "<strong>Stackable modules</strong> deliver usable kWh and continuous kW per unit, stackable several high. High round-trip efficiency, ~0 ms backup transfer, weather-rated for indoor or outdoor install.",
-  },
-  gateway: {
-    theme: "sigenstor",
-    tag: "Smart Gateway",
-    title: "The <em>smart manager</em> of the house",
-    body: "The gateway is the communication and backup-management hub. It monitors every circuit, coordinates solar + battery + EV + grid, and handles the instant transfer when the utility goes down.",
-    spec: "<strong>~0 ms transfer.</strong> Your computer doesn't reboot, your Wi-Fi doesn't drop, your medical equipment stays online. The neighbors lose power — you don't even notice.",
-  },
-  ev: {
-    theme: "ev",
-    tag: "Electric Vehicle · V2X Ready",
-    title: "Your EV is a <em>75—130 kWh</em> mobile battery",
-    body: "A modern EV carries 5—10× the capacity of a typical home battery. With bidirectional V2X, your car can power the home during outages, or discharge back to the grid for peak-rate revenue.",
-    spec: "<strong>V2H &amp; V2G support</strong> depends on the vehicle. The DC module is upgradable over the air as new EVs get certified — F-150 Lightning, Kia EV9, Ioniq 5/6, and more.",
-  },
-  home: {
-    theme: "home",
-    tag: "The Load",
-    title: "Your home, <em>unchanged</em> — except the bill",
-    body: "The hybrid inverter converts DC from solar, battery, or EV into clean AC for your home. Lights, HVAC, heat pump, kitchen, EV charging — nothing changes in how you live. Everything changes on the utility bill.",
-    spec: "<strong>A right-sized battery + solar</strong> offsets 90—110% of consumption, driving net bills toward zero.",
-  },
-  grid: {
-    theme: "grid",
-    tag: "Utility Connection",
-    title: "The utility as your <em>backup</em>",
-    body: "The grid connection becomes a safety net for the darkest stretches — and a revenue opportunity during peak demand hours. Storing and using your own energy is increasingly more valuable than exporting it.",
-    spec: "<strong>Programmable reserve:</strong> set a minimum battery % (e.g. 20%) to hold back for outages. Never caught empty during a grid event.",
-  },
+// ── Battery context that drives all copy ─────────────────────────────────────
+type Ctx = {
+  name: string;
+  units: number;
+  usableKWh: number;
+  continuousKW: number;
+  peakKW: number;
+  warrantyYears: number;
+  chemistry: string;
+  backupDays: number;
+  bidirectionalEv: boolean;
 };
 
-const MODE_CONTENT: Record<string, Mode> = {
-  self: {
-    theme: "sigenstor",
-    tag: "Default · Daytime Operation",
-    title: "<em>Self Consumption</em> — use your own sun first",
-    body: "Solar DC drops down the wall into the gateway, which feeds the home and banks any surplus in the battery tower. Every watt displaces a retail-rate kWh from the utility.",
-    spec: "<strong>Highest-value mode.</strong> You displace retail-rate grid power with panels you already own, and bank the surplus for tonight.",
-    flows: ["flow-solar-gw", "flow-gw-home", "flow-gw-bat"],
-    stats: { solar: 7.4, home: 2.1, battery: 68, ev: 82, exportKW: 0, importKW: 0 },
-    cable: false,
-    atmo: "",
-  },
-  "battery-home": {
-    theme: "sigenstor",
-    tag: "Evening / Night Operation",
-    title: "Battery <em>powers the home</em> after sunset",
-    body: "Solar's done for the day. The battery pushes stored DC up to the gateway, which converts to AC and delivers it to every circuit in the home. The utility doesn't know you exist.",
-    spec: "<strong>High continuous discharge</strong> from a multi-module stack — enough for central AC + kitchen + lights simultaneously.",
-    flows: ["flow-bat-gw", "flow-gw-home"],
-    stats: { solar: 0, home: 3.2, battery: 54, ev: 82, exportKW: 0, importKW: 0 },
-    cable: false,
-    atmo: "night",
-  },
-  "ev-charge": {
-    theme: "charger",
-    tag: "DC-DC Direct Charging",
-    title: "Charge your EV <em>DC-to-DC</em> from the sun",
-    body: "Solar enters the gateway, which feeds the home. Surplus drops into the battery tower, and the DC charger module at the base sends power straight out the cable to the vehicle — no AC conversion, no onboard converter loss.",
-    spec: "<strong>Up to 25 kW DC.</strong> Roughly 3× faster than a typical Level-2 AC charger, with less conversion loss. Empty EV to 80% in a single sunny afternoon.",
-    flows: ["flow-solar-gw", "flow-gw-home", "flow-gw-bat", "flow-dcc-ev"],
-    stats: { solar: 9.2, home: 2.0, battery: 72, ev: 45, exportKW: 0, importKW: 0 },
-    cable: true,
-    atmo: "",
-  },
-  v2h: {
-    theme: "ev",
-    tag: "V2H · Vehicle-to-Home",
-    title: "The grid is down. <em>Your car runs the house.</em>",
-    body: "During a blackout the EV pushes DC back up the cable into the DC charger at the base of the tower, up to the gateway, and out to every circuit in the home. A 131 kWh truck can run a typical home for 3–5 days.",
-    spec: "<strong>~0 ms transfer.</strong> No flicker. Refrigerator keeps running. Medical equipment stays online. A grid-down week becomes a non-event.",
-    flows: ["flow-ev-dcc", "flow-bat-gw", "flow-gw-home"],
-    stats: { solar: 0, home: 2.4, battery: 12, ev: 68, exportKW: 0, importKW: 0 },
-    cable: true,
-    atmo: "outage",
-  },
-  v2g: {
-    theme: "v2g",
-    tag: "V2G · Vehicle-to-Grid",
-    title: "Sell your EV's power at <em>peak rates</em>",
-    body: "EV pushes DC up through the cable into the battery tower, then straight out to the utility. Pure outbound: peak-rate revenue on power originally charged cheap. Plug in full at noon, profit by 7 PM.",
-    spec: "<strong>Pioneering V2X.</strong> The DC module is designed for V2G; vehicle compatibility rolls out via OTA updates as ISO 15118-20 matures in North America.",
-    flows: ["flow-ev-dcc-v2g", "flow-bat-grid-v2g"],
-    stats: { solar: 0, home: 2.8, battery: 55, ev: 72, exportKW: 9.5, importKW: 0 },
-    cable: true,
-    atmo: "",
-  },
-  "grid-pull": {
-    theme: "grid",
-    tag: "Grid Pull · Rare With Full Stack",
-    title: "When stored energy runs low, <em>the grid fills in</em>",
-    body: "On rare cloudy stretches with the batteries drained, the utility quietly backfills — in through the battery tower, up to the gateway, and out to the home. The reverse of the export path.",
-    spec: "<strong>Programmable reserve:</strong> keep a user-set % (e.g. 20%) always in the tank for outage readiness. Never caught empty.",
-    flows: ["flow-grid-bat", "flow-bat-gw", "flow-gw-home"],
-    stats: { solar: 0.2, home: 3.5, battery: 18, ev: 40, exportKW: 0, importKW: 3.3 },
-    cable: false,
-    atmo: "",
-  },
-  // Solar only
-  "so-day": {
-    theme: "solar",
-    tag: "Daytime · Solar Only",
-    title: "Solar <em>powers the home</em> — but only while the sun shines",
-    body: "Panels produce DC, the inverter converts to AC, and your home runs on sun. It works beautifully at noon. The problem is everything that happens outside that window.",
-    spec: "<strong>Utilities pay a few ¢/kWh</strong> for excess solar you export — then sell it back that evening at full retail. A large markup on your own power.",
-    flows: ["flow-solar-gw", "flow-gw-home", "flow-gw-grid-surplus"],
-    stats: { solar: 7.4, home: 2.1, battery: 0, ev: 0, exportKW: 5.3, importKW: 0 },
-    cable: false,
-    atmo: "",
-  },
-  "so-night": {
-    theme: "grid",
-    tag: "Evening · Solar Only",
-    title: "Sun goes down. <em>You buy it all back at retail.</em>",
-    body: "No sun, no production. Your home pulls from the grid at the full retail rate — including the cheap power you just exported two hours ago. Without a battery there's nothing to fall back on.",
-    spec: "<strong>This is the net-metering gap.</strong> Solar-only homes lose much of their excess production value to the utility's rate spread.",
-    flows: ["flow-grid-gw-only", "flow-gw-home"],
-    stats: { solar: 0, home: 3.2, battery: 0, ev: 0, exportKW: 0, importKW: 3.2 },
-    cable: false,
-    atmo: "night",
-  },
-  "so-outage": {
-    theme: "grid",
-    tag: "Outage · Solar Only",
-    title: "The grid goes down. <em>So do your panels.</em>",
-    body: "Here's the painful one: when the utility loses power, grid-tied solar inverters are required by code to shut off — even in broad daylight. Without a battery, your panels go dark with everyone else's lights.",
-    spec: "<strong>Anti-islanding protection</strong> is a federal requirement (UL 1741). Solar-only homes cannot run during a blackout. Period.",
-    flows: [],
-    stats: { solar: 0, home: 0, battery: 0, ev: 0, exportKW: 0, importKW: 0 },
-    cable: false,
-    atmo: "outage",
-  },
-  // Solar + battery
-  "sb-self": {
-    theme: "sigenstor",
-    tag: "Default · Daytime Operation",
-    title: "<em>Self Consumption</em> — use your own sun first",
-    body: "Solar DC drops into the gateway, feeds the home, and banks any surplus in the battery. Every watt you produce either powers your home right now or saves itself for tonight.",
-    spec: "<strong>Highest-value mode.</strong> You displace retail-rate grid power with panels you already own, and bank the surplus for tonight.",
-    flows: ["flow-solar-gw", "flow-gw-home", "flow-gw-bat"],
-    stats: { solar: 7.4, home: 2.1, battery: 68, ev: 0, exportKW: 0, importKW: 0 },
-    cable: false,
-    atmo: "",
-  },
-  "sb-evening": {
-    theme: "sigenstor",
-    tag: "Evening Discharge",
-    title: "Battery <em>powers the home</em> after sunset",
-    body: "The sun is down, the house is awake: dinner, laundry, TV, HVAC. Power comes from the battery at no cost, no utility involvement, no rate spread.",
-    spec: "<strong>High continuous discharge</strong> covers central AC + kitchen + lights simultaneously.",
-    flows: ["flow-bat-gw", "flow-gw-home"],
-    stats: { solar: 0, home: 3.2, battery: 54, ev: 0, exportKW: 0, importKW: 0 },
-    cable: false,
-    atmo: "night",
-  },
-  "sb-outage": {
-    theme: "ev",
-    tag: "Outage · Battery Backup",
-    title: "Grid goes down. <em>You don't notice.</em>",
-    body: "The battery islands your home almost instantly — fridge, Wi-Fi, lights, medical equipment all keep running. Solar even continues producing during daylight, recharging the battery while the grid is out.",
-    spec: "<strong>A multi-module stack</strong> is roughly a full day of essential loads. Add more modules for longer coverage.",
-    flows: ["flow-bat-gw", "flow-gw-home"],
-    stats: { solar: 0, home: 2.4, battery: 62, ev: 0, exportKW: 0, importKW: 0 },
-    cable: false,
-    atmo: "outage",
-  },
-  "sb-grid": {
-    theme: "grid",
-    tag: "Grid Pull · Rare",
-    title: "Battery empty + cloudy day = <em>grid fills in</em>",
-    body: "When solar can't keep up and the battery is drained, the utility quietly backfills through the gateway. With a properly sized system, most homes pull from the grid less than 10% of the year.",
-    spec: "<strong>Programmable reserve:</strong> hold a user-set % (e.g. 20%) for outage readiness. Never caught empty.",
-    flows: ["flow-grid-bat", "flow-bat-gw", "flow-gw-home"],
-    stats: { solar: 0.2, home: 3.5, battery: 18, ev: 0, exportKW: 0, importKW: 3.3 },
-    cable: false,
-    atmo: "",
-  },
-  // Planning
-  "pl-problem": {
-    theme: "grid",
-    tag: "The Problem",
-    title: "Utility rates keep <em>climbing</em>",
-    body: "Utilities have raised rates repeatedly over the last decade — and they keep climbing several percent a year. Every year you wait is another year locked into their increases.",
-    spec: "<strong>Solar locks your energy cost for 25+ years.</strong> When rates jump next, solar homeowners don't even notice.",
-    flows: [],
-    stats: { solar: 0, home: 3.2, battery: 0, ev: 0, exportKW: 0, importKW: 3.2 },
-    cable: false,
-    atmo: "night",
-  },
-  "pl-solar-only": {
-    theme: "solar",
-    tag: "Tier 1 · Solar Panels Only",
-    title: "<em>The entry tier.</em> Panels, nothing else.",
-    body: "8–12 kW on the roof, tied to the grid through a string inverter. Cuts your bill 70–90% on sunny days. But you still pay retail every night, and you still lose power in an outage.",
-    spec: "<strong>Lower upfront cost · 8–10 yr payback · No outage protection.</strong>",
-    flows: ["flow-solar-gw", "flow-gw-home", "flow-gw-grid-surplus"],
-    stats: { solar: 7.4, home: 2.1, battery: 0, ev: 0, exportKW: 5.3, importKW: 0 },
-    cable: false,
-    atmo: "",
-  },
-  "pl-solar-batt": {
-    theme: "sigenstor",
-    tag: "Tier 2 · Solar + Battery",
-    title: "The <em>sweet spot</em> for most homes",
-    body: "Adds a battery to the solar stack. You use your own production around the clock, you run through outages, and you stop exporting cheap power just to buy it back at retail later. Our most popular tier.",
-    spec: "<strong>Mid-range cost · 7–9 yr payback · Full outage protection.</strong>",
-    flows: ["flow-solar-gw", "flow-gw-home", "flow-gw-bat"],
-    stats: { solar: 7.4, home: 2.1, battery: 68, ev: 0, exportKW: 0, importKW: 0 },
-    cable: false,
-    atmo: "",
-  },
-  "pl-full": {
-    theme: "ev",
-    tag: "Tier 3 · Full Stack",
-    title: "Solar + Battery + <em>Bidirectional DC EV Charger</em>",
-    body: "The complete stack: every component in one tower, including a DC charger that feeds your EV directly from solar without AC conversion. V2H turns the car into a backup generator. V2G eventually earns peak-rate revenue.",
-    spec: "<strong>Full system · 6–8 yr payback · EV fuel savings stack on top.</strong>",
-    flows: ["flow-solar-gw", "flow-gw-home", "flow-gw-bat", "flow-dcc-ev"],
-    stats: { solar: 9.2, home: 2.0, battery: 72, ev: 45, exportKW: 0, importKW: 0 },
-    cable: true,
-    atmo: "",
-  },
-  "pl-ready": {
-    theme: "sigenstor",
-    tag: "Ready When You Are",
-    title: "Every tier is <em>upgrade-ready</em>",
-    body: "Not sure where to start? It depends on three questions: how worried are you about outages, do you have (or plan to get) an EV, and what's your budget? Want backup → Tier 2, our best seller. EV on the horizon → skip to Tier 3.",
-    spec: "<strong>No pressure.</strong> Free consultation, honest numbers, system sized for your actual usage. Compatible components let you upgrade later without throwaway hardware.",
-    flows: [],
-    stats: { solar: 0, home: 0, battery: 0, ev: 0, exportKW: 0, importKW: 0 },
-    cable: false,
-    atmo: "",
-  },
-};
+const n1 = (v: number) => (Math.round(v * 10) / 10).toString();
 
-type SetupKey = "solar-only" | "solar-battery" | "full" | "planning";
-const SETUPS: Record<SetupKey, { label: string; ico: string; modes: Array<{ key: string; title: string; sub: string }>; defaultMode: string }> = {
-  "solar-only": {
-    label: "Solar Only",
-    ico: "☀",
-    modes: [
-      { key: "so-day", title: "Daytime Production", sub: "Solar → Home + Grid export" },
-      { key: "so-night", title: "Evening Pull", sub: "Grid at full retail rate" },
-      { key: "so-outage", title: "Outage", sub: "Panels forced off" },
-    ],
-    defaultMode: "so-day",
-  },
-  "solar-battery": {
-    label: "Solar + Battery",
-    ico: "☀+▮",
-    modes: [
-      { key: "sb-self", title: "Self Consumption", sub: "Solar → Home → Battery" },
-      { key: "sb-evening", title: "Battery → Home", sub: "Evening discharge" },
-      { key: "sb-outage", title: "Outage Backup", sub: "Home runs on battery" },
-      { key: "sb-grid", title: "Grid Pull", sub: "Rare fallback" },
-    ],
-    defaultMode: "sb-self",
-  },
-  full: {
-    label: "+ EV",
-    ico: "☀+▮+▣",
-    modes: [
-      { key: "self", title: "Self Consumption", sub: "Solar → Home → Battery" },
-      { key: "battery-home", title: "Battery → Home", sub: "Evening discharge" },
-      { key: "ev-charge", title: "DC Charge EV", sub: "Solar/Battery → EV · DC-DC" },
-      { key: "v2h", title: "V2H · Outage", sub: "EV powers the home" },
-      { key: "v2g", title: "V2G · Sell to Grid", sub: "Peak rate export" },
-      { key: "grid-pull", title: "Grid Pull", sub: "Backup from utility" },
-    ],
-    defaultMode: "self",
-  },
-  planning: {
-    label: "Planning",
-    ico: "?",
-    modes: [
-      { key: "pl-problem", title: "The Rate Problem", sub: "Rising every year" },
-      { key: "pl-solar-only", title: "Tier 1 · Panels", sub: "Basic savings" },
-      { key: "pl-solar-batt", title: "Tier 2 · + Battery", sub: "Our best seller" },
-      { key: "pl-full", title: "Tier 3 · + EV", sub: "Full stack" },
-      { key: "pl-ready", title: "Grow At Your Pace", sub: "Start anywhere, upgrade later" },
-    ],
-    defaultMode: "pl-problem",
-  },
-};
+// Build every mode/hotspot/setup from the selected battery's real specs.
+function buildContent(ctx: Ctx): {
+  hotspots: Record<string, InfoCard>;
+  modes: Record<string, Mode>;
+  setups: Record<SetupKey, SetupDef>;
+} {
+  const { name, units, usableKWh, continuousKW, peakKW, warrantyYears, chemistry, backupDays, bidirectionalEv } = ctx;
+  const kwh = `${n1(usableKWh)} kWh`;
+  const cont = `${n1(continuousKW)} kW`;
+  const surge = peakKW > continuousKW + 0.1 ? `${n1(peakKW)} kW` : "";
+  const daysTxt = `${n1(backupDays)} day${backupDays >= 1.5 ? "s" : ""}`;
+  const chemNice = chemistry === "LFP" ? "LFP — safe, long-life cells" : `${chemistry} — high energy density`;
+  const unitsTxt = units > 1 ? ` across ${units} units` : "";
+
+  const hotspots: Record<string, InfoCard> = {
+    solar: {
+      theme: "solar",
+      tag: "Rooftop PV Array",
+      title: "The <em>source</em> — sunlight into power",
+      body: "Premium panels turn daylight into DC electricity and feed it into the inverter through independent MPPT channels, so even complex roofs with multiple orientations harvest maximum energy.",
+      spec: "<strong>Oversize-friendly.</strong> You can fit more panels than the inverter's rating to squeeze out every cloudy-morning watt.",
+    },
+    gateway: {
+      theme: "sigenstor",
+      tag: "Smart Gateway",
+      title: "The <em>smart manager</em> of the house",
+      body: "The gateway is the brain and backup hub. It monitors every circuit, coordinates solar, battery and grid, and handles the switch-over the instant the utility goes down.",
+      spec: "<strong>Near-instant transfer.</strong> Your computer doesn't reboot, your Wi-Fi doesn't drop, your medical equipment stays online. The neighbors lose power — you don't even notice.",
+    },
+    sigenstor: {
+      theme: "sigenstor",
+      tag: name,
+      title: `<em>${kwh}</em> of stored sunshine`,
+      body: `Your ${name} stores solar by day and powers the home by night at up to ${cont} continuous. ${chemNice}.`,
+      spec: `<strong>${warrantyYears}-year warranty${unitsTxt}.</strong> ${kwh} usable${surge ? ` · ${surge} surge for motor starts` : ""}, near-instant backup transfer.`,
+    },
+    ev: bidirectionalEv
+      ? {
+          theme: "ev",
+          tag: "Electric Vehicle · V2X Ready",
+          title: "Your EV is a <em>75—130 kWh</em> mobile battery",
+          body: "A modern EV carries several times the capacity of a home battery. With bidirectional V2X, the car can power your home during outages, or discharge to the grid for peak-rate revenue.",
+          spec: "<strong>V2H &amp; V2G support</strong> depends on the vehicle, and rolls out over the air as more EVs get certified.",
+        }
+      : {
+          theme: "ev",
+          tag: "Electric Vehicle",
+          title: "Drive on <em>your own sunshine</em>",
+          body: `Charge the car from your solar and ${name} instead of the utility. A typical EV adds 25–40 miles per sunny afternoon of surplus solar — fuel you already paid for.`,
+          spec: "<strong>Schedule charging for midday</strong> and your commute effectively runs on the panels on your roof.",
+        },
+    home: {
+      theme: "home",
+      tag: "The Load",
+      title: "Your home, <em>unchanged</em> — except the bill",
+      body: "The inverter turns DC from solar or battery into clean AC for your home. Lights, HVAC, heat pump, kitchen, EV — nothing changes in how you live. Everything changes on the utility bill.",
+      spec: `<strong>A right-sized ${name} + solar</strong> offsets the bulk of your consumption, driving net bills toward zero.`,
+    },
+    grid: {
+      theme: "grid",
+      tag: "Utility Connection",
+      title: "The utility as your <em>backup</em>",
+      body: "The grid connection becomes a safety net for the darkest stretches — and, where rates allow, a revenue opportunity during peak demand. Using your own stored energy is increasingly worth more than exporting it cheap.",
+      spec: "<strong>Programmable reserve:</strong> hold back a minimum battery % (e.g. 20%) for outages so you're never caught empty.",
+    },
+  };
+
+  // EV-charge mode copy depends on whether the battery does DC bidirectional EV.
+  const evCharge: Mode = bidirectionalEv
+    ? {
+        theme: "charger",
+        tag: "DC-DC Direct Charging",
+        title: "Charge your EV <em>DC-to-DC</em> from the sun",
+        body: `Solar feeds the home and tops up your ${name}; the DC charger sends power straight out to the vehicle — no AC conversion, no onboard-converter loss.`,
+        spec: "<strong>Up to 25 kW DC</strong> — roughly 3× a typical Level-2 AC charger, with less loss. Empty to 80% in a sunny afternoon.",
+        flows: ["flow-solar-gw", "flow-gw-home", "flow-gw-bat", "flow-dcc-ev"],
+        stats: { solar: 9.2, home: 2.0, battery: 72, ev: 45, exportKW: 0, importKW: 0 },
+        cable: true,
+        atmo: "",
+      }
+    : {
+        theme: "charger",
+        tag: "EV Charging · Level 2",
+        title: "Charge your EV <em>on sunshine</em>",
+        body: `Solar powers the home and tops up your ${name}; the surplus runs your EV charger, so the car drives on energy you made — not power you bought at retail.`,
+        spec: "<strong>Schedule it for the sunniest hours</strong> and your daily commute effectively runs on the panels you already own.",
+        flows: ["flow-solar-gw", "flow-gw-home", "flow-gw-bat", "flow-dcc-ev"],
+        stats: { solar: 9.2, home: 2.0, battery: 72, ev: 45, exportKW: 0, importKW: 0 },
+        cable: true,
+        atmo: "",
+      };
+
+  const modes: Record<string, Mode> = {
+    // ── Full / + Battery shared narrative ──
+    self: {
+      theme: "sigenstor",
+      tag: "Default · Daytime Operation",
+      title: "<em>Self Consumption</em> — use your own sun first",
+      body: `Solar feeds your home through the inverter and banks the surplus in your ${name} — ${kwh} of usable storage. Every watt powers the home now or saves itself for tonight.`,
+      spec: "<strong>Highest-value mode.</strong> You displace retail-rate grid power with panels you already own, and bank the surplus for the evening.",
+      flows: ["flow-solar-gw", "flow-gw-home", "flow-gw-bat"],
+      stats: { solar: 7.4, home: 2.1, battery: 68, ev: 82, exportKW: 0, importKW: 0 },
+      cable: false,
+      atmo: "",
+    },
+    "battery-home": {
+      theme: "sigenstor",
+      tag: "Evening / Night Operation",
+      title: "Battery <em>powers the home</em> after sunset",
+      body: `Solar's done for the day. Your ${name} delivers up to ${cont} of continuous power to every circuit — the utility doesn't know you exist.`,
+      spec: `<strong>${cont} continuous${surge ? ` · ${surge} surge` : ""}.</strong> Runs central AC, the kitchen and lights together${surge ? ", and starts big motor loads" : ""}.`,
+      flows: ["flow-bat-gw", "flow-gw-home"],
+      stats: { solar: 0, home: 3.2, battery: 54, ev: 82, exportKW: 0, importKW: 0 },
+      cable: false,
+      atmo: "night",
+    },
+    "ev-charge": evCharge,
+    v2h: {
+      theme: "ev",
+      tag: "V2H · Vehicle-to-Home",
+      title: "The grid is down. <em>Your car runs the house.</em>",
+      body: "During a blackout the EV pushes power back up the cable, through the battery tower and gateway, and out to every circuit. A big truck battery can run a typical home for days.",
+      spec: "<strong>Near-instant transfer.</strong> No flicker. The fridge keeps running, medical equipment stays online — a grid-down week becomes a non-event.",
+      flows: ["flow-ev-dcc", "flow-bat-gw", "flow-gw-home"],
+      stats: { solar: 0, home: 2.4, battery: 12, ev: 68, exportKW: 0, importKW: 0 },
+      cable: true,
+      atmo: "outage",
+    },
+    v2g: {
+      theme: "v2g",
+      tag: "V2G · Vehicle-to-Grid",
+      title: "Sell your EV's power at <em>peak rates</em>",
+      body: "The EV discharges up through the cable and battery tower, then straight out to the utility — peak-rate revenue on power originally charged cheap. Plug in full at noon, profit by 7 PM.",
+      spec: "<strong>Pioneering V2X.</strong> Vehicle compatibility rolls out via OTA updates as standards mature in North America.",
+      flows: ["flow-ev-dcc-v2g", "flow-bat-grid-v2g"],
+      stats: { solar: 0, home: 2.8, battery: 55, ev: 72, exportKW: 9.5, importKW: 0 },
+      cable: true,
+      atmo: "",
+    },
+    "grid-pull": {
+      theme: "grid",
+      tag: "Grid Pull · Rare With A Full Stack",
+      title: "When stored energy runs low, <em>the grid fills in</em>",
+      body: `On rare cloudy stretches with your ${name} drained, the utility quietly backfills — in through the battery, up to the gateway, out to the home. The reverse of the export path.`,
+      spec: "<strong>Programmable reserve:</strong> keep a user-set % always in the tank for outage readiness. Never caught empty.",
+      flows: ["flow-grid-bat", "flow-bat-gw", "flow-gw-home"],
+      stats: { solar: 0.2, home: 3.5, battery: 18, ev: 40, exportKW: 0, importKW: 3.3 },
+      cable: false,
+      atmo: "",
+    },
+    // ── Solar only ──
+    "so-day": {
+      theme: "solar",
+      tag: "Daytime · Solar Only",
+      title: "Solar <em>powers the home</em> — but only while the sun shines",
+      body: "Panels produce DC, the inverter converts to AC, and your home runs on sun. It works beautifully at noon. The problem is everything that happens outside that window.",
+      spec: "<strong>Utilities pay a few ¢/kWh</strong> for excess solar you export — then sell it back that evening at full retail. A big markup on your own power.",
+      flows: ["flow-solar-gw", "flow-gw-home", "flow-gw-grid-surplus"],
+      stats: { solar: 7.4, home: 2.1, battery: 0, ev: 0, exportKW: 5.3, importKW: 0 },
+      cable: false,
+      atmo: "",
+    },
+    "so-night": {
+      theme: "grid",
+      tag: "Evening · Solar Only",
+      title: "Sun goes down. <em>You buy it all back at retail.</em>",
+      body: "No sun, no production. Your home pulls from the grid at full retail — including the cheap power you exported two hours ago. Without a battery there's nothing to fall back on.",
+      spec: "<strong>This is the net-metering gap.</strong> Solar-only homes lose much of their excess production value to the utility's rate spread.",
+      flows: ["flow-grid-gw-only", "flow-gw-home"],
+      stats: { solar: 0, home: 3.2, battery: 0, ev: 0, exportKW: 0, importKW: 3.2 },
+      cable: false,
+      atmo: "night",
+    },
+    "so-outage": {
+      theme: "grid",
+      tag: "Outage · Solar Only",
+      title: "The grid goes down. <em>So do your panels.</em>",
+      body: "When the utility loses power, grid-tied solar inverters are required by code to shut off — even in broad daylight. Without a battery, your panels go dark with everyone else's lights.",
+      spec: "<strong>Anti-islanding protection</strong> is a federal requirement (UL 1741). Solar-only homes cannot run during a blackout. Period.",
+      flows: [],
+      stats: { solar: 0, home: 0, battery: 0, ev: 0, exportKW: 0, importKW: 0 },
+      cable: false,
+      atmo: "outage",
+    },
+    // ── Solar + battery ──
+    "sb-self": {
+      theme: "sigenstor",
+      tag: "Default · Daytime Operation",
+      title: "<em>Self Consumption</em> — use your own sun first",
+      body: `Solar feeds the home and banks any surplus in your ${name}. Every watt you produce powers the home now or saves itself for tonight.`,
+      spec: "<strong>Highest-value mode.</strong> You displace retail-rate grid power with panels you already own, and bank the surplus for tonight.",
+      flows: ["flow-solar-gw", "flow-gw-home", "flow-gw-bat"],
+      stats: { solar: 7.4, home: 2.1, battery: 68, ev: 0, exportKW: 0, importKW: 0 },
+      cable: false,
+      atmo: "",
+    },
+    "sb-evening": {
+      theme: "sigenstor",
+      tag: "Evening Discharge",
+      title: "Battery <em>powers the home</em> after sunset",
+      body: `Dinner, laundry, TV, HVAC — after dark the power comes from your ${name} at no cost, no utility involvement, no rate spread.`,
+      spec: `<strong>${cont} continuous${surge ? ` · ${surge} surge` : ""}.</strong> Covers central AC + kitchen + lights at once.`,
+      flows: ["flow-bat-gw", "flow-gw-home"],
+      stats: { solar: 0, home: 3.2, battery: 54, ev: 0, exportKW: 0, importKW: 0 },
+      cable: false,
+      atmo: "night",
+    },
+    "sb-outage": {
+      theme: "ev",
+      tag: "Outage · Battery Backup",
+      title: "Grid goes down. <em>You don't notice.</em>",
+      body: `Your ${name} islands the home almost instantly — fridge, Wi-Fi, lights, medical equipment all keep running. Solar keeps producing by day, recharging the battery while the grid is out.`,
+      spec: `<strong>${kwh} usable${unitsTxt}</strong> — about ${daysTxt} of essential loads. Add capacity for longer coverage.`,
+      flows: ["flow-bat-gw", "flow-gw-home"],
+      stats: { solar: 0, home: 2.4, battery: 62, ev: 0, exportKW: 0, importKW: 0 },
+      cable: false,
+      atmo: "outage",
+    },
+    "sb-grid": {
+      theme: "grid",
+      tag: "Grid Pull · Rare",
+      title: "Battery empty + cloudy day = <em>grid fills in</em>",
+      body: `When solar can't keep up and your ${name} is drained, the utility quietly backfills through the gateway. With a properly sized system, most homes pull from the grid less than 10% of the year.`,
+      spec: "<strong>Programmable reserve:</strong> hold a user-set % for outage readiness. Never caught empty.",
+      flows: ["flow-grid-bat", "flow-bat-gw", "flow-gw-home"],
+      stats: { solar: 0.2, home: 3.5, battery: 18, ev: 0, exportKW: 0, importKW: 3.3 },
+      cable: false,
+      atmo: "",
+    },
+    // ── Planning ──
+    "pl-problem": {
+      theme: "grid",
+      tag: "The Problem",
+      title: "Utility rates keep <em>climbing</em>",
+      body: "Utilities have raised rates repeatedly over the last decade — and they keep climbing several percent a year. Every year you wait is another year locked into their increases.",
+      spec: "<strong>Solar + storage locks your energy cost for 25+ years.</strong> When rates jump next, you don't even notice.",
+      flows: [],
+      stats: { solar: 0, home: 3.2, battery: 0, ev: 0, exportKW: 0, importKW: 3.2 },
+      cable: false,
+      atmo: "night",
+    },
+    "pl-solar-only": {
+      theme: "solar",
+      tag: "Tier 1 · Solar Panels Only",
+      title: "<em>The entry tier.</em> Panels, nothing else.",
+      body: "Panels tied to the grid through an inverter. Cuts your bill 70–90% on sunny days. But you still pay retail every night, and you still lose power in an outage.",
+      spec: "<strong>Lower upfront cost · 8–10 yr payback · No outage protection.</strong>",
+      flows: ["flow-solar-gw", "flow-gw-home", "flow-gw-grid-surplus"],
+      stats: { solar: 7.4, home: 2.1, battery: 0, ev: 0, exportKW: 5.3, importKW: 0 },
+      cable: false,
+      atmo: "",
+    },
+    "pl-solar-batt": {
+      theme: "sigenstor",
+      tag: "Tier 2 · Solar + Battery",
+      title: "The <em>sweet spot</em> for most homes",
+      body: `Adds your ${name} to the solar stack. You use your own production around the clock, you run through outages, and you stop exporting cheap power just to buy it back at retail later. Our most popular tier.`,
+      spec: "<strong>Mid-range cost · 7–9 yr payback · Full outage protection.</strong>",
+      flows: ["flow-solar-gw", "flow-gw-home", "flow-gw-bat"],
+      stats: { solar: 7.4, home: 2.1, battery: 68, ev: 0, exportKW: 0, importKW: 0 },
+      cable: false,
+      atmo: "",
+    },
+    "pl-full": {
+      theme: "ev",
+      tag: "Tier 3 · Solar + Battery + EV",
+      title: "Add the <em>EV</em> and drive on sunshine",
+      body: `The complete stack: solar, your ${name}, and EV charging from your own production. ${bidirectionalEv ? "Bidirectional V2H turns the car into a backup generator and V2G can earn peak-rate revenue." : "Charge the car on midday solar instead of buying fuel from the utility."}`,
+      spec: "<strong>Full system · 6–8 yr payback · EV fuel savings stack on top.</strong>",
+      flows: ["flow-solar-gw", "flow-gw-home", "flow-gw-bat", "flow-dcc-ev"],
+      stats: { solar: 9.2, home: 2.0, battery: 72, ev: 45, exportKW: 0, importKW: 0 },
+      cable: true,
+      atmo: "",
+    },
+    "pl-ready": {
+      theme: "sigenstor",
+      tag: "Ready When You Are",
+      title: "Every tier is <em>upgrade-ready</em>",
+      body: "Not sure where to start? It comes down to three questions: how worried are you about outages, do you have (or plan to get) an EV, and what's your budget? Want backup → Tier 2, our best seller. EV on the horizon → skip to Tier 3.",
+      spec: "<strong>No pressure.</strong> Free consultation, honest numbers, system sized for your actual usage — with compatible components so you can upgrade later without throwaway hardware.",
+      flows: [],
+      stats: { solar: 0, home: 0, battery: 0, ev: 0, exportKW: 0, importKW: 0 },
+      cable: false,
+      atmo: "",
+    },
+  };
+
+  // The "full" (EV) setup only offers V2H/V2G when the battery supports it.
+  const fullModes = bidirectionalEv
+    ? [
+        { key: "self", title: "Self Consumption", sub: "Solar → Home → Battery" },
+        { key: "battery-home", title: "Battery → Home", sub: "Evening discharge" },
+        { key: "ev-charge", title: "DC Charge EV", sub: "Solar/Battery → EV · DC-DC" },
+        { key: "v2h", title: "V2H · Outage", sub: "EV powers the home" },
+        { key: "v2g", title: "V2G · Sell to Grid", sub: "Peak rate export" },
+        { key: "grid-pull", title: "Grid Pull", sub: "Backup from utility" },
+      ]
+    : [
+        { key: "self", title: "Self Consumption", sub: "Solar → Home → Battery" },
+        { key: "battery-home", title: "Battery → Home", sub: "Evening discharge" },
+        { key: "ev-charge", title: "Charge EV", sub: "Solar + Battery → EV" },
+        { key: "sb-outage", title: "Outage Backup", sub: "Home runs on battery" },
+        { key: "grid-pull", title: "Grid Pull", sub: "Backup from utility" },
+      ];
+
+  const setups: Record<SetupKey, SetupDef> = {
+    "solar-only": {
+      label: "Solar Only",
+      ico: "☀",
+      modes: [
+        { key: "so-day", title: "Daytime Production", sub: "Solar → Home + Grid export" },
+        { key: "so-night", title: "Evening Pull", sub: "Grid at full retail rate" },
+        { key: "so-outage", title: "Outage", sub: "Panels forced off" },
+      ],
+      defaultMode: "so-day",
+    },
+    "solar-battery": {
+      label: "Solar + Battery",
+      ico: "☀+▮",
+      modes: [
+        { key: "sb-self", title: "Self Consumption", sub: "Solar → Home → Battery" },
+        { key: "sb-evening", title: "Battery → Home", sub: "Evening discharge" },
+        { key: "sb-outage", title: "Outage Backup", sub: "Home runs on battery" },
+        { key: "sb-grid", title: "Grid Pull", sub: "Rare fallback" },
+      ],
+      defaultMode: "sb-self",
+    },
+    full: {
+      label: "+ EV",
+      ico: "☀+▮+▣",
+      modes: fullModes,
+      defaultMode: "self",
+    },
+    planning: {
+      label: "Planning",
+      ico: "?",
+      modes: [
+        { key: "pl-problem", title: "The Rate Problem", sub: "Rising every year" },
+        { key: "pl-solar-only", title: "Tier 1 · Panels", sub: "Basic savings" },
+        { key: "pl-solar-batt", title: "Tier 2 · + Battery", sub: "Our best seller" },
+        { key: "pl-full", title: "Tier 3 · + EV", sub: "Full stack" },
+        { key: "pl-ready", title: "Grow At Your Pace", sub: "Start anywhere, upgrade later" },
+      ],
+      defaultMode: "pl-problem",
+    },
+  };
+
+  return { hotspots, modes, setups };
+}
 
 export interface LivingEnergySceneProps {
   accent?: string;
@@ -368,6 +436,15 @@ export interface LivingEnergySceneProps {
   monthlyKWh?: number; // customer's real usage → seeds Home Load
   hasEv?: boolean;
   hasExistingSolar?: boolean;
+  // selected battery's real specs (totals) — drive the explainer copy
+  units?: number;
+  usableKWh?: number;
+  continuousKW?: number;
+  peakKW?: number;
+  warrantyYears?: number;
+  chemistry?: string;
+  backupDays?: number;
+  bidirectionalEv?: boolean; // DC bidirectional EV charger / V2X capable
 }
 
 export default function LivingEnergyScene({
@@ -376,31 +453,51 @@ export default function LivingEnergyScene({
   monthlyKWh,
   hasEv = false,
   hasExistingSolar = false,
+  units = 1,
+  usableKWh = 13.5,
+  continuousKW = 7,
+  peakKW = 11,
+  warrantyYears = 10,
+  chemistry = "LFP",
+  backupDays = 2,
+  bidirectionalEv = false,
 }: LivingEnergySceneProps) {
+  const ctx: Ctx = useMemo(
+    () => ({
+      name: (batteryName || "home battery").replace(/\s+/g, " ").trim(),
+      units,
+      usableKWh,
+      continuousKW,
+      peakKW,
+      warrantyYears,
+      chemistry,
+      backupDays,
+      bidirectionalEv,
+    }),
+    [batteryName, units, usableKWh, continuousKW, peakKW, warrantyYears, chemistry, backupDays, bidirectionalEv]
+  );
+  const { hotspots: HC, modes: MC, setups: SETUPS } = useMemo(() => buildContent(ctx), [ctx]);
+
   const initialSetup: SetupKey = hasEv ? "full" : hasExistingSolar ? "solar-battery" : "full";
   const [setup, setSetup] = useState<SetupKey>(initialSetup);
   const [mode, setMode] = useState<string>(SETUPS[initialSetup].defaultMode);
-  // When a hotspot is tapped we show its explainer instead of the mode's, until
-  // the mode changes again.
   const [hotspot, setHotspot] = useState<string | null>(null);
 
   const setupDef = SETUPS[setup];
-  const modeDef = MODE_CONTENT[mode] || MODE_CONTENT[setupDef.defaultMode];
+  const modeDef = MC[mode] || MC[setupDef.defaultMode];
   const activeFlows = useMemo(() => new Set(modeDef.flows), [modeDef]);
-  const card: InfoCard = hotspot && HOTSPOT_CONTENT[hotspot] ? HOTSPOT_CONTENT[hotspot] : modeDef;
+  const card: InfoCard = hotspot && HC[hotspot] ? HC[hotspot] : modeDef;
 
-  // Seed Home Load off the customer's real usage when we have it (designed
-  // baseline is ~2.1 kW at self-consumption). Scale the per-mode numbers so the
-  // demo tracks their actual home rather than a generic figure.
+  // Seed Home Load off real usage when we have it (designed baseline ~2.1 kW).
   const homeScale =
     typeof monthlyKWh === "number" && isFinite(monthlyKWh) && monthlyKWh > 0
-      ? Math.max(0.45, Math.min(2.6, monthlyKWh / 730 / 2.1)) // monthly→avg kW, ÷ baseline
+      ? Math.max(0.45, Math.min(2.6, monthlyKWh / 730 / 2.1))
       : 1;
   const s = modeDef.stats;
   const homeKW = s.home > 0 ? +(s.home * homeScale).toFixed(1) : 0;
   const solarKW = s.solar > 0 ? +(s.solar * (homeScale > 1 ? Math.min(homeScale, 1.8) : 1)).toFixed(1) : 0;
 
-  const batLabel = (batteryName || "Battery").replace(/\s+/g, " ").trim();
+  const batLabel = ctx.name === "home battery" ? "Battery" : ctx.name;
 
   const selectSetup = (k: SetupKey) => {
     setSetup(k);
@@ -434,11 +531,7 @@ export default function LivingEnergyScene({
           <div className="les-setup-label">What&rsquo;s your setup?</div>
           <div className="les-setup-tabs">
             {(Object.keys(SETUPS) as SetupKey[]).map((k) => (
-              <button
-                key={k}
-                className={"les-setbtn" + (setup === k ? " on" : "")}
-                onClick={() => selectSetup(k)}
-              >
+              <button key={k} className={"les-setbtn" + (setup === k ? " on" : "")} onClick={() => selectSetup(k)}>
                 <span className="les-setbtn-ico">{SETUPS[k].ico}</span>
                 <span className="les-setbtn-txt">{SETUPS[k].label}</span>
               </button>
@@ -450,16 +543,18 @@ export default function LivingEnergyScene({
       <div className="les-grid">
         {/* Scene + mode buttons */}
         <div className="les-scenewrap">
-          <div className="les-scene" onClick={(e) => {
-            const t = (e.target as HTMLElement).closest("[data-hotspot]") as HTMLElement | null;
-            if (t?.dataset.hotspot) setHotspot(t.dataset.hotspot);
-          }}>
+          <div
+            className="les-scene"
+            onClick={(e) => {
+              const t = (e.target as HTMLElement).closest("[data-hotspot]") as HTMLElement | null;
+              if (t?.dataset.hotspot) setHotspot(t.dataset.hotspot);
+            }}
+          >
             <img className="les-img" src={IMG} alt="Your home energy system" draggable={false} />
             <div className={"les-atmo" + (modeDef.atmo ? " " + modeDef.atmo : "")} />
             <div className="les-vignette" />
 
             <svg className="les-overlay" viewBox="0 0 1600 817" preserveAspectRatio="xMidYMid slice">
-              {/* static visible cable, glow when EV connected */}
               <path
                 className={"les-cable" + (modeDef.cable ? " on" : "")}
                 d={CABLE_D}
@@ -469,7 +564,6 @@ export default function LivingEnergyScene({
                 fill="none"
                 strokeLinecap="round"
               />
-              {/* animated energy flows */}
               {FLOWS.map((f) => (
                 <path
                   key={f.id}
@@ -480,7 +574,6 @@ export default function LivingEnergyScene({
                   style={{ color: f.stroke }}
                 />
               ))}
-              {/* hotspots */}
               {HOTSPOTS.map((h) => (
                 <g
                   key={h.key}
@@ -505,11 +598,7 @@ export default function LivingEnergyScene({
 
           <div className="les-modes">
             {setupDef.modes.map((m) => (
-              <button
-                key={m.key}
-                className={"les-modebtn" + (mode === m.key && !hotspot ? " on" : "")}
-                onClick={() => selectMode(m.key)}
-              >
+              <button key={m.key} className={"les-modebtn" + (mode === m.key && !hotspot ? " on" : "")} onClick={() => selectMode(m.key)}>
                 <span className="les-mode-title">
                   <span className="les-mode-dot" />
                   {m.title}
@@ -548,8 +637,8 @@ export default function LivingEnergyScene({
           <div className="les-legend">
             <span><i style={{ background: "#ffd86b" }} />Solar</span>
             <span><i style={{ background: accent }} />Battery</span>
-            <span><i style={{ background: "#f472b6" }} />V2H</span>
-            <span><i style={{ background: "#fb7185" }} />V2G</span>
+            {bidirectionalEv && <span><i style={{ background: "#f472b6" }} />V2H</span>}
+            {bidirectionalEv && <span><i style={{ background: "#fb7185" }} />V2G</span>}
             <span><i style={{ background: "#38bdf8" }} />Export</span>
             <span><i style={{ background: "#ef4444" }} />Grid</span>
           </div>
@@ -560,7 +649,6 @@ export default function LivingEnergyScene({
   );
 }
 
-// body text is plain (no inline markup we need) — render as text safely.
 function stripTags(html: string): string {
   return html.replace(/<[^>]+>/g, "");
 }
