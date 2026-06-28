@@ -3,8 +3,13 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 // ─────────────────────────────────────────────────────────────────────────────
 // SolarProposalShow — a full-screen, client-side, presenter-driven slide deck a
 // closer plays for a homeowner at the kitchen table. Pure React + inline SVG +
-// CSS keyframes — no external animation libraries. The centerpiece is an
-// interactive home scene whose energy flows morph between four scenarios.
+// an injected <style> block — no external animation libraries. The centerpiece
+// is an interactive home scene whose energy flows morph between four scenarios.
+//
+// VISUAL LANGUAGE: futuristic deep-purple "Youtility" aesthetic — glassmorphism
+// cards with hairline borders + energy-colored accent bars, mono HUD readouts,
+// neon marching-ants energy flows, and a grain + glow atmosphere. Mirrors (and
+// extends) the sigenstor_home reference. All classes prefixed `sps-`.
 // ─────────────────────────────────────────────────────────────────────────────
 
 export interface SolarShowProps {
@@ -45,15 +50,17 @@ export interface SolarShowProps {
 
 type Scenario = "nosolar" | "solar" | "battery" | "ev";
 
+// Energy palette — matches the reference design tokens.
 const PALETTE = {
-  gold: "#fbbf24",
-  goldDim: "#a8821f",
-  green: "#34d399",
-  blue: "#38bdf8",
-  amber: "#f59e0b",
-  ink: "#e8eef8",
-  inkMid: "#a8b3c7",
-  inkDim: "#6b7589",
+  solar: "#ffd86b",
+  battery: "#8b5cf6",
+  grid: "#ef4444",
+  export: "#38bdf8",
+  ev: "#f472b6",
+  accent: "#8b5cf6",
+  accentBright: "#a78bfa",
+  text: "#ece8f5",
+  textDim: "#8a8199",
 };
 
 const money0 = (n: number | undefined | null) =>
@@ -92,6 +99,69 @@ function useCountUp(target: number | undefined | null, active: boolean, duration
   return val;
 }
 
+// ── HUD live stat chips overlaid on the scene ────────────────────────────────
+function SceneHud({
+  scenario,
+  night,
+  hasEv,
+  monthlyKWh,
+}: {
+  scenario: Scenario;
+  night: boolean;
+  hasEv: boolean;
+  monthlyKWh?: number;
+}) {
+  // Derive tasteful "live" numbers. Home draw scales loosely off monthly usage;
+  // otherwise fall back to pleasant static defaults.
+  const homeKW =
+    typeof monthlyKWh === "number" && isFinite(monthlyKWh) && monthlyKWh > 0
+      ? Math.max(0.8, Math.min(6, monthlyKWh / 730)) // kWh/mo → avg kW, clamped
+      : 2.4;
+
+  const batteryActive = scenario === "battery" || scenario === "ev";
+  const isNight = batteryActive && night;
+
+  type Chip = { label: string; value: string; color: string };
+  const chips: Chip[] = [];
+
+  if (scenario === "nosolar") {
+    chips.push({ label: "GRID", value: `${homeKW.toFixed(1)} kW`, color: PALETTE.grid });
+    chips.push({ label: "HOME", value: `${homeKW.toFixed(1)} kW`, color: PALETTE.accentBright });
+  } else if (isNight) {
+    chips.push({ label: "SOLAR", value: "0.0 kW", color: PALETTE.solar });
+    chips.push({ label: "BATTERY", value: "87%", color: PALETTE.battery });
+    chips.push({ label: "GRID", value: "OFFLINE", color: PALETTE.grid });
+    chips.push({ label: "HOME", value: `${homeKW.toFixed(1)} kW`, color: PALETTE.accentBright });
+  } else {
+    const solarKW = (homeKW + (batteryActive ? 1.8 : 0) + (scenario === "ev" ? 3.2 : 0.9)).toFixed(1);
+    chips.push({ label: "SOLAR", value: `${solarKW} kW`, color: PALETTE.solar });
+    if (batteryActive)
+      chips.push({ label: "BATTERY", value: scenario === "ev" ? "64%" : "72%", color: PALETTE.battery });
+    if (scenario === "solar")
+      chips.push({ label: "EXPORT", value: "1.4 kW", color: PALETTE.export });
+    if (scenario === "ev" && hasEv)
+      chips.push({ label: "EV", value: "3.2 kW", color: PALETTE.ev });
+    chips.push({ label: "HOME", value: `${homeKW.toFixed(1)} kW`, color: PALETTE.accentBright });
+  }
+
+  return (
+    <div className="sps-hud" key={scenario + String(night)}>
+      {chips.map((c) => (
+        <div className="sps-chip" key={c.label}>
+          <span className="sps-chip-dot" style={{ background: c.color, boxShadow: `0 0 8px ${c.color}` }} />
+          <span className="sps-chip-label">{c.label}</span>
+          <span className="sps-chip-sep">▸</span>
+          <span className="sps-chip-val" style={{ color: c.color }}>{c.value}</span>
+        </div>
+      ))}
+      <div className="sps-chip sps-chip-live">
+        <span className="sps-live-dot" />
+        <span className="sps-chip-label">LIVE</span>
+      </div>
+    </div>
+  );
+}
+
 // ── The interactive home SVG ─────────────────────────────────────────────────
 function HomeScene({
   scenario,
@@ -112,20 +182,16 @@ function HomeScene({
   const sunUp = solarActive && !isNight;
 
   // Flow visibility:
-  const flowGridToHome = (scenario === "nosolar") || (!solarActive) || (isNight ? false : false);
-  // grid → home active when: no solar at all, OR daytime grid top-up is not the story.
-  const gridFlow = scenario === "nosolar"; // amber, grid → home
+  const gridFlow = scenario === "nosolar"; // red, grid → home
   const solarToHome = solarActive && !isNight;
-  const solarToGrid = scenario === "solar" && !isNight; // export
-  const solarToBattery = batteryActive && !isNight; // charging
-  const batteryToHome = batteryActive && isNight; // discharging at night
-  const toEv = evActive && (isNight ? batteryToHome : solarActive); // car charging
-
-  void flowGridToHome;
+  const solarToGrid = scenario === "solar" && !isNight; // export (blue)
+  const solarToBattery = batteryActive && !isNight; // charging (purple)
+  const batteryToHome = batteryActive && isNight; // discharging at night (purple)
+  const toEv = evActive && (isNight ? batteryToHome : solarActive); // car charging (pink)
 
   return (
     <svg
-      className="sps-scene"
+      className={"sps-scene" + (isNight ? " night" : "") + (gridDark ? " outage" : "")}
       viewBox="0 0 400 260"
       role="img"
       aria-label="Home energy scene"
@@ -133,21 +199,33 @@ function HomeScene({
     >
       <defs>
         <linearGradient id="sps-sky" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0" stopColor={isNight ? "#0a1228" : "#13315e"} />
-          <stop offset="1" stopColor={isNight ? "#070b18" : "#1d3a66"} />
+          <stop offset="0" stopColor={isNight ? "#0a0a1f" : "#241640"} />
+          <stop offset="1" stopColor={isNight ? "#080612" : "#160e2a"} />
         </linearGradient>
         <linearGradient id="sps-roof" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0" stopColor="#3a4a66" />
-          <stop offset="1" stopColor="#27344c" />
+          <stop offset="0" stopColor="#2a2240" />
+          <stop offset="1" stopColor="#1a1430" />
+        </linearGradient>
+        <linearGradient id="sps-wall" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0" stopColor={isNight ? "#171127" : "#221a36"} />
+          <stop offset="1" stopColor={isNight ? "#100b1c" : "#181126"} />
         </linearGradient>
         <radialGradient id="sps-sunglow" cx="0.5" cy="0.5" r="0.5">
-          <stop offset="0" stopColor="#fde68a" stopOpacity="0.9" />
-          <stop offset="1" stopColor="#fbbf24" stopOpacity="0" />
+          <stop offset="0" stopColor={isNight ? "#cdd6f4" : "#ffe9a8"} stopOpacity="0.9" />
+          <stop offset="1" stopColor={isNight ? "#9aa6d4" : "#ffd86b"} stopOpacity="0" />
         </radialGradient>
         <linearGradient id="sps-panel" x1="0" y1="0" x2="1" y2="1">
-          <stop offset="0" stopColor="#1e3a5f" />
-          <stop offset="1" stopColor="#0f2240" />
+          <stop offset="0" stopColor="#3b2a66" />
+          <stop offset="1" stopColor="#1a1233" />
         </linearGradient>
+        <linearGradient id="sps-batgrad" x1="0" y1="1" x2="0" y2="0">
+          <stop offset="0" stopColor="#6d28d9" />
+          <stop offset="1" stopColor="#a78bfa" />
+        </linearGradient>
+        <radialGradient id="sps-ground" cx="0.5" cy="0" r="1">
+          <stop offset="0" stopColor={isNight ? "#0e0a1c" : "#140e26"} />
+          <stop offset="1" stopColor="#080510" />
+        </radialGradient>
       </defs>
 
       {/* sky */}
@@ -164,6 +242,7 @@ function HomeScene({
           [250, 22],
           [380, 60],
           [20, 70],
+          [180, 24],
         ].map(([cx, cy], i) => (
           <circle
             key={i}
@@ -181,13 +260,13 @@ function HomeScene({
         className={"sps-sun" + (sunUp ? " on" : "")}
         style={{ transformOrigin: "330px 48px" }}
       >
-        <circle cx="330" cy="48" r="42" fill="url(#sps-sunglow)" />
+        <circle cx="330" cy="48" r="46" fill="url(#sps-sunglow)" />
         <circle
           cx="330"
           cy="48"
           r="18"
-          fill={isNight ? "#cdd6f4" : "#fde68a"}
-          stroke={isNight ? "#9aa6d4" : "#fbbf24"}
+          fill={isNight ? "#cdd6f4" : "#ffe9a8"}
+          stroke={isNight ? "#9aa6d4" : "#ffd86b"}
           strokeWidth="2"
         />
         {!isNight &&
@@ -204,7 +283,7 @@ function HomeScene({
                 y1={y1}
                 x2={x2}
                 y2={y2}
-                stroke="#fcd34d"
+                stroke="#ffd86b"
                 strokeWidth="2.5"
                 strokeLinecap="round"
               />
@@ -213,20 +292,19 @@ function HomeScene({
       </g>
 
       {/* ground */}
-      <rect x="0" y="206" width="400" height="54" fill={isNight ? "#0c1322" : "#16243d"} />
+      <rect x="0" y="206" width="400" height="54" fill="url(#sps-ground)" />
+      <line x1="0" y1="206" x2="400" y2="206" stroke="rgba(167,139,250,0.18)" strokeWidth="1" />
 
       {/* ── Grid: pole + power lines (left) ── */}
       <g className={"sps-grid" + (gridDark ? " dark" : "")}>
-        <line x1="28" y1="120" x2="28" y2="206" stroke="#5a6b86" strokeWidth="4" strokeLinecap="round" />
-        <line x1="14" y1="128" x2="42" y2="128" stroke="#5a6b86" strokeWidth="3" strokeLinecap="round" />
-        <line x1="14" y1="138" x2="42" y2="138" stroke="#5a6b86" strokeWidth="3" strokeLinecap="round" />
+        <line x1="28" y1="120" x2="28" y2="206" stroke="#4a4060" strokeWidth="4" strokeLinecap="round" />
+        <line x1="14" y1="128" x2="42" y2="128" stroke="#4a4060" strokeWidth="3" strokeLinecap="round" />
+        <line x1="14" y1="138" x2="42" y2="138" stroke="#4a4060" strokeWidth="3" strokeLinecap="round" />
         {/* slack wire toward the house */}
-        <path d="M28 130 Q70 150 110 150" fill="none" stroke="#3f4d64" strokeWidth="2" />
-        <text x="28" y="200" textAnchor="middle" fontSize="9" fill={PALETTE.inkDim}>
-          GRID
-        </text>
+        <path d="M28 130 Q70 150 110 150" fill="none" stroke="#352d4a" strokeWidth="2" />
+        <text x="28" y="200" textAnchor="middle" className="sps-svglabel">GRID</text>
         {gridDark && (
-          <text x="28" y="112" textAnchor="middle" fontSize="9" fill={PALETTE.amber} className="sps-outage">
+          <text x="28" y="112" textAnchor="middle" className="sps-outage" fill={PALETTE.grid}>
             ⚠ OUTAGE
           </text>
         )}
@@ -234,58 +312,66 @@ function HomeScene({
 
       {/* ── House ── */}
       <g>
+        {/* glow base under house */}
+        <ellipse cx="210" cy="208" rx="92" ry="10" fill={PALETTE.accent} opacity={isNight ? 0.1 : 0.16} />
         {/* body */}
-        <rect x="150" y="130" width="120" height="76" rx="3" fill={isNight ? "#1a2335" : "#26344e"} />
+        <rect x="150" y="130" width="120" height="76" rx="4" fill="url(#sps-wall)" stroke="rgba(167,139,250,0.14)" strokeWidth="1" />
         {/* roof */}
-        <polygon points="142,132 210,96 278,132" fill="url(#sps-roof)" />
+        <polygon points="140,133 210,94 280,133" fill="url(#sps-roof)" stroke="rgba(167,139,250,0.12)" strokeWidth="1" />
         {/* door */}
-        <rect x="200" y="168" width="20" height="38" rx="2" fill={isNight ? "#0e1626" : "#1a2740"} />
+        <rect x="200" y="168" width="20" height="38" rx="2" fill={isNight ? "#0c0818" : "#140e24"} />
+        <circle cx="216" cy="188" r="1.4" fill={PALETTE.accentBright} />
         {/* windows — glow when powered */}
         {[
           [164, 150],
           [236, 150],
           [164, 178],
-        ].map(([x, y], i) => {
-          // home is lit unless it's a full outage with no battery (never happens here:
-          // in battery/ev night the battery keeps it lit). In plain nosolar/solar it's day-lit.
-          const lit = true;
-          return (
-            <rect
-              key={i}
-              x={x}
-              y={y}
-              width="20"
-              height="18"
-              rx="2"
-              className={"sps-window" + (lit ? " lit" : "")}
-              style={{ animationDelay: `${i * 0.2}s` }}
-            />
-          );
-        })}
+        ].map(([x, y], i) => (
+          <rect
+            key={i}
+            x={x}
+            y={y}
+            width="20"
+            height="18"
+            rx="2"
+            className="sps-window lit"
+            style={{ animationDelay: `${i * 0.2}s` }}
+          />
+        ))}
 
         {/* roof solar panels */}
         <g className={"sps-panels" + (solarActive && !isNight ? " active" : "")}>
           {[0, 1, 2, 3].map((i) => (
-            <g key={i} transform={`translate(${168 + i * 18}, ${112 - i * 0}) `}>
+            <g key={i} transform={`translate(${168 + i * 18}, 112)`}>
               <polygon
-                points={`${0},${8 + 0} ${14},${4} ${14},${16} ${0},${20}`}
+                points={`0,8 14,4 14,16 0,20`}
                 fill="url(#sps-panel)"
-                stroke="#0a1a30"
+                stroke="#0e0820"
                 strokeWidth="0.6"
               />
             </g>
           ))}
           {/* shine sweep when active */}
-          {solarActive && !isNight && <polygon className="sps-shine" points="168,118 240,98 240,104 168,124" fill="#bfe3ff" />}
+          {solarActive && !isNight && (
+            <polygon className="sps-shine" points="168,118 240,98 240,104 168,124" fill="#d6c4ff" />
+          )}
         </g>
       </g>
 
       {/* ── Wall battery (right of house) ── */}
       <g className={"sps-battery" + (batteryActive ? " active" : "")}>
-        <rect x="288" y="150" width="26" height="46" rx="4" fill="#13233c" stroke={batteryActive ? PALETTE.blue : "#33415c"} strokeWidth="1.5" />
-        {/* fill level: charging by day, draining isn't animated (kept full-ish at night) */}
+        <rect
+          x="288"
+          y="148"
+          width="28"
+          height="50"
+          rx="6"
+          fill="#140d24"
+          stroke={batteryActive ? PALETTE.battery : "#352d4a"}
+          strokeWidth="1.5"
+        />
         <clipPath id="sps-batclip">
-          <rect x="290" y="152" width="22" height="42" rx="3" />
+          <rect x="290" y="150" width="24" height="46" rx="4" />
         </clipPath>
         <g clipPath="url(#sps-batclip)">
           <rect
@@ -295,75 +381,64 @@ function HomeScene({
               (batteryActive && isNight ? " full" : "")
             }
             x="290"
-            y="152"
-            width="22"
-            height="42"
-            fill={PALETTE.blue}
+            y="150"
+            width="24"
+            height="46"
+            fill="url(#sps-batgrad)"
           />
         </g>
-        <text x="301" y="208" textAnchor="middle" fontSize="8" fill={batteryActive ? PALETTE.blue : PALETTE.inkDim}>
+        {/* terminal */}
+        <rect x="298" y="145" width="8" height="4" rx="1.5" fill={batteryActive ? PALETTE.battery : "#352d4a"} />
+        <text x="302" y="208" textAnchor="middle" className="sps-svglabel" fill={batteryActive ? PALETTE.accentBright : PALETTE.textDim}>
           BATTERY
         </text>
       </g>
 
       {/* ── EV in driveway ── */}
       {hasEv && (
-        <g className={"sps-ev" + (evActive ? " active" : "")} transform="translate(96, 178)">
-          {/* car body */}
-          <rect x="0" y="10" width="46" height="16" rx="6" fill={evActive ? "#1f3a55" : "#1a2335"} stroke={evActive ? PALETTE.green : "#33415c"} strokeWidth="1.2" />
-          <path d="M8 10 Q14 0 24 0 L34 0 Q40 2 42 10 Z" fill={evActive ? "#274a6b" : "#1a2335"} />
-          <circle cx="12" cy="27" r="5" fill="#0c1322" stroke="#475569" strokeWidth="1.5" />
-          <circle cx="36" cy="27" r="5" fill="#0c1322" stroke="#475569" strokeWidth="1.5" />
+        <g className={"sps-ev" + (evActive ? " active" : "")} transform="translate(92, 176)">
+          {/* car body — sleek silhouette */}
+          <rect x="0" y="12" width="48" height="14" rx="7" fill={evActive ? "#2a1f44" : "#171127"} stroke={evActive ? PALETTE.ev : "#352d4a"} strokeWidth="1.2" />
+          <path d="M9 12 Q15 1 26 1 L34 1 Q41 3 43 12 Z" fill={evActive ? "#3a2a55" : "#1a1330"} stroke={evActive ? PALETTE.ev : "transparent"} strokeWidth="0.8" />
+          <circle cx="13" cy="27" r="5" fill="#0a0616" stroke="#5b4d75" strokeWidth="1.5" />
+          <circle cx="37" cy="27" r="5" fill="#0a0616" stroke="#5b4d75" strokeWidth="1.5" />
           {/* charge bar above the car */}
-          <rect x="6" y="-9" width="34" height="5" rx="2.5" fill="#0c1322" stroke="#33415c" strokeWidth="0.8" />
-          <rect className={"sps-evcharge" + (evActive ? " on" : "")} x="7" y="-8" width="32" height="3" rx="1.5" fill={PALETTE.green} />
+          <rect x="7" y="-9" width="34" height="5" rx="2.5" fill="#0a0616" stroke="#352d4a" strokeWidth="0.8" />
+          <rect className={"sps-evcharge" + (evActive ? " on" : "")} x="8" y="-8" width="32" height="3" rx="1.5" fill={PALETTE.ev} />
         </g>
       )}
 
-      {/* ════ ENERGY FLOW PATHS (marching ants) ════ */}
-      {/* grid → home (amber) */}
+      {/* ════ ENERGY FLOW PATHS (neon marching ants) ════ */}
+      {/* grid → home (red) */}
       <path
-        className={"sps-flow amber" + (gridFlow ? " on" : "")}
+        className={"sps-flow grid" + (gridFlow ? " on" : "")}
         d="M44 150 Q100 150 150 160"
-        fill="none"
       />
-      {/* solar(panels) → home (green) */}
+      {/* solar(panels) → home (gold) */}
       <path
-        className={"sps-flow green" + (solarToHome ? " on" : "")}
+        className={"sps-flow solar" + (solarToHome ? " on" : "")}
         d="M205 110 L205 150"
-        fill="none"
       />
-      {/* solar → grid export (green, flowing left) */}
+      {/* solar → grid export (blue, flowing left) */}
       <path
-        className={"sps-flow green rev" + (solarToGrid ? " on" : "")}
+        className={"sps-flow export rev" + (solarToGrid ? " on" : "")}
         d="M150 140 Q100 140 44 138"
-        fill="none"
       />
-      {/* solar → battery (blue) */}
+      {/* solar → battery (purple) */}
       <path
-        className={"sps-flow blue" + (solarToBattery ? " on" : "")}
-        d="M250 120 Q290 120 300 150"
-        fill="none"
+        className={"sps-flow battery" + (solarToBattery ? " on" : "")}
+        d="M250 120 Q295 120 302 150"
       />
-      {/* battery → home (blue, flowing left into house) */}
+      {/* battery → home (purple, flowing left into house) */}
       <path
-        className={"sps-flow blue rev" + (batteryToHome ? " on" : "")}
+        className={"sps-flow battery rev" + (batteryToHome ? " on" : "")}
         d="M288 172 L270 172"
-        fill="none"
       />
-      {/* power → EV (green) */}
+      {/* power → EV (pink) */}
       {hasEv && (
         <path
-          className={"sps-flow green rev" + (toEv ? " on" : "")}
-          d="M150 188 Q130 188 142 188"
-          fill="none"
-        />
-      )}
-      {hasEv && (
-        <path
-          className={"sps-flow green rev" + (toEv ? " on" : "")}
-          d="M150 190 L142 190"
-          fill="none"
+          className={"sps-flow ev rev" + (toEv ? " on" : "")}
+          d="M150 190 Q128 190 140 190"
         />
       )}
     </svg>
@@ -378,6 +453,7 @@ export default function SolarProposalShow(props: SolarShowProps) {
     address,
     companyName,
     monthlyBill,
+    monthlyKWh,
     recommendation,
     roi,
     incentives,
@@ -480,18 +556,32 @@ export default function SolarProposalShow(props: SolarShowProps) {
     ev: `Charge your car on sunshine — drive on energy you made, not energy you bought.`,
   };
 
-  const scenarioOptions: Array<{ key: Scenario; label: string }> = [
-    { key: "nosolar", label: "No solar" },
-    { key: "solar", label: "Solar" },
-    { key: "battery", label: "Solar + Battery" },
-    { key: "ev", label: "+ EV charger" },
+  const scenarioOptions: Array<{ key: Scenario; label: string; sub: string; icon: string }> = [
+    { key: "nosolar", label: "No solar", sub: "GRID ONLY", icon: "⚡" },
+    { key: "solar", label: "Solar", sub: "DAYTIME OFFSET", icon: "☀" },
+    { key: "battery", label: "Solar + Battery", sub: "STORE & BACKUP", icon: "▮" },
+    { key: "ev", label: "+ EV charger", sub: "DRIVE ON SUN", icon: "⊳" },
   ];
 
   const videoForScenario = videoUrls?.[scenario];
 
+  // Themed accent bar color for the interactive slide.
+  const sceneTheme =
+    scenario === "nosolar"
+      ? "grid"
+      : scenario === "solar"
+      ? "solar"
+      : scenario === "ev"
+      ? "ev"
+      : "battery";
+
   return (
     <div className="sps-root" role="dialog" aria-modal="true" aria-label="Interactive solar proposal">
       <style>{CSS}</style>
+
+      {/* atmosphere overlays */}
+      <div className="sps-grain" aria-hidden="true" />
+      <div className="sps-vignette" aria-hidden="true" />
 
       <button className="sps-close" onClick={onClose} aria-label="Close presentation">
         ✕
@@ -511,8 +601,10 @@ export default function SolarProposalShow(props: SolarShowProps) {
               )}
 
               {s.key === "interactive" && (
-                <div className="sps-inner">
+                <div className={"sps-inner sps-rise" + (activeKey === "interactive" ? " in" : "")}>
+                  <div className="sps-eyebrow">Live demo</div>
                   <h2 className="sps-h2">See your energy come alive</h2>
+
                   <div className="sps-switcher">
                     {scenarioOptions.map((o) => (
                       <button
@@ -523,12 +615,16 @@ export default function SolarProposalShow(props: SolarShowProps) {
                           if (o.key !== "battery" && o.key !== "ev") setNight(false);
                         }}
                       >
-                        {o.label}
+                        <span className="sps-scbtn-ico">{o.icon}</span>
+                        <span className="sps-scbtn-txt">
+                          <span className="sps-scbtn-label">{o.label}</span>
+                          <span className="sps-scbtn-sub">{o.sub}</span>
+                        </span>
                       </button>
                     ))}
                   </div>
 
-                  <div className="sps-sceneWrap">
+                  <div className={"sps-sceneWrap sps-theme-" + sceneTheme}>
                     {videoForScenario ? (
                       <video
                         className="sps-video"
@@ -539,7 +635,10 @@ export default function SolarProposalShow(props: SolarShowProps) {
                         playsInline
                       />
                     ) : (
-                      <HomeScene scenario={scenario} night={night} hasEv={hasEv} />
+                      <>
+                        <HomeScene scenario={scenario} night={night} hasEv={hasEv} />
+                        <SceneHud scenario={scenario} night={night} hasEv={hasEv} monthlyKWh={monthlyKWh} />
+                      </>
                     )}
 
                     {(scenario === "battery" || scenario === "ev") && (
@@ -548,22 +647,24 @@ export default function SolarProposalShow(props: SolarShowProps) {
                           className={"sps-dnbtn" + (!night ? " on" : "")}
                           onClick={() => setNight(false)}
                         >
-                          ☀️ Day
+                          ☀ Day
                         </button>
                         <button
                           className={"sps-dnbtn" + (night ? " on" : "")}
                           onClick={() => setNight(true)}
                         >
-                          🌙 Night
+                          ☾ Night
                         </button>
                       </div>
                     )}
                   </div>
 
                   <div className="sps-legend">
-                    <span><i style={{ background: PALETTE.amber }} /> Grid</span>
-                    <span><i style={{ background: PALETTE.green }} /> Solar</span>
-                    <span><i style={{ background: PALETTE.blue }} /> Battery</span>
+                    <span><i style={{ background: PALETTE.grid }} /> Grid</span>
+                    <span><i style={{ background: PALETTE.solar }} /> Solar</span>
+                    <span><i style={{ background: PALETTE.battery }} /> Battery</span>
+                    <span><i style={{ background: PALETTE.export }} /> Export</span>
+                    {hasEv && <span><i style={{ background: PALETTE.ev }} /> EV</span>}
                   </div>
 
                   <p className="sps-caption" key={scenario + String(night)}>
@@ -573,9 +674,10 @@ export default function SolarProposalShow(props: SolarShowProps) {
               )}
 
               {s.key === "savings" && roi && (
-                <div className="sps-inner">
+                <div className={"sps-inner sps-rise" + (activeKey === "savings" ? " in" : "")}>
+                  <div className="sps-eyebrow">The numbers</div>
                   <h2 className="sps-h2">Your savings</h2>
-                  <div className="sps-bignum">
+                  <div className="sps-bignum sps-theme-battery">
                     <div className="sps-bignum-label">Net cost after incentives</div>
                     <div className="sps-bignum-value">{money0(netUp)}</div>
                     <div className="sps-bignum-eq">
@@ -584,12 +686,18 @@ export default function SolarProposalShow(props: SolarShowProps) {
                     </div>
                   </div>
                   <div className="sps-savegrid">
-                    <div className="sps-savecard">
-                      <div className="sps-saveval green">{money0(moUp)}</div>
+                    <div className="sps-savecard sps-theme-solar">
+                      <div className="sps-saveval">
+                        <span className="sps-save-dot" style={{ background: PALETTE.solar }} />
+                        {money0(moUp)}
+                      </div>
                       <div className="sps-savelabel">Estimated monthly savings</div>
                     </div>
-                    <div className="sps-savecard">
-                      <div className="sps-saveval blue">{money0(lifeUp)}</div>
+                    <div className="sps-savecard sps-theme-export">
+                      <div className="sps-saveval">
+                        <span className="sps-save-dot" style={{ background: PALETTE.export }} />
+                        {money0(lifeUp)}
+                      </div>
                       <div className="sps-savelabel">Lifetime savings</div>
                     </div>
                   </div>
@@ -597,13 +705,15 @@ export default function SolarProposalShow(props: SolarShowProps) {
               )}
 
               {s.key === "backup" && recommendation && (
-                <div className="sps-inner">
+                <div className={"sps-inner sps-rise" + (activeKey === "backup" ? " in" : "")}>
+                  <div className="sps-eyebrow">Resilience</div>
                   <h2 className="sps-h2">Peace of mind, day and night</h2>
                   <div className="sps-backupGrid">
                     <div className="sps-miniScene">
                       <HomeScene scenario="battery" night hasEv={false} />
                     </div>
-                    <div className="sps-syscard">
+                    <div className="sps-syscard sps-theme-battery">
+                      <div className="sps-tag">System recommendation</div>
                       <div className="sps-sysname">
                         {recommendation.units}× {recommendation.brand} {recommendation.model}
                       </div>
@@ -614,7 +724,7 @@ export default function SolarProposalShow(props: SolarShowProps) {
                         </div>
                         <div>
                           <div className="sps-sysn">{recommendation.backupDaysAchieved}</div>
-                          <div className="sps-sysl">days of backup</div>
+                          <div className="sps-sysl">days backup</div>
                         </div>
                         <div>
                           <div className="sps-sysn">{recommendation.units}</div>
@@ -631,16 +741,15 @@ export default function SolarProposalShow(props: SolarShowProps) {
               )}
 
               {s.key === "incentives" && incentives && incentives.length > 0 && (
-                <div className="sps-inner">
+                <div className={"sps-inner sps-rise" + (activeKey === "incentives" ? " in" : "")}>
+                  <div className="sps-eyebrow">Money back</div>
                   <h2 className="sps-h2">Your incentives</h2>
                   <p className="sps-sub">Verified from official sources.</p>
                   <div className="sps-inclist">
                     {incentives.map((inc, i) => (
-                      <div className="sps-inccard" key={i}>
-                        <div className="sps-incTop">
-                          <span className="sps-incName">{inc.name}</span>
-                          {inc.amount && <span className="sps-incAmt">{inc.amount}</span>}
-                        </div>
+                      <div className="sps-inccard sps-theme-solar" key={i} style={{ animationDelay: `${0.06 * i}s` }}>
+                        <div className="sps-incName">{inc.name}</div>
+                        {inc.amount && <span className="sps-incAmt">{inc.amount}</span>}
                         <div className="sps-incMeta">
                           {[
                             inc.administrator,
@@ -661,8 +770,9 @@ export default function SolarProposalShow(props: SolarShowProps) {
               )}
 
               {s.key === "cta" && (
-                <div className="sps-inner sps-cta">
+                <div className={"sps-inner sps-cta sps-rise" + (activeKey === "cta" ? " in" : "")}>
                   <div className="sps-ctaGlow" />
+                  <div className="sps-eyebrow">Next step</div>
                   <h2 className="sps-ctaTitle">Let&rsquo;s do this, {name.split(" ")[0]}.</h2>
                   <p className="sps-ctaSub">
                     Lower bills, real backup, and energy on your terms — starting now.
@@ -744,97 +854,169 @@ function CoverSlide({
 
 // ── Component-scoped CSS ─────────────────────────────────────────────────────
 const CSS = `
-.sps-root{position:fixed;inset:0;z-index:5000;color:${PALETTE.ink};
-  font-family:"Inter",-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&family=Inter:wght@300;400;500;600;700&display=swap');
+
+.sps-root{
+  --bg:#0a0712;--card:#150f1f;--card-2:#1c1530;
+  --line:rgba(255,255,255,0.08);--line-2:rgba(255,255,255,0.14);
+  --text:#ece8f5;--text-dim:#8a8199;
+  --accent:#8b5cf6;--accent-bright:#a78bfa;--accent-deep:#6d28d9;
+  --solar:#ffd86b;--battery:#8b5cf6;--grid:#ef4444;--export:#38bdf8;--ev:#f472b6;
+  --font-head:'Space Grotesk',system-ui,-apple-system,sans-serif;
+  --font-mono:'JetBrains Mono','SF Mono',Consolas,monospace;
+  --font-body:'Inter',system-ui,-apple-system,sans-serif;
+  position:fixed;inset:0;z-index:5000;color:var(--text);
+  font-family:var(--font-body);
   background:
-    radial-gradient(1100px 600px at 80% -10%, rgba(56,189,248,.18), transparent 60%),
-    radial-gradient(900px 520px at -8% 110%, rgba(52,211,153,.12), transparent 60%),
-    linear-gradient(160deg,#070b18 0%,#0c142a 55%,#101a33 100%);
+    radial-gradient(1200px 700px at 78% -12%, rgba(139,92,246,.22), transparent 60%),
+    radial-gradient(900px 560px at -8% 112%, rgba(109,40,217,.18), transparent 60%),
+    radial-gradient(700px 500px at 50% 50%, rgba(167,139,250,.05), transparent 70%),
+    linear-gradient(165deg,#0a0712 0%,#0f0a1c 55%,#140d24 100%);
   overflow:hidden;display:flex;flex-direction:column;
   -webkit-font-smoothing:antialiased;}
+
+/* atmosphere: grain + radial vignette */
+.sps-grain{position:absolute;inset:0;pointer-events:none;z-index:2;
+  opacity:.035;mix-blend-mode:overlay;
+  background-image:url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");}
+.sps-vignette{position:absolute;inset:0;pointer-events:none;z-index:1;
+  box-shadow:inset 0 0 120px 30px rgba(0,0,0,0.55);}
+
 .sps-close{position:absolute;top:max(14px,env(safe-area-inset-top));right:16px;z-index:30;
-  width:42px;height:42px;border-radius:50%;border:1px solid rgba(255,255,255,.18);
-  background:rgba(255,255,255,.06);color:#e8eef8;font-size:18px;cursor:pointer;
-  backdrop-filter:blur(8px);transition:background .2s,transform .1s;}
-.sps-close:hover{background:rgba(255,255,255,.14);}
+  width:42px;height:42px;border-radius:50%;border:1px solid var(--line-2);
+  background:rgba(255,255,255,.05);color:var(--text);font-size:18px;cursor:pointer;
+  backdrop-filter:blur(8px);transition:background .2s,border-color .2s,transform .1s;}
+.sps-close:hover{background:rgba(139,92,246,.18);border-color:var(--accent);}
 .sps-close:active{transform:scale(.94);}
 
-.sps-stage{flex:1;min-height:0;overflow:hidden;position:relative;}
+.sps-stage{flex:1;min-height:0;overflow:hidden;position:relative;z-index:3;}
 .sps-track{display:flex;height:100%;width:100%;
-  transition:transform .5s cubic-bezier(.22,1,.36,1);}
+  transition:transform .55s cubic-bezier(.22,1,.36,1);}
 .sps-slide{flex:0 0 100%;width:100%;height:100%;overflow-y:auto;
   display:flex;align-items:center;justify-content:center;
   padding:clamp(16px,4vw,48px);}
-.sps-inner{width:100%;max-width:920px;display:flex;flex-direction:column;
-  align-items:center;gap:clamp(14px,2.5vh,26px);text-align:center;}
+.sps-inner{width:100%;max-width:940px;display:flex;flex-direction:column;
+  align-items:center;gap:clamp(13px,2.4vh,24px);text-align:center;}
 
-.sps-h2{font-family:"Space Grotesk","Inter",sans-serif;
-  font-size:clamp(22px,4.5vw,38px);font-weight:700;letter-spacing:-.5px;
-  background:linear-gradient(135deg,#fff,#9fd2ff);-webkit-background-clip:text;
+/* staggered entrance */
+.sps-rise>*{opacity:0;transform:translateY(16px);}
+.sps-rise.in>*{animation:sps-rise .7s cubic-bezier(.22,1,.36,1) forwards;}
+.sps-rise.in>*:nth-child(1){animation-delay:.04s;}
+.sps-rise.in>*:nth-child(2){animation-delay:.10s;}
+.sps-rise.in>*:nth-child(3){animation-delay:.16s;}
+.sps-rise.in>*:nth-child(4){animation-delay:.22s;}
+.sps-rise.in>*:nth-child(5){animation-delay:.28s;}
+.sps-rise.in>*:nth-child(6){animation-delay:.34s;}
+@keyframes sps-rise{to{opacity:1;transform:none;}}
+
+/* typography */
+.sps-eyebrow{font-family:var(--font-mono);font-size:10px;letter-spacing:.2em;
+  text-transform:uppercase;color:var(--text-dim);font-weight:500;}
+.sps-eyebrow::before{content:'·';margin-right:8px;color:var(--accent);}
+.sps-h2{font-family:var(--font-head);
+  font-size:clamp(23px,4.6vw,40px);font-weight:600;letter-spacing:-.02em;line-height:1.1;
+  background:linear-gradient(135deg,#fff,var(--accent-bright));-webkit-background-clip:text;
   background-clip:text;color:transparent;margin:0;}
-.sps-sub{color:${PALETTE.inkMid};font-size:14px;margin:-8px 0 0;}
+.sps-sub{color:var(--text-dim);font-size:13.5px;margin:-6px 0 0;}
+.sps-tag{font-family:var(--font-mono);font-size:10px;letter-spacing:.2em;
+  text-transform:uppercase;color:var(--text-dim);margin-bottom:8px;}
 
 /* ── Cover ── */
 .sps-cover{gap:clamp(16px,3vh,34px);}
-.sps-coverHero{width:min(560px,90vw);opacity:0;transform:translateY(24px) scale(.96);}
+.sps-coverHero{width:min(560px,90vw);opacity:0;transform:translateY(24px) scale(.96);
+  filter:drop-shadow(0 30px 60px rgba(109,40,217,.3));border-radius:18px;}
 .sps-cover.in .sps-coverHero{animation:sps-rise .9s cubic-bezier(.22,1,.36,1) .1s forwards;}
 .sps-coverText{opacity:0;transform:translateY(18px);}
 .sps-cover.in .sps-coverText{animation:sps-rise .8s cubic-bezier(.22,1,.36,1) .45s forwards;}
-.sps-eyebrow{font-size:13px;letter-spacing:2px;text-transform:uppercase;
-  color:${PALETTE.blue};font-weight:600;margin-bottom:10px;}
-.sps-title{font-family:"Space Grotesk","Inter",sans-serif;
-  font-size:clamp(34px,8vw,68px);font-weight:700;line-height:1.02;letter-spacing:-1px;
-  background:linear-gradient(135deg,#fff 0%,#fcd34d 50%,#38bdf8 100%);
-  -webkit-background-clip:text;background-clip:text;color:transparent;margin:0;}
-.sps-coverName{font-size:clamp(18px,3.2vw,26px);font-weight:600;margin-top:16px;}
-.sps-coverAddr{color:${PALETTE.inkMid};font-size:15px;margin-top:4px;}
-
-@keyframes sps-rise{to{opacity:1;transform:none;}}
+.sps-title{font-family:var(--font-head);
+  font-size:clamp(34px,8vw,70px);font-weight:700;line-height:1.02;letter-spacing:-.03em;
+  background:linear-gradient(135deg,#fff 0%,var(--accent-bright) 55%,var(--accent) 100%);
+  -webkit-background-clip:text;background-clip:text;color:transparent;margin:10px 0 0;}
+.sps-coverName{font-family:var(--font-head);font-size:clamp(18px,3.2vw,26px);font-weight:600;margin-top:16px;}
+.sps-coverAddr{font-family:var(--font-mono);color:var(--text-dim);font-size:12px;letter-spacing:.05em;margin-top:6px;}
 
 /* ── Interactive scene ── */
 .sps-switcher{display:flex;flex-wrap:wrap;gap:8px;justify-content:center;}
-.sps-scbtn{font-family:inherit;font-size:13px;font-weight:600;padding:9px 16px;
-  border-radius:999px;border:1px solid rgba(255,255,255,.16);
-  background:rgba(255,255,255,.04);color:${PALETTE.inkMid};cursor:pointer;
-  transition:all .25s;min-height:40px;}
-.sps-scbtn:hover{border-color:rgba(56,189,248,.5);color:#fff;}
-.sps-scbtn.on{background:linear-gradient(135deg,#0ea5e9,#38bdf8);color:#00131f;
-  border-color:transparent;box-shadow:0 6px 20px rgba(14,165,233,.35);}
+.sps-scbtn{display:flex;align-items:center;gap:9px;font-family:var(--font-head);
+  padding:9px 14px;min-width:120px;border-radius:11px;border:1px solid var(--line-2);
+  background:rgba(255,255,255,.025);color:var(--text);cursor:pointer;
+  text-align:left;line-height:1.15;transition:all .2s ease;min-height:46px;}
+.sps-scbtn-ico{font-size:15px;opacity:.7;flex-shrink:0;}
+.sps-scbtn-txt{display:flex;flex-direction:column;gap:2px;}
+.sps-scbtn-label{font-size:12.5px;font-weight:600;}
+.sps-scbtn-sub{font-family:var(--font-mono);font-size:8.5px;letter-spacing:.14em;
+  text-transform:uppercase;color:var(--text-dim);}
+.sps-scbtn:hover{border-color:rgba(255,255,255,.26);background:rgba(255,255,255,.045);}
+.sps-scbtn.on{background:rgba(139,92,246,.14);border-color:var(--accent);
+  box-shadow:0 0 0 3px rgba(139,92,246,.16);}
+.sps-scbtn.on .sps-scbtn-ico{opacity:1;color:var(--accent-bright);}
+.sps-scbtn.on .sps-scbtn-sub{color:var(--accent-bright);}
 
-.sps-sceneWrap{position:relative;width:min(640px,94vw);
-  background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.08);
-  border-radius:20px;padding:10px;box-shadow:0 20px 60px rgba(0,0,0,.4);
-  backdrop-filter:blur(6px);}
-.sps-scene{width:100%;height:auto;display:block;border-radius:14px;}
-.sps-video{width:100%;height:auto;display:block;border-radius:14px;}
+.sps-sceneWrap{position:relative;width:min(660px,94vw);
+  background:var(--card);border:1px solid var(--line);
+  border-radius:18px;padding:10px;overflow:hidden;
+  box-shadow:0 24px 70px rgba(0,0,0,.5),inset 0 1px 0 rgba(255,255,255,.04);}
+.sps-sceneWrap::before{content:'';position:absolute;top:0;left:0;width:3px;height:100%;
+  background:var(--accent);z-index:4;border-radius:3px 0 0 3px;}
+.sps-theme-solar::before{background:var(--solar)!important;}
+.sps-theme-battery::before{background:var(--battery)!important;}
+.sps-theme-grid::before{background:var(--grid)!important;}
+.sps-theme-export::before{background:var(--export)!important;}
+.sps-theme-ev::before{background:var(--ev)!important;}
+.sps-scene{width:100%;height:auto;display:block;border-radius:12px;}
+.sps-video{width:100%;height:auto;display:block;border-radius:12px;}
 
-.sps-daynight{position:absolute;top:18px;left:50%;transform:translateX(-50%);
-  display:flex;gap:6px;background:rgba(8,12,24,.6);border:1px solid rgba(255,255,255,.12);
-  border-radius:999px;padding:4px;backdrop-filter:blur(6px);}
-.sps-dnbtn{font-family:inherit;font-size:12px;font-weight:600;padding:6px 14px;
-  border-radius:999px;border:0;background:transparent;color:${PALETTE.inkMid};cursor:pointer;
-  transition:all .2s;}
-.sps-dnbtn.on{background:rgba(255,255,255,.14);color:#fff;}
+/* HUD chips */
+.sps-hud{position:absolute;top:14px;left:14px;z-index:5;display:flex;flex-direction:column;
+  gap:6px;align-items:flex-start;animation:sps-fade .45s ease;}
+.sps-chip{display:inline-flex;align-items:center;gap:7px;
+  padding:5px 10px;border-radius:9px;
+  background:rgba(10,7,18,.62);border:1px solid var(--line-2);
+  backdrop-filter:blur(10px);font-family:var(--font-mono);}
+.sps-chip-dot{width:7px;height:7px;border-radius:50%;flex-shrink:0;}
+.sps-chip-label{font-size:9px;letter-spacing:.16em;color:var(--text-dim);font-weight:500;}
+.sps-chip-sep{font-size:8px;color:var(--text-dim);opacity:.6;}
+.sps-chip-val{font-size:11px;font-weight:600;letter-spacing:.02em;}
+.sps-chip-live{padding:5px 10px;}
+.sps-live-dot{width:6px;height:6px;border-radius:50%;background:var(--accent);
+  box-shadow:0 0 6px var(--accent);animation:sps-pulse 1.6s ease-in-out infinite;}
+.sps-chip-live .sps-chip-label{color:var(--accent-bright);}
+@keyframes sps-pulse{0%,100%{opacity:1;box-shadow:0 0 6px var(--accent);}50%{opacity:.4;box-shadow:0 0 2px var(--accent);}}
 
-.sps-legend{display:flex;gap:18px;flex-wrap:wrap;justify-content:center;
-  font-size:12px;color:${PALETTE.inkMid};}
+.sps-daynight{position:absolute;top:14px;right:14px;z-index:6;
+  display:flex;gap:5px;background:rgba(10,7,18,.65);border:1px solid var(--line-2);
+  border-radius:999px;padding:4px;backdrop-filter:blur(8px);}
+.sps-dnbtn{font-family:var(--font-mono);font-size:11px;font-weight:500;letter-spacing:.05em;
+  padding:6px 13px;border-radius:999px;border:0;background:transparent;color:var(--text-dim);
+  cursor:pointer;transition:all .2s;}
+.sps-dnbtn.on{background:rgba(139,92,246,.22);color:#fff;box-shadow:0 0 0 1px var(--accent);}
+
+.sps-legend{display:flex;gap:16px;flex-wrap:wrap;justify-content:center;
+  font-family:var(--font-mono);font-size:10px;letter-spacing:.1em;text-transform:uppercase;
+  color:var(--text-dim);}
 .sps-legend span{display:inline-flex;align-items:center;gap:6px;}
-.sps-legend i{width:12px;height:12px;border-radius:3px;display:inline-block;}
+.sps-legend i{width:9px;height:9px;border-radius:3px;display:inline-block;}
 
-.sps-caption{font-size:clamp(15px,2.4vw,19px);line-height:1.5;color:#e8eef8;
-  max-width:640px;margin:0;animation:sps-fade .5s ease;}
+.sps-caption{font-family:var(--font-body);font-size:clamp(15px,2.4vw,19px);line-height:1.5;
+  color:#d6cfe6;max-width:640px;margin:0;animation:sps-fade .5s ease;}
 @keyframes sps-fade{from{opacity:0;transform:translateY(8px);}to{opacity:1;transform:none;}}
 
-/* ── SVG scene animations ── */
-.sps-flow{stroke-width:3;stroke-linecap:round;opacity:0;
-  stroke-dasharray:6 9;transition:opacity .4s;pointer-events:none;}
-.sps-flow.on{opacity:1;animation:sps-march 1s linear infinite;}
-.sps-flow.rev.on{animation:sps-march-rev 1s linear infinite;}
-.sps-flow.amber{stroke:${PALETTE.amber};filter:drop-shadow(0 0 3px rgba(245,158,11,.7));}
-.sps-flow.green{stroke:${PALETTE.green};filter:drop-shadow(0 0 3px rgba(52,211,153,.7));}
-.sps-flow.blue{stroke:${PALETTE.blue};filter:drop-shadow(0 0 3px rgba(56,189,248,.7));}
-@keyframes sps-march{to{stroke-dashoffset:-30;}}
-@keyframes sps-march-rev{to{stroke-dashoffset:30;}}
+/* ── SVG scene: neon marching-ants flows ── */
+.sps-flow{fill:none;stroke-width:3.5;stroke-linecap:round;opacity:0;
+  stroke-dasharray:10 14;transition:opacity .4s;pointer-events:none;}
+.sps-flow.on{opacity:1;animation:sps-flowDash 1.6s linear infinite;}
+.sps-flow.rev.on{animation-direction:reverse;}
+.sps-flow.solar{stroke:var(--solar);filter:drop-shadow(0 0 8px var(--solar));}
+.sps-flow.battery{stroke:var(--battery);filter:drop-shadow(0 0 8px var(--battery));}
+.sps-flow.grid{stroke:var(--grid);filter:drop-shadow(0 0 8px var(--grid));}
+.sps-flow.export{stroke:var(--export);filter:drop-shadow(0 0 8px var(--export));}
+.sps-flow.ev{stroke:var(--ev);filter:drop-shadow(0 0 8px var(--ev));}
+@keyframes sps-flowDash{to{stroke-dashoffset:-48;}}
+
+.sps-svglabel{font-family:var(--font-mono);font-size:8px;letter-spacing:.15em;fill:var(--text-dim);}
+.sps-outage{font-family:var(--font-mono);font-size:8px;letter-spacing:.1em;
+  animation:sps-blink 1.2s step-end infinite;}
+@keyframes sps-blink{50%{opacity:.3;}}
 
 .sps-sun{opacity:.55;transition:opacity .6s,transform .6s;}
 .sps-sun.on{opacity:1;animation:sps-sunpulse 4s ease-in-out infinite;}
@@ -843,127 +1025,145 @@ const CSS = `
 .sps-star{opacity:.3;animation:sps-twinkle 2.4s ease-in-out infinite;}
 @keyframes sps-twinkle{0%,100%{opacity:.25;}50%{opacity:1;}}
 
-.sps-window{fill:#1a2740;transition:fill .5s;}
-.sps-window.lit{fill:#fde68a;animation:sps-glow 3s ease-in-out infinite;}
-@keyframes sps-glow{0%,100%{fill:#fcd34d;}50%{fill:#fde68a;}}
+.sps-window{fill:#1a1330;transition:fill .5s;}
+.sps-window.lit{fill:#ffe9a8;animation:sps-glow 3s ease-in-out infinite;}
+@keyframes sps-glow{0%,100%{fill:#ffd86b;}50%{fill:#ffe9a8;}}
 
 .sps-panels{opacity:.5;transition:opacity .5s;}
 .sps-panels.active{opacity:1;}
 .sps-shine{opacity:0;animation:sps-shine 3.5s ease-in-out infinite;}
-@keyframes sps-shine{0%,70%,100%{opacity:0;}82%{opacity:.55;}}
+@keyframes sps-shine{0%,70%,100%{opacity:0;}82%{opacity:.6;}}
 
-.sps-batfill{transform:translateY(42px);}
+.sps-batfill{transform:translateY(46px);}
 .sps-batfill.filling{animation:sps-fill 3s ease-in-out infinite;}
-.sps-batfill.full{transform:translateY(4px);}
-@keyframes sps-fill{0%{transform:translateY(38px);}50%{transform:translateY(6px);}100%{transform:translateY(38px);}}
+.sps-batfill.full{transform:translateY(5px);}
+@keyframes sps-fill{0%{transform:translateY(42px);}50%{transform:translateY(6px);}100%{transform:translateY(42px);}}
 
 .sps-evcharge{transform:scaleX(0);transform-origin:left center;}
 .sps-evcharge.on{animation:sps-evfill 2.6s ease-in-out infinite;}
 @keyframes sps-evfill{0%{transform:scaleX(.1);}60%{transform:scaleX(1);}100%{transform:scaleX(.1);}}
 
-.sps-grid.dark line{stroke:#2a3346 !important;transition:stroke .5s;}
-.sps-outage{animation:sps-blink 1.2s step-end infinite;}
-@keyframes sps-blink{50%{opacity:.3;}}
+.sps-grid.dark line{stroke:#211b30!important;transition:stroke .5s;}
+
+/* night/outage atmosphere overlay via scene class (subtle tint already in gradients) */
 
 /* ── Savings ── */
-.sps-bignum{background:rgba(255,255,255,.04);border:1px solid rgba(56,189,248,.25);
-  border-radius:20px;padding:clamp(20px,4vw,38px);width:min(620px,92vw);
-  box-shadow:0 20px 60px rgba(0,0,0,.4);}
-.sps-bignum-label{font-size:14px;color:${PALETTE.inkMid};text-transform:uppercase;
-  letter-spacing:1px;}
-.sps-bignum-value{font-family:"Space Grotesk","Inter",sans-serif;
-  font-size:clamp(44px,11vw,84px);font-weight:700;line-height:1;margin:8px 0;
-  background:linear-gradient(135deg,#fff,#38bdf8);-webkit-background-clip:text;
-  background-clip:text;color:transparent;}
-.sps-bignum-eq{font-size:14px;color:${PALETTE.inkMid};}
-.sps-bignum-eq strong{color:#fff;}
+.sps-bignum{position:relative;overflow:hidden;background:var(--card);
+  border:1px solid var(--line);border-radius:16px;
+  padding:clamp(22px,4vw,40px);width:min(620px,92vw);
+  box-shadow:0 24px 70px rgba(0,0,0,.5);}
+.sps-bignum::before{content:'';position:absolute;top:0;left:0;width:3px;height:100%;background:var(--battery);}
+.sps-bignum-label{font-family:var(--font-mono);font-size:10px;color:var(--text-dim);
+  text-transform:uppercase;letter-spacing:.2em;}
+.sps-bignum-value{font-family:var(--font-head);
+  font-size:clamp(46px,11vw,88px);font-weight:700;line-height:1;margin:10px 0;letter-spacing:-.02em;
+  background:linear-gradient(135deg,var(--accent),var(--accent-bright));
+  -webkit-background-clip:text;background-clip:text;color:transparent;}
+.sps-bignum-eq{font-family:var(--font-mono);font-size:11.5px;letter-spacing:.02em;color:var(--text-dim);}
+.sps-bignum-eq strong{color:var(--text);font-weight:600;}
 .sps-savegrid{display:grid;grid-template-columns:1fr 1fr;gap:14px;width:min(620px,92vw);}
-.sps-savecard{background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.08);
-  border-radius:16px;padding:22px 16px;}
-.sps-saveval{font-family:"Space Grotesk","Inter",sans-serif;font-size:clamp(26px,6vw,40px);
-  font-weight:700;line-height:1;}
-.sps-saveval.green{color:${PALETTE.green};}
-.sps-saveval.blue{color:${PALETTE.blue};}
-.sps-savelabel{font-size:13px;color:${PALETTE.inkMid};margin-top:8px;}
+.sps-savecard{position:relative;overflow:hidden;background:var(--card);
+  border:1px solid var(--line);border-radius:14px;padding:22px 16px;}
+.sps-savecard::before{content:'';position:absolute;top:0;left:0;width:3px;height:100%;background:var(--accent);}
+.sps-saveval{display:flex;align-items:center;justify-content:center;gap:9px;
+  font-family:var(--font-head);font-size:clamp(26px,6vw,40px);font-weight:700;line-height:1;}
+.sps-save-dot{width:9px;height:9px;border-radius:50%;flex-shrink:0;}
+.sps-savelabel{font-family:var(--font-mono);font-size:10px;letter-spacing:.12em;text-transform:uppercase;
+  color:var(--text-dim);margin-top:10px;}
 @media(max-width:520px){.sps-savegrid{grid-template-columns:1fr;}}
 
 /* ── Backup ── */
 .sps-backupGrid{display:grid;grid-template-columns:1fr 1fr;gap:22px;
-  width:min(860px,94vw);align-items:center;}
-.sps-miniScene{background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.08);
-  border-radius:18px;padding:8px;}
-.sps-syscard{text-align:left;background:rgba(255,255,255,.04);
-  border:1px solid rgba(52,211,153,.25);border-radius:18px;padding:22px;}
-.sps-sysname{font-family:"Space Grotesk","Inter",sans-serif;font-size:20px;font-weight:700;}
-.sps-sysstats{display:flex;gap:20px;margin:16px 0;}
-.sps-sysn{font-family:"Space Grotesk","Inter",sans-serif;font-size:30px;font-weight:700;
-  color:${PALETTE.green};line-height:1;}
-.sps-sysl{font-size:12px;color:${PALETTE.inkMid};margin-top:4px;}
-.sps-syslead{font-size:15px;line-height:1.55;color:#dbe4f3;margin:0;}
+  width:min(880px,94vw);align-items:center;}
+.sps-miniScene{position:relative;overflow:hidden;background:var(--card);
+  border:1px solid var(--line);border-radius:16px;padding:8px;
+  box-shadow:0 18px 50px rgba(0,0,0,.45);}
+.sps-syscard{position:relative;overflow:hidden;text-align:left;background:var(--card);
+  border:1px solid var(--line);border-radius:16px;padding:22px;}
+.sps-syscard::before{content:'';position:absolute;top:0;left:0;width:3px;height:100%;background:var(--battery);}
+.sps-sysname{font-family:var(--font-head);font-size:21px;font-weight:600;letter-spacing:-.02em;}
+.sps-sysstats{display:flex;gap:22px;margin:18px 0;}
+.sps-sysn{font-family:var(--font-mono);font-size:30px;font-weight:700;
+  color:var(--accent-bright);line-height:1;}
+.sps-sysl{font-family:var(--font-mono);font-size:9px;letter-spacing:.12em;text-transform:uppercase;
+  color:var(--text-dim);margin-top:6px;}
+.sps-syslead{font-family:var(--font-body);font-size:14px;line-height:1.55;color:#c8c3b3;margin:0;}
 @media(max-width:680px){.sps-backupGrid{grid-template-columns:1fr;}}
 
 /* ── Incentives ── */
-.sps-inclist{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));
-  gap:14px;width:min(860px,94vw);}
-.sps-inccard{background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.1);
-  border-radius:16px;padding:18px;text-align:left;
-  transition:border-color .25s,transform .25s;}
-.sps-inccard:hover{border-color:rgba(56,189,248,.4);transform:translateY(-2px);}
-.sps-incTop{display:flex;justify-content:space-between;align-items:flex-start;gap:10px;}
-.sps-incName{font-weight:700;font-size:15px;}
-.sps-incAmt{flex-shrink:0;background:linear-gradient(135deg,#34d399,#10b981);color:#06121f;
-  font-weight:700;font-size:12px;padding:3px 10px;border-radius:999px;white-space:nowrap;}
-.sps-incMeta{font-size:13px;color:${PALETTE.inkMid};margin-top:8px;}
-.sps-incLink{display:inline-block;margin-top:10px;font-size:13px;color:${PALETTE.blue};
-  font-weight:600;}
+.sps-inclist{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));
+  gap:14px;width:min(880px,94vw);
+  max-height:min(62vh,560px);overflow-y:auto;padding:2px;align-content:start;
+  align-items:start;justify-items:stretch;}
+.sps-inccard{position:relative;overflow:hidden;display:flex;flex-direction:column;
+  align-items:flex-start;min-width:0;background:var(--card);
+  border:1px solid var(--line);border-radius:14px;padding:18px 18px 18px 20px;text-align:left;
+  transition:border-color .25s,transform .25s;animation:sps-rise .6s cubic-bezier(.22,1,.36,1) backwards;}
+.sps-inccard::before{content:'';position:absolute;top:0;left:0;width:3px;height:100%;background:var(--solar);}
+.sps-inccard:hover{border-color:var(--line-2);transform:translateY(-2px);}
+.sps-incName{font-family:var(--font-head);font-weight:600;font-size:15px;letter-spacing:-.01em;
+  line-height:1.3;max-width:100%;overflow-wrap:anywhere;word-break:break-word;}
+.sps-incAmt{display:inline-block;max-width:100%;margin-top:10px;
+  font-family:var(--font-mono);background:rgba(255,216,107,.14);
+  color:var(--solar);font-weight:600;font-size:11px;line-height:1.4;padding:4px 10px;border-radius:8px;
+  white-space:normal;overflow-wrap:anywhere;word-break:break-word;
+  border:1px solid rgba(255,216,107,.3);}
+.sps-incMeta{font-family:var(--font-mono);font-size:10px;letter-spacing:.04em;color:var(--text-dim);
+  margin-top:10px;max-width:100%;overflow-wrap:anywhere;word-break:break-word;}
+.sps-incLink{display:inline-block;margin-top:12px;font-family:var(--font-mono);font-size:11px;
+  letter-spacing:.05em;color:var(--accent-bright);font-weight:500;}
 
 /* ── CTA ── */
 .sps-cta{position:relative;justify-content:center;min-height:60vh;}
 .sps-ctaGlow{position:absolute;inset:-40% 0 auto;height:480px;
-  background:radial-gradient(closest-side,rgba(56,189,248,.22),transparent);
+  background:radial-gradient(closest-side,rgba(139,92,246,.28),transparent);
   pointer-events:none;animation:sps-sunpulse 6s ease-in-out infinite;}
-.sps-ctaTitle{position:relative;font-family:"Space Grotesk","Inter",sans-serif;
-  font-size:clamp(32px,7vw,60px);font-weight:700;letter-spacing:-1px;
-  background:linear-gradient(135deg,#fff,#fcd34d);-webkit-background-clip:text;
+.sps-ctaTitle{position:relative;font-family:var(--font-head);
+  font-size:clamp(32px,7vw,62px);font-weight:700;letter-spacing:-.03em;
+  background:linear-gradient(135deg,#fff,var(--accent-bright));-webkit-background-clip:text;
   background-clip:text;color:transparent;margin:0;}
-.sps-ctaSub{position:relative;font-size:clamp(16px,3vw,22px);color:#dbe4f3;
-  max-width:560px;margin:6px 0 0;}
-.sps-ctaLine{position:relative;font-size:15px;color:${PALETTE.blue};margin:0;font-weight:600;}
-.sps-ctaCompany{position:relative;margin-top:22px;font-size:15px;letter-spacing:1px;
-  text-transform:uppercase;color:${PALETTE.inkMid};font-weight:600;}
+.sps-ctaSub{position:relative;font-family:var(--font-body);font-size:clamp(16px,3vw,22px);
+  color:#d6cfe6;max-width:560px;margin:6px 0 0;}
+.sps-ctaLine{position:relative;font-family:var(--font-mono);font-size:13px;letter-spacing:.03em;
+  color:var(--accent-bright);margin:0;font-weight:500;}
+.sps-ctaCompany{position:relative;margin-top:22px;font-family:var(--font-mono);font-size:11px;
+  letter-spacing:.2em;text-transform:uppercase;color:var(--text-dim);font-weight:500;}
 
 /* ── Nav controls ── */
 .sps-nav{position:absolute;top:50%;transform:translateY(-50%);z-index:20;
-  width:48px;height:48px;border-radius:50%;border:1px solid rgba(255,255,255,.16);
-  background:rgba(255,255,255,.06);color:#fff;font-size:26px;line-height:1;cursor:pointer;
-  backdrop-filter:blur(8px);transition:background .2s,transform .1s;
+  width:48px;height:48px;border-radius:50%;border:1px solid var(--line-2);
+  background:rgba(255,255,255,.05);color:var(--text);font-size:26px;line-height:1;cursor:pointer;
+  backdrop-filter:blur(8px);transition:background .2s,border-color .2s,transform .1s;
   display:flex;align-items:center;justify-content:center;}
-.sps-nav:hover:not(:disabled){background:rgba(255,255,255,.16);}
+.sps-nav:hover:not(:disabled){background:rgba(139,92,246,.18);border-color:var(--accent);}
 .sps-nav:active:not(:disabled){transform:translateY(-50%) scale(.92);}
-.sps-nav:disabled{opacity:.25;cursor:default;}
+.sps-nav:disabled{opacity:.22;cursor:default;}
 .sps-nav.prev{left:14px;}
 .sps-nav.next{right:14px;}
 
 .sps-dots{position:absolute;bottom:max(18px,env(safe-area-inset-bottom));left:50%;
   transform:translateX(-50%);z-index:20;display:flex;gap:10px;}
 .sps-dot{width:9px;height:9px;border-radius:50%;border:0;cursor:pointer;
-  background:rgba(255,255,255,.25);transition:all .25s;padding:0;}
-.sps-dot.on{background:#38bdf8;width:26px;border-radius:999px;
-  box-shadow:0 0 12px rgba(56,189,248,.6);}
+  background:rgba(255,255,255,.22);transition:all .25s;padding:0;}
+.sps-dot.on{background:var(--accent-bright);width:26px;border-radius:999px;
+  box-shadow:0 0 12px rgba(139,92,246,.7);}
 
 @media(max-width:560px){
   .sps-nav{width:40px;height:40px;font-size:22px;}
   .sps-nav.prev{left:8px;}
   .sps-nav.next{right:8px;}
+  .sps-hud{top:10px;left:10px;}
+  .sps-scbtn{min-width:calc(50% - 4px);flex:1 1 calc(50% - 4px);}
 }
 
 @media(prefers-reduced-motion:reduce){
-  .sps-flow.on,.sps-flow.rev.on{animation:none !important;opacity:1;}
+  .sps-flow.on,.sps-flow.rev.on{animation:none!important;opacity:1;}
   .sps-sun.on,.sps-window.lit,.sps-shine,.sps-batfill.filling,
-  .sps-evcharge.on,.sps-star,.sps-outage,.sps-ctaGlow{animation:none !important;}
+  .sps-evcharge.on,.sps-star,.sps-outage,.sps-ctaGlow,.sps-live-dot,.sps-grain{animation:none!important;}
   .sps-batfill.filling{transform:translateY(6px);}
   .sps-evcharge.on{transform:scaleX(1);}
   .sps-track{transition:none;}
-  .sps-cover .sps-coverHero,.sps-cover .sps-coverText{opacity:1 !important;transform:none !important;animation:none !important;}
+  .sps-rise>*,.sps-inccard{opacity:1!important;transform:none!important;animation:none!important;}
+  .sps-cover .sps-coverHero,.sps-cover .sps-coverText{opacity:1!important;transform:none!important;animation:none!important;}
 }
 `;
