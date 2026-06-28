@@ -430,13 +430,6 @@ export default function SolarProposalShow(props: SolarShowProps) {
   const clamp = useCallback((n: number) => Math.max(0, Math.min(count - 1, n)), [count]);
   const next = useCallback(() => setIdx((i) => clamp(i + 1)), [clamp]);
   const prev = useCallback(() => setIdx((i) => clamp(i - 1)), [clamp]);
-  const goToKey = useCallback(
-    (key: string) => {
-      const i = slides.findIndex((sl) => sl.key === key);
-      if (i >= 0) setIdx(i);
-    },
-    [slides]
-  );
 
   // Reset to the first slide each time the show opens.
   useEffect(() => {
@@ -868,7 +861,7 @@ export default function SolarProposalShow(props: SolarShowProps) {
                         setUnits={setUnits}
                         onChoose={(id) => {
                           setSelectedId(id);
-                          goToKey("pricing");
+                          next(); // just select, then advance to the next slide (Resilience)
                         }}
                       />
                     </div>
