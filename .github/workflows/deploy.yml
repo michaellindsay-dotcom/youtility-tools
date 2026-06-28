@@ -16,7 +16,7 @@ concurrency:
 jobs:
   deploy:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30 # extra headroom for deploy retries on transient quota limits
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -50,7 +50,21 @@ jobs:
         # Include firestore:rules and storage so rule changes (e.g. new
         # collections) actually ship. firestore:rules deploys ONLY the rules —
         # not indexes — so --force can't drop indexes that aren't in the repo.
-        run: npx firebase-tools deploy --only hosting,functions,firestore:rules,storage --project youtilityknock --non-interactive --force
+        #
+        # Retry on transient failures: deploying ~50 functions can brush the
+        # Cloud Functions "mutation requests per minute per region" quota (HTTP
+        # 429), especially when several merges land back-to-back. A retry with
+        # backoff lets the per-minute quota reset; firebase skips functions that
+        # already updated, so each retry does less work and clears the limit.
+        run: |
+          attempt=1; max=4
+          until npx firebase-tools deploy --only hosting,functions,firestore:rules,storage --project youtilityknock --non-interactive --force; do
+            if [ "$attempt" -ge "$max" ]; then echo "::error::Deploy failed after $max attempts"; exit 1; fi
+            wait=$((attempt * 75))
+            echo "::warning::Deploy attempt $attempt/$max failed (likely a transient quota limit); retrying in ${wait}s…"
+            sleep "$wait"
+            attempt=$((attempt + 1))
+          done
         env:
           GOOGLE_APPLICATION_CREDENTIALS: ${{ runner.temp }}/gcp-sa.json
 
@@ -61,6 +75,13 @@ jobs:
       # is safe to run on every push. Index builds can take a few minutes; the
       # queries fall back gracefully until they're ready.
       - name: Deploy Firestore indexes
-        run: npx firebase-tools deploy --only firestore:indexes --project youtilityknock --non-interactive
+        run: |
+          attempt=1; max=3
+          until npx firebase-tools deploy --only firestore:indexes --project youtilityknock --non-interactive; do
+            if [ "$attempt" -ge "$max" ]; then echo "::error::Index deploy failed after $max attempts"; exit 1; fi
+            echo "::warning::Index deploy attempt $attempt/$max failed; retrying in 45s…"
+            sleep 45
+            attempt=$((attempt + 1))
+          done
         env:
           GOOGLE_APPLICATION_CREDENTIALS: ${{ runner.temp }}/gcp-sa.json
