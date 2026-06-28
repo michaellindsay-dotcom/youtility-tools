@@ -5,6 +5,7 @@ import App from "./App";
 import { AuthProvider } from "./auth/AuthContext";
 import { ShiftProvider } from "./shift/ShiftContext";
 import SharedProposalView from "./pages/SharedProposalView";
+import AgreementSignView from "./pages/AgreementSignView";
 import "./index.css";
 
 // Native (Capacitor) builds run from the bundle root; the web build is served
@@ -12,10 +13,18 @@ import "./index.css";
 const basename = import.meta.env.VITE_NATIVE === "1" ? "/" : "/app";
 
 const root = ReactDOM.createRoot(document.getElementById("root")!);
+const qs = typeof window !== "undefined" ? new URLSearchParams(window.location.search) : new URLSearchParams();
 
-// A homeowner opening the emailed proposal link (…/app/?pid=<id>) gets the
-// standalone, no-login interactive viewer — outside the auth gate and router.
-if (typeof window !== "undefined" && new URLSearchParams(window.location.search).has("pid")) {
+// Standalone, no-login entry points (outside the auth gate + router):
+//  • ?pid=<id>        → the homeowner's interactive proposal viewer
+//  • ?agreement=<id>  → the customer's battery-agreement sign page
+if (qs.has("agreement")) {
+  root.render(
+    <React.StrictMode>
+      <AgreementSignView />
+    </React.StrictMode>
+  );
+} else if (qs.has("pid")) {
   root.render(
     <React.StrictMode>
       <SharedProposalView />

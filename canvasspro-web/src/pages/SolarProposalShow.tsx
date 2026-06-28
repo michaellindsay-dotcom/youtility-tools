@@ -137,6 +137,28 @@ export interface SolarShowProps {
   // for the Sungage financing application (defaults to the dealer login portal).
   depositUsd?: number;
   sungageApplyUrl?: string;
+  // "Let's do this" → start the agreement/close flow with the chosen payment.
+  // Only wired from the closer's tool (the homeowner viewer leaves it unset).
+  onLetsDoIt?: (selection: ProposalCloseSelection) => void;
+}
+
+// What the CTA hands back to the closer's tool to build the agreement.
+export interface ProposalCloseSelection {
+  method: "finance" | "cash";
+  systemPrice: number;
+  finance?: { optionId: string; name: string; apr: number; termYears: number; monthly: number };
+  cash?: { cashPrice: number; depositUsd: number; balance: number };
+  battery?: {
+    productId: string;
+    brand: string;
+    model: string;
+    units: number;
+    totalUsableKWh: number;
+    totalContinuousKW: number;
+    backupDaysAchieved: number;
+    warrantyYears: number;
+    chemistry: string;
+  };
 }
 
 // Energy palette — accent colors used by the savings/backup stat dots.
@@ -312,6 +334,7 @@ export default function SolarProposalShow(props: SolarShowProps) {
     chosenProductId,
     depositUsd = 2500,
     sungageApplyUrl,
+    onLetsDoIt,
   } = props;
 
   const hasOptions = !!(options && options.length);
@@ -333,6 +356,9 @@ export default function SolarProposalShow(props: SolarShowProps) {
     (productId: string, units: number) => setUnitsById((m) => ({ ...m, [productId]: units })),
     []
   );
+  // Pricing selection (lifted so the "Let's do this" CTA can build the agreement).
+  const [payMode, setPayMode] = useState<"finance" | "cash">("finance");
+  const [financeOptId, setFinanceOptId] = useState<string>(FINANCE_OPTIONS[0].id);
 
   const active = useMemo(() => {
     const base = options?.find((o) => o.productId === selectedId) || options?.[0];
@@ -421,6 +447,8 @@ export default function SolarProposalShow(props: SolarShowProps) {
         setSelectedId(chosenProductId || options[0].productId);
         setCompareIds(options.slice(0, 2).map((o) => o.productId));
         setUnitsById({});
+        setPayMode("finance");
+        setFinanceOptId(FINANCE_OPTIONS[0].id);
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -869,6 +897,10 @@ export default function SolarProposalShow(props: SolarShowProps) {
                         firstName={name.split(" ")[0]}
                         depositUsd={depositUsd}
                         sungageApplyUrl={sungageApplyUrl || SUNGAGE_PORTAL_URL}
+                        mode={payMode}
+                        setMode={setPayMode}
+                        optId={financeOptId}
+                        setOptId={setFinanceOptId}
                       />
                     </div>
                   </>
@@ -889,6 +921,41 @@ export default function SolarProposalShow(props: SolarShowProps) {
                           From {money0(monthlyBill)}/mo on the grid to about{" "}
                           {money0(effRoi.monthlySavings)}/mo back in your pocket.
                         </p>
+                      )}
+                      {onLetsDoIt && effRoi && active && (
+                        <button
+                          className="sps-cta-go"
+                          style={{ background: brandAccent }}
+                          onClick={() => {
+                            const price = effRoi.grossCost > 0 ? effRoi.grossCost : effRoi.netCost;
+                            const cashPrice = effRoi.netCost > 0 ? effRoi.netCost : effRoi.grossCost;
+                            const sel: ProposalCloseSelection = {
+                              method: payMode,
+                              systemPrice: payMode === "finance" ? price : cashPrice,
+                              battery: {
+                                productId: active.productId,
+                                brand: active.brand,
+                                model: active.model,
+                                units: active.units,
+                                totalUsableKWh: active.totalUsableKWh,
+                                totalContinuousKW: active.totalContinuousKW,
+                                backupDaysAchieved: active.backupDaysAchieved,
+                                warrantyYears: active.warrantyYears,
+                                chemistry: active.chemistry,
+                              },
+                            };
+                            if (payMode === "finance") {
+                              const opt = financeOptionById(financeOptId);
+                              const fin = computeFinance(opt, price);
+                              sel.finance = { optionId: opt.id, name: opt.name, apr: opt.apr, termYears: opt.termYears, monthly: fin.monthly };
+                            } else {
+                              sel.cash = { cashPrice, depositUsd, balance: Math.max(0, cashPrice - depositUsd) };
+                            }
+                            onLetsDoIt(sel);
+                          }}
+                        >
+                          Let&rsquo;s do this →
+                        </button>
                       )}
                       {company && <div className="sps-ctaCompany">{company}</div>}
                     </div>
@@ -1137,15 +1204,21 @@ function PricingSlide({
   firstName,
   depositUsd,
   sungageApplyUrl,
+  mode,
+  setMode,
+  optId,
+  setOptId,
 }: {
   roi: { grossCost: number; incentives: number; netCost: number; monthlySavings: number; lifetimeSavings: number };
   accent: string;
   firstName: string;
   depositUsd: number;
   sungageApplyUrl: string;
+  mode: "finance" | "cash";
+  setMode: (m: "finance" | "cash") => void;
+  optId: string;
+  setOptId: (id: string) => void;
 }) {
-  const [mode, setMode] = useState<"finance" | "cash">("finance");
-  const [optId, setOptId] = useState(FINANCE_OPTIONS[0].id);
   const [deposit, setDeposit] = useState<"idle" | "card" | "cash">("idle");
 
   // Finance the system sale price (grossed up by the dealer fee inside compute).
@@ -1535,6 +1608,15 @@ const CSS = `
   color:#e6e0f2;max-width:580px;margin:6px 0 0;text-shadow:0 1px 16px rgba(0,0,0,.7);}
 .sps-ctaLine{font-family:var(--font-mono);font-size:13px;letter-spacing:.03em;
   color:var(--accent-bright);margin:0;font-weight:500;}
+.sps-cta-go{margin-top:26px;font-family:var(--font-head);font-weight:700;
+  font-size:clamp(20px,3.4vw,28px);letter-spacing:-.01em;color:#fff;border:0;cursor:pointer;
+  padding:clamp(16px,2.4vh,22px) clamp(34px,6vw,60px);border-radius:999px;
+  box-shadow:0 16px 50px rgba(139,92,246,.5),inset 0 1px 0 rgba(255,255,255,.2);
+  transition:transform .12s,filter .2s;animation:sps-cta-pulse 2.6s ease-in-out infinite;}
+.sps-cta-go:hover{filter:brightness(1.08);}
+.sps-cta-go:active{transform:scale(.97);}
+@keyframes sps-cta-pulse{0%,100%{box-shadow:0 16px 50px rgba(139,92,246,.45),inset 0 1px 0 rgba(255,255,255,.2);}
+  50%{box-shadow:0 18px 60px rgba(139,92,246,.75),inset 0 1px 0 rgba(255,255,255,.25);}}
 .sps-ctaCompany{margin-top:22px;font-family:var(--font-mono);font-size:11px;
   letter-spacing:.22em;text-transform:uppercase;color:var(--text-dim);font-weight:500;}
 

@@ -974,6 +974,21 @@
         Sungage application link (optional)
         <input id="bpSungageUrl" type="url" placeholder="https://auth.sungage.com/…  (blank = use the Sungage dealer login portal)" />
       </label>
+
+      <h3 style="font-size:15px;margin:18px 0 4px;">Battery agreement</h3>
+      <p class="muted" style="margin:0 0 12px;font-size:13px;">Used when a closer signs a customer up. Leave the installer name to fill the contractor-of-record line; add anyone who should receive a copy of every signed agreement.</p>
+      <label style="display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--muted,#8a8199);max-width:600px;">
+        Installer / contractor name (printed on the agreement)
+        <input id="bpInstaller" type="text" placeholder="Your licensed installer / contractor name" />
+      </label>
+      <label style="display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--muted,#8a8199);margin-top:14px;max-width:600px;">
+        Agreement copy recipients (comma-separated emails)
+        <input id="bpAgreementCc" type="text" placeholder="ops@company.com, pm@company.com" />
+      </label>
+      <label style="display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--muted,#8a8199);margin-top:14px;max-width:600px;">
+        Use your own agreement instead (PDF link, optional)
+        <input id="bpAgreementUrl" type="url" placeholder="https://…/your-installation-agreement.pdf  (blank = use the standard template)" />
+      </label>
     </div>
 
     <div class="row" style="justify-content:flex-end;margin-top:16px;">
@@ -1794,26 +1809,26 @@ function syncDepositLabel() {
 $("bpDepositType")?.addEventListener("change", syncDepositLabel);
 
 async function loadBatteryPricing(companyId) {
-  let pricing = {}, offered, depositUsd, depositPct, sungageApplyUrl;
+  let pricing = {}, offered, c = {};
   try {
     const snap = await getDoc(doc(db, "companies", companyId));
-    const c = snap.exists() ? snap.data() : {};
+    c = snap.exists() ? snap.data() : {};
     pricing = c.batteryPricing || {};
     offered = c.batteryOffered;
-    depositUsd = c.batteryDepositUsd;
-    depositPct = c.batteryDepositPct;
-    sungageApplyUrl = c.sungageApplyUrl;
   } catch (e) { /* leave empty */ }
   renderBatteryPricingRows(pricing, offered);
   // Seed the deposit/financing fields. A positive % takes precedence.
-  if (Number(depositPct) > 0) {
+  if (Number(c.batteryDepositPct) > 0) {
     $("bpDepositType").value = "pct";
-    $("bpDepositValue").value = String(depositPct);
+    $("bpDepositValue").value = String(c.batteryDepositPct);
   } else {
     $("bpDepositType").value = "usd";
-    $("bpDepositValue").value = Number(depositUsd) > 0 ? String(depositUsd) : "";
+    $("bpDepositValue").value = Number(c.batteryDepositUsd) > 0 ? String(c.batteryDepositUsd) : "";
   }
-  $("bpSungageUrl").value = sungageApplyUrl || "";
+  $("bpSungageUrl").value = c.sungageApplyUrl || "";
+  $("bpInstaller").value = c.agreementInstallerName || "";
+  $("bpAgreementCc").value = Array.isArray(c.agreementCcEmails) ? c.agreementCcEmails.join(", ") : "";
+  $("bpAgreementUrl").value = c.agreementTemplateUrl || "";
   syncDepositLabel();
 }
 $("batteryPricingSave").addEventListener("click", async () => {
@@ -1837,6 +1852,9 @@ $("batteryPricingSave").addEventListener("click", async () => {
       depositUsd: depType === "usd" ? depVal : 0,
       depositPct: depType === "pct" ? depVal : 0,
       sungageApplyUrl: ($("bpSungageUrl")?.value || "").trim(),
+      agreementInstallerName: ($("bpInstaller")?.value || "").trim(),
+      agreementCcEmails: ($("bpAgreementCc")?.value || "").split(",").map((e) => e.trim()).filter(Boolean),
+      agreementTemplateUrl: ($("bpAgreementUrl")?.value || "").trim(),
     });
     banner($("batteryPricingBanner"), "Battery pricing saved.", "good");
   } catch (e) { banner($("batteryPricingBanner"), e.message || "Save failed.", "error"); }

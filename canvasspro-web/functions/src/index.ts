@@ -3276,16 +3276,265 @@ export const getSharedProposal = onCall(async (request) => {
   return { payload: data.payload || {} };
 });
 
+// ─── Battery purchase & installation agreement (e-sign + auto-close) ──────────
+const money$ = (n: any) => (typeof n === "number" && isFinite(n) ? `$${Math.round(n).toLocaleString()}` : "—");
+const agDate = (ms: number) => new Date(ms || Date.now()).toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" });
+
+// The standard agreement body as ordered sections. Used for both the on-screen
+// (HTML) sign page and the PDF. installerName is left blank for the company to
+// fill from the admin portal. NOTE: a standard template — have it reviewed by
+// counsel for your jurisdiction.
+function agreementSections(a: Record<string, any>): Array<{ h: string; body: string }> {
+  const b = a.battery || {};
+  const pay = a.payment || {};
+  const sys = `${b.units || 1}× ${b.brand || ""} ${b.model || ""}`.trim();
+  const specs = [
+    b.totalUsableKWh ? `${b.totalUsableKWh} kWh usable` : "",
+    b.totalContinuousKW ? `${b.totalContinuousKW} kW continuous` : "",
+    b.backupDaysAchieved ? `~${b.backupDaysAchieved}-day backup` : "",
+    b.chemistry ? `${b.chemistry} chemistry` : "",
+  ].filter(Boolean).join(" · ");
+  const installer = a.installerName || "______________________________ (to be completed by Seller)";
+  const company = a.companyName || "Seller";
+
+  let paymentBody: string;
+  if (pay.method === "finance" && pay.finance) {
+    const f = pay.finance;
+    paymentBody =
+      `Buyer elects to FINANCE the System. The total cash price is ${money$(pay.systemPrice)}. ` +
+      `Financing is provided through ${f.lender || "the Seller's lending partner (Sungage Financial)"} under the ` +
+      `"${f.name || "selected"}" plan: approximately ${money$(f.monthly)} per month, ${(Number(f.apr) * 100 || 0).toFixed(2)}% APR, ${f.termYears || 20}-year term` +
+      `${f.escalator ? `, with a ${(f.escalator * 100).toFixed(1)}% annual payment escalator` : ""}` +
+      `${f.deferred ? `, including a deferred-payment period` : ""}. ` +
+      `Payment figures are estimates; the final rate, payment, and terms are set by the lender on credit approval and the executed lender loan documents control.`;
+  } else {
+    const c = pay.cash || {};
+    const balance = typeof c.balance === "number" ? c.balance : Math.max(0, (pay.systemPrice || 0) - (c.depositUsd || 0));
+    paymentBody =
+      `Buyer elects to pay CASH. The total price is ${money$(pay.systemPrice || c.cashPrice)}. ` +
+      `A deposit of ${money$(c.depositUsd)} is paid upon execution to reserve pricing and the installation schedule (fully credited to the total). ` +
+      `The remaining balance of ${money$(balance)} is due upon completion of installation per the following schedule: ` +
+      `(a) the deposit at signing; and (b) the balance upon substantial completion and passing of the required inspection.`;
+  }
+
+  return [
+    { h: "1. Parties", body: `This Battery Purchase & Installation Agreement ("Agreement") is entered into between ${company} ("Seller"/"Installer") and ${a.customerName || "the homeowner"} ("Buyer") for the property at ${a.address || "the address on file"}.` },
+    { h: "2. The System", body: `Seller will furnish and install: ${sys}${specs ? ` — ${specs}` : ""}, together with all balance-of-system components, mounting, and electrical work required for a complete, code-compliant battery energy storage installation ("System").` },
+    { h: "3. Purchase Price & Payment", body: paymentBody },
+    { h: "4. Scope of Work & Standard Installation", body: `Seller will perform a standard installation: mounting the equipment, electrical interconnection to the home's panel/backup loads, commissioning, and configuration of monitoring. Work is performed to the manufacturer's specifications and applicable electrical code. Non-standard work (e.g., main-panel upgrades, trenching, structural modifications, or additional circuits) discovered at site survey may require a written change order and price adjustment.` },
+    { h: "5. Permits, Inspection & Interconnection", body: `Seller will obtain the permits required for the installation and coordinate the authority-having-jurisdiction inspection and any required utility interconnection approval. Installation timelines depend on permit and utility processing outside Seller's control.` },
+    { h: "6. Warranties", body: `Manufacturer warranty: the battery and equipment carry the manufacturer's limited warranty (approximately ${b.warrantyYears || 10} years for the selected product), per the manufacturer's terms. Workmanship/Installation warranty: Seller warrants its installation workmanship against defects for the company's standard workmanship period. Warranties exclude damage from misuse, alteration, acts of nature, or work by others. This is a summary; the manufacturer and Seller written warranties control.` },
+    { h: "7. Site Survey & Final Design", body: `This Agreement is based on the information available at signing and is subject to a site survey and final engineering. If the survey reveals conditions that materially change scope or cost, Seller will present a change order; Buyer may approve it or cancel for a refund of amounts paid less any non-recoverable costs already incurred.` },
+    { h: "8. Right to Cancel", body: `Buyer may cancel this Agreement for any reason by written notice delivered within three (3) business days after signing and receive a full refund of any deposit, in accordance with applicable law.` },
+    { h: "9. Limitation of Liability", body: `To the maximum extent permitted by law, Seller's total liability arising out of or relating to this Agreement will not exceed the total price paid by Buyer. Neither party is liable for indirect, incidental, special, or consequential damages.` },
+    { h: "10. Entire Agreement & Governing Law", body: `This Agreement, together with any executed lender loan documents and written change orders, is the entire agreement between the parties. It is governed by the laws of the state in which the property is located. If any provision is unenforceable, the remainder stays in effect.` },
+    { h: "Installer", body: `Installer / contractor of record: ${installer}. License #: ____________________.` },
+  ];
+}
+
+function buildAgreementPdf(a: Record<string, any>): Promise<Buffer> {
+  return new Promise((resolve, reject) => {
+    const doc = new PDFDocument({ margin: 56, size: "LETTER" });
+    const chunks: Buffer[] = [];
+    doc.on("data", (c: Buffer) => chunks.push(c));
+    doc.on("end", () => resolve(Buffer.concat(chunks)));
+    doc.on("error", reject);
+
+    const dateStr = agDate(a.createdAt || Date.now());
+    doc.fontSize(19).fillColor("#6d28d9").text(a.companyName || "Battery Agreement");
+    doc.fillColor("#000").fontSize(14).text("Battery Purchase & Installation Agreement").moveDown(0.2);
+    doc.fontSize(10).fillColor("#555").text(`Date: ${dateStr}`);
+    if (a.reference) doc.text(`Agreement ref: ${a.reference}`);
+    doc.fillColor("#000").fontSize(11).moveDown(0.6);
+
+    for (const s of agreementSections(a)) {
+      doc.moveDown(0.5).fontSize(12).fillColor("#2a1e55").text(s.h).moveDown(0.1).fillColor("#000").fontSize(10).text(s.body);
+    }
+
+    // Signature block — stamped if e-signed.
+    doc.moveDown(1.2).fontSize(12).fillColor("#2a1e55").text("Acceptance").fillColor("#000").fontSize(10).moveDown(0.3);
+    doc.text("By signing below, Buyer agrees to the terms of this Agreement.");
+    doc.moveDown(1);
+    if (a.signedName) {
+      try {
+        if (typeof a.signatureDataUrl === "string" && a.signatureDataUrl.startsWith("data:image")) {
+          const b64 = a.signatureDataUrl.split(",")[1];
+          doc.image(Buffer.from(b64, "base64"), { width: 200 });
+        }
+      } catch { /* ignore bad signature image */ }
+      doc.fillColor("#2a1e55").text(`Signed electronically by: ${a.signedName}`).fillColor("#000");
+      doc.text(`Date: ${agDate(a.signedAt || Date.now())}`);
+      if (a.signedIp) doc.fontSize(8).fillColor("#888").text(`IP: ${a.signedIp}`).fillColor("#000").fontSize(10);
+    } else {
+      doc.text("Buyer signature: ________________________________");
+      doc.moveDown(0.6);
+      doc.text(`Printed name: ${a.customerName || "________________________________"}`);
+      doc.moveDown(0.6);
+      doc.text("Date: ________________________________");
+    }
+    doc.moveDown(1.2);
+    doc.text(`Seller: ${a.companyName || ""}    By: ____________________________   (${a.closerName || "Sales representative"})`);
+
+    doc.end();
+  });
+}
+
+// Closer creates the agreement from the proposal + chosen payment. Returns a
+// sign link for on-device signing or to email the customer.
+export const createBatteryAgreement = onCall(async (request) => {
+  const caller = await getCaller(request);
+  const d = (request.data || {}) as Record<string, any>;
+  const companyId = caller.companyId || d.companyId || null;
+  const company = companyId ? (await db.doc(`companies/${companyId}`).get()).data() || {} : {};
+  const id = crypto.randomUUID().replace(/-/g, "");
+  const token = crypto.randomBytes(16).toString("hex");
+  const now = Date.now();
+  const agreement = {
+    customerName: String(d.customerName || "").slice(0, 200),
+    customerEmail: String(d.customerEmail || "").slice(0, 200),
+    address: String(d.address || "").slice(0, 300),
+    companyId,
+    companyName: company.name || d.companyName || "",
+    closerUid: caller.uid,
+    closerName: String(d.closerName || "").slice(0, 200),
+    leadId: d.leadId || null,
+    eventId: d.eventId || null,
+    battery: d.battery || {},
+    payment: d.payment || {},
+    installerName: company.agreementInstallerName || "",
+    templateUrl: company.agreementTemplateUrl || "",
+    ccEmails: Array.isArray(company.agreementCcEmails) ? company.agreementCcEmails : [],
+    reference: id.slice(0, 8).toUpperCase(),
+    signToken: token,
+    status: "sent",
+    signedName: "",
+    signedAt: 0,
+    createdAt: now,
+  };
+  await db.doc(`battery_agreements/${id}`).set(agreement);
+  const signUrl = `${APP_URL}/app/?agreement=${id}&t=${token}`;
+
+  // Optionally email the customer the sign link.
+  if (d.delivery === "email" && agreement.customerEmail && /.+@.+\..+/.test(agreement.customerEmail)) {
+    const first = agreement.customerName.split(" ")[0] || "there";
+    const html =
+      `<div style="font-family:system-ui,Arial,sans-serif;max-width:560px;margin:0 auto;color:#111">` +
+      `<h2>Your battery agreement is ready to sign</h2>` +
+      `<p>Hi ${escHtml(first)}, please review and sign your Battery Purchase &amp; Installation Agreement${agreement.companyName ? ` with ${escHtml(agreement.companyName)}` : ""}.</p>` +
+      `<p style="text-align:center;margin:22px 0"><a href="${signUrl}" style="display:inline-block;background:#7c3aed;color:#fff;text-decoration:none;font-weight:600;padding:13px 26px;border-radius:999px">Review &amp; sign →</a></p>` +
+      `<p style="color:#999;font-size:12px">If you didn't request this, you can ignore this email.</p></div>`;
+    const cfg = await getNotifyConfig();
+    await sendEmailDetailed(cfg, agreement.customerEmail, "Sign your battery agreement", `Review and sign: ${signUrl}`, undefined, html);
+  }
+  return { ok: true, id, token, signUrl };
+});
+
+// Public (no auth): load an agreement for the sign page by id + token.
+export const getBatteryAgreement = onCall(async (request) => {
+  const d = (request.data || {}) as { id?: string; t?: string };
+  const id = String(d.id || "").replace(/[^a-zA-Z0-9]/g, "").slice(0, 64);
+  const snap = id ? await db.doc(`battery_agreements/${id}`).get() : null;
+  if (!snap || !snap.exists) throw new HttpsError("not-found", "This agreement link is no longer available.");
+  const a = snap.data() as Record<string, any>;
+  if (!d.t || d.t !== a.signToken) throw new HttpsError("permission-denied", "Invalid agreement link.");
+  return {
+    customerName: a.customerName, address: a.address, companyName: a.companyName,
+    battery: a.battery, payment: a.payment, reference: a.reference,
+    sections: agreementSections(a), templateUrl: a.templateUrl || "",
+    status: a.status, signedName: a.signedName || "", signedAt: a.signedAt || 0,
+  };
+});
+
+// Public (no auth): record the signature, email the signed copy to everyone,
+// notify the company, mark the appointment closed/won, and record the sale.
+export const signBatteryAgreement = onCall(async (request) => {
+  const d = (request.data || {}) as { id?: string; t?: string; name?: string; signatureDataUrl?: string };
+  const id = String(d.id || "").replace(/[^a-zA-Z0-9]/g, "").slice(0, 64);
+  const ref = id ? db.doc(`battery_agreements/${id}`) : null;
+  const snap = ref ? await ref.get() : null;
+  if (!ref || !snap || !snap.exists) throw new HttpsError("not-found", "Agreement not found.");
+  const a = snap.data() as Record<string, any>;
+  if (!d.t || d.t !== a.signToken) throw new HttpsError("permission-denied", "Invalid agreement link.");
+  if (a.status === "signed") return { ok: true, alreadySigned: true };
+  const name = String(d.name || "").trim();
+  if (!name) throw new HttpsError("invalid-argument", "Please type your full name to sign.");
+
+  const now = Date.now();
+  const sig = typeof d.signatureDataUrl === "string" && d.signatureDataUrl.startsWith("data:image") ? d.signatureDataUrl.slice(0, 400_000) : "";
+  const ip = (request.rawRequest?.headers["x-forwarded-for"] as string)?.split(",")[0]?.trim() || "";
+  const signed = { ...a, signedName: name, signedAt: now, signedIp: ip, signatureDataUrl: sig, status: "signed" };
+  await ref.set({ signedName: name, signedAt: now, signedIp: ip, signatureDataUrl: sig, status: "signed", updatedAt: now }, { merge: true });
+
+  // Build the signed PDF once.
+  let pdf: Buffer | null = null;
+  try { pdf = await buildAgreementPdf(signed); } catch (e) { logger.warn("agreement pdf failed", e); }
+  const attachments = pdf ? [{ filename: `Battery-Agreement-${a.reference}.pdf`, content: pdf.toString("base64"), type: "application/pdf" }] : undefined;
+
+  // Recipients: customer + closer + company admins/managers + configured CCs.
+  const recipients = new Set<string>();
+  if (a.customerEmail) recipients.add(a.customerEmail);
+  (a.ccEmails || []).forEach((e: string) => { if (e) recipients.add(e); });
+  try {
+    const closer = a.closerUid ? (await db.doc(`users/${a.closerUid}`).get()).data() : null;
+    if (closer?.email) recipients.add(closer.email);
+    if (a.companyId) {
+      const mgrs = await db.collection("users").where("companyId", "==", a.companyId).where("role", "in", ["admin", "manager"]).get();
+      mgrs.forEach((u) => { const e = (u.data() as any).email; if (e) recipients.add(e); });
+    }
+  } catch (e) { logger.warn("agreement recipients lookup failed", e); }
+
+  const cfg = await getNotifyConfig();
+  const subject = `Signed battery agreement — ${a.customerName || ""} (${a.reference})`;
+  const html =
+    `<div style="font-family:system-ui,Arial,sans-serif;max-width:560px;margin:0 auto;color:#111">` +
+    `<h2>Agreement signed ✅</h2>` +
+    `<p><strong>${escHtml(a.customerName || "")}</strong> signed the Battery Purchase &amp; Installation Agreement${a.companyName ? ` with ${escHtml(a.companyName)}` : ""} on ${agDate(now)}.</p>` +
+    `<p>${escHtml(a.address || "")}</p>` +
+    `<p>A copy of the signed agreement is attached.</p></div>`;
+  for (const to of recipients) {
+    try { await sendEmailDetailed(cfg, to, subject, `${a.customerName} signed the agreement (${a.reference}).`, attachments, html); } catch (e) { logger.warn(`agreement email to ${to} failed`, e); }
+  }
+
+  // Record the sale.
+  try {
+    await db.doc(`soldCustomers/${id}`).set({
+      agreementId: id, companyId: a.companyId, closerUid: a.closerUid, customerName: a.customerName,
+      customerEmail: a.customerEmail, address: a.address, battery: a.battery, payment: a.payment,
+      leadId: a.leadId, eventId: a.eventId, reference: a.reference, signedName: name, signedAt: now,
+      status: "sold", createdAt: now,
+    }, { merge: true });
+  } catch (e) { logger.warn("soldCustomers write failed", e); }
+
+  // Auto-disposition the appointment as Closed / Won.
+  if (a.eventId) {
+    try {
+      await db.doc(`events/${a.eventId}`).set({
+        apptStatus: "closed_won",
+        apptNotes: `Battery agreement signed by ${name} (ref ${a.reference}).`,
+        dispositionedAt: now, agreementId: id, updatedAt: now,
+      }, { merge: true });
+    } catch (e) { logger.warn("auto-disposition failed", e); }
+  }
+  if (a.leadId) {
+    try { await db.doc(`leads/${a.leadId}`).set({ status: "sold", soldAt: now, agreementId: id }, { merge: true }); } catch { /* best effort */ }
+  }
+
+  return { ok: true };
+});
+
 // Admin: set company-wide battery pricing (price + install adder per product).
 export const setBatteryPricing = onCall(async (request) => {
   const caller = await getCaller(request);
-  const { companyId, pricing, offered, depositUsd, depositPct, sungageApplyUrl } = (request.data || {}) as {
+  const { companyId, pricing, offered, depositUsd, depositPct, sungageApplyUrl, agreementInstallerName, agreementCcEmails, agreementTemplateUrl } = (request.data || {}) as {
     companyId?: string;
     pricing?: Record<string, { price?: number; adder?: number }>;
     offered?: string[];
     depositUsd?: number;
     depositPct?: number;
     sungageApplyUrl?: string;
+    agreementInstallerName?: string;
+    agreementCcEmails?: string[];
+    agreementTemplateUrl?: string;
   };
   authorizeForCompany(caller, companyId);
   const clean: Record<string, { price: number; adder: number }> = {};
@@ -3302,6 +3551,12 @@ export const setBatteryPricing = onCall(async (request) => {
   if (depositUsd !== undefined) patch.batteryDepositUsd = Math.max(0, Math.round(Number(depositUsd) || 0));
   if (depositPct !== undefined) patch.batteryDepositPct = Math.max(0, Math.min(100, Number(depositPct) || 0));
   if (sungageApplyUrl !== undefined) patch.sungageApplyUrl = String(sungageApplyUrl || "").trim().slice(0, 600);
+  if (agreementInstallerName !== undefined) patch.agreementInstallerName = String(agreementInstallerName || "").trim().slice(0, 200);
+  if (agreementTemplateUrl !== undefined) patch.agreementTemplateUrl = String(agreementTemplateUrl || "").trim().slice(0, 600);
+  if (agreementCcEmails !== undefined) {
+    patch.agreementCcEmails = (Array.isArray(agreementCcEmails) ? agreementCcEmails : [])
+      .map((e) => String(e || "").trim()).filter((e) => /.+@.+\..+/.test(e)).slice(0, 20);
+  }
   await db.doc(`companies/${companyId}`).set(patch, { merge: true });
   return { ok: true };
 });
