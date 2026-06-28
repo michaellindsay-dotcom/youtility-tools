@@ -46,6 +46,10 @@ export interface SolarShowProps {
   hasEv?: boolean; // EV charger selected
   hasExistingSolar?: boolean;
   videoUrls?: Partial<Record<"nosolar" | "solar" | "battery" | "ev", string>>;
+  // Real photo of the customer's home (a data URI). Preferred hero imagery —
+  // rendered full-bleed on the cover + as the night backdrop on the backup slide.
+  homeImage?: string;
+  homeImageIsStreetView?: boolean; // true → Street View, false → Satellite
 }
 
 type Scenario = "nosolar" | "solar" | "battery" | "ev";
@@ -460,6 +464,8 @@ export default function SolarProposalShow(props: SolarShowProps) {
     hasEv = false,
     hasExistingSolar = false,
     videoUrls,
+    homeImage,
+    homeImageIsStreetView = false,
   } = props;
 
   const [idx, setIdx] = useState(0);
@@ -597,7 +603,15 @@ export default function SolarProposalShow(props: SolarShowProps) {
           {slides.map((s) => (
             <section className="sps-slide" key={s.key} aria-hidden={slides[idx]?.key !== s.key}>
               {s.key === "cover" && (
-                <CoverSlide name={name} address={address} company={company} active={activeKey === "cover"} hasEv={hasEv} />
+                <CoverSlide
+                  name={name}
+                  address={address}
+                  company={company}
+                  active={activeKey === "cover"}
+                  hasEv={hasEv}
+                  homeImage={homeImage}
+                  homeImageIsStreetView={homeImageIsStreetView}
+                />
               )}
 
               {s.key === "interactive" && (
@@ -638,6 +652,12 @@ export default function SolarProposalShow(props: SolarShowProps) {
                       <>
                         <HomeScene scenario={scenario} night={night} hasEv={hasEv} />
                         <SceneHud scenario={scenario} night={night} hasEv={hasEv} monthlyKWh={monthlyKWh} />
+                        {homeImage && (
+                          <div className="sps-homeInset">
+                            <img src={homeImage} alt="Your home" />
+                            <span className="sps-homeInset-label">YOUR HOME</span>
+                          </div>
+                        )}
                       </>
                     )}
 
@@ -709,9 +729,20 @@ export default function SolarProposalShow(props: SolarShowProps) {
                   <div className="sps-eyebrow">Resilience</div>
                   <h2 className="sps-h2">Peace of mind, day and night</h2>
                   <div className="sps-backupGrid">
-                    <div className="sps-miniScene">
-                      <HomeScene scenario="battery" night hasEv={false} />
-                    </div>
+                    {homeImage ? (
+                      <div className="sps-miniScene sps-nightHome">
+                        <img className="sps-nightHome-img" src={homeImage} alt="Your home at night" />
+                        <div className="sps-nightHome-scrim" aria-hidden="true" />
+                        <div className="sps-nightHome-glow" aria-hidden="true" />
+                        <span className="sps-nightHome-label">
+                          YOUR HOME · LIGHTS ON
+                        </span>
+                      </div>
+                    ) : (
+                      <div className="sps-miniScene">
+                        <HomeScene scenario="battery" night hasEv={false} />
+                      </div>
+                    )}
                     <div className="sps-syscard sps-theme-battery">
                       <div className="sps-tag">System recommendation</div>
                       <div className="sps-sysname">
@@ -830,13 +861,42 @@ function CoverSlide({
   company,
   active,
   hasEv,
+  homeImage,
+  homeImageIsStreetView,
 }: {
   name: string;
   address?: string;
   company: string;
   active: boolean;
   hasEv: boolean;
+  homeImage?: string;
+  homeImageIsStreetView?: boolean;
 }) {
+  // When we have a real photo of the home, use it as a full-bleed background
+  // hero behind a navy scrim. Otherwise fall back to the animated SVG cover.
+  if (homeImage) {
+    return (
+      <div className={"sps-inner sps-cover sps-coverPhoto" + (active ? " in" : "")}>
+        <div className="sps-coverPhoto-bg" aria-hidden="true">
+          <div
+            className="sps-coverPhoto-img"
+            style={{ backgroundImage: `url(${homeImage})` }}
+          />
+          <div className="sps-coverPhoto-scrim" />
+        </div>
+        <div className="sps-coverText sps-coverText-photo">
+          <div className="sps-coverTag">
+            YOUR HOME · {homeImageIsStreetView ? "STREET VIEW" : "SATELLITE"}
+          </div>
+          <div className="sps-eyebrow">{company || "A proposal prepared for you"}</div>
+          <h1 className="sps-title">Your Energy Future</h1>
+          <div className="sps-coverName">{name}</div>
+          {address && <div className="sps-coverAddr">{address}</div>}
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className={"sps-inner sps-cover" + (active ? " in" : "")}>
       <div className="sps-coverHero">
@@ -934,6 +994,55 @@ const CSS = `
   -webkit-background-clip:text;background-clip:text;color:transparent;margin:10px 0 0;}
 .sps-coverName{font-family:var(--font-head);font-size:clamp(18px,3.2vw,26px);font-weight:600;margin-top:16px;}
 .sps-coverAddr{font-family:var(--font-mono);color:var(--text-dim);font-size:12px;letter-spacing:.05em;margin-top:6px;}
+
+/* ── Cover with a real photo of the home (full-bleed hero) ── */
+.sps-coverPhoto{position:relative;justify-content:flex-end;align-items:flex-start;
+  text-align:left;min-height:100%;padding:clamp(20px,5vh,48px) clamp(16px,4vw,40px);}
+.sps-coverPhoto-bg{position:absolute;inset:0;z-index:0;overflow:hidden;border-radius:0;
+  pointer-events:none;}
+.sps-coverPhoto-img{position:absolute;inset:-4%;background-size:cover;background-position:center;
+  transform:scale(1);transform-origin:center;}
+.sps-coverPhoto.in .sps-coverPhoto-img{animation:sps-kenburns 18s ease forwards;}
+@keyframes sps-kenburns{from{transform:scale(1);}to{transform:scale(1.08);}}
+.sps-coverPhoto-scrim{position:absolute;inset:0;
+  background:
+    linear-gradient(180deg,rgba(10,7,18,.32) 0%,rgba(10,7,18,.52) 48%,rgba(10,7,18,.92) 100%),
+    radial-gradient(120% 90% at 50% 0%,rgba(36,22,64,.25),transparent 60%);}
+.sps-coverText-photo{position:relative;z-index:1;align-items:flex-start;text-align:left;
+  width:min(940px,100%);}
+.sps-coverText-photo .sps-title{text-align:left;}
+.sps-coverTag{display:inline-block;font-family:var(--font-mono);font-size:9.5px;
+  letter-spacing:.22em;text-transform:uppercase;color:var(--accent-bright);font-weight:600;
+  padding:5px 11px;border-radius:999px;margin-bottom:12px;
+  background:rgba(10,7,18,.5);border:1px solid var(--line-2);backdrop-filter:blur(8px);}
+
+/* ── Real-home inset thumbnail on the interactive scene ── */
+.sps-homeInset{position:absolute;right:14px;bottom:14px;z-index:6;
+  width:clamp(120px,22vw,156px);border-radius:12px;overflow:hidden;
+  border:1px solid var(--line-2);background:rgba(10,7,18,.6);
+  box-shadow:0 10px 30px rgba(0,0,0,.55),inset 0 1px 0 rgba(255,255,255,.06);
+  backdrop-filter:blur(6px);animation:sps-fade .5s ease;}
+.sps-homeInset img{display:block;width:100%;height:auto;aspect-ratio:4/3;object-fit:cover;}
+.sps-homeInset-label{position:absolute;left:7px;bottom:6px;font-family:var(--font-mono);
+  font-size:8px;letter-spacing:.16em;color:#fff;font-weight:600;
+  padding:3px 7px;border-radius:6px;background:rgba(10,7,18,.62);
+  border:1px solid var(--line-2);backdrop-filter:blur(4px);}
+@media(max-width:560px){.sps-homeInset{right:10px;bottom:10px;}}
+
+/* ── Real-home night backdrop on the backup slide ── */
+.sps-nightHome{position:relative;overflow:hidden;min-height:200px;}
+.sps-nightHome-img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;
+  display:block;}
+.sps-nightHome-scrim{position:absolute;inset:0;mix-blend-mode:multiply;
+  background:linear-gradient(160deg,#1a2356 0%,#0b0f2e 60%,#06081c 100%);}
+.sps-nightHome-glow{position:absolute;inset:0;
+  background:radial-gradient(40% 32% at 50% 64%,rgba(255,214,128,.42),transparent 70%);
+  mix-blend-mode:screen;animation:sps-lightsOn 5s ease-in-out infinite;}
+@keyframes sps-lightsOn{0%,100%{opacity:.78;}50%{opacity:1;}}
+.sps-nightHome-label{position:absolute;left:12px;bottom:10px;z-index:2;
+  font-family:var(--font-mono);font-size:9px;letter-spacing:.18em;color:#ffe9a8;font-weight:600;
+  padding:4px 9px;border-radius:7px;background:rgba(6,8,28,.55);
+  border:1px solid var(--line-2);backdrop-filter:blur(5px);}
 
 /* ── Interactive scene ── */
 .sps-switcher{display:flex;flex-wrap:wrap;gap:8px;justify-content:center;}
@@ -1165,5 +1274,8 @@ const CSS = `
   .sps-track{transition:none;}
   .sps-rise>*,.sps-inccard{opacity:1!important;transform:none!important;animation:none!important;}
   .sps-cover .sps-coverHero,.sps-cover .sps-coverText{opacity:1!important;transform:none!important;animation:none!important;}
+  .sps-coverPhoto.in .sps-coverPhoto-img{animation:none!important;transform:scale(1.04);}
+  .sps-nightHome-glow{animation:none!important;opacity:.9;}
+  .sps-homeInset{animation:none!important;}
 }
 `;

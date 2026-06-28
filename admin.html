@@ -539,6 +539,14 @@
       <div class="field"><span>API base URL</span><input id="batchUrl" /></div>
       <label class="day-chip" style="align-self:center;"><input id="batchEnabled" type="checkbox" /> Skip-trace enabled</label>
     </div>
+    <h3 style="font-size:14px;margin:18px 0 10px;">🗺️ Google Maps (home imagery for proposals)</h3>
+    <div class="grid-2">
+      <div class="field"><span>API key</span><input id="googleMapsKey" autocomplete="off" placeholder="Static Maps + Street View + Geocoding enabled" /></div>
+    </div>
+    <h3 style="font-size:14px;margin:18px 0 10px;">⚡ NREL (utility lookup for incentives)</h3>
+    <div class="grid-2">
+      <div class="field"><span>API key</span><input id="nrelKey" autocomplete="off" placeholder="free key from developer.nrel.gov (DEMO_KEY if blank)" /></div>
+    </div>
     <div class="row" style="justify-content:flex-end;margin-top:10px;">
       <button id="apiKeysSave" class="btn primary sm">Save provider keys</button>
     </div>
@@ -1707,6 +1715,8 @@ async function loadApiKeys() {
     $("batchKey").value = data.batchKey || "";
     $("batchUrl").value = data.batchUrl || "";
     $("batchEnabled").checked = data.batchEnabled !== false;
+    $("googleMapsKey").value = data.googleMapsKey || "";
+    $("nrelKey").value = (data.nrelKey && data.nrelKey !== "DEMO_KEY") ? data.nrelKey : "";
   } catch (e) { banner($("apiKeysBanner"), e.message || "Could not load keys.", "error"); }
 }
 $("apiKeysSave").addEventListener("click", async () => {
@@ -1716,6 +1726,7 @@ $("apiKeysSave").addEventListener("click", async () => {
       attomKey: $("attomKey").value, attomUrl: $("attomUrl").value,
       batchKey: $("batchKey").value, batchUrl: $("batchUrl").value,
       batchEnabled: $("batchEnabled").checked,
+      googleMapsKey: $("googleMapsKey").value, nrelKey: $("nrelKey").value,
     });
     banner($("apiKeysBanner"), "Provider keys saved.", "good");
   } catch (e) { banner($("apiKeysBanner"), e.message || "Save failed.", "error"); }
