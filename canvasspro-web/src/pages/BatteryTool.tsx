@@ -611,16 +611,24 @@ export default function BatteryTool() {
   const [homeIsSV, setHomeIsSV] = useState(false);
   const [homeImgLoading, setHomeImgLoading] = useState(false);
   const [homeImgErr, setHomeImgErr] = useState("");
+  const [homeImgTried, setHomeImgTried] = useState(false); // an attempt finished (success, empty, or error)
   // Remember which address/geo the current photo was fetched for, so a changed
-  // address can re-fetch.
+  // address can re-fetch. `attempted` marks a key we've already tried (even if it
+  // returned nothing) so auto-load runs once per address, not on every render.
   const homeImgKeyRef = useRef<string | null>(null);
+  const homeImgAttemptedRef = useRef<string | null>(null);
 
-  const loadHomeImagery = async () => {
+  const homeKey = () => {
     const latNum = typeof leadGeo.lat === "number" && isFinite(leadGeo.lat) ? leadGeo.lat : undefined;
     const lngNum = typeof leadGeo.lng === "number" && isFinite(leadGeo.lng) ? leadGeo.lng : undefined;
-    const addr = address.trim();
+    return { addr: address.trim(), latNum, lngNum, key: `${address.trim()}|${latNum ?? ""}|${lngNum ?? ""}` };
+  };
+
+  const loadHomeImagery = async () => {
+    const { addr, latNum, lngNum, key } = homeKey();
     // Guard: nothing to look up.
     if (!addr && (latNum == null || lngNum == null)) return;
+    homeImgAttemptedRef.current = key; // mark attempted up front so auto-load fires once
     setHomeImgLoading(true);
     setHomeImgErr("");
     try {
@@ -634,39 +642,50 @@ export default function BatteryTool() {
       const img = data.streetView || data.satellite || null;
       setHomeImg(img);
       setHomeIsSV(!!data.streetView);
-      homeImgKeyRef.current = `${addr}|${latNum ?? ""}|${lngNum ?? ""}`;
+      homeImgKeyRef.current = key;
     } catch (e) {
       setHomeImgErr((e as Error).message || "Couldn't load the home photo.");
     } finally {
       setHomeImgLoading(false);
+      setHomeImgTried(true);
     }
   };
 
-  // If the address/geo no longer matches the photo we have, allow a re-fetch by
-  // clearing the stale image.
+  // If the address/geo no longer matches the photo we have, clear the stale
+  // image + attempt marker so it can re-fetch for the new address.
   useEffect(() => {
-    const latNum = typeof leadGeo.lat === "number" && isFinite(leadGeo.lat) ? leadGeo.lat : undefined;
-    const lngNum = typeof leadGeo.lng === "number" && isFinite(leadGeo.lng) ? leadGeo.lng : undefined;
-    const key = `${address.trim()}|${latNum ?? ""}|${lngNum ?? ""}`;
+    const { key } = homeKey();
     if (homeImgKeyRef.current && homeImgKeyRef.current !== key) {
       setHomeImg(null);
       setHomeIsSV(false);
-      setHomeImgErr("");
       homeImgKeyRef.current = null;
     }
+    if (homeImgAttemptedRef.current && homeImgAttemptedRef.current !== key) {
+      homeImgAttemptedRef.current = null;
+      setHomeImgErr("");
+      setHomeImgTried(false);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [address, leadGeo.lat, leadGeo.lng]);
 
-  // Open the show, best-effort pulling the home photo first if we don't have one.
+  // Auto-load the home photo as soon as we have an address/geo — once per target
+  // (debounced so typing an address doesn't fire on every keystroke).
+  useEffect(() => {
+    const { addr, latNum, lngNum, key } = homeKey();
+    if (!addr && (latNum == null || lngNum == null)) return;
+    if (homeImgAttemptedRef.current === key) return; // already tried this target
+    const t = setTimeout(() => { void loadHomeImagery(); }, 700);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [address, leadGeo.lat, leadGeo.lng]);
+
+  // Open the show; the auto-loader usually has the photo already, but pull it
+  // best-effort if we haven't tried this address yet.
   const presentShow = async () => {
-    const latNum = typeof leadGeo.lat === "number" && isFinite(leadGeo.lat) ? leadGeo.lat : undefined;
-    const lngNum = typeof leadGeo.lng === "number" && isFinite(leadGeo.lng) ? leadGeo.lng : undefined;
-    const haveTarget = !!address.trim() || (latNum != null && lngNum != null);
-    if (!homeImg && haveTarget && !homeImgLoading) {
-      try {
-        await loadHomeImagery();
-      } catch {
-        /* best-effort — open the show regardless */
-      }
+    const { addr, latNum, lngNum, key } = homeKey();
+    const haveTarget = !!addr || (latNum != null && lngNum != null);
+    if (!homeImg && haveTarget && !homeImgLoading && homeImgAttemptedRef.current !== key) {
+      try { await loadHomeImagery(); } catch { /* best-effort — open regardless */ }
     }
     setShowOpen(true);
   };
@@ -899,7 +918,15 @@ export default function BatteryTool() {
             </div>
           )}
         </div>
-        {homeImgErr && <p className="muted small" style={{ color: "#f59e0b", marginTop: 8 }}>{homeImgErr}</p>}
+        {/* Tell the rep why the real photo isn't showing instead of failing
+            silently — the proposal still works with the stylized scene. */}
+        {homeImgTried && !homeImg && !homeImgLoading && (
+          <p className="muted small" style={{ color: "#f59e0b", marginTop: 8 }}>
+            🏠 No home photo available for this address — the proposal will use the stylized scene.{" "}
+            A Google Cloud admin needs to enable the <strong>Street View Static</strong> + <strong>Maps Static</strong> APIs on the project.
+          </p>
+        )}
+        {homeImgErr && <p className="muted small" style={{ color: "#94a3b8", marginTop: 4 }}>{homeImgErr}</p>}
       </div>
 
       {/* 2. Bill analyzer */}
