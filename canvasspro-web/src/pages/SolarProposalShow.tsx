@@ -1,5 +1,6 @@
 import type React from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import LivingEnergyScene from "./LivingEnergyScene";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // SolarProposalShow — a full-screen, photography-led battery proposal a closer
@@ -89,9 +90,7 @@ export interface SolarShowProps {
   chosenProductId?: string; // the battery currently selected in the tool
 }
 
-type Scenario = "nosolar" | "solar" | "battery" | "ev";
-
-// Energy palette — neon accents threaded through the flow lines + HUD chips.
+// Energy palette — accent colors used by the savings/backup stat dots.
 const PALETTE = {
   solar: "#ffd86b",
   battery: "#8b5cf6",
@@ -241,250 +240,6 @@ function PhotoBackdrop({
   );
 }
 
-// Star field for the night sky (x, y, r). Kept clear of the sun/moon corner.
-const STAR_POS: Array<[number, number, number]> = [
-  [310, 60, 1.4], [380, 110, 1], [450, 70, 1.6], [520, 120, 1.1], [600, 64, 1.3],
-  [680, 110, 1], [740, 70, 1.5], [820, 120, 1.2], [880, 70, 1], [930, 130, 1.4],
-  [350, 170, 1], [560, 180, 1.2], [700, 175, 1], [860, 180, 1.3], [470, 130, 0.9],
-  [640, 130, 1.1],
-];
-
-// ── Illustrated, animated energy-flow scene ──────────────────────────────────
-// A self-contained vector diagram — sun/moon, grid tower, solar roof, wall
-// battery, EV + charger — with power flowing along connectors that actually
-// link the right nodes, lit per scenario + day/night, plus live stat tags
-// anchored to each node. Replaces the old free-floating-lines-over-a-photo
-// overlay so every state reads coherently instead of random dashes on the sky.
-function EnergyScene({
-  scenario,
-  night,
-  hasEv,
-  monthlyKWh,
-  accent,
-}: {
-  scenario: Scenario;
-  night: boolean;
-  hasEv: boolean;
-  monthlyKWh?: number;
-  accent: string;
-}) {
-  const solarActive = scenario === "solar" || scenario === "battery" || scenario === "ev";
-  const batteryActive = scenario === "battery" || scenario === "ev";
-  const evActive = scenario === "ev" && hasEv;
-  const isNight = batteryActive && night;
-
-  // Which connectors are energised in this state.
-  const gridImport = scenario === "nosolar";
-  const sunRays = solarActive && !isNight;
-  const solarToHome = solarActive && !isNight;
-  const exportFlow = scenario === "solar" && !isNight;
-  const charging = batteryActive && !isNight; // solar → battery
-  const discharging = batteryActive && isNight; // battery → home
-  const toEv = evActive;
-
-  // Tasteful "live" numbers — home draw scales loosely off monthly usage.
-  const homeKW =
-    typeof monthlyKWh === "number" && isFinite(monthlyKWh) && monthlyKWh > 0
-      ? Math.max(0.8, Math.min(6, monthlyKWh / 730))
-      : 2.4;
-  const solarKW = isNight ? 0 : homeKW + (batteryActive ? 1.8 : 0.9) + (evActive ? 3.2 : 0);
-  const batteryPct = scenario === "ev" ? (isNight ? "58%" : "64%") : isNight ? "87%" : "72%";
-  const gridText = gridImport
-    ? `${homeKW.toFixed(1)} kW`
-    : exportFlow
-    ? "1.4 kW ↑"
-    : isNight
-    ? "OFFLINE"
-    : "STANDBY";
-
-  const wall = "#171226";
-
-  // Small live readout pill anchored to a node (rendered inside the SVG so it
-  // always tracks the illustration's coordinates).
-  const Tag = ({
-    x,
-    y,
-    label,
-    value,
-    color,
-    on = true,
-  }: {
-    x: number;
-    y: number;
-    label: string;
-    value: string;
-    color: string;
-    on?: boolean;
-  }) => (
-    <g transform={`translate(${x},${y})`} className="sps-tag2" opacity={on ? 1 : 0.4}>
-      <rect x={0} y={0} width={132} height={34} rx={9} className="sps-tag2-bg" />
-      <circle cx={15} cy={17} r={4} fill={color} style={{ filter: `drop-shadow(0 0 5px ${color})` }} />
-      <text x={28} y={15} className="sps-tag2-l">{label}</text>
-      <text x={28} y={28} className="sps-tag2-v" fill={color}>{value}</text>
-    </g>
-  );
-
-  return (
-    <svg className="sps-scene2" viewBox="0 0 1000 600" preserveAspectRatio="xMidYMid meet" aria-hidden="true">
-      <defs>
-        <linearGradient id="sps-sky-d" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0" stopColor="#141a3a" />
-          <stop offset="55%" stopColor="#243a66" />
-          <stop offset="100%" stopColor="#b9743f" />
-        </linearGradient>
-        <linearGradient id="sps-sky-n" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0" stopColor="#080616" />
-          <stop offset="60%" stopColor="#17103a" />
-          <stop offset="100%" stopColor="#2a1e55" />
-        </linearGradient>
-        <linearGradient id="sps-ground" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0" stopColor="#15101f" />
-          <stop offset="100%" stopColor="#080510" />
-        </linearGradient>
-        <radialGradient id="sps-sun" cx="0.5" cy="0.5" r="0.5">
-          <stop offset="0" stopColor="#fff2c4" />
-          <stop offset="35%" stopColor="#ffd86b" />
-          <stop offset="100%" stopColor="#ffd86b" stopOpacity="0" />
-        </radialGradient>
-        <radialGradient id="sps-moon" cx="0.4" cy="0.4" r="0.7">
-          <stop offset="0" stopColor="#eef0ff" />
-          <stop offset="100%" stopColor="#aab0d8" />
-        </radialGradient>
-        <linearGradient id="sps-panel" x1="0" y1="0" x2="1" y2="1">
-          <stop offset="0" stopColor="#1b2b52" />
-          <stop offset="100%" stopColor="#0e1730" />
-        </linearGradient>
-        <radialGradient id="sps-hubg" cx="0.5" cy="0.5" r="0.5">
-          <stop offset="0" stopColor={accent} stopOpacity="0.6" />
-          <stop offset="1" stopColor={accent} stopOpacity="0" />
-        </radialGradient>
-        <clipPath id="sps-roofclip">
-          <polygon points="435,312 585,210 735,312" />
-        </clipPath>
-      </defs>
-
-      {/* sky — day/night crossfade */}
-      <rect className="sps-skyfade" x="0" y="0" width="1000" height="600" fill="url(#sps-sky-d)" style={{ opacity: isNight ? 0 : 1 }} />
-      <rect className="sps-skyfade" x="0" y="0" width="1000" height="600" fill="url(#sps-sky-n)" style={{ opacity: isNight ? 1 : 0 }} />
-
-      {/* stars (night only) */}
-      <g className="sps-stars" style={{ opacity: isNight ? 1 : 0 }}>
-        {STAR_POS.map((s, i) => (
-          <circle key={i} cx={s[0]} cy={s[1]} r={s[2]} fill="#fff" className="sps-star" style={{ animationDelay: `${(i % 5) * 0.6}s` }} />
-        ))}
-      </g>
-
-      {/* sun (day) / moon (night) */}
-      <g className="sps-skyfade" style={{ opacity: isNight ? 0 : 1 }}>
-        <circle cx="180" cy="120" r="96" fill="url(#sps-sun)" className="sps-sunglow" />
-        <circle cx="180" cy="120" r="38" fill="#ffe48f" />
-      </g>
-      <g className="sps-skyfade" style={{ opacity: isNight ? 1 : 0 }}>
-        <circle cx="180" cy="118" r="34" fill="url(#sps-moon)" />
-        <circle cx="196" cy="108" r="34" fill="#17103a" />
-      </g>
-
-      {/* ground */}
-      <rect x="0" y="468" width="1000" height="132" fill="url(#sps-ground)" />
-      <line x1="0" y1="468" x2="1000" y2="468" stroke="rgba(255,255,255,0.08)" strokeWidth="1" />
-
-      {/* ── energy connectors (between real node anchors) ── */}
-      <g className="sps-flowset">
-        {/* grid → home (import) */}
-        <path className={"sps-flow" + (gridImport ? " on" : "")} style={{ stroke: PALETTE.grid, filter: `drop-shadow(0 0 6px ${PALETTE.grid})` }}
-          d="M150,300 C 320,360 430,392 552,392" />
-        {/* home → grid (export) */}
-        <path className={"sps-flow rev" + (exportFlow ? " on" : "")} style={{ stroke: PALETTE.export, filter: `drop-shadow(0 0 6px ${PALETTE.export})` }}
-          d="M552,392 C 420,398 300,360 150,308" />
-        {/* sun → panels */}
-        <path className={"sps-flow" + (sunRays ? " on" : "")} style={{ stroke: PALETTE.solar, filter: `drop-shadow(0 0 6px ${PALETTE.solar})` }}
-          d="M210,150 C 360,180 470,205 556,236" />
-        {/* panels → home */}
-        <path className={"sps-flow" + (solarToHome ? " on" : "")} style={{ stroke: PALETTE.solar, filter: `drop-shadow(0 0 6px ${PALETTE.solar})` }}
-          d="M572,250 C 568,300 565,340 560,378" />
-        {/* panels → battery (charging) */}
-        <path className={"sps-flow" + (charging ? " on" : "")} style={{ stroke: accent, filter: `drop-shadow(0 0 7px ${accent})` }}
-          d="M612,250 C 690,300 726,338 748,372" />
-        {/* battery → home (discharge) */}
-        <path className={"sps-flow rev" + (discharging ? " on" : "")} style={{ stroke: accent, filter: `drop-shadow(0 0 7px ${accent})` }}
-          d="M748,392 C 680,392 622,392 572,392" />
-        {/* home → EV */}
-        {hasEv && (
-          <path className={"sps-flow" + (toEv ? " on" : "")} style={{ stroke: PALETTE.ev, filter: `drop-shadow(0 0 7px ${PALETTE.ev})` }}
-            d="M566,398 C 650,432 724,448 786,456" />
-        )}
-      </g>
-
-      {/* ── grid transmission tower ── */}
-      <g className={"sps-grid2" + (isNight ? " off" : "")} stroke="#6b6f8c" strokeWidth="4" fill="none" strokeLinecap="round">
-        <line x1="95" y1="468" x2="120" y2="250" />
-        <line x1="165" y1="468" x2="140" y2="250" />
-        <line x1="108" y1="300" x2="152" y2="300" />
-        <line x1="100" y1="350" x2="160" y2="350" />
-        <line x1="93" y1="405" x2="167" y2="405" />
-        <polyline points="100,250 130,232 160,250" />
-        <line x1="130" y1="232" x2="130" y2="250" />
-      </g>
-
-      {/* ── house with solar roof ── */}
-      <g>
-        <polygon points="435,312 585,210 735,312" fill="url(#sps-panel)" stroke="#243a66" strokeWidth="2"
-          className={"sps-roof2" + (solarToHome ? " live" : "")} />
-        <g clipPath="url(#sps-roofclip)" stroke="rgba(120,170,255,0.30)" strokeWidth="1.4">
-          <line x1="470" y1="280" x2="700" y2="280" />
-          <line x1="450" y1="252" x2="720" y2="252" />
-          <line x1="500" y1="312" x2="585" y2="232" />
-          <line x1="585" y1="232" x2="670" y2="312" />
-          <line x1="540" y1="312" x2="585" y2="262" />
-          <line x1="585" y1="262" x2="630" y2="312" />
-        </g>
-        <rect x="455" y="312" width="250" height="156" rx="6" fill={wall} stroke="rgba(255,255,255,0.08)" strokeWidth="1.5" />
-        <rect x="545" y="392" width="46" height="76" rx="4" fill="#0e0a1a" stroke="rgba(255,255,255,0.1)" />
-        <rect className={"sps-win" + (isNight ? " lit" : "")} x="485" y="338" width="40" height="34" rx="4" />
-        <rect className={"sps-win" + (isNight ? " lit" : "")} x="625" y="338" width="40" height="34" rx="4" />
-        {/* electrical hub where flows converge */}
-        <circle cx="560" cy="392" r="34" fill="url(#sps-hubg)" className="sps-hub2" />
-        <circle cx="560" cy="392" r="7" fill={accent} style={{ filter: `drop-shadow(0 0 6px ${accent})` }} />
-      </g>
-
-      {/* ── wall-mounted battery ── */}
-      <g className={"sps-bat2" + (batteryActive ? " on" : "")}>
-        <rect x="722" y="330" width="62" height="120" rx="12" fill="#120e22" stroke={batteryActive ? accent : "#3a3550"} strokeWidth="2.5"
-          style={batteryActive ? { filter: `drop-shadow(0 0 12px ${accent}88)` } : undefined} />
-        <rect x="732" y={discharging ? 388 : 360} width="42" height={discharging ? 52 : 80} rx="6" fill={accent}
-          opacity={batteryActive ? 0.9 : 0.18} className="sps-bat2-fill" />
-        <path d="M757 356 L745 388 L754 388 L749 416 L766 380 L756 380 Z" fill="#fff" opacity={batteryActive ? 0.92 : 0.25} />
-      </g>
-
-      {/* ── EV + charger ── */}
-      {hasEv && (
-        <g className={"sps-ev2" + (toEv ? " on" : "")}>
-          <rect x="690" y="420" width="16" height="48" rx="3" fill="#241d33" />
-          <rect x="684" y="412" width="28" height="22" rx="4" fill="#120e22" stroke={toEv ? PALETTE.ev : "#3a3550"} strokeWidth="2" />
-          <path d="M735 466 q14 -40 52 -42 l40 0 q30 2 44 42 Z" fill="#1a1530" stroke="rgba(255,255,255,0.1)" />
-          <rect x="735" y="462" width="148" height="20" rx="9" fill="#221b3a" stroke={toEv ? PALETTE.ev : "rgba(255,255,255,0.1)"} strokeWidth={toEv ? 2 : 1}
-            style={toEv ? { filter: `drop-shadow(0 0 10px ${PALETTE.ev}88)` } : undefined} />
-          <circle cx="762" cy="486" r="11" fill="#0d0a18" stroke="#4a4560" strokeWidth="3" />
-          <circle cx="852" cy="486" r="11" fill="#0d0a18" stroke="#4a4560" strokeWidth="3" />
-        </g>
-      )}
-
-      {/* ── live readout tags anchored to nodes ── */}
-      <Tag x={452} y={150} label="SOLAR" value={`${solarKW.toFixed(1)} kW`} color={PALETTE.solar} on={solarActive} />
-      <Tag x={24} y={250} label="GRID" value={gridText} color={isNight ? "#6b6f8c" : PALETTE.grid} />
-      {batteryActive && <Tag x={800} y={300} label="BATTERY" value={batteryPct} color={accent} />}
-      <Tag x={372} y={430} label="HOME" value={`${homeKW.toFixed(1)} kW`} color={PALETTE.accentBright} />
-      {evActive && <Tag x={772} y={508} label="EV" value="3.2 kW" color={PALETTE.ev} />}
-
-      {/* LIVE badge */}
-      <g transform="translate(884,28)" className="sps-live2">
-        <rect x="0" y="0" width="90" height="28" rx="14" className="sps-tag2-bg" />
-        <circle cx="18" cy="14" r="5" fill={accent} className="sps-live2-dot" style={{ filter: `drop-shadow(0 0 5px ${accent})` }} />
-        <text x="33" y="18" className="sps-tag2-l">LIVE</text>
-      </g>
-    </svg>
-  );
-}
 
 export default function SolarProposalShow(props: SolarShowProps) {
   const {
@@ -500,7 +255,6 @@ export default function SolarProposalShow(props: SolarShowProps) {
     incentives,
     hasEv = false,
     hasExistingSolar = false,
-    videoUrls,
     homeImage,
     homeImageIsStreetView = false,
     options,
@@ -510,9 +264,6 @@ export default function SolarProposalShow(props: SolarShowProps) {
   const hasOptions = !!(options && options.length);
 
   const [idx, setIdx] = useState(0);
-  // The interactive home scenario + day/night.
-  const [scenario, setScenario] = useState<Scenario>("nosolar");
-  const [night, setNight] = useState(false);
 
   // CRM proposal: which battery is selected (drives specs/savings/3D/features) and
   // which two are being compared (max 2). Defaults to the chosen/top option.
@@ -598,8 +349,6 @@ export default function SolarProposalShow(props: SolarShowProps) {
   useEffect(() => {
     if (open) {
       setIdx(0);
-      setScenario(hasExistingSolar ? "solar" : "nosolar");
-      setNight(false);
       // Re-seed the battery selection from the current props on (re)open.
       if (options && options.length) {
         setSelectedId(chosenProductId || options[0].productId);
@@ -705,32 +454,6 @@ export default function SolarProposalShow(props: SolarShowProps) {
   const company = companyName?.trim() || "";
   const coverPhoto = homeImage || PHOTO.solar;
 
-  const scenarioCaption: Record<Scenario, string> = {
-    nosolar:
-      typeof monthlyBill === "number"
-        ? `Today you draw 100% from the grid — about ${money0(monthlyBill)}/mo, rising every year.`
-        : `Today you draw 100% of your power from the grid — and the bill rises every year.`,
-    solar:
-      `Your panels offset daytime usage and export the extra back to the grid, lowering your bill.`,
-    battery: night
-      ? `When the grid goes dark, your battery keeps the lights on${
-          effRec ? ` for ~${effRec.backupDaysAchieved} days` : ""
-        }.`
-      : `By day, sunshine fills your battery${
-          effRec ? ` — ${effRec.units}× ${effRec.model}` : ""
-        } while powering the home.`,
-    ev: `Charge your car on sunshine — drive on energy you made, not energy you bought.`,
-  };
-
-  const scenarioOptions: Array<{ key: Scenario; label: string; sub: string; icon: string }> = [
-    { key: "nosolar", label: "No solar", sub: "GRID ONLY", icon: "⚡" },
-    { key: "solar", label: "Solar", sub: "DAYTIME OFFSET", icon: "☀" },
-    { key: "battery", label: "Solar + Battery", sub: "STORE & BACKUP", icon: "▮" },
-    { key: "ev", label: "+ EV charger", sub: "DRIVE ON SUN", icon: "⊳" },
-  ];
-
-  const videoForScenario = videoUrls?.[scenario];
-
   return (
     <div
       className="sps-root"
@@ -777,94 +500,19 @@ export default function SolarProposalShow(props: SolarShowProps) {
                   </>
                 )}
 
-                {/* ───────── 2. Interactive centerpiece ───────── */}
+                {/* ───────── 2. Interactive centerpiece ─────────
+                    Photoreal "living energy system": a 3D-rendered home cutaway
+                    with animated flows anchored to the real components, a live
+                    status panel, scenario/mode switching and tap-to-learn
+                    hotspots. Themed to the selected battery + fed real usage. */}
                 {s.key === "interactive" && (
-                  <>
-                    {videoForScenario ? (
-                      <div className="sps-bg" aria-hidden="true">
-                        <video
-                          className="sps-bg-video"
-                          src={videoForScenario}
-                          autoPlay
-                          muted
-                          loop
-                          playsInline
-                        />
-                        <div className="sps-bg-scrim" />
-                      </div>
-                    ) : (
-                      <>
-                        {/* Purpose-built illustrated energy diagram — power flows
-                            connect the right nodes per scenario + day/night. */}
-                        <EnergyScene
-                          scenario={scenario}
-                          night={night}
-                          hasEv={hasEv}
-                          monthlyKWh={monthlyKWh}
-                          accent={brandAccent}
-                        />
-                        <div className="sps-scene-scrim" aria-hidden="true" />
-                      </>
-                    )}
-
-                    {/* outage badge in the night/backup state */}
-                    {!videoForScenario && (scenario === "battery" || scenario === "ev") && night && (
-                      <div className="sps-outageBadge">⚠ GRID OUTAGE · YOUR HOME STAYS ON</div>
-                    )}
-
-                    <div className={"sps-inner sps-scene-inner" + (isOn ? " in" : "")}>
-                      <div className="sps-eyebrow sps-light">Live demo</div>
-                      <h2 className="sps-h2">See your energy come alive</h2>
-
-                      <div className="sps-switcher">
-                        {scenarioOptions.map((o) => (
-                          <button
-                            key={o.key}
-                            className={"sps-scbtn" + (scenario === o.key ? " on" : "")}
-                            onClick={() => {
-                              setScenario(o.key);
-                              if (o.key !== "battery" && o.key !== "ev") setNight(false);
-                            }}
-                          >
-                            <span className="sps-scbtn-ico">{o.icon}</span>
-                            <span className="sps-scbtn-txt">
-                              <span className="sps-scbtn-label">{o.label}</span>
-                              <span className="sps-scbtn-sub">{o.sub}</span>
-                            </span>
-                          </button>
-                        ))}
-                      </div>
-
-                      {(scenario === "battery" || scenario === "ev") && (
-                        <div className="sps-daynight">
-                          <button
-                            className={"sps-dnbtn" + (!night ? " on" : "")}
-                            onClick={() => setNight(false)}
-                          >
-                            ☀ Day
-                          </button>
-                          <button
-                            className={"sps-dnbtn" + (night ? " on" : "")}
-                            onClick={() => setNight(true)}
-                          >
-                            ☾ Night
-                          </button>
-                        </div>
-                      )}
-
-                      <div className="sps-legend">
-                        <span><i style={{ background: PALETTE.grid }} /> Grid</span>
-                        <span><i style={{ background: PALETTE.solar }} /> Solar</span>
-                        <span><i style={{ background: brandAccent }} /> Battery</span>
-                        <span><i style={{ background: PALETTE.export }} /> Export</span>
-                        {hasEv && <span><i style={{ background: PALETTE.ev }} /> EV</span>}
-                      </div>
-
-                      <p className="sps-caption" key={scenario + String(night)}>
-                        {scenarioCaption[scenario]}
-                      </p>
-                    </div>
-                  </>
+                  <LivingEnergyScene
+                    accent={brandAccent}
+                    batteryName={active ? `${active.brand} ${active.model}` : effRec ? `${effRec.brand} ${effRec.model}` : undefined}
+                    monthlyKWh={monthlyKWh}
+                    hasEv={hasEv}
+                    hasExistingSolar={hasExistingSolar}
+                  />
                 )}
 
                 {/* ───────── Why this battery ───────── */}
