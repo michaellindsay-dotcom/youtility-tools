@@ -241,8 +241,21 @@ function PhotoBackdrop({
   );
 }
 
-// ── HUD live stat chips overlaid on the interactive scene ────────────────────
-function SceneHud({
+// Star field for the night sky (x, y, r). Kept clear of the sun/moon corner.
+const STAR_POS: Array<[number, number, number]> = [
+  [310, 60, 1.4], [380, 110, 1], [450, 70, 1.6], [520, 120, 1.1], [600, 64, 1.3],
+  [680, 110, 1], [740, 70, 1.5], [820, 120, 1.2], [880, 70, 1], [930, 130, 1.4],
+  [350, 170, 1], [560, 180, 1.2], [700, 175, 1], [860, 180, 1.3], [470, 130, 0.9],
+  [640, 130, 1.1],
+];
+
+// ── Illustrated, animated energy-flow scene ──────────────────────────────────
+// A self-contained vector diagram — sun/moon, grid tower, solar roof, wall
+// battery, EV + charger — with power flowing along connectors that actually
+// link the right nodes, lit per scenario + day/night, plus live stat tags
+// anchored to each node. Replaces the old free-floating-lines-over-a-photo
+// overlay so every state reads coherently instead of random dashes on the sky.
+function EnergyScene({
   scenario,
   night,
   hasEv,
@@ -255,140 +268,220 @@ function SceneHud({
   monthlyKWh?: number;
   accent: string;
 }) {
-  // Derive tasteful "live" numbers. Home draw scales loosely off monthly usage;
-  // otherwise fall back to pleasant static defaults.
-  const homeKW =
-    typeof monthlyKWh === "number" && isFinite(monthlyKWh) && monthlyKWh > 0
-      ? Math.max(0.8, Math.min(6, monthlyKWh / 730)) // kWh/mo → avg kW, clamped
-      : 2.4;
-
-  const batteryActive = scenario === "battery" || scenario === "ev";
-  const isNight = batteryActive && night;
-
-  type Chip = { label: string; value: string; color: string };
-  const chips: Chip[] = [];
-
-  if (scenario === "nosolar") {
-    chips.push({ label: "GRID", value: `${homeKW.toFixed(1)} kW`, color: PALETTE.grid });
-    chips.push({ label: "HOME", value: `${homeKW.toFixed(1)} kW`, color: accent });
-  } else if (isNight) {
-    chips.push({ label: "SOLAR", value: "0.0 kW", color: PALETTE.solar });
-    chips.push({ label: "BATTERY", value: "87%", color: accent });
-    chips.push({ label: "GRID", value: "OFFLINE", color: PALETTE.grid });
-    chips.push({ label: "HOME", value: `${homeKW.toFixed(1)} kW`, color: PALETTE.accentBright });
-  } else {
-    const solarKW = (homeKW + (batteryActive ? 1.8 : 0) + (scenario === "ev" ? 3.2 : 0.9)).toFixed(1);
-    chips.push({ label: "SOLAR", value: `${solarKW} kW`, color: PALETTE.solar });
-    if (batteryActive)
-      chips.push({ label: "BATTERY", value: scenario === "ev" ? "64%" : "72%", color: accent });
-    if (scenario === "solar")
-      chips.push({ label: "EXPORT", value: "1.4 kW", color: PALETTE.export });
-    if (scenario === "ev" && hasEv)
-      chips.push({ label: "EV", value: "3.2 kW", color: PALETTE.ev });
-    chips.push({ label: "HOME", value: `${homeKW.toFixed(1)} kW`, color: PALETTE.accentBright });
-  }
-
-  return (
-    <div className="sps-hud" key={scenario + String(night)}>
-      {chips.map((c) => (
-        <div className="sps-chip" key={c.label}>
-          <span className="sps-chip-dot" style={{ background: c.color, boxShadow: `0 0 8px ${c.color}` }} />
-          <span className="sps-chip-label">{c.label}</span>
-          <span className="sps-chip-sep">▸</span>
-          <span className="sps-chip-val" style={{ color: c.color }}>{c.value}</span>
-        </div>
-      ))}
-      <div className="sps-chip sps-chip-live">
-        <span className="sps-live-dot" style={{ background: accent, boxShadow: `0 0 6px ${accent}` }} />
-        <span className="sps-chip-label">LIVE</span>
-      </div>
-    </div>
-  );
-}
-
-// ── Animated glowing energy-flow lines (SVG marching-ants over the photo) ─────
-// A free-floating overlay sized to the scene; each path is color-coded and only
-// "on" for the relevant scenario. Drop-shadow glow gives the neon look.
-function EnergyFlows({
-  scenario,
-  night,
-  hasEv,
-  accent,
-}: {
-  scenario: Scenario;
-  night: boolean;
-  hasEv: boolean;
-  accent: string;
-}) {
   const solarActive = scenario === "solar" || scenario === "battery" || scenario === "ev";
   const batteryActive = scenario === "battery" || scenario === "ev";
-  const evActive = scenario === "ev";
+  const evActive = scenario === "ev" && hasEv;
   const isNight = batteryActive && night;
 
-  const gridFlow = scenario === "nosolar" || (batteryActive && !isNight && false);
+  // Which connectors are energised in this state.
+  const gridImport = scenario === "nosolar";
+  const sunRays = solarActive && !isNight;
   const solarToHome = solarActive && !isNight;
-  const solarToGrid = scenario === "solar" && !isNight; // export
-  const solarToBattery = batteryActive && !isNight; // charging
-  const batteryToHome = batteryActive && isNight; // discharging at night
+  const exportFlow = scenario === "solar" && !isNight;
+  const charging = batteryActive && !isNight; // solar → battery
+  const discharging = batteryActive && isNight; // battery → home
   const toEv = evActive;
 
-  // Anchors (viewBox 0..400 x 0..240): SUN top-right, GRID left, HOME center,
-  // BATTERY right, EV bottom-left. Lines fan out from the home hub.
+  // Tasteful "live" numbers — home draw scales loosely off monthly usage.
+  const homeKW =
+    typeof monthlyKWh === "number" && isFinite(monthlyKWh) && monthlyKWh > 0
+      ? Math.max(0.8, Math.min(6, monthlyKWh / 730))
+      : 2.4;
+  const solarKW = isNight ? 0 : homeKW + (batteryActive ? 1.8 : 0.9) + (evActive ? 3.2 : 0);
+  const batteryPct = scenario === "ev" ? (isNight ? "58%" : "64%") : isNight ? "87%" : "72%";
+  const gridText = gridImport
+    ? `${homeKW.toFixed(1)} kW`
+    : exportFlow
+    ? "1.4 kW ↑"
+    : isNight
+    ? "OFFLINE"
+    : "STANDBY";
+
+  const wall = "#171226";
+
+  // Small live readout pill anchored to a node (rendered inside the SVG so it
+  // always tracks the illustration's coordinates).
+  const Tag = ({
+    x,
+    y,
+    label,
+    value,
+    color,
+    on = true,
+  }: {
+    x: number;
+    y: number;
+    label: string;
+    value: string;
+    color: string;
+    on?: boolean;
+  }) => (
+    <g transform={`translate(${x},${y})`} className="sps-tag2" opacity={on ? 1 : 0.4}>
+      <rect x={0} y={0} width={132} height={34} rx={9} className="sps-tag2-bg" />
+      <circle cx={15} cy={17} r={4} fill={color} style={{ filter: `drop-shadow(0 0 5px ${color})` }} />
+      <text x={28} y={15} className="sps-tag2-l">{label}</text>
+      <text x={28} y={28} className="sps-tag2-v" fill={color}>{value}</text>
+    </g>
+  );
+
   return (
-    <svg
-      className="sps-flows"
-      viewBox="0 0 400 240"
-      preserveAspectRatio="none"
-      aria-hidden="true"
-    >
+    <svg className="sps-scene2" viewBox="0 0 1000 600" preserveAspectRatio="xMidYMid meet" aria-hidden="true">
       <defs>
-        <radialGradient id="sps-hub" cx="0.5" cy="0.5" r="0.5">
-          <stop offset="0" stopColor={accent} stopOpacity="0.55" />
+        <linearGradient id="sps-sky-d" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0" stopColor="#141a3a" />
+          <stop offset="55%" stopColor="#243a66" />
+          <stop offset="100%" stopColor="#b9743f" />
+        </linearGradient>
+        <linearGradient id="sps-sky-n" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0" stopColor="#080616" />
+          <stop offset="60%" stopColor="#17103a" />
+          <stop offset="100%" stopColor="#2a1e55" />
+        </linearGradient>
+        <linearGradient id="sps-ground" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0" stopColor="#15101f" />
+          <stop offset="100%" stopColor="#080510" />
+        </linearGradient>
+        <radialGradient id="sps-sun" cx="0.5" cy="0.5" r="0.5">
+          <stop offset="0" stopColor="#fff2c4" />
+          <stop offset="35%" stopColor="#ffd86b" />
+          <stop offset="100%" stopColor="#ffd86b" stopOpacity="0" />
+        </radialGradient>
+        <radialGradient id="sps-moon" cx="0.4" cy="0.4" r="0.7">
+          <stop offset="0" stopColor="#eef0ff" />
+          <stop offset="100%" stopColor="#aab0d8" />
+        </radialGradient>
+        <linearGradient id="sps-panel" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0" stopColor="#1b2b52" />
+          <stop offset="100%" stopColor="#0e1730" />
+        </linearGradient>
+        <radialGradient id="sps-hubg" cx="0.5" cy="0.5" r="0.5">
+          <stop offset="0" stopColor={accent} stopOpacity="0.6" />
           <stop offset="1" stopColor={accent} stopOpacity="0" />
         </radialGradient>
+        <clipPath id="sps-roofclip">
+          <polygon points="435,312 585,210 735,312" />
+        </clipPath>
       </defs>
 
-      {/* central home hub glow */}
-      <circle cx="200" cy="130" r="34" fill="url(#sps-hub)" className="sps-hubGlow" />
+      {/* sky — day/night crossfade */}
+      <rect className="sps-skyfade" x="0" y="0" width="1000" height="600" fill="url(#sps-sky-d)" style={{ opacity: isNight ? 0 : 1 }} />
+      <rect className="sps-skyfade" x="0" y="0" width="1000" height="600" fill="url(#sps-sky-n)" style={{ opacity: isNight ? 1 : 0 }} />
 
-      {/* grid → home (amber) */}
-      <path
-        className={"sps-flow grid" + (gridFlow ? " on" : "")}
-        style={{ stroke: PALETTE.grid, filter: `drop-shadow(0 0 7px ${PALETTE.grid})` }}
-        d="M40 96 C 110 110, 150 118, 188 126"
-      />
-      {/* solar → home (gold) */}
-      <path
-        className={"sps-flow" + (solarToHome ? " on" : "")}
-        style={{ stroke: PALETTE.solar, filter: `drop-shadow(0 0 7px ${PALETTE.solar})` }}
-        d="M348 54 C 290 78, 250 100, 214 120"
-      />
-      {/* solar → grid export (blue, reversed) */}
-      <path
-        className={"sps-flow rev" + (solarToGrid ? " on" : "")}
-        style={{ stroke: PALETTE.export, filter: `drop-shadow(0 0 7px ${PALETTE.export})` }}
-        d="M188 132 C 140 140, 96 130, 44 116"
-      />
-      {/* solar → battery (accent) */}
-      <path
-        className={"sps-flow" + (solarToBattery ? " on" : "")}
-        style={{ stroke: accent, filter: `drop-shadow(0 0 8px ${accent})` }}
-        d="M330 70 C 350 120, 358 150, 356 176"
-      />
-      {/* battery → home (accent, reversed) */}
-      <path
-        className={"sps-flow rev" + (batteryToHome ? " on" : "")}
-        style={{ stroke: accent, filter: `drop-shadow(0 0 8px ${accent})` }}
-        d="M352 176 C 310 168, 260 150, 216 134"
-      />
-      {/* power → EV (pink) */}
+      {/* stars (night only) */}
+      <g className="sps-stars" style={{ opacity: isNight ? 1 : 0 }}>
+        {STAR_POS.map((s, i) => (
+          <circle key={i} cx={s[0]} cy={s[1]} r={s[2]} fill="#fff" className="sps-star" style={{ animationDelay: `${(i % 5) * 0.6}s` }} />
+        ))}
+      </g>
+
+      {/* sun (day) / moon (night) */}
+      <g className="sps-skyfade" style={{ opacity: isNight ? 0 : 1 }}>
+        <circle cx="180" cy="120" r="96" fill="url(#sps-sun)" className="sps-sunglow" />
+        <circle cx="180" cy="120" r="38" fill="#ffe48f" />
+      </g>
+      <g className="sps-skyfade" style={{ opacity: isNight ? 1 : 0 }}>
+        <circle cx="180" cy="118" r="34" fill="url(#sps-moon)" />
+        <circle cx="196" cy="108" r="34" fill="#17103a" />
+      </g>
+
+      {/* ground */}
+      <rect x="0" y="468" width="1000" height="132" fill="url(#sps-ground)" />
+      <line x1="0" y1="468" x2="1000" y2="468" stroke="rgba(255,255,255,0.08)" strokeWidth="1" />
+
+      {/* ── energy connectors (between real node anchors) ── */}
+      <g className="sps-flowset">
+        {/* grid → home (import) */}
+        <path className={"sps-flow" + (gridImport ? " on" : "")} style={{ stroke: PALETTE.grid, filter: `drop-shadow(0 0 6px ${PALETTE.grid})` }}
+          d="M150,300 C 320,360 430,392 552,392" />
+        {/* home → grid (export) */}
+        <path className={"sps-flow rev" + (exportFlow ? " on" : "")} style={{ stroke: PALETTE.export, filter: `drop-shadow(0 0 6px ${PALETTE.export})` }}
+          d="M552,392 C 420,398 300,360 150,308" />
+        {/* sun → panels */}
+        <path className={"sps-flow" + (sunRays ? " on" : "")} style={{ stroke: PALETTE.solar, filter: `drop-shadow(0 0 6px ${PALETTE.solar})` }}
+          d="M210,150 C 360,180 470,205 556,236" />
+        {/* panels → home */}
+        <path className={"sps-flow" + (solarToHome ? " on" : "")} style={{ stroke: PALETTE.solar, filter: `drop-shadow(0 0 6px ${PALETTE.solar})` }}
+          d="M572,250 C 568,300 565,340 560,378" />
+        {/* panels → battery (charging) */}
+        <path className={"sps-flow" + (charging ? " on" : "")} style={{ stroke: accent, filter: `drop-shadow(0 0 7px ${accent})` }}
+          d="M612,250 C 690,300 726,338 748,372" />
+        {/* battery → home (discharge) */}
+        <path className={"sps-flow rev" + (discharging ? " on" : "")} style={{ stroke: accent, filter: `drop-shadow(0 0 7px ${accent})` }}
+          d="M748,392 C 680,392 622,392 572,392" />
+        {/* home → EV */}
+        {hasEv && (
+          <path className={"sps-flow" + (toEv ? " on" : "")} style={{ stroke: PALETTE.ev, filter: `drop-shadow(0 0 7px ${PALETTE.ev})` }}
+            d="M566,398 C 650,432 724,448 786,456" />
+        )}
+      </g>
+
+      {/* ── grid transmission tower ── */}
+      <g className={"sps-grid2" + (isNight ? " off" : "")} stroke="#6b6f8c" strokeWidth="4" fill="none" strokeLinecap="round">
+        <line x1="95" y1="468" x2="120" y2="250" />
+        <line x1="165" y1="468" x2="140" y2="250" />
+        <line x1="108" y1="300" x2="152" y2="300" />
+        <line x1="100" y1="350" x2="160" y2="350" />
+        <line x1="93" y1="405" x2="167" y2="405" />
+        <polyline points="100,250 130,232 160,250" />
+        <line x1="130" y1="232" x2="130" y2="250" />
+      </g>
+
+      {/* ── house with solar roof ── */}
+      <g>
+        <polygon points="435,312 585,210 735,312" fill="url(#sps-panel)" stroke="#243a66" strokeWidth="2"
+          className={"sps-roof2" + (solarToHome ? " live" : "")} />
+        <g clipPath="url(#sps-roofclip)" stroke="rgba(120,170,255,0.30)" strokeWidth="1.4">
+          <line x1="470" y1="280" x2="700" y2="280" />
+          <line x1="450" y1="252" x2="720" y2="252" />
+          <line x1="500" y1="312" x2="585" y2="232" />
+          <line x1="585" y1="232" x2="670" y2="312" />
+          <line x1="540" y1="312" x2="585" y2="262" />
+          <line x1="585" y1="262" x2="630" y2="312" />
+        </g>
+        <rect x="455" y="312" width="250" height="156" rx="6" fill={wall} stroke="rgba(255,255,255,0.08)" strokeWidth="1.5" />
+        <rect x="545" y="392" width="46" height="76" rx="4" fill="#0e0a1a" stroke="rgba(255,255,255,0.1)" />
+        <rect className={"sps-win" + (isNight ? " lit" : "")} x="485" y="338" width="40" height="34" rx="4" />
+        <rect className={"sps-win" + (isNight ? " lit" : "")} x="625" y="338" width="40" height="34" rx="4" />
+        {/* electrical hub where flows converge */}
+        <circle cx="560" cy="392" r="34" fill="url(#sps-hubg)" className="sps-hub2" />
+        <circle cx="560" cy="392" r="7" fill={accent} style={{ filter: `drop-shadow(0 0 6px ${accent})` }} />
+      </g>
+
+      {/* ── wall-mounted battery ── */}
+      <g className={"sps-bat2" + (batteryActive ? " on" : "")}>
+        <rect x="722" y="330" width="62" height="120" rx="12" fill="#120e22" stroke={batteryActive ? accent : "#3a3550"} strokeWidth="2.5"
+          style={batteryActive ? { filter: `drop-shadow(0 0 12px ${accent}88)` } : undefined} />
+        <rect x="732" y={discharging ? 388 : 360} width="42" height={discharging ? 52 : 80} rx="6" fill={accent}
+          opacity={batteryActive ? 0.9 : 0.18} className="sps-bat2-fill" />
+        <path d="M757 356 L745 388 L754 388 L749 416 L766 380 L756 380 Z" fill="#fff" opacity={batteryActive ? 0.92 : 0.25} />
+      </g>
+
+      {/* ── EV + charger ── */}
       {hasEv && (
-        <path
-          className={"sps-flow" + (toEv ? " on" : "")}
-          style={{ stroke: PALETTE.ev, filter: `drop-shadow(0 0 8px ${PALETTE.ev})` }}
-          d="M186 138 C 140 160, 100 178, 60 196"
-        />
+        <g className={"sps-ev2" + (toEv ? " on" : "")}>
+          <rect x="690" y="420" width="16" height="48" rx="3" fill="#241d33" />
+          <rect x="684" y="412" width="28" height="22" rx="4" fill="#120e22" stroke={toEv ? PALETTE.ev : "#3a3550"} strokeWidth="2" />
+          <path d="M735 466 q14 -40 52 -42 l40 0 q30 2 44 42 Z" fill="#1a1530" stroke="rgba(255,255,255,0.1)" />
+          <rect x="735" y="462" width="148" height="20" rx="9" fill="#221b3a" stroke={toEv ? PALETTE.ev : "rgba(255,255,255,0.1)"} strokeWidth={toEv ? 2 : 1}
+            style={toEv ? { filter: `drop-shadow(0 0 10px ${PALETTE.ev}88)` } : undefined} />
+          <circle cx="762" cy="486" r="11" fill="#0d0a18" stroke="#4a4560" strokeWidth="3" />
+          <circle cx="852" cy="486" r="11" fill="#0d0a18" stroke="#4a4560" strokeWidth="3" />
+        </g>
       )}
+
+      {/* ── live readout tags anchored to nodes ── */}
+      <Tag x={452} y={150} label="SOLAR" value={`${solarKW.toFixed(1)} kW`} color={PALETTE.solar} on={solarActive} />
+      <Tag x={24} y={250} label="GRID" value={gridText} color={isNight ? "#6b6f8c" : PALETTE.grid} />
+      {batteryActive && <Tag x={800} y={300} label="BATTERY" value={batteryPct} color={accent} />}
+      <Tag x={372} y={430} label="HOME" value={`${homeKW.toFixed(1)} kW`} color={PALETTE.accentBright} />
+      {evActive && <Tag x={772} y={508} label="EV" value="3.2 kW" color={PALETTE.ev} />}
+
+      {/* LIVE badge */}
+      <g transform="translate(884,28)" className="sps-live2">
+        <rect x="0" y="0" width="90" height="28" rx="14" className="sps-tag2-bg" />
+        <circle cx="18" cy="14" r="5" fill={accent} className="sps-live2-dot" style={{ filter: `drop-shadow(0 0 5px ${accent})` }} />
+        <text x="33" y="18" className="sps-tag2-l">LIVE</text>
+      </g>
     </svg>
   );
 }
@@ -638,17 +731,6 @@ export default function SolarProposalShow(props: SolarShowProps) {
 
   const videoForScenario = videoUrls?.[scenario];
 
-  // Background photo per scenario (crossfaded). Night battery/ev dims further.
-  const scenePhoto =
-    scenario === "nosolar"
-      ? PHOTO.night
-      : scenario === "solar"
-      ? PHOTO.solar
-      : scenario === "ev"
-      ? PHOTO.ev
-      : PHOTO.energy;
-  const sceneDim = scenario === "nosolar" || ((scenario === "battery" || scenario === "ev") && night);
-
   return (
     <div
       className="sps-root"
@@ -711,20 +793,17 @@ export default function SolarProposalShow(props: SolarShowProps) {
                         <div className="sps-bg-scrim" />
                       </div>
                     ) : (
-                      <PhotoBackdrop src={scenePhoto} active={isOn} dim={sceneDim} position="center" />
-                    )}
-
-                    {/* energy-flow overlay + HUD float over the photo */}
-                    {!videoForScenario && (
                       <>
-                        <EnergyFlows scenario={scenario} night={night} hasEv={hasEv} accent={brandAccent} />
-                        <SceneHud
+                        {/* Purpose-built illustrated energy diagram — power flows
+                            connect the right nodes per scenario + day/night. */}
+                        <EnergyScene
                           scenario={scenario}
                           night={night}
                           hasEv={hasEv}
                           monthlyKWh={monthlyKWh}
                           accent={brandAccent}
                         />
+                        <div className="sps-scene-scrim" aria-hidden="true" />
                       </>
                     )}
 
@@ -1386,15 +1465,34 @@ const CSS = `
 .sps-scene-inner.in>*:nth-child(5){animation-delay:.25s;}
 .sps-scene-inner.in>*:nth-child(6){animation-delay:.3s;}
 
-/* energy-flow overlay sits over the photo, below the content */
-.sps-flows{position:absolute;inset:0;z-index:2;width:100%;height:100%;pointer-events:none;}
-.sps-hubGlow{animation:sps-hubpulse 4s ease-in-out infinite;}
-@keyframes sps-hubpulse{0%,100%{opacity:.6;}50%{opacity:1;}}
-.sps-flow{fill:none;stroke-width:2.4;stroke-linecap:round;opacity:0;
-  stroke-dasharray:7 12;transition:opacity .5s;}
-.sps-flow.on{opacity:.95;animation:sps-flowDash 1.5s linear infinite;}
+/* ── illustrated energy scene (self-contained vector diagram) ── */
+.sps-scene2{position:absolute;inset:0;z-index:1;width:100%;height:100%;pointer-events:none;}
+.sps-scene-scrim{position:absolute;inset:0;z-index:2;pointer-events:none;
+  background:linear-gradient(180deg,rgba(8,5,18,0) 36%,rgba(8,5,18,.5) 70%,rgba(6,4,14,.92) 100%);}
+.sps-scene2 .sps-skyfade{transition:opacity .9s ease;}
+.sps-stars{transition:opacity .9s ease;}
+.sps-star{animation:sps-twinkle 3.4s ease-in-out infinite;}
+@keyframes sps-twinkle{0%,100%{opacity:.2;}50%{opacity:.95;}}
+.sps-sunglow{animation:sps-hubpulse 5s ease-in-out infinite;transform-origin:180px 120px;}
+.sps-hub2{animation:sps-hubpulse 4s ease-in-out infinite;transform-origin:560px 392px;}
+@keyframes sps-hubpulse{0%,100%{opacity:.55;}50%{opacity:1;}}
+.sps-roof2{transition:filter .5s ease;}
+.sps-roof2.live{filter:drop-shadow(0 0 12px rgba(255,216,107,.55));}
+.sps-win{fill:#0c0a18;stroke:rgba(255,255,255,.08);transition:fill .6s ease;}
+.sps-win.lit{fill:#ffd98a;filter:drop-shadow(0 0 9px rgba(255,210,120,.7));}
+.sps-grid2{transition:opacity .5s ease;}
+.sps-grid2.off{opacity:.32;}
+.sps-bat2-fill{transition:y .6s ease,height .6s ease,opacity .4s ease;}
+.sps-tag2{transition:opacity .4s ease;}
+.sps-tag2-bg{fill:rgba(8,5,18,.66);stroke:rgba(255,255,255,.16);stroke-width:1;}
+.sps-tag2-l{font-family:var(--font-mono);font-size:9px;letter-spacing:.16em;fill:#cfc7e2;font-weight:600;}
+.sps-tag2-v{font-family:var(--font-mono);font-size:12px;font-weight:700;letter-spacing:.01em;}
+.sps-live2-dot{animation:sps-pulse 1.6s ease-in-out infinite;}
+.sps-flow{fill:none;stroke-width:3;stroke-linecap:round;opacity:0;
+  stroke-dasharray:8 13;transition:opacity .5s;}
+.sps-flow.on{opacity:.95;animation:sps-flowDash 1.4s linear infinite;}
 .sps-flow.rev.on{animation-direction:reverse;}
-@keyframes sps-flowDash{to{stroke-dashoffset:-38;}}
+@keyframes sps-flowDash{to{stroke-dashoffset:-42;}}
 
 .sps-outageBadge{position:absolute;top:max(64px,calc(env(safe-area-inset-top) + 50px));
   left:50%;transform:translateX(-50%);z-index:8;
@@ -1421,23 +1519,6 @@ const CSS = `
 .sps-scbtn.on .sps-scbtn-ico{opacity:1;color:var(--accent-bright);}
 .sps-scbtn.on .sps-scbtn-sub{color:var(--accent-bright);}
 
-/* HUD chips floating top-left over the photo */
-.sps-hud{position:absolute;top:max(64px,calc(env(safe-area-inset-top) + 50px));left:16px;
-  z-index:7;display:flex;flex-direction:column;gap:6px;align-items:flex-start;
-  animation:sps-fade .5s ease;pointer-events:none;}
-.sps-chip{display:inline-flex;align-items:center;gap:7px;
-  padding:6px 11px;border-radius:10px;
-  background:rgba(8,5,18,.55);border:1px solid var(--line-2);
-  backdrop-filter:blur(12px);font-family:var(--font-mono);
-  box-shadow:0 4px 16px rgba(0,0,0,.4);}
-.sps-chip-dot{width:7px;height:7px;border-radius:50%;flex-shrink:0;}
-.sps-chip-label{font-size:9px;letter-spacing:.18em;color:var(--text-dim);font-weight:500;}
-.sps-chip-sep{font-size:8px;color:var(--text-dim);opacity:.6;}
-.sps-chip-val{font-size:11px;font-weight:600;letter-spacing:.02em;}
-.sps-chip-live{padding:6px 11px;}
-.sps-live-dot{width:6px;height:6px;border-radius:50%;
-  animation:sps-pulse 1.6s ease-in-out infinite;}
-.sps-chip-live .sps-chip-label{color:var(--accent-bright);}
 @keyframes sps-pulse{0%,100%{opacity:1;}50%{opacity:.35;}}
 
 .sps-daynight{display:inline-flex;gap:5px;background:rgba(8,5,18,.55);border:1px solid var(--line-2);
@@ -1561,7 +1642,6 @@ const CSS = `
   .sps-nav{width:40px;height:40px;font-size:22px;}
   .sps-nav.prev{left:8px;}
   .sps-nav.next{right:8px;}
-  .sps-hud{left:10px;}
   .sps-scbtn{min-width:calc(50% - 4px);flex:1 1 calc(50% - 4px);}
 }
 
@@ -1676,7 +1756,7 @@ const CSS = `
   .sps-bg-img,.sps-bg-img.kb{animation:none!important;transform:scale(1.04)!important;}
   .sps-batfb-charge{animation:none!important;opacity:.9;}
   .sps-flow.on,.sps-flow.rev.on{animation:none!important;opacity:.95;}
-  .sps-hubGlow,.sps-live-dot,.sps-grain,.sps-outageBadge,.sps-scrollHint{animation:none!important;}
+  .sps-sunglow,.sps-hub2,.sps-star,.sps-live2-dot,.sps-grain,.sps-outageBadge,.sps-scrollHint{animation:none!important;}
   .sps-track{transition:none;}
   .sps-rise>*,.sps-cover>*,.sps-cta>*,.sps-scene-inner>*,.sps-inccard{
     opacity:1!important;transform:none!important;animation:none!important;}
