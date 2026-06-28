@@ -28,7 +28,7 @@ import {
   type AreaIncentive,
   type IncentiveReport,
 } from "../lib/incentives";
-import SolarProposalShow, { type ProposalOption } from "./SolarProposalShow";
+import SolarProposalShow, { type ProposalOption, type ProposalCloseSelection } from "./SolarProposalShow";
 
 const fmt = (ms: number) =>
   new Date(ms).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
@@ -964,6 +964,53 @@ export default function BatteryTool() {
 
   // Interactive proposal "show" overlay.
   const [showOpen, setShowOpen] = useState(false);
+
+  // "Let's do this" → create the battery agreement and finalize (sign on this
+  // device, or email the customer to sign).
+  const [closeSel, setCloseSel] = useState<ProposalCloseSelection | null>(null);
+  const [closeBusy, setCloseBusy] = useState<"" | "device" | "email">("");
+  const [closeMsg, setCloseMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  const handleLetsDoIt = (sel: ProposalCloseSelection) => {
+    setShowOpen(false);
+    setCloseMsg(null);
+    setCloseSel(sel);
+  };
+  const createAgreement = async (delivery: "device" | "email") => {
+    if (!closeSel) return;
+    if (delivery === "email" && !homeownerEmail) {
+      setCloseMsg({ ok: false, text: "Enter the customer's email to send it for signature." });
+      return;
+    }
+    setCloseBusy(delivery);
+    setCloseMsg(null);
+    try {
+      const q = new URLSearchParams(window.location.search);
+      const { data } = await httpsCallable<{ delivery: string } & Record<string, unknown>, { ok?: boolean; signUrl?: string }>(
+        functions,
+        "createBatteryAgreement"
+      )({
+        delivery,
+        customerName,
+        customerEmail: homeownerEmail || undefined,
+        address,
+        leadId: q.get("leadId") || undefined,
+        eventId: q.get("eventId") || undefined,
+        closerName: profile?.displayName || profile?.email || "",
+        battery: closeSel.battery,
+        payment: { method: closeSel.method, systemPrice: closeSel.systemPrice, finance: closeSel.finance, cash: closeSel.cash },
+      });
+      if (delivery === "device" && data?.signUrl) {
+        window.location.href = data.signUrl; // hand the tablet over to sign now
+        return;
+      }
+      setCloseMsg({ ok: true, text: `Agreement sent to ${homeownerEmail} to sign.` });
+    } catch (e) {
+      setCloseMsg({ ok: false, text: (e as Error).message || "Couldn't create the agreement." });
+    } finally {
+      setCloseBusy("");
+    }
+  };
+
   // EV charger is in the selected loads?
   const hasEv = useMemo(() => selected.some((s) => s.applianceId === "ev_l2" && s.qty > 0), [selected]);
 
@@ -1901,7 +1948,56 @@ export default function BatteryTool() {
         chosenProductId={system?.product.id}
         depositUsd={depositUsd}
         sungageApplyUrl={company?.sungageApplyUrl}
+        onLetsDoIt={handleLetsDoIt}
       />
+
+      {/* Finalize: create the agreement & choose how to sign. */}
+      {closeSel && (
+        <div
+          onClick={() => !closeBusy && setCloseSel(null)}
+          style={{ position: "fixed", inset: 0, zIndex: 6000, background: "rgba(6,4,14,0.72)", backdropFilter: "blur(6px)", display: "flex", alignItems: "center", justifyContent: "center", padding: 18 }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{ position: "relative", width: "min(460px,96vw)", background: "#150f1f", border: "1px solid rgba(255,255,255,0.12)", borderRadius: 16, padding: "22px 22px 18px", boxShadow: "0 30px 80px rgba(0,0,0,0.6)" }}
+          >
+            <button
+              onClick={() => !closeBusy && setCloseSel(null)}
+              aria-label="Close"
+              style={{ position: "absolute", top: 12, right: 12, width: 32, height: 32, borderRadius: "50%", border: "1px solid rgba(255,255,255,0.18)", background: "transparent", color: "#fff", cursor: "pointer" }}
+            >
+              ✕
+            </button>
+            <div className="bt-kicker">· Finalize</div>
+            <h2 className="section-h" style={{ marginTop: 2 }}>Create the agreement</h2>
+            <p className="muted small" style={{ marginTop: 0 }}>
+              {customerName || "Customer"} · {closeSel.battery ? `${closeSel.battery.units}× ${closeSel.battery.brand} ${closeSel.battery.model}` : ""}
+              {" · "}
+              {closeSel.method === "finance"
+                ? `${closeSel.finance?.name} — ${money(closeSel.finance?.monthly || 0)}/mo`
+                : `Cash — ${money(closeSel.cash?.depositUsd || 0)} deposit`}
+            </p>
+            <label className="field-label bt-field-label" htmlFor="bt-close-email">Customer email (for signing or a copy)</label>
+            <input id="bt-close-email" type="email" value={homeownerEmail} placeholder="homeowner@email.com" onChange={(e) => setHomeownerEmail(e.target.value)} style={{ width: "100%", marginBottom: 12 }} />
+            <div className="row" style={{ gap: 10, flexWrap: "wrap" }}>
+              <button className="btn primary" onClick={() => createAgreement("device")} disabled={!!closeBusy}>
+                {closeBusy === "device" ? "Opening…" : "✍️ Sign on this device"}
+              </button>
+              <button className="btn primary" onClick={() => createAgreement("email")} disabled={!!closeBusy || !homeownerEmail}>
+                {closeBusy === "email" ? "Sending…" : "✉️ Email to customer"}
+              </button>
+            </div>
+            {closeMsg && (
+              <p className="muted small" style={{ color: closeMsg.ok ? "#34d399" : "#ef4444", marginBottom: 0 }}>
+                {closeMsg.ok ? "✅ " : ""}{closeMsg.text}
+              </p>
+            )}
+            <p className="muted" style={{ fontSize: 11, marginBottom: 0 }}>
+              On signature the agreement is emailed to everyone, the appointment is closed/won, and it's recorded in the sold-customer list.
+            </p>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
