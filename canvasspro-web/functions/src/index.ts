@@ -35,6 +35,10 @@ const ATTOM = {
 // key; DEMO_KEY works for light testing but is rate-limited.
 const NREL = { key: process.env.NREL_API_KEY || "DEMO_KEY" };
 
+// Google Maps — Street View + satellite imagery of the customer's actual home
+// for the proposal hero (Static Maps, Street View, Geocoding APIs).
+const GMAPS = { key: process.env.GOOGLE_MAPS_KEY || "" };
+
 async function attomGet(path: string, params: Record<string, string | number | undefined>) {
   const url = new URL(ATTOM.baseUrl + path);
   Object.entries(params).forEach(([k, v]) => {
@@ -82,6 +86,7 @@ async function refreshApiConfig(): Promise<void> {
     if (typeof c.attomKey === "string" && c.attomKey) ATTOM.key = c.attomKey;
     if (typeof c.attomUrl === "string" && c.attomUrl) ATTOM.baseUrl = c.attomUrl;
     if (typeof c.nrelKey === "string" && c.nrelKey) NREL.key = c.nrelKey;
+    if (typeof c.googleMapsKey === "string" && c.googleMapsKey) GMAPS.key = c.googleMapsKey;
     if (typeof c.batchKey === "string" && c.batchKey) BATCH.key = c.batchKey;
     if (typeof c.batchUrl === "string" && c.batchUrl) BATCH.baseUrl = c.batchUrl;
     if (typeof c.batchEnabled === "boolean") BATCH.enabled = c.batchEnabled;
@@ -2293,7 +2298,7 @@ export const getApiKeys = onCall(async (request) => {
   return {
     attomKey: ATTOM.key, attomUrl: ATTOM.baseUrl,
     batchKey: BATCH.key, batchUrl: BATCH.baseUrl, batchEnabled: BATCH.enabled,
-    nrelKey: NREL.key,
+    nrelKey: NREL.key, googleMapsKey: GMAPS.key,
   };
 });
 
@@ -2308,6 +2313,7 @@ export const setApiKeys = onCall(async (request) => {
   if (typeof d.batchUrl === "string") u.batchUrl = (d.batchUrl as string).trim();
   if (typeof d.batchEnabled === "boolean") u.batchEnabled = d.batchEnabled;
   if (typeof d.nrelKey === "string" && d.nrelKey.trim()) u.nrelKey = d.nrelKey.trim();
+  if (typeof d.googleMapsKey === "string" && d.googleMapsKey.trim()) u.googleMapsKey = d.googleMapsKey.trim();
   await db.doc("config/api").set(u, { merge: true });
   return { ok: true };
 });
@@ -3232,6 +3238,49 @@ export const analyzeEnergyDocument = onCall({ timeoutSeconds: 120 }, async (requ
   let data: any = {};
   try { data = m ? JSON.parse(m[0]) : {}; } catch { data = {}; }
   return { kind: kind || "bill", data };
+});
+
+// Real imagery of the customer's home for the proposal hero — Street View (if the
+// address has coverage) with a satellite/aerial fallback. Images are returned as
+// base64 data URIs so the Google Maps key never leaves the server.
+export const getHomeImagery = onCall({ timeoutSeconds: 60 }, async (request) => {
+  await getCaller(request);
+  let { lat, lng } = (request.data || {}) as { lat?: number; lng?: number };
+  const { address } = (request.data || {}) as { address?: string };
+  await refreshApiConfig();
+  if (!GMAPS.key) throw new HttpsError("failed-precondition", "Home imagery isn't configured — ask your admin to add a Google Maps API key.");
+  const key = GMAPS.key;
+  // Geocode the address when we don't already have coordinates.
+  if ((typeof lat !== "number" || typeof lng !== "number") && address) {
+    try {
+      const g: any = await (await fetch(`https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(address)}&key=${key}`)).json();
+      const loc = g?.results?.[0]?.geometry?.location;
+      if (loc) { lat = loc.lat; lng = loc.lng; }
+    } catch (e) { logger.warn("geocode failed", e); }
+  }
+  if (typeof lat !== "number" || typeof lng !== "number") throw new HttpsError("invalid-argument", "Need an address or coordinates.");
+  const fetchImg = async (url: string): Promise<string | null> => {
+    try {
+      const r = await fetch(url);
+      if (!r.ok) return null;
+      const ct = r.headers.get("content-type") || "image/jpeg";
+      if (!ct.startsWith("image/")) return null; // Google returns JSON on error
+      const buf = Buffer.from(await r.arrayBuffer());
+      if (buf.length < 1500) return null; // tiny = "no imagery" placeholder
+      return `data:${ct};base64,${buf.toString("base64")}`;
+    } catch { return null; }
+  };
+  // Street View coverage check first (avoids the gray "no image" tile).
+  let hasStreetView = false;
+  try {
+    const meta: any = await (await fetch(`https://maps.googleapis.com/maps/api/streetview/metadata?location=${lat},${lng}&source=outdoor&key=${key}`)).json();
+    hasStreetView = meta?.status === "OK";
+  } catch { /* fall back to satellite */ }
+  const [streetView, satellite] = await Promise.all([
+    hasStreetView ? fetchImg(`https://maps.googleapis.com/maps/api/streetview?size=640x360&location=${lat},${lng}&fov=78&pitch=8&source=outdoor&key=${key}`) : Promise.resolve(null),
+    fetchImg(`https://maps.googleapis.com/maps/api/staticmap?center=${lat},${lng}&zoom=20&size=640x360&maptype=satellite&key=${key}`),
+  ]);
+  return { streetView, satellite, hasStreetView: !!streetView, lat, lng };
 });
 
 // ════════════════════════════════════════════════════════════════════════════
