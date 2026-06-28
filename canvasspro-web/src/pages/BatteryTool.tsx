@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
-import { addDoc, collection, doc, getDoc, onSnapshot, query, where } from "firebase/firestore";
+import { addDoc, collection, doc, getDoc, getDocs, limit, onSnapshot, query, where } from "firebase/firestore";
 import { httpsCallable } from "firebase/functions";
 import { db, functions } from "../firebase";
 import { useAuth } from "../auth/AuthContext";
@@ -139,6 +139,60 @@ export default function BatteryTool() {
 
   // Customer geo (from a linked lead), used to sharpen incentive lookups.
   const [leadGeo, setLeadGeo] = useState<{ lat?: number; lng?: number }>({});
+
+  // Customer picker — search the company's leads/customers by name or address so
+  // the proposal auto-fills regardless of how the tool was opened.
+  type LeadHit = { id: string; ownerName: string; address: string; lat?: number; lng?: number };
+  const [custQuery, setCustQuery] = useState("");
+  const [custResults, setCustResults] = useState<LeadHit[]>([]);
+  const [custOpen, setCustOpen] = useState(false);
+  const allLeadsRef = useRef<LeadHit[] | null>(null);
+
+  const ensureLeads = async (): Promise<LeadHit[]> => {
+    if (allLeadsRef.current) return allLeadsRef.current;
+    if (!companyId || !profile) return [];
+    const base = collection(db, "leads");
+    // Admins read the whole company; everyone else reads only their visible leads
+    // (matches the Firestore rules so the query isn't rejected). Single-field
+    // filters only — no composite index needed.
+    const q = role === "admin"
+      ? query(base, where("companyId", "==", companyId), limit(800))
+      : query(base, where("visibilityPath", "array-contains", profile.uid), limit(800));
+    try {
+      const snap = await getDocs(q);
+      const hits = snap.docs.map((d) => {
+        const v = d.data() as { ownerName?: string; address?: string; lat?: number; lng?: number };
+        return { id: d.id, ownerName: v.ownerName || "", address: v.address || "", lat: v.lat, lng: v.lng };
+      }).filter((h) => h.ownerName || h.address);
+      allLeadsRef.current = hits;
+      return hits;
+    } catch (e) {
+      console.warn("customer search", e);
+      allLeadsRef.current = [];
+      return [];
+    }
+  };
+
+  const onCustQuery = async (text: string) => {
+    setCustQuery(text);
+    setCustOpen(true);
+    const t = text.trim().toLowerCase();
+    if (!t) { setCustResults([]); return; }
+    const leads = await ensureLeads();
+    setCustResults(
+      leads.filter((h) => h.ownerName.toLowerCase().includes(t) || h.address.toLowerCase().includes(t)).slice(0, 8)
+    );
+  };
+
+  const pickCustomer = (h: LeadHit) => {
+    setCustomerName(h.ownerName);
+    setAddress(h.address);
+    setLeadGeo({ lat: h.lat, lng: h.lng });
+    setLeadId(h.id); // also pulls geo + any setter-captured incentives via the lead-hydration effect
+    setCustQuery(h.ownerName || h.address);
+    setCustOpen(false);
+    setCustResults([]);
+  };
 
   // Auto-populate from an appointment/event: read the event, derive its lead
   // (or a name from the title) and address. Runs once per eventId.
@@ -684,6 +738,32 @@ export default function BatteryTool() {
       {/* 1. Customer */}
       <div className="card" style={{ marginBottom: 18 }}>
         <h2 className="section-h" style={{ marginTop: 0 }}>Customer</h2>
+        <label className="field" style={{ position: "relative" }}>
+          <span>Find a customer <span className="muted small">(search your leads by name or address)</span></span>
+          <input
+            value={custQuery}
+            placeholder="Start typing a name or address…"
+            onChange={(e) => onCustQuery(e.target.value)}
+            onFocus={() => { void ensureLeads(); if (custResults.length) setCustOpen(true); }}
+            onBlur={() => setTimeout(() => setCustOpen(false), 150)}
+          />
+          {custOpen && custResults.length > 0 && (
+            <div style={{ position: "absolute", top: "100%", left: 0, right: 0, zIndex: 20, background: "var(--card, #150f1f)", border: "1px solid rgba(255,255,255,0.14)", borderRadius: 10, marginTop: 4, maxHeight: 260, overflowY: "auto", boxShadow: "0 12px 32px rgba(0,0,0,0.45)" }}>
+              {custResults.map((h) => (
+                <button
+                  key={h.id}
+                  type="button"
+                  className="row"
+                  style={{ width: "100%", textAlign: "left", padding: "9px 12px", background: "transparent", border: "none", borderBottom: "1px solid rgba(255,255,255,0.06)", cursor: "pointer", display: "block" }}
+                  onMouseDown={(e) => { e.preventDefault(); pickCustomer(h); }}
+                >
+                  <div style={{ fontWeight: 600 }}>{h.ownerName || "(no name)"}</div>
+                  <div className="muted small">{h.address || "no address"}</div>
+                </button>
+              ))}
+            </div>
+          )}
+        </label>
         <label className="field">
           <span>Customer name</span>
           <input value={customerName} placeholder="Full name" onChange={(e) => setCustomerName(e.target.value)} />
