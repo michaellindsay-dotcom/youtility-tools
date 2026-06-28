@@ -3199,7 +3199,7 @@ export const emailIncentivesToHomeowner = onCall(async (request) => {
 // Admin: set company-wide battery pricing (price + install adder per product).
 export const setBatteryPricing = onCall(async (request) => {
   const caller = await getCaller(request);
-  const { companyId, pricing } = (request.data || {}) as { companyId?: string; pricing?: Record<string, { price?: number; adder?: number }> };
+  const { companyId, pricing, offered } = (request.data || {}) as { companyId?: string; pricing?: Record<string, { price?: number; adder?: number }>; offered?: string[] };
   authorizeForCompany(caller, companyId);
   const clean: Record<string, { price: number; adder: number }> = {};
   for (const [pid, v] of Object.entries(pricing || {})) {
@@ -3207,7 +3207,11 @@ export const setBatteryPricing = onCall(async (request) => {
     const adder = Math.max(0, Number(v?.adder) || 0);
     if (price > 0 || adder > 0) clean[pid] = { price, adder };
   }
-  await db.doc(`companies/${companyId}`).set({ batteryPricing: clean, batteryPricingUpdatedAt: Date.now() }, { merge: true });
+  const patch: Record<string, unknown> = { batteryPricing: clean, batteryPricingUpdatedAt: Date.now() };
+  // Which products the company offers its reps. Only stored when provided so we
+  // can treat "unset" as "offer everything" for existing companies.
+  if (Array.isArray(offered)) patch.batteryOffered = offered.filter((x) => typeof x === "string").slice(0, 50);
+  await db.doc(`companies/${companyId}`).set(patch, { merge: true });
   return { ok: true };
 });
 
