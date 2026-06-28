@@ -237,6 +237,7 @@
       <button class="home-btn" data-card="usersCard"><span class="hb-ico">👥</span><b>Accounts</b><small>Add people, set setter/closer function &amp; managers, reset passwords</small></button>
       <button class="home-btn" data-card="schedulingCard"><span class="hb-ico">📅</span><b>Scheduling &amp; Closers</b><small>Booking window, business hours, appointment routing &amp; closers</small></button>
       <button class="home-btn" data-card="companySettingsCard"><span class="hb-ico">🛠️</span><b>Company settings</b><small>Max territories per rep &amp; other company options</small></button>
+      <button class="home-btn" data-card="batteryPricingCard"><span class="hb-ico">🔋</span><b>Battery pricing</b><small>Per-product price &amp; install adder for proposals</small></button>
       <button class="home-btn" data-card="rolesCard"><span class="hb-ico">🏷️</span><b>Roles &amp; titles</b><small>Custom titles and the access tier each grants</small></button>
       <button class="home-btn" data-card="teamsCard"><span class="hb-ico">🗂️</span><b>Teams</b><small>Group reps into teams</small></button>
       <button class="home-btn" data-card="rewardsCard"><span class="hb-ico">🎁</span><b>Rewards</b><small>Incentives, benchmarks &amp; the rewards store</small></button>
@@ -936,6 +937,27 @@
     <div id="companySettingsBanner" class="banner"></div>
   </section>
 
+  <section id="batteryPricingCard" class="card hidden">
+    <h2>Battery pricing</h2>
+    <p class="muted" style="margin:-6px 0 14px;font-size:13px;">Set the price and install adder for each battery. These seed the closer's Battery Tool proposals; a closer can still override on an individual proposal. Leave a row blank to omit it.</p>
+    <div style="overflow-x:auto;">
+      <table style="width:100%;border-collapse:collapse;font-size:13px;">
+        <thead>
+          <tr style="text-align:left;color:var(--muted,#8a8199);">
+            <th style="padding:6px 8px;">Battery</th>
+            <th style="padding:6px 8px;width:130px;">Price / unit ($)</th>
+            <th style="padding:6px 8px;width:130px;">Install adder ($)</th>
+          </tr>
+        </thead>
+        <tbody id="batteryPricingRows"></tbody>
+      </table>
+    </div>
+    <div class="row" style="justify-content:flex-end;margin-top:14px;">
+      <button id="batteryPricingSave" class="btn primary sm">Save pricing</button>
+    </div>
+    <div id="batteryPricingBanner" class="banner"></div>
+  </section>
+
   <!-- YoutilityCRM link (per company) -->
   <section id="crmCompanyCard" class="card hidden">
     <h2><span id="crmCompanyTitle">YoutilityCRM link</span></h2>
@@ -1092,6 +1114,7 @@ const setUserRole     = httpsCallable(fns, "setUserRole");
 const setUserCloser   = httpsCallable(fns, "setUserCloser");
 const setUserFunction = httpsCallable(fns, "setUserFunction");
 const setCompanyOptions = httpsCallable(fns, "setCompanyOptions");
+const setBatteryPricing = httpsCallable(fns, "setBatteryPricing");
 const createRole      = httpsCallable(fns, "createRole");
 const deleteRole      = httpsCallable(fns, "deleteRole");
 const createTeam      = httpsCallable(fns, "createTeam");
@@ -1187,7 +1210,7 @@ function showLogin() {
 }
 // ── Tabs (super-admin) ────────────────────────────────────────────────────
 const TAB_CARDS = {
-  companies: ["companiesCard","schedulingCard","companySettingsCard","crmCompanyCard","rolesCard","teamsCard","rewardsCard","redemptionsCard","companyBillingCard","usersCard"],
+  companies: ["companiesCard","schedulingCard","companySettingsCard","batteryPricingCard","crmCompanyCard","rolesCard","teamsCard","rewardsCard","redemptionsCard","companyBillingCard","usersCard"],
   orgs: ["orgsCard"],
   demos: ["demoRequestsCard"],
   payments: ["plansCard","billingCard"],
@@ -1196,7 +1219,7 @@ const TAB_CARDS = {
   apis: ["apiKeysCard","integrationsCard","crmCard"],
   account: ["myAccountCard"],
 };
-const COMPANY_ONLY = new Set(["schedulingCard","companySettingsCard","crmCompanyCard","rolesCard","teamsCard","rewardsCard","redemptionsCard","companyBillingCard","usersCard"]);
+const COMPANY_ONLY = new Set(["schedulingCard","companySettingsCard","batteryPricingCard","crmCompanyCard","rolesCard","teamsCard","rewardsCard","redemptionsCard","companyBillingCard","usersCard"]);
 const ALL_TAB_CARDS = Object.values(TAB_CARDS).flat();
 
 function renderTab() {
@@ -1244,7 +1267,7 @@ function enterConsole() {
 }
 
 // ── Company-admin view toggle: Town Hall ⇄ Settings ───────────────────────
-const COMPANY_SETTINGS_CARDS = ["schedulingCard","companySettingsCard","rolesCard","teamsCard","rewardsCard","redemptionsCard","companyBillingCard","usersCard"];
+const COMPANY_SETTINGS_CARDS = ["schedulingCard","companySettingsCard","batteryPricingCard","rolesCard","teamsCard","rewardsCard","redemptionsCard","companyBillingCard","usersCard"];
 function hideAllSettingCards() {
   COMPANY_SETTINGS_CARDS.forEach((id) => { const el = $(id); if (el) el.classList.add("hidden"); });
 }
@@ -1303,7 +1326,7 @@ async function selectCompany(companyId, companyName) {
     // Company admins: card visibility is owned by showAdminView (Town Hall ⇄
     // Settings), so we don't reveal the settings cards here.
   }
-  await Promise.all([loadRoles(), loadTeams(), loadScheduling(companyId), loadCompanySettings(companyId), loadCompanyCrm(companyId), loadRewards(companyId), loadRedemptions(companyId)]);
+  await Promise.all([loadRoles(), loadTeams(), loadScheduling(companyId), loadCompanySettings(companyId), loadBatteryPricing(companyId), loadCompanyCrm(companyId), loadRewards(companyId), loadRedemptions(companyId)]);
   await loadUsers();
   populateUserFormSelects();
   loadBilling(companyId, companyName);
@@ -1704,6 +1727,58 @@ $("companySettingsSave").addEventListener("click", async () => {
     banner($("companySettingsBanner"), "Settings saved.", "good");
   } catch (e) { banner($("companySettingsBanner"), e.message || "Save failed.", "error"); }
   finally { $("companySettingsSave").disabled = false; }
+});
+
+// ── Battery pricing (per-product price + install adder) ───────────────────────
+// Catalog mirrors canvasspro-web/src/lib/batteries.ts (id + display label).
+const BATTERY_PRODUCTS = [
+  { id: "tesla_pw3", label: "Tesla Powerwall 3" },
+  { id: "tesla_pw2", label: "Tesla Powerwall 2" },
+  { id: "franklin_apower2", label: "FranklinWH aPower 2" },
+  { id: "franklin_apower", label: "FranklinWH aPower" },
+  { id: "enphase_5p", label: "Enphase IQ Battery 5P" },
+  { id: "enphase_10c", label: "Enphase IQ Battery 10C" },
+  { id: "solaredge_home", label: "SolarEdge Home Battery 10kWh" },
+  { id: "lg_resu16", label: "LG RESU16H Prime" },
+  { id: "panasonic_evervolt", label: "Panasonic EverVolt 2.0" },
+  { id: "generac_pwrcell", label: "Generac PWRcell M6" },
+];
+function renderBatteryPricingRows(pricing) {
+  const rows = BATTERY_PRODUCTS.map((p) => {
+    const e = (pricing && pricing[p.id]) || {};
+    const price = e.price ? String(e.price) : "";
+    const adder = e.adder ? String(e.adder) : "";
+    return `<tr>
+      <td style="padding:6px 8px;">${p.label}</td>
+      <td style="padding:6px 8px;"><input data-bp-price="${p.id}" type="number" min="0" step="1" value="${price}" placeholder="0" style="width:110px;" /></td>
+      <td style="padding:6px 8px;"><input data-bp-adder="${p.id}" type="number" min="0" step="1" value="${adder}" placeholder="0" style="width:110px;" /></td>
+    </tr>`;
+  }).join("");
+  $("batteryPricingRows").innerHTML = rows;
+}
+async function loadBatteryPricing(companyId) {
+  let pricing = {};
+  try {
+    const snap = await getDoc(doc(db, "companies", companyId));
+    const c = snap.exists() ? snap.data() : {};
+    pricing = c.batteryPricing || {};
+  } catch (e) { /* leave empty */ }
+  renderBatteryPricingRows(pricing);
+}
+$("batteryPricingSave").addEventListener("click", async () => {
+  if (!state.selectedCompany) return;
+  $("batteryPricingSave").disabled = true;
+  try {
+    const pricing = {};
+    BATTERY_PRODUCTS.forEach((p) => {
+      const price = Number(document.querySelector(`[data-bp-price="${p.id}"]`)?.value) || 0;
+      const adder = Number(document.querySelector(`[data-bp-adder="${p.id}"]`)?.value) || 0;
+      if (price > 0 || adder > 0) pricing[p.id] = { price, adder };
+    });
+    await setBatteryPricing({ companyId: state.selectedCompany, pricing });
+    banner($("batteryPricingBanner"), "Battery pricing saved.", "good");
+  } catch (e) { banner($("batteryPricingBanner"), e.message || "Save failed.", "error"); }
+  finally { $("batteryPricingSave").disabled = false; }
 });
 
 // ── Data provider keys (super-admin) ─────────────────────────────────────
