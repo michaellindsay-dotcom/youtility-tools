@@ -14,6 +14,12 @@
     ],
     "headers": [
       {
+        "source": "/app/**",
+        "headers": [
+          { "key": "Cache-Control", "value": "no-cache, no-store, must-revalidate" }
+        ]
+      },
+      {
         "source": "/app/assets/**",
         "headers": [
           { "key": "Cache-Control", "value": "max-age=31536000, immutable" }
