@@ -76,6 +76,10 @@ workflows:
         # fresh account can't create a cert, so no profile, so the archive fails
         # with "requires a provisioning profile".
         - ios_signing
+      vars:
+        # Marketing version shown on the App Store. Bump this for each public
+        # release (it flows into agvtool new-marketing-version below).
+        VERSION_NAME: "1.1"
       node: 20
       xcode: latest
       cocoapods: default
@@ -120,9 +124,15 @@ workflows:
       - name: Install CocoaPods
         script: |
           cd canvasspro-web/ios/App && pod install
-      - name: Set build number
+      - name: Set marketing version & build number
         script: |
-          cd canvasspro-web/ios/App && agvtool new-version -all "$BUILD_NUMBER"
+          cd canvasspro-web/ios/App
+          # Marketing version (CFBundleShortVersionString) is what the App Store
+          # shows (e.g. 1.0, 1.1). Bump it for a new store release by setting the
+          # VERSION_NAME env var; it defaults to the current shipped value.
+          agvtool new-marketing-version "${VERSION_NAME:-1.0}"
+          # Build number (CFBundleVersion) — Codemagic's incrementing index.
+          agvtool new-version -all "$BUILD_NUMBER"
       - name: Fetch signing profiles & build IPA
         script: |
           cd canvasspro-web/ios/App
@@ -164,6 +174,8 @@ workflows:
         - youtilityknock_keystore
       groups:
         - google_play          # provides GCLOUD_SERVICE_ACCOUNT_CREDENTIALS
+      vars:
+        VERSION_NAME: "1.1"    # keep in sync with the iOS workflow above
       node: 20
       java: 17
     scripts:
@@ -212,7 +224,7 @@ workflows:
           android {
               defaultConfig {
                   versionCode (System.getenv("BUILD_NUMBER") ?: "1").toInteger() + 1
-                  versionName System.getenv("VERSION_NAME") ?: "1.0.0"
+                  versionName System.getenv("VERSION_NAME") ?: "1.0"
               }
               signingConfigs {
                   release {

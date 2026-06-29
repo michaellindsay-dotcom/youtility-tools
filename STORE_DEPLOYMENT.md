@@ -103,6 +103,32 @@ You'll fill these in the App Store Connect / Play Console UIs:
 
 ---
 
+## Shipping an update (after 1.0 is live)
+
+Each store update needs a **higher version number** and a **new build**, and is
+re-reviewed by Apple/Google (yes, even an unlisted app).
+
+1. **Set the version.** The marketing version is the `VERSION_NAME` variable in
+   `codemagic.yaml` (both the `ios-release` and `android-release` workflows).
+   Bump it for each release — e.g. `1.0` → `1.1` for features, `1.0.1` for a
+   patch. The CI build applies it via `agvtool new-marketing-version` (iOS) and
+   `versionName` (Android); the build number auto-increments from `$BUILD_NUMBER`.
+2. **Run the Codemagic workflow** (`ios-release` and/or `android-release`) off
+   `main`. It builds, signs, and uploads to **TestFlight** / the Play **Internal**
+   track automatically.
+3. **iOS — create the new App Store version:** App Store Connect → your app →
+   **(+) next to "iOS App" → Add Version** → enter the new number → fill
+   **"What's New in This Version"** (see `STORE_LISTING.md`) → attach the new
+   build. Screenshots/metadata carry over; update them only if the UI changed.
+4. **Submit for Review** → the demo login is already saved under App Review
+   Information → **Add for Review → Submit** (auto-release).
+5. **Android:** the workflow ships to the Internal track; promote to Production
+   in the Play Console and roll out.
+
+> Quick loop for future releases: merge to `main` → bump `VERSION_NAME` →
+> run the workflow → add the version + "What's New" in App Store Connect →
+> submit.
+
 ## Building / testing locally
 
 ```bash
