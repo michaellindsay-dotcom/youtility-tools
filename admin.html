@@ -372,6 +372,7 @@
       <button class="home-btn" data-card="rolesCard"><span class="hb-ico">🏷️</span><b>Roles &amp; titles</b><small>Custom titles and the access tier each grants</small></button>
       <button class="home-btn" data-card="teamsCard"><span class="hb-ico">🗂️</span><b>Teams</b><small>Group reps into teams</small></button>
       <button class="home-btn" data-card="schedulingCard"><span class="hb-ico">📅</span><b>Scheduling &amp; Closers</b><small>Booking window, business hours &amp; appointment routing</small></button>
+      <button class="home-btn" data-card="companyServicesCard"><span class="hb-ico">🧩</span><b>Services</b><small>Turn tools on/off for this company &amp; set the price override</small></button>
       <button class="home-btn" data-card="companySettingsCard"><span class="hb-ico">⚙️</span><b>Settings</b><small>Max territories per rep &amp; other company options</small></button>
       <button class="home-btn" data-card="batteryPricingCard"><span class="hb-ico">🔋</span><b>Battery pricing</b><small>Per-product price &amp; install adder for proposals</small></button>
       <button class="home-btn" data-card="crmCompanyCard"><span class="hb-ico">🔗</span><b>CRM link</b><small>Connect this company to YoutilityCRM</small></button>
@@ -739,11 +740,30 @@
   </section>
 
   <!-- Company billing + invoices (company profile / company-admin) -->
+  <!-- Per-company services + price override (super-admin) -->
+  <section id="companyServicesCard" class="card hidden">
+    <h2><span id="companyServicesTitle">Services</span></h2>
+    <p class="muted small" style="margin:-4px 0 14px;">Turn individual tools on/off for just this company — overrides the package.</p>
+    <div class="svc-grid" id="companyServicesGrid"></div>
+    <div class="row" style="gap:10px;align-items:center;margin-top:14px;flex-wrap:wrap;">
+      <label class="field" style="max-width:220px;"><span>Price override ($/mo)</span><input type="number" min="0" id="companyServicesPrice" value="0" /></label>
+      <button class="btn primary sm" id="companyServicesSave">Save services</button>
+    </div>
+    <div id="companyServicesBanner" class="banner"></div>
+  </section>
+
   <section id="companyBillingCard" class="card hidden">
     <h2 id="companyBillingTitle">Billing &amp; invoices</h2>
     <div class="bill-total" id="billTotal">$0<small>/mo</small></div>
     <div class="muted small" id="billServices" style="margin:4px 0 14px;">—</div>
     <div id="orgBilledNotice" class="banner" style="display:none;background:#0e2233;border:1px solid #21314a;color:#bcd6ee;margin:0 0 14px;padding:11px 14px;border-radius:9px;"></div>
+
+    <!-- Charge toggle + one-off Bill + Stripe portal (moved off the company list) -->
+    <div class="row" id="billActions" style="gap:12px;align-items:center;flex-wrap:wrap;margin:0 0 16px;">
+      <label class="day-chip" title="Off = comped: full features, no charge"><input type="checkbox" id="billChargeChk" /> Charge this company</label>
+      <button id="billNowBtn" class="btn sm">💳 Bill now</button>
+      <button id="billPortalBtn" class="btn ghost sm" style="display:none;">Stripe portal</button>
+    </div>
 
     <h3 style="font-size:14px;margin:0 0 8px;">Billing contact</h3>
     <div class="grid-2">
@@ -1276,7 +1296,7 @@ function showLogin() {
 }
 // ── Tabs (super-admin) ────────────────────────────────────────────────────
 const TAB_CARDS = {
-  companies: ["companiesCard","schedulingCard","companySettingsCard","batteryPricingCard","crmCompanyCard","rolesCard","teamsCard","rewardsCard","redemptionsCard","companyBillingCard","usersCard"],
+  companies: ["companiesCard","companyServicesCard","schedulingCard","companySettingsCard","batteryPricingCard","crmCompanyCard","rolesCard","teamsCard","rewardsCard","redemptionsCard","companyBillingCard","usersCard"],
   orgs: ["orgsCard"],
   demos: ["demoRequestsCard"],
   payments: ["plansCard","billingCard"],
@@ -1285,7 +1305,7 @@ const TAB_CARDS = {
   apis: ["apiKeysCard","integrationsCard","crmCard"],
   account: ["myAccountCard"],
 };
-const COMPANY_ONLY = new Set(["schedulingCard","companySettingsCard","batteryPricingCard","crmCompanyCard","rolesCard","teamsCard","rewardsCard","redemptionsCard","companyBillingCard","usersCard"]);
+const COMPANY_ONLY = new Set(["companyServicesCard","schedulingCard","companySettingsCard","batteryPricingCard","crmCompanyCard","rolesCard","teamsCard","rewardsCard","redemptionsCard","companyBillingCard","usersCard"]);
 const ALL_TAB_CARDS = Object.values(TAB_CARDS).flat();
 
 function renderTab() {
@@ -1430,6 +1450,8 @@ async function selectCompany(companyId, companyName) {
   $("schedulingTitle").textContent = "Scheduling" + suffix;
   $("crmCompanyTitle").textContent = "YoutilityCRM link" + suffix;
   $("rewardsTitle").textContent = "Rewards & Gamify" + suffix;
+  $("companyServicesTitle").textContent = "Services" + suffix;
+  loadCompanyServices(companyId);
   if (state.isSuper) {
     state.currentTab = "companies";
     // Open this company's dashboard hub (the section buttons), not the list.
@@ -2168,6 +2190,15 @@ async function loadBilling(companyId, companyName) {
     $("createInvoiceBlock").style.display = "";
   }
 
+  // Charge / Bill now / Stripe portal — super-admin, standalone company only
+  // (org-member companies are billed through the org).
+  const showBillActions = state.isSuper && !c.organizationId;
+  $("billActions").style.display = showBillActions ? "" : "none";
+  if (showBillActions) {
+    $("billChargeChk").checked = !c.billingExempt;
+    $("billPortalBtn").style.display = c.stripeCustomerId ? "inline-block" : "none";
+  }
+
   // Mount the card field for whichever provider is active. Organization billing
   // is processed via Square, so org-mode requires Square to be the active gateway.
   const pub = await loadBillingPublic();
@@ -2284,6 +2315,38 @@ $("billContactSave").addEventListener("click", async () => {
     banner($("companyBillingBanner"), "Billing contact saved.", "good");
   } catch (e) { banner($("companyBillingBanner"), e.message || "Could not save billing contact.", "error"); }
   finally { $("billContactSave").disabled = false; }
+});
+// Charge toggle (comped on/off), one-off Bill, and Stripe portal — moved here
+// from the company list row.
+$("billChargeChk").addEventListener("change", async (ev) => {
+  if (!billingCompany) return;
+  try {
+    await setCompanyPlan({ companyId: billingCompany, billingExempt: !ev.target.checked });
+    banner($("companyBillingBanner"), ev.target.checked ? "This company will be charged." : "Comped — full features, no charge.", "good");
+    loadBilling(billingCompany);
+  } catch (e) { banner($("companyBillingBanner"), e.message || "Update failed.", "error"); }
+});
+$("billNowBtn").addEventListener("click", async () => {
+  if (!billingCompany) return;
+  // Square is charged via the card on file below (30-day cycle) — no hosted checkout.
+  if (billingProviderActive === "square") {
+    banner($("companyBillingBanner"), "Square: add the card on file below — it's then charged automatically on a 30-day cycle.", "good");
+    return;
+  }
+  let c = {};
+  try { c = (await getDoc(doc(db, "companies", billingCompany))).data() || {}; } catch {}
+  const plan = state.plans.find((p) => p.name === c.plan);
+  if (!plan) { banner($("companyBillingBanner"), "Set a plan for this company first.", "error"); return; }
+  if (!plan.stripePriceId) { banner($("companyBillingBanner"), `Plan "${plan.name}" needs a Stripe Price ID (set it under Pricing).`, "error"); return; }
+  try {
+    const { data } = await createCheckoutSession({ companyId: billingCompany, planId: plan.id });
+    if (data?.url) window.open(data.url, "_blank");
+  } catch (e) { banner($("companyBillingBanner"), e.message || "Checkout failed.", "error"); }
+});
+$("billPortalBtn").addEventListener("click", async () => {
+  if (!billingCompany) return;
+  try { const { data } = await createBillingPortalSession({ companyId: billingCompany }); if (data?.url) window.open(data.url, "_blank"); }
+  catch (e) { banner($("companyBillingBanner"), e.message || "Could not open portal.", "error"); }
 });
 $("invCreate").addEventListener("click", async () => {
   if (!billingCompany) return;
@@ -3099,45 +3162,13 @@ async function loadCompanies() {
         <td><select class="planSel">${planOpts.join("")}</select></td>
         <td><select class="statusSel">${statusOpts.join("")}</select></td>
         <td class="row" style="gap:6px;">
-          <label class="day-chip" title="Off = comped: full features, no charge"><input type="checkbox" class="chargeChk" ${c.billingExempt ? "" : "checked"} /> Charge</label>
-          <button class="btn ghost sm svc" title="Toggle services & set price for this company">⚙ Services</button>
           <button class="btn sm mng">Open →</button>
-          <button class="btn ghost sm chk" title="Bill this company for the selected plan">💳 Bill</button>
-          ${c.stripeCustomerId ? '<button class="btn ghost sm prt" title="Open Stripe billing portal">Portal</button>' : ""}
         </td>`;
-      tr.querySelector(".chargeChk").addEventListener("change", async (ev) => {
-        try { await setCompanyPlan({ companyId: d.id, billingExempt: !ev.target.checked });
-          banner($("banner"), ev.target.checked ? `${esc(c.name)} will be charged.` : `${esc(c.name)} comped — full features, no charge.`, "good"); }
-        catch (e) { banner($("banner"), e.message || "Update failed.", "error"); }
-      });
-      // Clicking the company name OR "Open →" opens its dashboard hub.
+      // Clicking the company name OR "Open →" opens its dashboard hub, where
+      // Services, Billing (Charge / Bill / Portal) and every other section live.
       const openDash = () => selectCompany(d.id, c.name);
       tr.querySelector(".coOpen").addEventListener("click", openDash);
       tr.querySelector(".mng").addEventListener("click", openDash);
-      tr.querySelector(".chk").addEventListener("click", async () => {
-        // Square has no hosted checkout — bill it via the saved card on the
-        // company's billing card (the Square card field lives there). Only the
-        // Stripe path uses hosted checkout + a per-plan Stripe Price ID.
-        if (activeProvider === "square") {
-          selectCompany(d.id, c.name);
-          openSuperSection("companyBillingCard");
-          banner($("banner"), `Square: add ${esc(c.name)}'s card under “Billing & invoices” to start charging.`, "good");
-          return;
-        }
-        const planName = tr.querySelector(".planSel").value;
-        const plan = state.plans.find((p) => p.name === planName);
-        if (!plan) { banner($("banner"), "Pick a plan for this company first.", "error"); return; }
-        if (!plan.stripePriceId) { banner($("banner"), `Plan "${plan.name}" needs a Stripe Price ID (edit it in Plans).`, "error"); return; }
-        try {
-          const { data } = await createCheckoutSession({ companyId: d.id, planId: plan.id });
-          if (data?.url) window.open(data.url, "_blank");
-        } catch (e) { banner($("banner"), e.message || "Checkout failed.", "error"); }
-      });
-      const prt = tr.querySelector(".prt");
-      if (prt) prt.addEventListener("click", async () => {
-        try { const { data } = await createBillingPortalSession({ companyId: d.id }); if (data?.url) window.open(data.url, "_blank"); }
-        catch (e) { banner($("banner"), e.message || "Could not open portal.", "error"); }
-      });
       const savePlan = async () => {
         try { await setCompanyPlan({ companyId:d.id, plan: tr.querySelector(".planSel").value, status: tr.querySelector(".statusSel").value });
           banner($("banner"), `${esc(c.name)}: plan updated.`, "good"); }
@@ -3146,36 +3177,33 @@ async function loadCompanies() {
       tr.querySelector(".planSel").addEventListener("change", savePlan);
       tr.querySelector(".statusSel").addEventListener("change", savePlan);
       body.appendChild(tr);
-
-      // Per-company services + price override (SalesRabbit-style on/off switches).
-      const on = (key) => !Array.isArray(c.features) || c.features.includes(key);
-      const svcRow = document.createElement("tr");
-      svcRow.className = "svc-row hidden";
-      svcRow.innerHTML = `<td colspan="4">
-        <div class="svc-panel">
-          <div class="svc-grid">
-            ${SERVICES.map(([k,label]) => `<label class="day-chip"><input type="checkbox" class="svcChk" value="${k}" ${on(k)?"checked":""} /> ${label}</label>`).join("")}
-          </div>
-          <div class="row" style="gap:10px;align-items:center;margin-top:10px;flex-wrap:wrap;">
-            <label class="field" style="max-width:200px;"><span>Price override ($/mo)</span><input type="number" min="0" class="svcPrice" value="${Number(c.planPrice)||0}" /></label>
-            <button class="btn primary sm svcSave">Save services</button>
-            <span class="muted small">Overrides the package — turn individual services on/off for just this company.</span>
-          </div>
-        </div></td>`;
-      tr.querySelector(".svc").addEventListener("click", () => svcRow.classList.toggle("hidden"));
-      svcRow.querySelector(".svcSave").addEventListener("click", async () => {
-        const features = [...svcRow.querySelectorAll(".svcChk")].filter((x) => x.checked).map((x) => x.value);
-        const planPrice = Number(svcRow.querySelector(".svcPrice").value) || 0;
-        try {
-          await setCompanyPlan({ companyId: d.id, features, planPrice });
-          c.features = features; c.planPrice = planPrice;
-          banner($("banner"), `${esc(c.name)}: services updated.`, "good");
-        } catch (e) { banner($("banner"), e.message || "Update failed.", "error"); }
-      });
-      body.appendChild(svcRow);
     });
   } catch (e) { body.innerHTML = `<tr><td colspan="4" class="banner error show">${esc(e.message)}</td></tr>`; }
 }
+
+// Per-company Services section (lives in the company dashboard). Renders the
+// service toggles + price override for the selected company.
+async function loadCompanyServices(companyId) {
+  let c = {};
+  try { const s = await getDoc(doc(db, "companies", companyId)); c = s.exists() ? s.data() : {}; } catch {}
+  const on = (key) => !Array.isArray(c.features) || c.features.includes(key);
+  $("companyServicesGrid").innerHTML = SERVICES.map(([k, label]) =>
+    `<label class="day-chip"><input type="checkbox" class="svcChk" value="${k}" ${on(k) ? "checked" : ""} /> ${label}</label>`).join("");
+  $("companyServicesPrice").value = Number(c.planPrice) || 0;
+}
+$("companyServicesSave").addEventListener("click", async () => {
+  const cid = state.selectedCompany;
+  if (!cid) return;
+  const features = [...document.querySelectorAll("#companyServicesGrid .svcChk")].filter((x) => x.checked).map((x) => x.value);
+  const planPrice = Number($("companyServicesPrice").value) || 0;
+  $("companyServicesSave").disabled = true;
+  try {
+    await setCompanyPlan({ companyId: cid, features, planPrice });
+    banner($("companyServicesBanner"), "Services updated.", "good");
+    loadBilling(cid); // keep the billing total in sync with the new features/price
+  } catch (e) { banner($("companyServicesBanner"), e.message || "Update failed.", "error"); }
+  finally { $("companyServicesSave").disabled = false; }
+});
 
 // ── Roles & titles ───────────────────────────────────────────────────────
 $("newRoleBtn").addEventListener("click", () => $("roleForm").classList.toggle("hidden"));
