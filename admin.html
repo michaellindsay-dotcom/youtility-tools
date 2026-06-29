@@ -373,6 +373,7 @@
       <button class="home-btn" data-card="teamsCard"><span class="hb-ico">🗂️</span><b>Teams</b><small>Group reps into teams</small></button>
       <button class="home-btn" data-card="schedulingCard"><span class="hb-ico">📅</span><b>Scheduling &amp; Closers</b><small>Booking window, business hours &amp; appointment routing</small></button>
       <button class="home-btn" data-card="companyServicesCard"><span class="hb-ico">🧩</span><b>Services</b><small>Turn tools on/off for this company &amp; set the price override</small></button>
+      <button class="home-btn" data-card="roleServicesCard"><span class="hb-ico">🔐</span><b>Role services</b><small>What each role (position) sees at login &amp; in the app</small></button>
       <button class="home-btn" data-card="companySettingsCard"><span class="hb-ico">⚙️</span><b>Settings</b><small>Max territories per rep &amp; other company options</small></button>
       <button class="home-btn" data-card="batteryPricingCard"><span class="hb-ico">🔋</span><b>Battery pricing</b><small>Per-product price &amp; install adder for proposals</small></button>
       <button class="home-btn" data-card="crmCompanyCard"><span class="hb-ico">🔗</span><b>CRM link</b><small>Connect this company to YoutilityCRM</small></button>
@@ -752,6 +753,15 @@
     <div id="companyServicesBanner" class="banner"></div>
   </section>
 
+  <!-- Services by role (position): what each role sees at login + in the app -->
+  <section id="roleServicesCard" class="card hidden">
+    <h2><span id="roleServicesTitle">Role services</span></h2>
+    <p class="muted small" style="margin:-4px 0 14px;">Choose what each role sees at login and in the app. Team permissions are a <strong>locked baseline</strong> added on top of these. Company Admin always sees everything.</p>
+    <div id="roleServicesGrid" style="overflow-x:auto;"></div>
+    <div class="row" style="justify-content:flex-end;margin-top:14px;"><button class="btn primary sm" id="roleServicesSave">Save role services</button></div>
+    <div id="roleServicesBanner" class="banner"></div>
+  </section>
+
   <section id="companyBillingCard" class="card hidden">
     <h2 id="companyBillingTitle">Billing &amp; invoices</h2>
     <div class="bill-total" id="billTotal">$0<small>/mo</small></div>
@@ -1100,7 +1110,7 @@
       <div id="inviteLinkBox" class="banner" style="word-break:break-all;"></div>
     </div>
     <table>
-      <thead><tr><th>Name</th><th>Email</th><th>Role / title</th><th>Function</th><th>Reports to (setter / closer)</th><th>Status</th><th></th></tr></thead>
+      <thead><tr><th>Name</th><th>Email</th><th>Role / title</th><th>Position</th><th>Reports to (setter / closer)</th><th>Status</th><th></th></tr></thead>
       <tbody id="usersBody"><tr><td colspan="7" class="muted">Select a company…</td></tr></tbody>
     </table>
   </section>
@@ -1204,7 +1214,10 @@ const setBatteryPricing = httpsCallable(fns, "setBatteryPricing");
 const createRole      = httpsCallable(fns, "createRole");
 const deleteRole      = httpsCallable(fns, "deleteRole");
 const createTeam      = httpsCallable(fns, "createTeam");
+const updateTeam      = httpsCallable(fns, "updateTeam");
 const assignUserHierarchy = httpsCallable(fns, "assignUserHierarchy");
+const setPositionServices = httpsCallable(fns, "setPositionServices");
+const reassignAppointment = httpsCallable(fns, "reassignAppointment");
 const impersonate     = httpsCallable(fns, "impersonate");
 const getNotificationConfig   = httpsCallable(fns, "getNotificationConfig");
 const setNotificationConfig   = httpsCallable(fns, "setNotificationConfig");
@@ -1296,7 +1309,7 @@ function showLogin() {
 }
 // ── Tabs (super-admin) ────────────────────────────────────────────────────
 const TAB_CARDS = {
-  companies: ["companiesCard","companyServicesCard","schedulingCard","companySettingsCard","batteryPricingCard","crmCompanyCard","rolesCard","teamsCard","rewardsCard","redemptionsCard","companyBillingCard","usersCard"],
+  companies: ["companiesCard","companyServicesCard","roleServicesCard","schedulingCard","companySettingsCard","batteryPricingCard","crmCompanyCard","rolesCard","teamsCard","rewardsCard","redemptionsCard","companyBillingCard","usersCard"],
   orgs: ["orgsCard"],
   demos: ["demoRequestsCard"],
   payments: ["plansCard","billingCard"],
@@ -1305,7 +1318,7 @@ const TAB_CARDS = {
   apis: ["apiKeysCard","integrationsCard","crmCard"],
   account: ["myAccountCard"],
 };
-const COMPANY_ONLY = new Set(["companyServicesCard","schedulingCard","companySettingsCard","batteryPricingCard","crmCompanyCard","rolesCard","teamsCard","rewardsCard","redemptionsCard","companyBillingCard","usersCard"]);
+const COMPANY_ONLY = new Set(["companyServicesCard","roleServicesCard","schedulingCard","companySettingsCard","batteryPricingCard","crmCompanyCard","rolesCard","teamsCard","rewardsCard","redemptionsCard","companyBillingCard","usersCard"]);
 const ALL_TAB_CARDS = Object.values(TAB_CARDS).flat();
 
 function renderTab() {
@@ -1452,6 +1465,7 @@ async function selectCompany(companyId, companyName) {
   $("rewardsTitle").textContent = "Rewards & Gamify" + suffix;
   $("companyServicesTitle").textContent = "Services" + suffix;
   loadCompanyServices(companyId);
+  loadRoleServices(companyId);
   if (state.isSuper) {
     state.currentTab = "companies";
     // Open this company's dashboard hub (the section buttons), not the list.
@@ -3144,6 +3158,17 @@ const SERVICES = [
   ["aiTerritories", "AI territories"],
 ];
 
+// Structural positions (must match the Position enum in functions + the app).
+const POSITIONS = [
+  ["admin", "Company Admin"],
+  ["team_manager", "Team Manager"],
+  ["closer_manager", "Closer Manager"],
+  ["setter_manager", "Setter Manager"],
+  ["closer", "Closer"],
+  ["setter", "Setter"],
+];
+const POSITION_LABEL = Object.fromEntries(POSITIONS);
+
 async function loadCompanies() {
   const body = $("companiesBody");
   body.innerHTML = `<tr><td colspan="4" class="muted">Loading…</td></tr>`;
@@ -3205,6 +3230,39 @@ $("companyServicesSave").addEventListener("click", async () => {
   finally { $("companyServicesSave").disabled = false; }
 });
 
+// Services-by-role: a position × services grid. Null (unconfigured) = all on.
+async function loadRoleServices(companyId) {
+  let c = {};
+  try { const s = await getDoc(doc(db, "companies", companyId)); c = s.exists() ? s.data() : {}; } catch {}
+  const ps = c.positionServices || {};
+  const head = `<tr><th style="text-align:left;padding:6px 10px;">Role</th>${SERVICES.map(([, l]) =>
+    `<th class="muted" style="padding:6px 8px;font-weight:500;font-size:11px;white-space:nowrap;">${l}</th>`).join("")}</tr>`;
+  const adminCells = SERVICES.map(() => `<td style="text-align:center;padding:6px 8px;"><input type="checkbox" checked disabled /></td>`).join("");
+  const adminRow = `<tr><td style="padding:6px 10px;"><strong>Company Admin</strong> <span class="muted small">(all)</span></td>${adminCells}</tr>`;
+  const rows = POSITIONS.filter(([p]) => p !== "admin").map(([p, label]) => {
+    const on = Array.isArray(ps[p]) ? ps[p] : null; // null = unconfigured → everything
+    const cells = SERVICES.map(([k]) => {
+      const checked = on ? on.includes(k) : true;
+      return `<td style="text-align:center;padding:6px 8px;"><input type="checkbox" class="rsChk" data-pos="${p}" data-key="${k}" ${checked ? "checked" : ""} /></td>`;
+    }).join("");
+    return `<tr><td style="padding:6px 10px;white-space:nowrap;"><strong>${label}</strong></td>${cells}</tr>`;
+  }).join("");
+  $("roleServicesGrid").innerHTML = `<table style="border-collapse:collapse;min-width:560px;">${head}${adminRow}${rows}</table>`;
+}
+$("roleServicesSave").addEventListener("click", async () => {
+  const cid = state.selectedCompany;
+  if (!cid) return;
+  const map = {};
+  POSITIONS.forEach(([p]) => { if (p !== "admin") map[p] = []; });
+  document.querySelectorAll("#roleServicesGrid .rsChk").forEach((cb) => { if (cb.checked) map[cb.dataset.pos].push(cb.dataset.key); });
+  $("roleServicesSave").disabled = true;
+  try {
+    await setPositionServices({ companyId: cid, positionServices: map });
+    banner($("roleServicesBanner"), "Role services saved.", "good");
+  } catch (e) { banner($("roleServicesBanner"), e.message || "Save failed.", "error"); }
+  finally { $("roleServicesSave").disabled = false; }
+});
+
 // ── Roles & titles ───────────────────────────────────────────────────────
 $("newRoleBtn").addEventListener("click", () => $("roleForm").classList.toggle("hidden"));
 $("roleCancel").addEventListener("click", () => $("roleForm").classList.add("hidden"));
@@ -3233,16 +3291,37 @@ async function loadRoles() {
     body.innerHTML = "";
     state.roles.forEach((r) => {
       const tr = document.createElement("tr");
-      tr.innerHTML = `<td><strong>${esc(r.title)}</strong>${r.isDefault?' <span class="badge">default</span>':''}</td>
+      tr.innerHTML = `<td><strong class="roleOpen" style="cursor:pointer;color:#0EA5E9;" title="Double-click to see who's assigned">${esc(r.title)}</strong>${r.isDefault?' <span class="badge">default</span>':''}</td>
         <td><span class="badge ${r.baseTier==='manager'?'manager':''}">${esc(r.baseTier)}</span></td>
         <td>${r.rank}</td>
         <td>${r.isDefault?'':'<button class="btn sm danger">Delete</button>'}</td>`;
-      const del = tr.querySelector("button");
+      const del = tr.querySelector(".danger");
       if (del) del.addEventListener("click", async () => {
         try { await deleteRole({ companyId: state.selectedCompany, roleId: r.id }); await loadRoles(); populateUserFormSelects(); }
         catch (e) { banner($("banner"), e.message, "error"); }
       });
+      // Double-click the title → show who's assigned + their service permissions.
+      const detail = document.createElement("tr");
+      detail.className = "hidden";
+      detail.innerHTML = `<td colspan="4"><div class="svc-panel roleDetail"></div></td>`;
+      const toggle = () => {
+        if (!detail.classList.contains("hidden")) { detail.classList.add("hidden"); return; }
+        detail.classList.remove("hidden");
+        const assignees = state.users.filter((u) => u.roleId === r.id);
+        const company = {}; // services resolved per position from the Role services grid
+        const list = assignees.length ? assignees.map((u) => {
+          const pos = POSITION_LABEL[u.position] || (u.role === "admin" ? "Company Admin" : "—");
+          return `<div style="padding:6px 0;border-bottom:1px solid #21314a;"><strong>${esc(u.displayName || u.email)}</strong>
+            <span class="muted small" style="float:right;">${esc(pos)}</span></div>`;
+        }).join("") : '<div class="muted small">No accounts have this role yet.</div>';
+        void company;
+        detail.querySelector(".roleDetail").innerHTML =
+          `<h4 style="margin:4px 0;font-size:13px;">Assigned to “${esc(r.title)}”</h4>${list}
+           <p class="muted small" style="margin:8px 0 0;">Service permissions are set per role under <strong>Role services</strong>; team permissions add a locked baseline on top.</p>`;
+      };
+      tr.querySelector(".roleOpen").addEventListener("dblclick", toggle);
       body.appendChild(tr);
+      body.appendChild(detail);
     });
   } catch (e) { body.innerHTML = `<tr><td colspan="4" class="banner error show">${esc(e.message)}</td></tr>`; }
 }
@@ -3278,11 +3357,68 @@ async function loadTeams() {
     body.innerHTML = "";
     state.teams.forEach((t) => {
       const tr = document.createElement("tr");
-      tr.innerHTML = `<td><strong>${esc(t.name)}</strong></td>
-        <td class="muted">${t.parentTeamId ? esc(nameOf(t.parentTeamId)) : "—"}</td><td></td>`;
+      tr.innerHTML = `<td><strong class="teamOpen" style="cursor:pointer;color:#0EA5E9;" title="Open team">${esc(t.name)}</strong></td>
+        <td class="muted">${t.parentTeamId ? esc(nameOf(t.parentTeamId)) : "—"}</td>
+        <td><button class="btn ghost sm teamOpenBtn">Open ▾</button></td>`;
+      const detail = document.createElement("tr");
+      detail.className = "hidden";
+      detail.innerHTML = `<td colspan="3"><div class="svc-panel"></div></td>`;
+      const panel = detail.querySelector(".svc-panel");
+      const toggle = () => {
+        if (detail.classList.contains("hidden")) { detail.classList.remove("hidden"); renderTeamDetail(t, panel); }
+        else detail.classList.add("hidden");
+      };
+      tr.querySelector(".teamOpen").addEventListener("dblclick", toggle);
+      tr.querySelector(".teamOpenBtn").addEventListener("click", toggle);
       body.appendChild(tr);
+      body.appendChild(detail);
     });
   } catch (e) { body.innerHTML = `<tr><td colspan="3" class="banner error show">${esc(e.message)}</td></tr>`; }
+}
+
+// Open team view: locked-baseline service permissions + drag-drop reporting lines.
+function renderTeamDetail(t, el) {
+  const tsp = Array.isArray(t.servicePermissions) ? t.servicePermissions : [];
+  const members = state.users.filter((u) => u.teamId === t.id);
+  const svc = SERVICES.map(([k, l]) => `<label class="day-chip"><input type="checkbox" class="tsvc" value="${k}" ${tsp.includes(k) ? 'checked' : ''}/> ${l}</label>`).join("");
+  const mlist = members.length ? members.map((u) => {
+    const mgr = u.managerId ? ((state.users.find((x) => x.id === u.managerId) || {}).displayName || "—") : "—";
+    return `<div class="teamMember" draggable="true" data-uid="${u.id}" style="padding:8px 10px;border:1px solid #21314a;border-radius:8px;margin:4px 0;cursor:grab;">
+      <strong>${esc(u.displayName || u.email)}</strong> <span class="muted small">${esc(POSITION_LABEL[u.position] || '')}</span>
+      <span class="muted small" style="float:right;">reports to: ${esc(mgr)}</span></div>`;
+  }).join("") : '<div class="muted small">No members on this team yet — assign people to this team in Accounts.</div>';
+  el.innerHTML = `
+    <h4 style="margin:4px 0;font-size:13px;">Team services <span class="muted small">— locked baseline for everyone on the team</span></h4>
+    <div class="svc-grid">${svc}</div>
+    <div class="row" style="justify-content:flex-end;margin:8px 0;"><button class="btn primary sm tsvcSave">Save team services</button></div>
+    <h4 style="margin:10px 0 4px;font-size:13px;">Reporting lines <span class="muted small">— drag a member onto their manager</span></h4>
+    <div class="teamMembers">${mlist}</div>
+    <div class="banner teamDetailBanner"></div>`;
+  el.querySelector(".tsvcSave").addEventListener("click", async () => {
+    const perms = [...el.querySelectorAll(".tsvc")].filter((x) => x.checked).map((x) => x.value);
+    try {
+      await updateTeam({ companyId: state.selectedCompany, teamId: t.id, servicePermissions: perms });
+      t.servicePermissions = perms;
+      banner(el.querySelector(".teamDetailBanner"), "Team services saved.", "good");
+    } catch (e) { banner(el.querySelector(".teamDetailBanner"), e.message || "Save failed.", "error"); }
+  });
+  el.querySelectorAll(".teamMember").forEach((node) => {
+    node.addEventListener("dragstart", (e) => { e.dataTransfer.setData("text/uid", node.dataset.uid); node.style.opacity = "0.5"; });
+    node.addEventListener("dragend", () => { node.style.opacity = "1"; });
+    node.addEventListener("dragover", (e) => { e.preventDefault(); node.style.outline = "2px solid #0EA5E9"; });
+    node.addEventListener("dragleave", () => { node.style.outline = "none"; });
+    node.addEventListener("drop", async (e) => {
+      e.preventDefault(); node.style.outline = "none";
+      const dragUid = e.dataTransfer.getData("text/uid");
+      const targetUid = node.dataset.uid;
+      if (!dragUid || dragUid === targetUid) return;
+      try {
+        await assignUserHierarchy({ uid: dragUid, managerId: targetUid });
+        banner(el.querySelector(".teamDetailBanner"), "Reporting line updated.", "good");
+        await loadUsers(); renderTeamDetail(t, el);
+      } catch (err) { banner(el.querySelector(".teamDetailBanner"), err.message || "Update failed.", "error"); }
+    });
+  });
 }
 
 // ── Users / accounts ─────────────────────────────────────────────────────
@@ -3390,18 +3526,22 @@ async function loadUsers() {
       // closer-manager select: only other closers (the parallel chain)
       const closerMgrOptions = `<option value="">— none —</option>` +
         state.users.filter((x)=>x.id!==u.id && x.isCloser).map((x)=>`<option value="${x.id}" ${u.closerManagerId===x.id?'selected':''}>${esc(x.displayName||x.email)}</option>`).join("");
-      // function select (setter / closer / both)
-      const fnVal = (u.isCloser && (u.isSetter!==false)) ? "both" : (u.isCloser ? "closer" : "setter");
-      const fnOptions = ["setter","closer","both"].map((v)=>`<option value="${v}" ${fnVal===v?'selected':''}>${v[0].toUpperCase()+v.slice(1)}</option>`).join("");
-      const isCloserFn = fnVal === "closer" || fnVal === "both";
+      // Position select (drives tier + setter/closer function).
+      const curPos = u.position || (u.role === "admin" ? "admin" : (u.isCloser && u.isSetter !== false ? "" : (u.isCloser ? "closer" : "setter")));
+      const posOptions = `<option value="">— set position —</option>` +
+        POSITIONS.map(([p, l]) => `<option value="${p}" ${curPos === p ? 'selected' : ''}>${l}</option>`).join("");
+      const isCloserFn = u.isCloser || curPos === "closer" || curPos === "closer_manager";
+      const teamOpts = state.teams.map((t) => `<option value="${t.id}" ${(u.managedTeamIds || []).includes(t.id) ? 'selected' : ''}>${esc(t.name)}</option>`).join("");
       const mirrorBtn = state.isSuper ? `<button class="btn sm mirrorBtn">Mirror</button>` : "";
       tr.innerHTML = `<td>${esc(u.displayName||"—")}${u.role==='admin'?' <span class="badge admin">admin</span>':''}</td>
         <td class="muted">${esc(u.email||"")}</td>
         <td><select class="roleSel">${roleOptions}</select></td>
-        <td><select class="fnSel">${fnOptions}</select></td>
+        <td><select class="posSel">${posOptions}</select></td>
         <td><div style="display:grid;gap:4px;">
           <select class="mgrSel" title="Setter manager">${mgrOptions}</select>
           <select class="closerMgrSel" title="Closer manager" ${isCloserFn?'':'disabled'}>${closerMgrOptions}</select>
+          <label class="day-chip reassignWrap" style="font-size:11px;${curPos==='closer_manager'?'':'display:none;'}"><input type="checkbox" class="reassignChk" ${u.canReassignAppointments?'checked':''}/> Can reassign appts</label>
+          <select class="mgdTeams" multiple size="2" title="Teams this manager oversees" style="font-size:11px;${curPos==='team_manager'?'':'display:none;'}">${teamOpts}</select>
         </div></td>
         <td>${u.disabled ? '<span class="badge disabled">disabled</span>' : '<span class="badge">active</span>'}</td>
         <td><div class="row">${mirrorBtn}
@@ -3436,10 +3576,24 @@ async function loadUsers() {
           banner($("banner"),"Closer manager updated.","good"); await loadUsers(); }
         catch (e) { banner($("banner"), e.message, "error"); loadUsers(); }
       });
-      tr.querySelector(".fnSel").addEventListener("change", async (ev) => {
-        const v = ev.target.value; // setter | closer | both
-        try { await setUserFunction({ uid:u.id, isSetter: v==="setter"||v==="both", isCloser: v==="closer"||v==="both" });
-          banner($("banner"),"Function updated.","good"); await loadUsers(); populateUserFormSelects(); }
+      tr.querySelector(".posSel").addEventListener("change", async (ev) => {
+        const v = ev.target.value; // position key
+        if (!v) return;
+        try { await assignUserHierarchy({ uid:u.id, position: v });
+          banner($("banner"),"Position updated.","good"); await loadUsers(); populateUserFormSelects(); }
+        catch (e) { banner($("banner"), e.message, "error"); loadUsers(); }
+      });
+      const reassignChk = tr.querySelector(".reassignChk");
+      if (reassignChk) reassignChk.addEventListener("change", async (ev) => {
+        try { await assignUserHierarchy({ uid:u.id, canReassignAppointments: ev.target.checked });
+          banner($("banner"), ev.target.checked ? "Can reassign appointments." : "Reassign permission removed.", "good"); }
+        catch (e) { banner($("banner"), e.message, "error"); loadUsers(); }
+      });
+      const mgdTeams = tr.querySelector(".mgdTeams");
+      if (mgdTeams) mgdTeams.addEventListener("change", async () => {
+        const ids = [...mgdTeams.selectedOptions].map((o) => o.value);
+        try { await assignUserHierarchy({ uid:u.id, managedTeamIds: ids });
+          banner($("banner"),"Managed teams updated.","good"); }
         catch (e) { banner($("banner"), e.message, "error"); loadUsers(); }
       });
       tr.querySelector(".disBtn").addEventListener("click", async () => {

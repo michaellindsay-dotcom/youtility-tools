@@ -1,6 +1,6 @@
 import { NavLink, useNavigate } from "react-router-dom";
 import { useAuth } from "../auth/AuthContext";
-import { hasFeature, type FeatureKey } from "../lib/features";
+import { userHasService, type FeatureKey } from "../lib/features";
 import type { Role } from "../types";
 
 // `feat` shows the link only when the plan has that feature; `anyFeat` shows it
@@ -17,22 +17,22 @@ const links: { to: string; label: string; icon: string; end?: boolean; feat?: Fe
   { to: "/shifts", label: "Success Planner", icon: "◎", anyFeat: ["planner", "analytics"] },
   { to: "/team", label: "Team", icon: "⛩" },
   { to: "/closer", label: "Closer", icon: "🤝", closer: true },
-  { to: "/battery", label: "Battery Tool", icon: "🔋", closer: true },
+  { to: "/battery", label: "Battery Tool", icon: "🔋", closer: true, feat: "battery" },
   { to: "/projects", label: "Sold Projects", icon: "📋", closer: true },
   { to: "/reports", label: "Reports", icon: "📊", roles: ["admin", "manager"] },
   { to: "/pitches", label: "My Pitches", icon: "🎙️", feat: "pitch" },
-  { to: "/training", label: "Training", icon: "🎓" },
+  { to: "/training", label: "Training", icon: "🎓", feat: "voice" },
   { to: "/pitch-library", label: "Pitch Library", icon: "🎬", feat: "pitch", roles: ["admin", "manager"] },
   { to: "/working", label: "Who's Working", icon: "🔥", feat: "chat" },
   { to: "/leaderboard", label: "Leaderboard", icon: "🏆", feat: "rewards" },
   { to: "/gamify", label: "Gamify", icon: "🎮", feat: "rewards" },
   { to: "/rewards", label: "Rewards", icon: "🎁", feat: "rewards" },
-  { to: "/territories", label: "Territories", icon: "▰" },
+  { to: "/territories", label: "Territories", icon: "▰", feat: "aiTerritories" },
   { to: "/settings", label: "Settings", icon: "⚐" },
 ];
 
 export default function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
-  const { company, role, profile, logout } = useAuth();
+  const { company, role, profile, team, logout } = useAuth();
   const navigate = useNavigate();
   const onSignOut = async () => {
     await logout();
@@ -42,8 +42,8 @@ export default function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
   const visible = links.filter((l) => {
     if (l.closer && !(profile?.isCloser || role === "admin" || role === "manager")) return false;
     if (l.roles && !(role && l.roles.includes(role))) return false;
-    if (l.anyFeat) return l.anyFeat.some((f) => hasFeature(company, f));
-    return !l.feat || hasFeature(company, l.feat);
+    if (l.anyFeat) return l.anyFeat.some((f) => userHasService(company, profile, team, f));
+    return !l.feat || userHasService(company, profile, team, l.feat);
   });
   return (
     <aside className="sidebar">
