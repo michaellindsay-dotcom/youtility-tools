@@ -18,6 +18,7 @@ const STATIC_FILES = [
   "terms.html",
   "admin.html",
   "pm.html",
+  "promo.html",
   "sign.html",
   "demo.html",
   "canvass-pro.html",
