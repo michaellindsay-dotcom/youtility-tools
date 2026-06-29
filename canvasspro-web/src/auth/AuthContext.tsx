@@ -12,7 +12,7 @@ import {
   signOut,
   type User,
 } from "firebase/auth";
-import { doc, getDoc, onSnapshot } from "firebase/firestore";
+import { doc, onSnapshot } from "firebase/firestore";
 import { auth, db, googleProvider } from "../firebase";
 import { isBillingLocked, PAYMENT_LOCK_MSG } from "../lib/billing";
 import type { Company, Role, UserProfile } from "../types";
@@ -40,12 +40,9 @@ const AuthContext = createContext<AuthState | undefined>(undefined);
 
 // Profiles are created by the admin console (createUser Cloud Function), never
 // in the app. If a signed-in user has no profile/company, they have no access.
-async function loadProfile(user: User): Promise<UserProfile | null> {
-  const snap = await getDoc(doc(db, "users", user.uid));
-  if (!snap.exists()) return null;
-  const data = snap.data() as Omit<UserProfile, "uid">;
-  if (!data.companyId) return null;
-  return { uid: user.uid, ...data };
+function toProfile(uid: string, data: Record<string, unknown> | undefined): UserProfile | null {
+  if (!data || !data.companyId) return null;
+  return { uid, ...(data as Omit<UserProfile, "uid">) };
 }
 
 export function AuthProvider({ children }: { children: ReactNode }) {
@@ -104,25 +101,47 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [user, profile, company, companyLoaded]);
 
   useEffect(() => {
-    const unsub = onAuthStateChanged(auth, async (u) => {
+    let unsubProfile: (() => void) | null = null;
+    const stopProfile = () => {
+      if (unsubProfile) {
+        unsubProfile();
+        unsubProfile = null;
+      }
+    };
+    const unsub = onAuthStateChanged(auth, (u) => {
       setUser(u);
-      if (u) {
-        try {
-          const p = await loadProfile(u);
+      stopProfile();
+      if (!u) {
+        setProfile(null);
+        setNoAccess(false);
+        setLoading(false);
+        return;
+      }
+      // Keep the profile LIVE (not a one-time read): if an admin disables this
+      // account mid-session, the `disabled` flag flips here and the effect
+      // below signs them out immediately, instead of the account lingering with
+      // access until the next full app reload (the bug that let disabled
+      // accounts keep working on a phone that already had a session open).
+      unsubProfile = onSnapshot(
+        doc(db, "users", u.uid),
+        (snap) => {
+          const p = toProfile(u.uid, snap.exists() ? snap.data() : undefined);
           setProfile(p);
           setNoAccess(p === null);
-        } catch (err) {
+          setLoading(false);
+        },
+        (err) => {
           console.error("Failed to load profile", err);
           setProfile(null);
           setNoAccess(true);
+          setLoading(false);
         }
-      } else {
-        setProfile(null);
-        setNoAccess(false);
-      }
-      setLoading(false);
+      );
     });
-    return unsub;
+    return () => {
+      stopProfile();
+      unsub();
+    };
   }, []);
 
   const login = async (email: string, password: string) => {

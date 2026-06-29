@@ -6,6 +6,15 @@ number automatically.
 
 ## [Unreleased]
 
+### Fixed
+- Deactivated accounts and suspended/inactive companies are now locked out on
+  devices with a warm cache, not just on a fresh (incognito) sign-in. The app
+  trusts an explicit cached `suspended`/`inactive` company status to block the
+  UI immediately (it self-corrects from the live company listener if the
+  company is actually active), and the signed-in user's profile is now a live
+  listener so disabling an account mid-session takes effect right away instead
+  of lingering until the next full app reload.
+
 ## [1.1] — 2026-06
 
 ### App Store "What's New" (user-facing)
