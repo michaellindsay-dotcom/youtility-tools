@@ -58,6 +58,17 @@ workflows:
   # ──────────────────────────────────────────────────────────────────────────
   ios-release:
     name: YoutilityKnock iOS
+    # Only build when you push a release tag (e.g. v1.1) — NOT on every push or
+    # PR. This stops the heavy signed App Store build (and any signing red X)
+    # from running on routine web/admin changes. Cut a real iOS build with:
+    #   git tag v1.1 && git push origin v1.1
+    # (Also set the Codemagic UI build trigger to "tag" to match this.)
+    triggering:
+      events:
+        - tag
+      tag_patterns:
+        - pattern: 'v*'
+          include: true
     instance_type: mac_mini_m2
     max_build_duration: 60
     integrations:
@@ -167,6 +178,13 @@ workflows:
   # ──────────────────────────────────────────────────────────────────────────
   android-release:
     name: YoutilityKnock Android
+    # Same as iOS: only build on a release tag (e.g. v1.1), not on every push.
+    triggering:
+      events:
+        - tag
+      tag_patterns:
+        - pattern: 'v*'
+          include: true
     instance_type: linux_x2
     max_build_duration: 60
     environment:
