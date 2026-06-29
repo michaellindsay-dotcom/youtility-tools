@@ -15,12 +15,14 @@ import {
 import { doc, onSnapshot } from "firebase/firestore";
 import { auth, db, googleProvider } from "../firebase";
 import { isBillingLocked, PAYMENT_LOCK_MSG } from "../lib/billing";
-import type { Company, Role, UserProfile } from "../types";
+import type { Company, Role, UserProfile, Team } from "../types";
 
 interface AuthState {
   user: User | null;
   profile: UserProfile | null;
   company: Company | null;
+  /** The user's team (for team-level service permissions); null if none. */
+  team: Team | null;
   /** True once the company doc has resolved from the SERVER (not just cache). */
   companyLoaded: boolean;
   role: Role | null;
@@ -49,6 +51,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [company, setCompany] = useState<Company | null>(null);
+  const [team, setTeam] = useState<Team | null>(null);
   const [companyLoaded, setCompanyLoaded] = useState(false);
   const [noAccess, setNoAccess] = useState(false);
   const [blockedReason, setBlockedReason] = useState<string | null>(null);
@@ -74,6 +77,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (!snap.metadata.fromCache) setCompanyLoaded(true);
     });
   }, [profile?.companyId]);
+
+  // Keep the user's team doc live (for team-level service permissions).
+  useEffect(() => {
+    const cid = profile?.companyId;
+    const tid = profile?.teamId;
+    if (!cid || !tid) { setTeam(null); return; }
+    return onSnapshot(doc(db, "companies", cid, "teams", tid), (snap) => {
+      setTeam(snap.exists() ? ({ id: snap.id, ...(snap.data() as Omit<Team, "id">) }) : null);
+    }, () => setTeam(null));
+  }, [profile?.companyId, profile?.teamId]);
 
   // Refuse access to deactivated or removed accounts: sign them out and stash a
   // message the login screen shows. Disabled *users* are already blocked by
@@ -158,6 +171,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     user,
     profile,
     company,
+    team,
     companyLoaded,
     role: profile?.role ?? null,
     companyId: profile?.companyId ?? null,

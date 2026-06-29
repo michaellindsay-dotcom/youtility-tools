@@ -51,6 +51,7 @@ export interface Company {
   trialEndsAt?: number; // epoch ms a "trial" plan converts to a paused account
   trialExpired?: boolean; // true once a trial lapsed and the account was paused
   features?: string[]; // enabled feature keys from the plan (undefined = all on)
+  positionServices?: Record<string, string[]>; // services granted per position ("services by role")
   maxUsers?: number;
   planPrice?: number;
   stripeCustomerId?: string;
@@ -107,12 +108,17 @@ export interface CompanyRole {
   createdAt?: number;
 }
 
+// Structural position — drives tier, setter/closer participation, and downline.
+export type Position =
+  | "admin" | "team_manager" | "closer_manager" | "setter_manager" | "closer" | "setter";
+
 export interface Team {
   id: string;
   companyId: string;
   name: string;
   leadUserId?: string; // the manager of this team
   parentTeamId?: string | null;
+  servicePermissions?: string[]; // locked-baseline services granted to all members
   createdAt?: number;
 }
 
@@ -136,6 +142,10 @@ export interface UserProfile {
   // Separate closer org chart, parallel to the setter managerId/managerPath.
   closerManagerId?: string | null; // direct closer manager
   closerManagerPath?: string[]; // closer-chain ancestors, nearest first
+  // Structural position + management scope.
+  position?: Position;
+  managedTeamIds?: string[]; // teams a team-manager oversees (sees all members)
+  canReassignAppointments?: boolean; // closer-manager permission set by an admin
   // AI pitch certification — passing a certification pitch unlocks full-credit
   // canvassing (uncertified reps' knocks count as a partial door).
   pitchCertified?: boolean;

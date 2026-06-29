@@ -145,6 +145,31 @@ async function batchSkipTrace(attomJson: any, address1: string, address2: string
 type Tier = "admin" | "manager" | "user";
 const TIERS: Tier[] = ["admin", "manager", "user"];
 
+// ── Positions ────────────────────────────────────────────────────────────────
+// A single structural Position per user drives the access tier, the setter /
+// closer org-chart participation, and downline visibility. Managers derive the
+// "manager" tier; setter/closer derive "user". Custom role titles still ride on
+// top for display; this is the structural source of truth.
+type Position = "admin" | "team_manager" | "closer_manager" | "setter_manager" | "closer" | "setter";
+const POSITIONS: Position[] = ["admin", "team_manager", "closer_manager", "setter_manager", "closer", "setter"];
+function isPosition(p: unknown): p is Position { return typeof p === "string" && (POSITIONS as string[]).includes(p); }
+function tierForPosition(p: Position): Tier {
+  if (p === "admin") return "admin";
+  if (p === "team_manager" || p === "closer_manager" || p === "setter_manager") return "manager";
+  return "user";
+}
+// Which org chart(s) the position participates in (gates assignability + chains).
+function fnForPosition(p: Position): { isSetter: boolean; isCloser: boolean } {
+  switch (p) {
+    case "setter": return { isSetter: true, isCloser: false };
+    case "closer": return { isSetter: false, isCloser: true };
+    case "setter_manager": return { isSetter: true, isCloser: false };
+    case "closer_manager": return { isSetter: false, isCloser: true };
+    case "team_manager": return { isSetter: true, isCloser: true };
+    case "admin": return { isSetter: false, isCloser: false };
+  }
+}
+
 interface Caller {
   uid: string;
   isSuper: boolean;
@@ -249,12 +274,33 @@ async function rebuildCompanyHierarchy(companyId: string) {
   const pathFor = makeWalker(managerOf); // setter chain
   const closerPathFor = makeWalker(closerManagerOf); // closer chain
 
+  // Team managers see EVERYONE on the teams they manage (across both chains).
+  // Map team → its managers, and each user → their team, then fold the team's
+  // managers (and the managers' own up-chains) into every member's paths so the
+  // existing visibilityPath rules automatically include team managers.
+  const teamMgrsByTeam: Record<string, string[]> = {};
+  const teamIdOf: Record<string, string | null> = {};
+  usersSnap.forEach((d) => {
+    teamIdOf[d.id] = (d.data().teamId as string) ?? null;
+    const mt = d.data().managedTeamIds;
+    if (Array.isArray(mt)) mt.forEach((t: string) => { (teamMgrsByTeam[t] ||= []).push(d.id); });
+  });
+  const teamMgrChain = (uid: string): string[] => {
+    const t = teamIdOf[uid];
+    if (!t || !teamMgrsByTeam[t]) return [];
+    const out: string[] = [];
+    for (const m of teamMgrsByTeam[t]) if (m !== uid) out.push(m, ...pathFor(m), ...closerPathFor(m));
+    return out;
+  };
+  const fullPathFor = (uid: string) => Array.from(new Set([...pathFor(uid), ...teamMgrChain(uid)]));
+  const fullCloserPathFor = (uid: string) => Array.from(new Set([...closerPathFor(uid), ...teamMgrChain(uid)]));
+
   let batch = db.batch();
   let ops = 0;
   const flush = async () => { if (ops) { await batch.commit(); batch = db.batch(); ops = 0; } };
 
   for (const d of usersSnap.docs) {
-    batch.update(d.ref, { managerPath: pathFor(d.id), closerManagerPath: closerPathFor(d.id) });
+    batch.update(d.ref, { managerPath: fullPathFor(d.id), closerManagerPath: fullCloserPathFor(d.id) });
     if (++ops >= 450) await flush();
   }
   await flush();
@@ -262,7 +308,7 @@ async function rebuildCompanyHierarchy(companyId: string) {
   const leadsSnap = await db.collection("leads").where("companyId", "==", companyId).get();
   for (const d of leadsSnap.docs) {
     const owner = (d.data().assignedTo as string) || d.data().createdBy;
-    batch.update(d.ref, { visibilityPath: [owner, ...pathFor(owner)] });
+    batch.update(d.ref, { visibilityPath: [owner, ...fullPathFor(owner)] });
     if (++ops >= 450) await flush();
   }
   await flush();
@@ -276,8 +322,8 @@ async function rebuildCompanyHierarchy(companyId: string) {
       const closerUid = e.closerUid as string;
       const setterUid = (e.setterUid as string) || "";
       const vis = Array.from(new Set([
-        closerUid, ...closerPathFor(closerUid),
-        ...(setterUid ? [setterUid, ...pathFor(setterUid)] : []),
+        closerUid, ...fullCloserPathFor(closerUid),
+        ...(setterUid ? [setterUid, ...fullPathFor(setterUid)] : []),
       ]));
       batch.update(d.ref, { visibilityPath: vis });
       if (++ops >= 450) await flush();
@@ -288,7 +334,7 @@ async function rebuildCompanyHierarchy(companyId: string) {
   // Keep per-user stats roll-up reachable by the right managers.
   const statsSnap = await db.collection("userStats").where("companyId", "==", companyId).get();
   for (const d of statsSnap.docs) {
-    batch.update(d.ref, { managerPath: pathFor(d.id), closerManagerPath: closerPathFor(d.id) });
+    batch.update(d.ref, { managerPath: fullPathFor(d.id), closerManagerPath: fullCloserPathFor(d.id) });
     if (++ops >= 450) await flush();
   }
   await flush();
@@ -420,11 +466,13 @@ export const createCompany = onCall(async (request) => {
 // ───────────────────────────────────────────────────────────────────────────
 export const createUser = onCall(async (request) => {
   const caller = await getCaller(request);
-  const { companyId, name, email, password, tier, roleId, title, teamId, managerId, isSetter, isCloser, closerManagerId } =
+  const { companyId, name, email, password, tier, roleId, title, teamId, managerId, isSetter, isCloser, closerManagerId,
+    position, managedTeamIds, canReassignAppointments } =
     request.data as {
       companyId?: string; name?: string; email?: string; password?: string;
       tier?: Tier; roleId?: string; title?: string; teamId?: string; managerId?: string;
       isSetter?: boolean; isCloser?: boolean; closerManagerId?: string | null;
+      position?: Position; managedTeamIds?: string[]; canReassignAppointments?: boolean;
     };
   const targetCompany = authorizeForCompany(caller, companyId);
   if (!email?.trim() || !password || password.length < 6) {
@@ -440,6 +488,15 @@ export const createUser = onCall(async (request) => {
     const r = roleSnap.data()!;
     baseTier = (r.baseTier as Tier) || "user";
     roleTitle = r.title;
+  }
+  // Position (structural) takes precedence: it drives the tier + setter/closer fn.
+  let effSetter = isSetter === undefined ? true : !!isSetter;
+  let effCloser = !!isCloser;
+  const pos: Position | null = isPosition(position) ? position : null;
+  if (pos) {
+    baseTier = tierForPosition(pos);
+    const fn = fnForPosition(pos);
+    effSetter = fn.isSetter; effCloser = fn.isCloser;
   }
   // Only a super-admin may mint another company admin's peer? Company admins
   // can create up to 'admin' within their own company.
@@ -471,11 +528,15 @@ export const createUser = onCall(async (request) => {
     teamId: teamId || null,
     managerId: managerId || null,
     managerPath,
-    // Function flags (default to setter for back-compat) + the closer org chart.
-    isSetter: isSetter === undefined ? true : !!isSetter,
-    isCloser: !!isCloser,
+    // Structural position + function flags + the closer org chart.
+    position: pos || null,
+    isSetter: effSetter,
+    isCloser: effCloser,
     closerManagerId: closerManagerId || null,
     closerManagerPath,
+    // A team manager can manage several teams (sees everyone in all of them).
+    managedTeamIds: Array.isArray(managedTeamIds) ? managedTeamIds : [],
+    canReassignAppointments: !!canReassignAppointments,
     disabled: false,
     createdAt: Date.now(),
     createdBy: caller.uid,
@@ -500,11 +561,13 @@ const GOVERNING_LAW_STATE = "Utah";
 
 export const inviteUser = onCall(async (request) => {
   const caller = await getCaller(request);
-  const { companyId, name, email, tier, roleId, title, teamId, managerId, isSetter, isCloser, closerManagerId } =
+  const { companyId, name, email, tier, roleId, title, teamId, managerId, isSetter, isCloser, closerManagerId,
+    position, managedTeamIds, canReassignAppointments } =
     request.data as {
       companyId?: string; name?: string; email?: string;
       tier?: Tier; roleId?: string; title?: string; teamId?: string; managerId?: string;
       isSetter?: boolean; isCloser?: boolean; closerManagerId?: string | null;
+      position?: Position; managedTeamIds?: string[]; canReassignAppointments?: boolean;
     };
   const targetCompany = authorizeForCompany(caller, companyId);
   if (!email?.trim()) throw new HttpsError("invalid-argument", "A valid email is required.");
@@ -517,6 +580,14 @@ export const inviteUser = onCall(async (request) => {
     const r = roleSnap.data()!;
     baseTier = (r.baseTier as Tier) || "user";
     roleTitle = r.title;
+  }
+  let effSetter = isSetter === undefined ? true : !!isSetter;
+  let effCloser = !!isCloser;
+  const pos: Position | null = isPosition(position) ? position : null;
+  if (pos) {
+    baseTier = tierForPosition(pos);
+    const fn = fnForPosition(pos);
+    effSetter = fn.isSetter; effCloser = fn.isCloser;
   }
   if (baseTier === "admin" && !(caller.isSuper || caller.role === "admin")) {
     throw new HttpsError("permission-denied", "Not allowed to create an admin.");
@@ -548,10 +619,13 @@ export const inviteUser = onCall(async (request) => {
     teamId: teamId || null,
     managerId: managerId || null,
     managerPath,
-    isSetter: isSetter === undefined ? true : !!isSetter,
-    isCloser: !!isCloser,
+    position: pos || null,
+    isSetter: effSetter,
+    isCloser: effCloser,
     closerManagerId: closerManagerId || null,
     closerManagerPath,
+    managedTeamIds: Array.isArray(managedTeamIds) ? managedTeamIds : [],
+    canReassignAppointments: !!canReassignAppointments,
     disabled: false,
     invitePending: true,
     createdAt: Date.now(),
@@ -638,27 +712,31 @@ export const deleteRole = onCall(async (request) => {
 // ───────────────────────────────────────────────────────────────────────────
 export const createTeam = onCall(async (request) => {
   const caller = await getCaller(request);
-  const { companyId, name, parentTeamId, leadUserId } = request.data as
-    { companyId?: string; name?: string; parentTeamId?: string | null; leadUserId?: string };
+  const { companyId, name, parentTeamId, leadUserId, servicePermissions } = request.data as
+    { companyId?: string; name?: string; parentTeamId?: string | null; leadUserId?: string; servicePermissions?: string[] };
   const company = authorizeForCompany(caller, companyId);
   if (!name?.trim()) throw new HttpsError("invalid-argument", "Team name required.");
   const ref = await db.collection(`companies/${company}/teams`).add({
     companyId: company, name: name.trim(),
-    parentTeamId: parentTeamId || null, leadUserId: leadUserId || null, createdAt: Date.now(),
+    parentTeamId: parentTeamId || null, leadUserId: leadUserId || null,
+    // Locked-baseline services granted to everyone on the team.
+    servicePermissions: Array.isArray(servicePermissions) ? servicePermissions : [],
+    createdAt: Date.now(),
   });
   return { ok: true, teamId: ref.id };
 });
 
 export const updateTeam = onCall(async (request) => {
   const caller = await getCaller(request);
-  const { companyId, teamId, name, parentTeamId, leadUserId } = request.data as
-    { companyId?: string; teamId?: string; name?: string; parentTeamId?: string | null; leadUserId?: string };
+  const { companyId, teamId, name, parentTeamId, leadUserId, servicePermissions } = request.data as
+    { companyId?: string; teamId?: string; name?: string; parentTeamId?: string | null; leadUserId?: string; servicePermissions?: string[] };
   const company = authorizeForCompany(caller, companyId);
   if (!teamId) throw new HttpsError("invalid-argument", "teamId required.");
   const patch: Record<string, unknown> = {};
   if (name?.trim()) patch.name = name.trim();
   if (parentTeamId !== undefined) patch.parentTeamId = parentTeamId || null;
   if (leadUserId !== undefined) patch.leadUserId = leadUserId || null;
+  if (servicePermissions !== undefined) patch.servicePermissions = Array.isArray(servicePermissions) ? servicePermissions : [];
   await db.doc(`companies/${company}/teams/${teamId}`).set(patch, { merge: true });
   return { ok: true };
 });
@@ -678,9 +756,11 @@ export const deleteTeam = onCall(async (request) => {
 // ───────────────────────────────────────────────────────────────────────────
 export const assignUserHierarchy = onCall(async (request) => {
   const caller = await getCaller(request);
-  const { uid, roleId, teamId, managerId, closerManagerId, isSetter, isCloser } = request.data as
+  const { uid, roleId, teamId, managerId, closerManagerId, isSetter, isCloser,
+    position, managedTeamIds, canReassignAppointments } = request.data as
     { uid?: string; roleId?: string; teamId?: string | null; managerId?: string | null;
-      closerManagerId?: string | null; isSetter?: boolean; isCloser?: boolean };
+      closerManagerId?: string | null; isSetter?: boolean; isCloser?: boolean;
+      position?: Position; managedTeamIds?: string[]; canReassignAppointments?: boolean };
   if (!uid) throw new HttpsError("invalid-argument", "uid required.");
   const target = await authorizeForTargetUser(caller, uid);
   const company = target.companyId as string;
@@ -705,15 +785,81 @@ export const assignUserHierarchy = onCall(async (request) => {
       patch.roleId = null;
     }
   }
+  // Position drives the tier + setter/closer function (overrides any role tier).
+  if (isPosition(position)) {
+    const t = tierForPosition(position);
+    const fn = fnForPosition(position);
+    patch.position = position;
+    patch.role = t;
+    patch.isSetter = fn.isSetter;
+    patch.isCloser = fn.isCloser;
+    await getAuth().setCustomUserClaims(uid, {
+      ...(await getAuth().getUser(uid)).customClaims,
+      role: t,
+    });
+  }
   if (teamId !== undefined) patch.teamId = teamId || null;
   if (managerId !== undefined) patch.managerId = managerId || null;
   if (closerManagerId !== undefined) patch.closerManagerId = closerManagerId || null;
-  if (isSetter !== undefined) patch.isSetter = !!isSetter;
-  if (isCloser !== undefined) patch.isCloser = !!isCloser;
+  // Explicit isSetter/isCloser only honored when no position was supplied.
+  if (!isPosition(position) && isSetter !== undefined) patch.isSetter = !!isSetter;
+  if (!isPosition(position) && isCloser !== undefined) patch.isCloser = !!isCloser;
+  if (managedTeamIds !== undefined) patch.managedTeamIds = Array.isArray(managedTeamIds) ? managedTeamIds : [];
+  if (canReassignAppointments !== undefined) patch.canReassignAppointments = !!canReassignAppointments;
 
   await db.doc(`users/${uid}`).set(patch, { merge: true });
   await rebuildCompanyHierarchy(company);
   logger.info(`Hierarchy updated for ${uid} in ${company} by ${caller.uid}`);
+  return { ok: true };
+});
+
+// Set the per-position service permissions for a company ("services by role").
+// Stored as companies/{id}.positionServices = { setter: [...], closer: [...], ... }.
+export const setPositionServices = onCall(async (request) => {
+  const caller = await getCaller(request);
+  const { companyId, positionServices } = (request.data || {}) as
+    { companyId?: string; positionServices?: Record<string, string[]> };
+  const company = authorizeForCompany(caller, companyId);
+  if (!positionServices || typeof positionServices !== "object") {
+    throw new HttpsError("invalid-argument", "positionServices required.");
+  }
+  const clean: Record<string, string[]> = {};
+  for (const p of POSITIONS) {
+    const v = (positionServices as Record<string, unknown>)[p];
+    if (Array.isArray(v)) clean[p] = v.filter((x) => typeof x === "string") as string[];
+  }
+  await db.doc(`companies/${company}`).set({ positionServices: clean, updatedAt: Date.now() }, { merge: true });
+  return { ok: true };
+});
+
+// Reassign an appointment to a different closer. Allowed for a super-admin, a
+// company admin, or a closer-manager who has the reassign permission AND already
+// sees the appointment (it's in their downline). Refreshes the company's
+// visibility paths so the new closer + their chain can see it.
+export const reassignAppointment = onCall(async (request) => {
+  const caller = await getCaller(request);
+  const { eventId, closerUid } = (request.data || {}) as { eventId?: string; closerUid?: string };
+  if (!eventId || !closerUid) throw new HttpsError("invalid-argument", "eventId and closerUid required.");
+  const evRef = db.doc(`events/${eventId}`);
+  const ev = (await evRef.get()).data();
+  if (!ev) throw new HttpsError("not-found", "Appointment not found.");
+  const company = ev.companyId as string;
+
+  let allowed = caller.isSuper || (caller.role === "admin" && caller.companyId === company);
+  if (!allowed) {
+    const me = (await db.doc(`users/${caller.uid}`).get()).data() || {};
+    const inDownline = Array.isArray(ev.visibilityPath) && (ev.visibilityPath as string[]).includes(caller.uid);
+    allowed = !!me.canReassignAppointments && me.companyId === company && inDownline;
+  }
+  if (!allowed) throw new HttpsError("permission-denied", "Not allowed to reassign this appointment.");
+
+  const newCloser = (await db.doc(`users/${closerUid}`).get()).data();
+  if (!newCloser || newCloser.companyId !== company || !newCloser.isCloser) {
+    throw new HttpsError("invalid-argument", "Pick a closer in this company.");
+  }
+  await evRef.set({ closerUid, updatedAt: Date.now() }, { merge: true });
+  await rebuildCompanyHierarchy(company); // recompute appointment visibilityPath
+  logger.info(`Appointment ${eventId} reassigned to ${closerUid} by ${caller.uid}`);
   return { ok: true };
 });
 
