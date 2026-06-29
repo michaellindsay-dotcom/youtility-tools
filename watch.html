@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+<title>YoutilityKnock — Watch</title>
+<meta name="description" content="Two short films on YoutilityKnock, the platform built to win door-to-door. Watch with sound, or download to share."/>
+<meta name="theme-color" content="#0EA5E9"/>
+<meta property="og:title" content="YoutilityKnock — Watch the platform in action"/>
+<meta property="og:description" content="The platform built to win door-to-door. Two short promos — watch with sound."/>
+<meta property="og:type" content="video.other"/>
+<meta property="og:url" content="https://youtilityknock.web.app/watch"/>
+<meta property="og:image" content="https://youtilityknock.web.app/promo-media/poster_canvass.jpg"/>
+<meta name="twitter:card" content="summary_large_image"/>
+<link rel="preconnect" href="https://fonts.googleapis.com"/>
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700;800&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet"/>
+<style>
+:root{
+  --sky:#0EA5E9;--sky2:#38BDF8;--sky3:#7DD3FC;--gold:#F59E0B;--gold2:#FCD34D;
+  --purple2:#A78BFA;--ink:#E8EEF8;--ink2:#C8D3E8;--ink3:#8896AA;
+  --bg:#050C18;--bg2:#080F1E;--line:rgba(255,255,255,.08);--line2:rgba(255,255,255,.14);
+  --glass:rgba(255,255,255,.04);--glass2:rgba(255,255,255,.07);
+}
+*{box-sizing:border-box;margin:0;padding:0;}
+body{font-family:'Inter',-apple-system,BlinkMacSystemFont,sans-serif;color:var(--ink);
+  background:radial-gradient(120% 80% at 50% -10%,#0d1b33 0%,var(--bg) 55%,#020812 100%);
+  min-height:100vh;-webkit-font-smoothing:antialiased;}
+a{color:inherit;text-decoration:none;}
+.wrap{max-width:920px;margin:0 auto;padding:32px 5% 64px;}
+header{display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap;margin-bottom:30px;}
+.brand{display:flex;align-items:center;gap:12px;}
+.mark{width:42px;height:42px;border-radius:11px;display:grid;place-items:center;font-family:'Space Grotesk';
+  font-weight:800;font-size:14px;color:#020C18;background:linear-gradient(135deg,var(--sky),var(--sky2));
+  box-shadow:0 4px 16px rgba(14,165,233,.4);letter-spacing:-.5px;}
+.brand b{font-family:'Space Grotesk';font-weight:700;font-size:18px;letter-spacing:-.3px;}
+.copy{display:inline-flex;align-items:center;gap:8px;padding:10px 18px;border-radius:100px;font-size:13.5px;
+  font-weight:600;cursor:pointer;background:var(--glass2);border:1px solid var(--line2);color:var(--ink2);
+  font-family:'Inter';transition:all .2s;}
+.copy:hover{color:var(--ink);border-color:var(--sky);background:rgba(14,165,233,.12);}
+.hero{margin-bottom:34px;}
+.kick{display:inline-flex;align-items:center;gap:8px;padding:7px 16px;border-radius:100px;margin-bottom:16px;
+  background:rgba(14,165,233,.1);border:1px solid rgba(14,165,233,.3);font-size:11.5px;font-weight:700;
+  color:var(--sky2);letter-spacing:1px;text-transform:uppercase;}
+h1{font-family:'Space Grotesk';font-weight:800;font-size:clamp(30px,5.5vw,52px);letter-spacing:-1.4px;line-height:1.04;}
+h1 .g{background:linear-gradient(120deg,var(--sky3),var(--sky),var(--purple2));-webkit-background-clip:text;background-clip:text;color:transparent;}
+.lede{margin-top:14px;font-size:clamp(15px,2vw,18px);color:var(--ink2);max-width:680px;line-height:1.55;}
+.card{background:linear-gradient(180deg,rgba(13,27,51,.6),rgba(8,16,32,.6));border:1px solid var(--line);
+  border-radius:22px;padding:18px;margin-bottom:26px;box-shadow:0 24px 60px rgba(0,0,0,.4);}
+.card .ct{display:flex;align-items:baseline;justify-content:space-between;gap:12px;flex-wrap:wrap;margin:4px 4px 14px;}
+.card h2{font-family:'Space Grotesk';font-weight:800;font-size:clamp(20px,3vw,28px);letter-spacing:-.6px;}
+.card h2.gold{background:linear-gradient(120deg,var(--gold2),var(--gold));-webkit-background-clip:text;background-clip:text;color:transparent;}
+.card .len{font-size:13px;color:var(--ink3);font-weight:600;white-space:nowrap;}
+.card p{margin:2px 4px 14px;font-size:14px;color:var(--ink3);line-height:1.5;}
+video{width:100%;border-radius:14px;display:block;background:#020812;border:1px solid var(--line2);
+  aspect-ratio:16/9;object-fit:cover;}
+.dl{display:flex;gap:10px;flex-wrap:wrap;margin-top:14px;}
+.btn{display:inline-flex;align-items:center;gap:8px;padding:11px 18px;border-radius:11px;font-size:13.5px;
+  font-weight:700;cursor:pointer;font-family:'Inter';transition:all .2s;}
+.btn-p{background:linear-gradient(135deg,var(--sky),var(--sky2));color:#020C18;box-shadow:0 6px 20px rgba(14,165,233,.3);}
+.btn-p:hover{transform:translateY(-1px);box-shadow:0 8px 26px rgba(14,165,233,.5);}
+.btn-o{background:var(--glass2);border:1px solid var(--line2);color:var(--ink2);}
+.btn-o:hover{color:var(--ink);border-color:var(--sky);}
+.tip{font-size:12.5px;color:var(--ink3);margin:4px 4px 0;}
+.foot{margin-top:34px;text-align:center;}
+.foot .go{display:inline-flex;align-items:center;gap:9px;padding:15px 30px;border-radius:13px;font-size:15px;font-weight:700;
+  background:linear-gradient(135deg,var(--gold),var(--gold2));color:#020C18;box-shadow:0 8px 26px rgba(245,158,11,.35);transition:all .2s;}
+.foot .go:hover{transform:translateY(-2px);box-shadow:0 12px 34px rgba(245,158,11,.55);}
+.foot .sub{margin-top:14px;font-size:13px;color:var(--ink3);}
+.toast{position:fixed;left:50%;bottom:26px;transform:translateX(-50%) translateY(20px);opacity:0;pointer-events:none;
+  background:rgba(8,18,32,.95);border:1px solid var(--sky);color:var(--ink);padding:11px 20px;border-radius:100px;
+  font-size:13.5px;font-weight:600;transition:all .25s;z-index:50;}
+.toast.on{opacity:1;transform:translateX(-50%) translateY(0);}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <a class="brand" href="/"><span class="mark">YK</span><b>YoutilityKnock</b></a>
+    <button class="copy" id="copyLink">🔗 Copy share link</button>
+  </header>
+
+  <div class="hero">
+    <div class="kick"><span>●</span>Watch · sound on</div>
+    <h1>The platform built to <span class="g">win door-to-door.</span></h1>
+    <p class="lede">Two short films — one on the field workflow that gets reps from the door to the top, one on the interactive proposal that closes on the spot. Press play (with sound), or download a version to text or email.</p>
+  </div>
+
+  <!-- Cut B — canvassing-led (lead with the primary use) -->
+  <div class="card">
+    <div class="ct"><h2 class="gold">From the Door to the Top</h2><span class="len">~57 sec</span></div>
+    <p>Route guidance, the first-of-its-kind success planner, live team presence with built-in chat, setter-to-closer handoff — then the close.</p>
+    <video controls preload="metadata" playsinline poster="/promo-media/poster_canvass.jpg">
+      <source src="/promo-media/canvass_16x9.mp4" type="video/mp4"/>
+    </video>
+    <div class="dl">
+      <a class="btn btn-p" href="/promo-media/canvass_16x9.mp4" download>⬇ Download · 16:9 (desktop)</a>
+      <a class="btn btn-o" href="/promo-media/canvass_9x16.mp4" download>⬇ Download · 9:16 (phone)</a>
+    </div>
+    <p class="tip">Tip: tap play for sound. The 9:16 version is sized for Reels, Stories & texting.</p>
+  </div>
+
+  <!-- Cut A — proposal-led -->
+  <div class="card">
+    <div class="ct"><h2>Stop Guessing. Start Winning.</h2><span class="len">~35 sec</span></div>
+    <p>The fast pitch: every advantage in one platform, plus the interactive battery proposal that comes alive and signs on the doorstep.</p>
+    <video controls preload="metadata" playsinline poster="/promo-media/poster_promo.jpg">
+      <source src="/promo-media/promo_16x9.mp4" type="video/mp4"/>
+    </video>
+    <div class="dl">
+      <a class="btn btn-p" href="/promo-media/promo_16x9.mp4" download>⬇ Download · 16:9 (desktop)</a>
+      <a class="btn btn-o" href="/promo-media/promo_9x16.mp4" download>⬇ Download · 9:16 (phone)</a>
+    </div>
+    <p class="tip">Tip: tap play for sound. The 9:16 version is sized for Reels, Stories & texting.</p>
+  </div>
+
+  <div class="foot">
+    <a class="go" href="https://youtilityknock.web.app" target="_blank" rel="noopener">Explore the platform →</a>
+    <div class="sub">Or see the interactive promos: <a href="/promo-canvass" style="color:var(--sky2)">/promo-canvass</a> · <a href="/promo" style="color:var(--sky2)">/promo</a></div>
+  </div>
+</div>
+
+<div class="toast" id="toast">Link copied ✓</div>
+
+<script>
+(function(){
+  var btn=document.getElementById('copyLink'), toast=document.getElementById('toast');
+  function pop(msg){toast.textContent=msg;toast.classList.add('on');setTimeout(function(){toast.classList.remove('on');},1800);}
+  btn.onclick=function(){
+    var url='https://youtilityknock.web.app/watch';
+    if(navigator.share){navigator.share({title:'YoutilityKnock',text:'The platform built to win door-to-door — watch:',url:url}).catch(function(){});return;}
+    if(navigator.clipboard){navigator.clipboard.writeText(url).then(function(){pop('Link copied ✓');},function(){pop(url);});}
+    else pop(url);
+  };
+  // Pause other videos when one plays.
+  var vids=[].slice.call(document.querySelectorAll('video'));
+  vids.forEach(function(v){v.addEventListener('play',function(){vids.forEach(function(o){if(o!==v)o.pause();});});});
+})();
+</script>
+</body>
+</html>
