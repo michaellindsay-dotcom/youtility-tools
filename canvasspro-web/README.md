@@ -61,13 +61,18 @@ public search).
 
 **Plan / pace / motivate**
 - **Success Planner** (`pages/Shifts.tsx` + `components/GoalPlanner.tsx`) — the
-  rep sets **one** number, their **monthly close goal**; everything else
+  rep sets **one** number, their **weekly close goal**; everything else
   (daily / weekly / monthly targets for closes, appts, conversations, doors,
-  hours) is **derived from that goal through their rolling 30-day average** and
-  is read-only. The close goal is **locked except on Sundays**. Below it sits
-  the shift time-keeper: in the **native app** a rep sees only their own shifts
-  rolled up **one row per day for the last 30 days**; the **web/manager** view
-  shows the per-shift downstream list.
+  hours) is **derived from it through their conversion rates** and is read-only,
+  as are the "Your numbers" rolling-average inputs. Appts/conversations come
+  straight from the conversion math; **doors & hours start at a baseline and
+  blend toward the rep's real rolling pace from day one**, reaching a full
+  30-day average by day 30. The close goal can be changed **on Sundays (or the
+  first login of a new week)**, then locks for the rest of the week. Below it
+  sits the shift time-keeper: in the **native app** a rep sees only their own
+  shifts rolled up **one row per day for the last 30 days**; the **web/manager**
+  view is a **drill-down** — each rep → their last 4 weeks → that week's days
+  (time, doors, appointments, closes).
 - **Dashboard** (`pages/Dashboard.tsx`) — today's funnel (doors / convos /
   appts / closes), pacing toward goal, and top performers.
 - **Rewards / Leaderboard / Gamify** (`rewards` plan) — points, levels, badges,

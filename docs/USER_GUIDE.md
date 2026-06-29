@@ -95,17 +95,19 @@ Use **← Back** to return to step 1; **Cancel** or **✕** closes without savin
 
 Open **Success Planner** from the menu.
 
-- **Set one number — your monthly close goal.** From it, the app works backward
-  through **your own rolling 30-day averages** to show what it takes: closes,
+- **Set one number — your weekly close goal.** From it, the app works backward
+  through **your own conversion rates** to show what it takes: closes,
   appointments, conversations, doors, and hours per **day, week, and month**.
 - Those breakdown numbers are **calculated for you** — you don't edit them
   individually.
-- **Your close goal can only be changed on Sundays.** Any other day it's locked
-  (you'll see a 🔒 note) so your plan stays stable through the week.
-- Doors and hours **adjust to your real pace from your first shift** (before
-  that they use a starter baseline).
-- **Your numbers:** the rolling averages that drive the math — you can fine-tune
-  them to match your true rates.
+- **Your close goal can be changed on Sundays** (or the first time you open the
+  app in a new week). After that it locks for the rest of the week (you'll see a
+  🔒 note) so your plan stays stable.
+- Doors and hours **start from a starter baseline and shift toward your real
+  pace from day one**, reaching a full 30-day average by day 30.
+- **Your numbers** (doors, conversations, appointments, closes, hours) are your
+  rolling 30-day activity that drives the math. They're **view-only** — they
+  update automatically as you log work; there's nothing to edit.
 
 At the bottom, **Shifts** shows **your last 30 days, one row per day** (shifts,
 time, doors).
@@ -127,8 +129,9 @@ time, doors).
 
 - **Team** — your downstream org chart (you see your reports and below; admins
   see the whole company).
-- **Shift history (web console)** — the per-shift list for your downline, not
-  just daily rollups.
+- **Shift history (web console)** — a drill-down of your downline: pick a rep,
+  see their last 4 weeks, then open a week to see each day's time, doors,
+  appointments, and closes.
 - **Territories** — draw map territories and assign them to reps.
 - **Schedule** — appointments and follow-ups across your team.
 

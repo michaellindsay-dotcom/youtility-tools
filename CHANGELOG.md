@@ -35,12 +35,15 @@ business app on the App Store.
 - **Lookup**: standalone address-enrichment tool.
 
 ### Plan, pace & motivate
-- **Success Planner**: set a single **monthly close goal**; daily/weekly/monthly
+- **Success Planner**: set a single **weekly close goal**; daily/weekly/monthly
   targets for closes, appointments, conversations, doors, and hours are derived
-  from it through your rolling 30-day average and are read-only. The close goal
-  is editable only on Sundays. Doors/hours adjust to your real pace from day one.
+  from it and read-only (as are the rolling-average "Your numbers"). Doors/hours
+  blend from a baseline toward your real pace from day one (full 30-day average
+  by day 30). The close goal is editable on Sundays or your first login of a new
+  week, then locks for the week.
 - **Shift history**: in the app, your own shifts rolled up one row per day for
-  the last 30 days; in the web/manager console, the per-shift downstream list.
+  the last 30 days; in the web/manager console, a drill-down (rep → last 4 weeks
+  → that week's days, with time/doors/appointments/closes).
 - **Dashboard** with today's funnel, goal pacing, and top performers.
 - **Rewards, Leaderboard, Gamify** (rewards plan): points, levels, badges,
   benchmark + redeemable rewards, ranked leaderboards.
