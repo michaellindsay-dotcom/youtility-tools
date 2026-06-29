@@ -41,13 +41,27 @@ export default function ProtectedRoute({ children, roles }: Props) {
   // accounts out, landing them on the login screen with the same message; this
   // branch just avoids any flash of the app in the meantime.) Data is never
   // deleted — access restores automatically once the company is active again.
-  // Only block on a SERVER-confirmed company state (companyLoaded). A stale
-  // browser cache can briefly report an old "suspended" status or a missing
-  // doc; we must not lock an active company out before the server replies.
+  //
+  // An EXPLICIT suspended/inactive status is authoritative even from cache. A
+  // device with a warm Firestore cache (or briefly offline — the norm in the
+  // field) must not get a free pass into the app just because the blocking
+  // decision is waiting on a fresh server snapshot that may be slow to arrive.
+  // This was the bug behind "it still lets me in on my phone but not in an
+  // incognito window": incognito has no cache, so it always read the suspended
+  // status from the server and blocked, while a cached session never did.
+  // Trusting the cached status here can only ever cause a brief, self-correcting
+  // flash (the live company listener delivers the real status moments later),
+  // never a permanent lockout.
+  //
+  // A *missing* company doc is different: a cold cache reports the doc missing
+  // before its first sync, so we only treat "missing" as inactive once the
+  // server has confirmed it (companyLoaded) — otherwise we'd lock valid
+  // companies out on startup.
   const status = String(company?.status || "active").toLowerCase();
-  const companyInactive =
-    companyLoaded &&
-    (company ? status === "suspended" || status === "inactive" : true);
+  const explicitlyInactive =
+    !!company && (status === "suspended" || status === "inactive");
+  const missingAfterLoad = companyLoaded && !company;
+  const companyInactive = explicitlyInactive || missingAfterLoad;
   if (companyInactive) {
     const billing = isBillingLocked(company);
     return (
