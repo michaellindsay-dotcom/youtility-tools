@@ -76,6 +76,10 @@ workflows:
         # fresh account can't create a cert, so no profile, so the archive fails
         # with "requires a provisioning profile".
         - ios_signing
+      vars:
+        # Marketing version shown on the App Store. Bump this for each public
+        # release (it flows into agvtool new-marketing-version below).
+        VERSION_NAME: "1.1"
       node: 20
       xcode: latest
       cocoapods: default
@@ -170,6 +174,8 @@ workflows:
         - youtilityknock_keystore
       groups:
         - google_play          # provides GCLOUD_SERVICE_ACCOUNT_CREDENTIALS
+      vars:
+        VERSION_NAME: "1.1"    # keep in sync with the iOS workflow above
       node: 20
       java: 17
     scripts:

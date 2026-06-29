@@ -6,10 +6,23 @@ number automatically.
 
 ## [Unreleased]
 
-- Docs brought up to date with the shipped app (README, user guide, changelog).
+## [1.1] — 2026-06
+
+### App Store "What's New" (user-facing)
+- Refreshed **Success Planner**: set a single **weekly close goal** and get your
+  daily/weekly/monthly game plan, built from your real rolling-average pace.
+  Doors and hours start adjusting from your first shift.
+- Smoother field experience: the **homeowner card** opens cleanly above the
+  header and only scrolls vertically, and the **map fills the screen**.
+- Your **shift history** now rolls up one row per day for the last 30 days.
+
+### Under the hood
+- Docs brought up to date (README, user guide, changelog).
+- Web deploy now publishes every root HTML page by default (deny-list); fixed
+  `oauth-callback.html` not deploying (calendar OAuth).
 - Removed an unused `PTS` re-export in `lib/rewards.ts`.
-- Versioning: web package set to `1.0.0`; iOS marketing version now driven by
-  the `VERSION_NAME` CI variable (defaults to `1.0`).
+- Versioning: marketing version driven by the `VERSION_NAME` CI variable
+  (set to `1.1` for this release).
 
 ## [1.0] — 2026-06 — Initial App Store release
 

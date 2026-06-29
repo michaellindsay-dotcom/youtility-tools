@@ -55,9 +55,14 @@ Console listings. Publisher: **Sun Service**. Support/privacy contact:
 **Keywords (≤100 chars, comma-separated)**
 > canvassing,door to door,d2d,sales,leads,field sales,solar,knocking,territory,CRM
 
-**What's New (first release)**
+**What's New (1.0 — first release)**
 > First release of YoutilityKnock: mapping, doorstep lead capture, territories,
 > shifts, and team sync for door-to-door teams.
+
+**What's New (1.1)**
+> A refreshed Success Planner: set one weekly close goal and we build your daily
+> and weekly game plan from your real pace. Plus a smoother homeowner card and
+> full-screen map, daily shift history, and reliability improvements.
 
 **App Privacy (App Store "Data used to track you" → None). Data linked to you:**
 | Data type | Collected | Linked to user | Used for tracking | Purpose |
