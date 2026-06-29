@@ -11,22 +11,12 @@ const root = dirname(dirname(fileURLToPath(import.meta.url)));
 const publicDir = join(root, "public");
 const appDist = join(root, "canvasspro-web", "dist");
 
-// Standalone static pages served at the site root.
-const STATIC_FILES = [
-  "index.html",
-  "privacy.html",
-  "terms.html",
-  "admin.html",
-  "pm.html",
-  "promo.html",
-  "sign.html",
-  "demo.html",
-  "canvass-pro.html",
-  "youtility-crm.html",
-  "player-highlight.html",
-  "solar-analysis.html",
-  "sigenstor_home.html",
-];
+// Deny-list model: EVERY root-level *.html page is published by default, so a
+// new tool/page goes live automatically (and you can never forget to add it to
+// a list). To keep a page OUT of the live site, add its filename here.
+const SKIP = new Set([
+  "youtilityknock-home.html", // superseded by index.html; not referenced anywhere
+]);
 
 async function exists(p) {
   try {
@@ -41,15 +31,17 @@ async function main() {
   await rm(publicDir, { recursive: true, force: true });
   await mkdir(publicDir, { recursive: true });
 
-  // Copy the standalone HTML pages.
-  for (const f of STATIC_FILES) {
-    const src = join(root, f);
-    if (await exists(src)) {
-      await cp(src, join(publicDir, f));
-    } else {
-      console.warn(`assemble: skipping missing ${f}`);
-    }
+  // Copy every root-level static HTML page except those on the SKIP list.
+  const entries = await readdir(root, { withFileTypes: true });
+  const pages = entries
+    .filter((e) => e.isFile() && e.name.endsWith(".html") && !SKIP.has(e.name))
+    .map((e) => e.name)
+    .sort();
+  for (const f of pages) {
+    await cp(join(root, f), join(publicDir, f));
   }
+  console.log(`assemble: ${pages.length} HTML pages → ${pages.join(", ")}`);
+  if (SKIP.size) console.log(`assemble: skipped (not published) → ${[...SKIP].join(", ")}`);
 
   // Copy the built React app under /app.
   if (!(await exists(appDist))) {

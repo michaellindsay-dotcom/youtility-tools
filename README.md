@@ -44,9 +44,21 @@ and architecture.
 
 ```bash
 firebase use <your-project-id>   # also update .firebaserc
-npm run deploy                   # from canvasspro-web/ — builds + deploys hosting, functions, rules
+npm run deploy                   # from the repo ROOT — builds the app, assembles
+                                 # public/, deploys hosting + functions + rules
+npm run deploy:hosting           # hosting only (HTML/app changes) — never touches data
 ```
+
+`scripts/assemble.mjs` publishes **every root-level `*.html` page by default**
+(deny-list model) plus the built React app under `/app`, so a new page goes
+live automatically — nothing to remember to add. To keep a page *off* the live
+site, add its filename to the `SKIP` set in that script. The live `public/`
+folder is a build artifact (gitignored); the HTML pages themselves live in git,
+so nothing is ever lost. A hosting deploy only swaps static files — it never
+touches Firestore/Storage data.
 
 Mobile builds run in **Codemagic** (`ios-release` / `android-release`
 workflows) — see the header comments in `codemagic.yaml` for the one-time
-signing setup, and `STORE_DEPLOYMENT.md` for the release runbook.
+signing setup, and `STORE_DEPLOYMENT.md` for the release runbook. The native
+app bundles the React `/app`, **not** these HTML pages, so HTML changes go live
+on the website the moment you deploy hosting — no App Store rebuild required.
