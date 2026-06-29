@@ -1,6 +1,6 @@
 {
   "name": "youtilityknock-web",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "private": true,
   "type": "module",
   "description": "YoutilityKnock — door-to-door canvassing dashboard (web + iOS + Android) on Firebase.",
