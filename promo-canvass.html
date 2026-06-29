@@ -40,7 +40,7 @@ canvas#fx{position:absolute;inset:0;z-index:0;opacity:.5;pointer-events:none;}
 .cbtn{display:inline-flex;align-items:center;gap:7px;padding:9px 16px;border-radius:100px;font-size:13px;font-weight:600;background:var(--glass2);border:1px solid var(--line2);color:var(--ink2);cursor:pointer;backdrop-filter:blur(12px);transition:all .2s;font-family:'Inter';}
 .cbtn:hover{color:var(--ink);border-color:var(--sky);background:rgba(14,165,233,.12);}
 
-.scene{position:absolute;inset:0;z-index:10;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:5vh 6vw;opacity:0;pointer-events:none;transition:opacity .6s ease;}
+.scene{position:absolute;inset:0;z-index:10;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:5vh 6vw 84px;opacity:0;pointer-events:none;transition:opacity .6s ease;}
 .scene.on{opacity:1;pointer-events:auto;}
 
 .kicker{display:inline-flex;align-items:center;gap:8px;padding:8px 18px;border-radius:100px;margin-bottom:22px;background:rgba(14,165,233,.1);border:1px solid rgba(14,165,233,.3);font-size:12px;font-weight:700;color:var(--sky2);letter-spacing:1.2px;text-transform:uppercase;}
@@ -86,17 +86,24 @@ h2{font-family:'Space Grotesk';font-weight:800;line-height:1.02;letter-spacing:-
 @keyframes pop{to{transform:translate(-50%,-50%) scale(1);}}
 @keyframes ring{0%{box-shadow:0 0 0 0 rgba(245,158,11,.5);}70%{box-shadow:0 0 0 12px rgba(245,158,11,0);}100%{box-shadow:0 0 0 0 rgba(245,158,11,0);}}
 
-/* SUCCESSION ladder */
-.ladder{display:flex;flex-direction:column;gap:10px;width:min(560px,94%);}
-.rung{display:flex;align-items:center;gap:14px;padding:14px 18px;border-radius:14px;text-align:left;}
-.rung .step{width:34px;height:34px;border-radius:10px;display:grid;place-items:center;font-size:16px;flex:none;background:rgba(255,255,255,.06);border:1px solid var(--line2);}
-.rung h4{font-family:'Space Grotesk';font-weight:700;font-size:16px;}
-.rung small{color:var(--ink3);font-size:12.5px;}
-.rung.cur{background:linear-gradient(120deg,rgba(245,158,11,.16),rgba(245,158,11,.04));border:1px solid rgba(245,158,11,.4);}
-.rung.cur .step{background:linear-gradient(135deg,var(--gold2),var(--gold));color:#021018;border:none;}
-.insight{margin-top:14px;width:min(560px,94%);padding:14px 18px;border-radius:14px;text-align:left;font-size:14px;color:var(--ink);
-  background:rgba(14,165,233,.1);border:1px solid rgba(56,189,248,.35);}
-.insight b{color:var(--sky2);}
+/* GAME PLAN / goal calculator (mirrors the live app screen) */
+.planner{width:min(560px,96%);padding:20px 22px;text-align:left;}
+.pl-top{display:flex;align-items:center;justify-content:space-between;margin-bottom:18px;}
+.pl-brand{display:flex;align-items:center;gap:10px;font-family:'Space Grotesk';font-weight:700;font-size:15px;color:var(--ink2);}
+.pl-brand .pm{width:26px;height:26px;border-radius:8px;display:grid;place-items:center;font-size:11px;font-weight:800;color:#021018;background:linear-gradient(135deg,var(--sky),var(--sky2));letter-spacing:-.5px;}
+.pl-shift{display:inline-flex;align-items:center;gap:6px;padding:8px 16px;border-radius:100px;font-size:13px;font-weight:700;color:#021018;background:linear-gradient(135deg,var(--sky),var(--sky2));box-shadow:0 6px 18px rgba(14,165,233,.4);}
+.goal{display:flex;align-items:center;gap:12px;flex-wrap:wrap;font-size:clamp(18px,3vw,24px);font-weight:600;color:var(--ink);}
+.goal .gfield{min-width:88px;padding:8px 14px;border-radius:12px;text-align:center;font-family:'Space Grotesk';font-weight:800;font-size:clamp(22px,4vw,30px);color:var(--sky2);background:rgba(56,189,248,.1);border:1px solid rgba(56,189,248,.4);}
+.lock{margin-top:12px;font-size:12.5px;line-height:1.5;color:var(--ink3);}.lock b{color:var(--ink2);}
+.pl-label{margin:16px 0 11px;font-size:12px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:var(--ink3);}
+.tiles{display:grid;grid-template-columns:1fr 1fr;gap:11px;}
+.tile{padding:14px 12px;border-radius:16px;text-align:center;background:linear-gradient(180deg,rgba(56,189,248,.08),rgba(56,189,248,.02));border:1px solid rgba(56,189,248,.2);}
+.tile .tn{font-family:'Space Grotesk';font-weight:800;font-size:clamp(30px,5vw,42px);letter-spacing:-1px;line-height:1;
+  background:linear-gradient(120deg,var(--sky3),var(--sky));-webkit-background-clip:text;background-clip:text;color:transparent;}
+.tile .tl{font-size:12.5px;color:var(--ink3);margin-top:7px;font-weight:600;}
+.insight{margin-top:14px;width:min(560px,96%);padding:14px 18px;border-radius:14px;text-align:left;font-size:13.5px;color:var(--ink);
+  background:rgba(245,158,11,.1);border:1px solid rgba(245,158,11,.32);}
+.insight b{color:var(--gold2);}
 
 /* TEAM presence + chat */
 .cols{display:flex;gap:18px;flex-wrap:wrap;justify-content:center;align-items:stretch;width:min(900px,96%);}
@@ -179,7 +186,29 @@ h2{font-family:'Space Grotesk';font-weight:800;line-height:1.02;letter-spacing:-
     <p class="sub word" style="animation-delay:1s">Random streets. Doors already worked. Leads lost in texts and a GroupMe nobody reads. Hard work, wasted.</p>
   </section>
 
-  <!-- 2 ROUTE guidance -->
+  <!-- 2 SUCCESS PLANNER — game plan / goal calculator (mirrors the live app) -->
+  <section class="scene" data-dur="6200">
+    <div class="kicker gd"><b></b>Industry first — your goal, reverse-engineered</div>
+    <h2 style="margin-bottom:14px;font-size:clamp(26px,4.6vw,52px)">Tell it your goal.<br>It builds the <span class="gold">game plan</span>.</h2>
+    <div class="panel planner mock">
+      <div class="pl-top">
+        <div class="pl-brand"><span class="pm">YK</span>Success Planner</div>
+        <span class="pl-shift">▶ Start Shift</span>
+      </div>
+      <div class="goal">I want to close <span class="gfield">10</span> per month</div>
+      <div class="lock">🔒 Your close goal is <b>locked</b> — change it on Sundays. Everything else adjusts automatically from your rolling 30-day average.</div>
+      <div class="pl-label">Your weekly game plan</div>
+      <div class="tiles">
+        <div class="tile"><div class="tn" data-to="8">0</div><div class="tl">Appts / wk</div></div>
+        <div class="tile"><div class="tn" data-to="77">0</div><div class="tl">Conversations / wk</div></div>
+        <div class="tile"><div class="tn" data-to="400">0</div><div class="tl">Doors / wk</div></div>
+        <div class="tile"><div class="tn" data-to="35">0</div><div class="tl">Hours / wk</div></div>
+      </div>
+    </div>
+    <div class="insight mock" style="animation-delay:.3s">🎯 <b>The only planner that works backward from your income goal</b> — then coaches every rep to the exact doors, conversations, and hours to hit it.</div>
+  </section>
+
+  <!-- 3 ROUTE guidance -->
   <section class="scene" data-dur="5400">
     <div class="kicker"><b></b>Real route optimization</div>
     <div class="mapwrap mock">
@@ -197,19 +226,6 @@ h2{font-family:'Space Grotesk';font-weight:800;line-height:1.02;letter-spacing:-
       </div>
     </div>
     <p class="sub mock" style="animation-delay:.3s">No more guessing which street is next. YoutilityKnock sequences the smartest route, skips doors already worked, and keeps every rep on the highest-value path.</p>
-  </section>
-
-  <!-- 3 SUCCESSION planner -->
-  <section class="scene" data-dur="5800">
-    <div class="kicker gd"><b></b>Industry first — only on YoutilityKnock</div>
-    <h2 style="margin-bottom:18px">The first-of-its-kind <span class="gold">succession planner</span></h2>
-    <div class="ladder mock">
-      <div class="rung"><div class="step">🚪</div><div><h4>Setter</h4><small>Booking appointments at the door</small></div></div>
-      <div class="rung cur"><div class="step">⭐</div><div><h4>Closer · Team Lead Track ↑</h4><small>Succession Stage: on track</small></div></div>
-      <div class="rung"><div class="step">🏅</div><div><h4>Team Lead</h4><small>22 days to eligibility</small></div></div>
-      <div class="rung"><div class="step">👑</div><div><h4>Manager</h4><small>Build and lead your own team</small></div></div>
-    </div>
-    <div class="insight mock" style="animation-delay:.25s">💡 <b>YK Succession Insight:</b> Jordan is <b>22 days</b> from Team Lead eligibility. Assign 2 mentoring sessions to accelerate.</div>
   </section>
 
   <!-- 4 TEAM presence + chat -->
@@ -341,7 +357,7 @@ h2{font-family:'Space Grotesk';font-weight:800;line-height:1.02;letter-spacing:-
     segs.forEach(function(s,i){s.style.transition='none';s.style.width=i<n?'100%':'0%';});
     elapsed=0;t0=performance.now();
     if(scenes[n].querySelector('#showImg'))retriggerImg();
-    if(scenes[n].querySelector('.stats'))runCounters(scenes[n]);
+    if(scenes[n].querySelector('[data-to]'))runCounters(scenes[n]);
     scenes[n].querySelectorAll('.word,.feat,.mock,.house,.route path').forEach(function(el){el.style.animation='none';el.offsetHeight;el.style.animation='';});
     var last=(n===scenes.length-1);
     document.getElementById('ctl').style.opacity=last?'0':'1';
@@ -356,7 +372,7 @@ h2{font-family:'Space Grotesk';font-weight:800;line-height:1.02;letter-spacing:-
   }
   function start(from){cancelAnimationFrame(raf);show(from||0);raf=requestAnimationFrame(tick);paused=false;playPause.textContent='⏸ Pause';}
   function runCounters(scene){
-    scene.querySelectorAll('.n').forEach(function(el){
+    scene.querySelectorAll('[data-to]').forEach(function(el){
       var to=parseFloat(el.getAttribute('data-to'))||0,suf=el.getAttribute('data-suf')||'',pre=el.getAttribute('data-pre')||'';
       var s=performance.now(),dur=1600;
       function step(now){var k=Math.min(1,(now-s)/dur);var e=1-Math.pow(1-k,3);el.textContent=pre+Math.round(to*e)+suf;if(k<1)requestAnimationFrame(step);}
