@@ -1,0 +1,389 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+<title>YoutilityKnock — From the Door to the Top</title>
+<meta name="description" content="The platform built to win door-to-door: route guidance, the first-of-its-kind succession planner, live team presence, built-in chat, and setter-to-closer handoff with geo-located disposition tools."/>
+<meta name="theme-color" content="#0EA5E9"/>
+<meta property="og:title" content="YoutilityKnock — From the Door to the Top"/>
+<meta property="og:description" content="Route guidance, a first-of-its-kind succession planner, live team presence, and setter-to-closer handoff. Watch the tour."/>
+<meta property="og:type" content="website"/>
+<meta property="og:url" content="https://youtilityknock.web.app/promo-canvass"/>
+<link rel="preconnect" href="https://fonts.googleapis.com"/>
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700;800&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet"/>
+<style>
+:root{
+  --sky:#0EA5E9;--sky2:#38BDF8;--sky3:#7DD3FC;
+  --gold:#F59E0B;--gold2:#FCD34D;
+  --green:#10B981;--green2:#34D399;
+  --purple:#8B5CF6;--purple2:#A78BFA;
+  --ink:#E8EEF8;--ink2:#C8D3E8;--ink3:#8896AA;
+  --bg:#050C18;--bg2:#080F1E;--bg3:#0C1528;--bg4:#111E35;
+  --line:rgba(255,255,255,.07);--line2:rgba(255,255,255,.12);
+  --glass:rgba(255,255,255,.04);--glass2:rgba(255,255,255,.07);
+}
+*{box-sizing:border-box;margin:0;padding:0;}
+html,body{height:100%;}
+body{font-family:'Inter',-apple-system,BlinkMacSystemFont,sans-serif;color:var(--ink);background:var(--bg);overflow:hidden;-webkit-font-smoothing:antialiased;}
+.stage{position:fixed;inset:0;background:radial-gradient(120% 90% at 50% -10%,#0d1b33 0%,var(--bg) 55%,#020812 100%);overflow:hidden;}
+canvas#fx{position:absolute;inset:0;z-index:0;opacity:.5;pointer-events:none;}
+.glow{position:absolute;border-radius:50%;filter:blur(90px);opacity:.5;z-index:0;pointer-events:none;}
+.g1{width:560px;height:560px;left:-160px;top:-160px;background:radial-gradient(circle,rgba(14,165,233,.45),transparent 70%);}
+.g2{width:620px;height:620px;right:-200px;bottom:-220px;background:radial-gradient(circle,rgba(139,92,246,.32),transparent 70%);}
+
+.bar{position:absolute;top:0;left:0;right:0;height:4px;z-index:40;display:flex;gap:4px;padding:8px 12px 0;}
+.seg{flex:1;height:4px;border-radius:3px;background:rgba(255,255,255,.12);overflow:hidden;}
+.seg i{display:block;height:100%;width:0;background:linear-gradient(90deg,var(--sky),var(--sky2));}
+.ctl{position:absolute;bottom:18px;left:0;right:0;z-index:40;display:flex;align-items:center;justify-content:center;gap:10px;}
+.cbtn{display:inline-flex;align-items:center;gap:7px;padding:9px 16px;border-radius:100px;font-size:13px;font-weight:600;background:var(--glass2);border:1px solid var(--line2);color:var(--ink2);cursor:pointer;backdrop-filter:blur(12px);transition:all .2s;font-family:'Inter';}
+.cbtn:hover{color:var(--ink);border-color:var(--sky);background:rgba(14,165,233,.12);}
+
+.scene{position:absolute;inset:0;z-index:10;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:5vh 6vw;opacity:0;pointer-events:none;transition:opacity .6s ease;}
+.scene.on{opacity:1;pointer-events:auto;}
+
+.kicker{display:inline-flex;align-items:center;gap:8px;padding:8px 18px;border-radius:100px;margin-bottom:22px;background:rgba(14,165,233,.1);border:1px solid rgba(14,165,233,.3);font-size:12px;font-weight:700;color:var(--sky2);letter-spacing:1.2px;text-transform:uppercase;}
+.kicker.gd{background:rgba(245,158,11,.12);border-color:rgba(245,158,11,.35);color:var(--gold2);}
+.kicker.gr{background:rgba(16,185,129,.12);border-color:rgba(16,185,129,.35);color:var(--green2);}
+.kicker b{width:6px;height:6px;border-radius:50%;background:currentColor;animation:pd 2s infinite;}
+@keyframes pd{0%,100%{opacity:1;transform:scale(1);}50%{opacity:.4;transform:scale(.7);}}
+
+h1{font-family:'Space Grotesk';font-weight:800;line-height:.98;letter-spacing:-2px;font-size:clamp(40px,9vw,116px);}
+h2{font-family:'Space Grotesk';font-weight:800;line-height:1.02;letter-spacing:-1.2px;font-size:clamp(28px,5.2vw,60px);max-width:900px;}
+.grad{background:linear-gradient(120deg,var(--sky3),var(--sky),var(--purple2));-webkit-background-clip:text;background-clip:text;color:transparent;}
+.gold{background:linear-gradient(120deg,var(--gold2),var(--gold));-webkit-background-clip:text;background-clip:text;color:transparent;}
+.sub{margin-top:18px;font-size:clamp(15px,2.1vw,21px);color:var(--ink2);max-width:760px;line-height:1.55;}
+
+.mark{width:128px;height:128px;border-radius:30px;display:grid;place-items:center;font-family:'Space Grotesk';font-weight:800;font-size:46px;color:#020C18;letter-spacing:-2px;background:linear-gradient(135deg,var(--sky),var(--sky2));box-shadow:0 20px 60px rgba(14,165,233,.5);}
+.brand{font-family:'Space Grotesk';font-weight:700;font-size:clamp(30px,5vw,52px);letter-spacing:-1px;margin-top:26px;}
+
+.word{display:inline-block;opacity:0;transform:translateY(40px);filter:blur(8px);}
+.scene.on .word{animation:wIn .7s cubic-bezier(.2,.8,.2,1) forwards;}
+@keyframes wIn{to{opacity:1;transform:translateY(0);filter:blur(0);}}
+
+/* mock card shells (rise in) */
+.mock{opacity:0;transform:translateY(28px) scale(.97);}
+.scene.on .mock{animation:mIn .7s cubic-bezier(.2,.8,.2,1) forwards;}
+@keyframes mIn{to{opacity:1;transform:translateY(0) scale(1);}}
+.panel{background:linear-gradient(180deg,rgba(13,27,51,.92),rgba(8,16,32,.92));border:1px solid var(--line2);border-radius:20px;box-shadow:0 30px 80px rgba(0,0,0,.55);backdrop-filter:blur(10px);}
+
+/* ROUTE map */
+.mapwrap{width:min(880px,94%);position:relative;}
+.map{position:relative;width:100%;aspect-ratio:16/9;border-radius:20px;overflow:hidden;border:1px solid var(--line2);
+  background:linear-gradient(180deg,#0a1730,#060e1f);box-shadow:0 30px 80px rgba(0,0,0,.55);}
+.map .grid-l{position:absolute;background:rgba(255,255,255,.05);}
+.maptag{position:absolute;top:14px;left:14px;z-index:5;display:flex;align-items:center;gap:8px;padding:7px 13px;border-radius:100px;font-size:12.5px;font-weight:700;color:#eaf6ff;background:rgba(8,18,32,.85);border:1px solid rgba(56,189,248,.45);}
+.maptag .dot{width:8px;height:8px;border-radius:50%;background:var(--sky2);animation:pd 1.6s infinite;}
+.route{position:absolute;inset:0;z-index:3;}
+.route path{stroke:url(#rg);stroke-width:3.5;fill:none;stroke-linecap:round;stroke-dasharray:1200;stroke-dashoffset:1200;}
+.scene.on .route path{animation:dash 2.4s ease forwards .4s;}
+@keyframes dash{to{stroke-dashoffset:0;}}
+.house{position:absolute;z-index:4;width:30px;height:30px;border-radius:9px;display:grid;place-items:center;font-size:12px;font-weight:800;color:#021018;transform:translate(-50%,-50%) scale(0);background:linear-gradient(135deg,var(--sky2),var(--sky));box-shadow:0 6px 18px rgba(14,165,233,.5);}
+.house.done{background:linear-gradient(135deg,var(--green2),var(--green));}
+.house.now{background:linear-gradient(135deg,var(--gold2),var(--gold));box-shadow:0 0 0 0 rgba(245,158,11,.6);animation:ring 1.6s infinite;}
+.scene.on .house{animation:pop .4s cubic-bezier(.2,1.4,.4,1) forwards;}
+@keyframes pop{to{transform:translate(-50%,-50%) scale(1);}}
+@keyframes ring{0%{box-shadow:0 0 0 0 rgba(245,158,11,.5);}70%{box-shadow:0 0 0 12px rgba(245,158,11,0);}100%{box-shadow:0 0 0 0 rgba(245,158,11,0);}}
+
+/* SUCCESSION ladder */
+.ladder{display:flex;flex-direction:column;gap:10px;width:min(560px,94%);}
+.rung{display:flex;align-items:center;gap:14px;padding:14px 18px;border-radius:14px;text-align:left;}
+.rung .step{width:34px;height:34px;border-radius:10px;display:grid;place-items:center;font-size:16px;flex:none;background:rgba(255,255,255,.06);border:1px solid var(--line2);}
+.rung h4{font-family:'Space Grotesk';font-weight:700;font-size:16px;}
+.rung small{color:var(--ink3);font-size:12.5px;}
+.rung.cur{background:linear-gradient(120deg,rgba(245,158,11,.16),rgba(245,158,11,.04));border:1px solid rgba(245,158,11,.4);}
+.rung.cur .step{background:linear-gradient(135deg,var(--gold2),var(--gold));color:#021018;border:none;}
+.insight{margin-top:14px;width:min(560px,94%);padding:14px 18px;border-radius:14px;text-align:left;font-size:14px;color:var(--ink);
+  background:rgba(14,165,233,.1);border:1px solid rgba(56,189,248,.35);}
+.insight b{color:var(--sky2);}
+
+/* TEAM presence + chat */
+.cols{display:flex;gap:18px;flex-wrap:wrap;justify-content:center;align-items:stretch;width:min(900px,96%);}
+.col{flex:1;min-width:280px;text-align:left;padding:18px;}
+.col h5{font-family:'Space Grotesk';font-weight:700;font-size:13px;letter-spacing:.6px;text-transform:uppercase;color:var(--ink3);margin-bottom:14px;}
+.who{display:flex;align-items:center;gap:12px;padding:9px 4px;border-bottom:1px solid var(--line);}
+.who:last-child{border-bottom:none;}
+.av{width:36px;height:36px;border-radius:50%;display:grid;place-items:center;font-weight:700;font-size:13px;color:#021018;flex:none;position:relative;}
+.av i{position:absolute;right:-1px;bottom:-1px;width:11px;height:11px;border-radius:50%;border:2px solid #0a1730;}
+.av i.on{background:var(--green2);}.av i.idle{background:var(--gold2);}
+.who .nm{font-weight:600;font-size:14px;}.who .st{font-size:12px;color:var(--ink3);}
+.chat{display:flex;flex-direction:column;gap:9px;}
+.bub{max-width:84%;padding:9px 13px;border-radius:14px;font-size:13.5px;line-height:1.35;}
+.bub.them{align-self:flex-start;background:rgba(255,255,255,.07);border:1px solid var(--line2);border-bottom-left-radius:4px;}
+.bub.me{align-self:flex-end;background:linear-gradient(135deg,var(--sky),var(--sky2));color:#021018;font-weight:600;border-bottom-right-radius:4px;}
+.bub .who-s{font-size:11px;font-weight:700;color:var(--sky2);margin-bottom:2px;}
+.killer{display:inline-block;margin-top:6px;font-size:12px;font-weight:700;color:var(--ink3);}
+.killer s{color:#ff7a7a;}
+
+/* SETTER -> CLOSER handoff */
+.flow{display:flex;align-items:center;gap:16px;flex-wrap:wrap;justify-content:center;width:min(900px,96%);}
+.card{width:260px;padding:18px;text-align:left;border-radius:18px;}
+.card .role{font-size:11px;font-weight:800;letter-spacing:1px;text-transform:uppercase;}
+.card.set .role{color:var(--sky2);}.card.clo .role{color:var(--gold2);}
+.card .nm2{font-family:'Space Grotesk';font-weight:700;font-size:18px;margin-top:4px;}
+.card .meta{font-size:12.5px;color:var(--ink3);margin-top:2px;}
+.disp{margin-top:12px;display:flex;flex-wrap:wrap;gap:6px;}
+.chip{padding:5px 10px;border-radius:8px;font-size:11.5px;font-weight:600;background:rgba(255,255,255,.06);border:1px solid var(--line2);color:var(--ink2);}
+.chip.hot{background:rgba(16,185,129,.16);border-color:rgba(16,185,129,.4);color:var(--green2);}
+.geo{margin-top:12px;display:flex;align-items:center;gap:7px;font-size:12px;color:var(--ink3);}
+.arrow{font-size:30px;color:var(--sky2);}
+.cardact{margin-top:12px;display:flex;gap:8px;}
+.mini{flex:1;text-align:center;padding:8px;border-radius:10px;font-size:12px;font-weight:700;background:rgba(56,189,248,.14);border:1px solid rgba(56,189,248,.35);color:var(--sky2);}
+
+/* feature montage */
+.feats{display:flex;flex-wrap:wrap;gap:12px;justify-content:center;max-width:900px;}
+.feat{display:flex;align-items:center;gap:12px;padding:14px 20px;border-radius:16px;text-align:left;background:var(--glass);border:1px solid var(--line2);min-width:230px;opacity:0;transform:translateY(24px) scale(.96);}
+.scene.on .feat{animation:fIn .55s cubic-bezier(.2,.8,.2,1) forwards;}
+@keyframes fIn{to{opacity:1;transform:translateY(0) scale(1);}}
+.feat .ic{width:44px;height:44px;border-radius:12px;display:grid;place-items:center;font-size:21px;flex:none;background:rgba(14,165,233,.12);border:1px solid rgba(14,165,233,.25);}
+.feat h4{font-family:'Space Grotesk';font-weight:700;font-size:15px;}.feat p{font-size:12.5px;color:var(--ink3);margin-top:2px;}
+
+/* stats */
+.stats{display:flex;flex-wrap:wrap;gap:30px;justify-content:center;}
+.stat{min-width:150px;}
+.stat .n{font-family:'Space Grotesk';font-weight:800;font-size:clamp(42px,7vw,80px);letter-spacing:-2px;line-height:1;background:linear-gradient(120deg,var(--sky3),var(--sky));-webkit-background-clip:text;background-clip:text;color:transparent;}
+.stat.g .n{background:linear-gradient(120deg,var(--gold2),var(--gold));-webkit-background-clip:text;background-clip:text;color:transparent;}
+.stat .l{font-size:13px;color:var(--ink3);margin-top:8px;font-weight:600;max-width:170px;margin-inline:auto;}
+
+/* CTA */
+.ctas{display:flex;gap:14px;flex-wrap:wrap;justify-content:center;margin-top:30px;}
+.btn{display:inline-flex;align-items:center;gap:9px;padding:16px 32px;border-radius:14px;font-size:16px;font-weight:700;cursor:pointer;transition:all .2s;border:none;font-family:'Inter';}
+.btn-p{background:linear-gradient(135deg,var(--sky),var(--sky2));color:#020C18;box-shadow:0 8px 30px rgba(14,165,233,.4);}
+.btn-p:hover{box-shadow:0 12px 40px rgba(14,165,233,.6);transform:translateY(-2px);}
+.btn-g{background:linear-gradient(135deg,var(--gold),var(--gold2));color:#020C18;box-shadow:0 8px 30px rgba(245,158,11,.4);}
+.btn-g:hover{box-shadow:0 12px 40px rgba(245,158,11,.6);transform:translateY(-2px);}
+.replay{margin-top:30px;}
+
+@media(max-width:640px){.feat,.col,.card{min-width:0;width:100%;}.cols,.flow{gap:12px;}.arrow{transform:rotate(90deg);}}
+@media(prefers-reduced-motion:reduce){.word,.feat,.mock,.house,.route path{animation:none!important;opacity:1!important;transform:none!important;filter:none!important;stroke-dashoffset:0!important;}}
+</style>
+</head>
+<body>
+<div class="stage" id="stage">
+  <div class="glow g1"></div><div class="glow g2"></div>
+  <canvas id="fx"></canvas>
+  <div class="bar" id="bar"></div>
+
+  <!-- 0 logo intro -->
+  <section class="scene" data-dur="3200">
+    <div class="mark">YK</div>
+    <div class="brand">Youtility<span class="grad">Knock</span></div>
+    <div class="kicker" style="margin-top:24px"><b></b>Built to win door-to-door</div>
+  </section>
+
+  <!-- 1 problem: the grind -->
+  <section class="scene" data-dur="3300">
+    <div class="kicker"><b></b>The door-to-door grind</div>
+    <h1><span class="word" style="animation-delay:.1s">Knock.</span> <span class="word" style="animation-delay:.32s">Walk.</span> <span class="word grad" style="animation-delay:.54s">Repeat?</span></h1>
+    <p class="sub word" style="animation-delay:1s">Random streets. Doors already worked. Leads lost in texts and a GroupMe nobody reads. Hard work, wasted.</p>
+  </section>
+
+  <!-- 2 ROUTE guidance -->
+  <section class="scene" data-dur="5400">
+    <div class="kicker"><b></b>Real route optimization</div>
+    <div class="mapwrap mock">
+      <div class="map" id="map">
+        <div class="maptag"><span class="dot"></span>Today's Optimized Route</div>
+        <svg class="route" viewBox="0 0 800 450" preserveAspectRatio="none">
+          <defs><linearGradient id="rg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#34D399"/><stop offset=".5" stop-color="#38BDF8"/><stop offset="1" stop-color="#FCD34D"/></linearGradient></defs>
+          <path d="M110,360 C200,330 210,210 300,200 C390,190 380,90 470,110 C560,130 560,250 640,250 C700,250 700,150 700,120"/>
+        </svg>
+        <div class="house done" style="left:13.7%;top:80%;animation-delay:.6s">✓</div>
+        <div class="house done" style="left:37.5%;top:44.4%;animation-delay:.9s">✓</div>
+        <div class="house now"  style="left:58.7%;top:24.4%;animation-delay:1.2s">3</div>
+        <div class="house"      style="left:80%;top:55.5%;animation-delay:1.5s">4</div>
+        <div class="house"      style="left:87.5%;top:26.6%;animation-delay:1.8s">5</div>
+      </div>
+    </div>
+    <p class="sub mock" style="animation-delay:.3s">No more guessing which street is next. YoutilityKnock sequences the smartest route, skips doors already worked, and keeps every rep on the highest-value path.</p>
+  </section>
+
+  <!-- 3 SUCCESSION planner -->
+  <section class="scene" data-dur="5800">
+    <div class="kicker gd"><b></b>Industry first — only on YoutilityKnock</div>
+    <h2 style="margin-bottom:18px">The first-of-its-kind <span class="gold">succession planner</span></h2>
+    <div class="ladder mock">
+      <div class="rung"><div class="step">🚪</div><div><h4>Setter</h4><small>Booking appointments at the door</small></div></div>
+      <div class="rung cur"><div class="step">⭐</div><div><h4>Closer · Team Lead Track ↑</h4><small>Succession Stage: on track</small></div></div>
+      <div class="rung"><div class="step">🏅</div><div><h4>Team Lead</h4><small>22 days to eligibility</small></div></div>
+      <div class="rung"><div class="step">👑</div><div><h4>Manager</h4><small>Build and lead your own team</small></div></div>
+    </div>
+    <div class="insight mock" style="animation-delay:.25s">💡 <b>YK Succession Insight:</b> Jordan is <b>22 days</b> from Team Lead eligibility. Assign 2 mentoring sessions to accelerate.</div>
+  </section>
+
+  <!-- 4 TEAM presence + chat -->
+  <section class="scene" data-dur="5600">
+    <div class="kicker gr"><b></b>Your whole team, in one place</div>
+    <div class="cols">
+      <div class="panel col mock">
+        <h5>Who's working — live</h5>
+        <div class="who"><div class="av" style="background:linear-gradient(135deg,#38BDF8,#0EA5E9)">JM<i class="on"></i></div><div><div class="nm">Jordan M.</div><div class="st">On the doors · 18 today</div></div></div>
+        <div class="who"><div class="av" style="background:linear-gradient(135deg,#34D399,#10B981)">AL<i class="on"></i></div><div><div class="nm">Alex L.</div><div class="st">On the doors · 2 appts set</div></div></div>
+        <div class="who"><div class="av" style="background:linear-gradient(135deg,#FCD34D,#F59E0B)">SR<i class="idle"></i></div><div><div class="nm">Sam R.</div><div class="st">On a pitch · area 4</div></div></div>
+        <div class="who"><div class="av" style="background:linear-gradient(135deg,#A78BFA,#8B5CF6)">DK<i class="on"></i></div><div><div class="nm">Dana K. · Closer</div><div class="st">En route to appt</div></div></div>
+      </div>
+      <div class="panel col mock" style="animation-delay:.2s">
+        <h5>Team chat — built in</h5>
+        <div class="chat">
+          <div class="bub them"><div class="who-s">Alex L.</div>Route was perfect today 💪</div>
+          <div class="bub them"><div class="who-s">Sam R.</div>Just set an appt on Maple — closer available?</div>
+          <div class="bub me">Dana's 6 min out — handing it over now ⚡</div>
+        </div>
+        <span class="killer">No more <s>GroupMe</s> · <s>group texts</s> · <s>spreadsheets</s></span>
+      </div>
+    </div>
+  </section>
+
+  <!-- 5 SETTER -> CLOSER handoff -->
+  <section class="scene" data-dur="5800">
+    <div class="kicker"><b></b>Setter &amp; closer — connected</div>
+    <h2 style="margin-bottom:20px">Set it at the door.<br><span class="grad">Hand it to a closer</span> — instantly.</h2>
+    <div class="flow">
+      <div class="panel card set mock">
+        <div class="role">Setter · at the door</div>
+        <div class="nm2">Sam R.</div>
+        <div class="meta">412 Maple St</div>
+        <div class="disp">
+          <span class="chip">Not home</span>
+          <span class="chip">Callback</span>
+          <span class="chip hot">✓ Appt set</span>
+          <span class="chip">Not interested</span>
+        </div>
+        <div class="geo">📍 Geo-tagged disposition · auto-logged</div>
+      </div>
+      <div class="arrow">→</div>
+      <div class="panel card clo mock" style="animation-delay:.3s">
+        <div class="role">Closer · nearest available</div>
+        <div class="nm2">Dana K.</div>
+        <div class="meta">6 min away · routed to 412 Maple</div>
+        <div class="cardact"><div class="mini">📞 Call</div><div class="mini">💬 Message</div></div>
+        <div class="geo">⚡ Direct handoff — no lead left behind</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 6 bridge: everything else -->
+  <section class="scene" data-dur="3000">
+    <div class="kicker"><b></b>And when it's time to close</div>
+    <h1><span class="grad word" style="animation-delay:.1s">Close</span> <span class="word" style="animation-delay:.32s">on the</span> <span class="word" style="animation-delay:.54s">doorstep.</span></h1>
+    <p class="sub word" style="animation-delay:.95s">Live coaching, homeowner intelligence, gamified culture — and cinematic battery proposals that sign right there.</p>
+  </section>
+
+  <!-- 7 feature montage condensed -->
+  <section class="scene" data-dur="4400">
+    <div class="kicker"><b></b>Everything in one platform</div>
+    <div class="feats">
+      <div class="feat" style="animation-delay:.05s"><div class="ic">🧭</div><div><h4>Succession Planning</h4><p>The only one in the industry.</p></div></div>
+      <div class="feat" style="animation-delay:.18s"><div class="ic">🗺️</div><div><h4>Route Guidance</h4><p>Smartest path, every day.</p></div></div>
+      <div class="feat" style="animation-delay:.31s"><div class="ic">📈</div><div><h4>Live Coaching</h4><p>Real stats, real time.</p></div></div>
+      <div class="feat" style="animation-delay:.44s"><div class="ic">🏠</div><div><h4>Homeowner Intelligence</h4><p>Know before you knock.</p></div></div>
+      <div class="feat" style="animation-delay:.57s"><div class="ic">🎮</div><div><h4>Gamification</h4><p>Culture that retains reps.</p></div></div>
+      <div class="feat" style="animation-delay:.70s"><div class="ic">⚡</div><div><h4>Interactive Proposals</h4><p>Sign on the doorstep.</p></div></div>
+    </div>
+  </section>
+
+  <!-- 8 proposal showcase -->
+  <section class="scene" data-dur="5200" id="showScene">
+    <div class="kicker"><b></b>The proposal that closes</div>
+    <div class="mapwrap mock">
+      <div class="map" id="showImg" style="background-size:cover;background-position:center;">
+        <div class="maptag"><span class="dot"></span>Interactive battery proposal</div>
+        <div style="position:absolute;left:0;right:0;bottom:0;z-index:4;padding:20px 24px;text-align:left;background:linear-gradient(180deg,transparent,rgba(2,8,18,.82));">
+          <div style="font-family:'Space Grotesk';font-weight:800;font-size:clamp(18px,2.6vw,26px);letter-spacing:-.5px">An interactive proposal — not a PDF.</div>
+          <div style="font-size:13px;color:var(--ink2);margin-top:3px">Solar → battery → backup → EV. Compare, price, e-sign, book the survey — all at the door.</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 9 stats -->
+  <section class="scene" data-dur="4400">
+    <div class="kicker"><b></b>The numbers reps feel</div>
+    <div class="stats">
+      <div class="stat"><div class="n" data-to="340" data-suf="%">0</div><div class="l">Avg rep improvement</div></div>
+      <div class="stat"><div class="n" data-to="12" data-suf="">0</div><div class="l">Features no one else has</div></div>
+      <div class="stat g"><div class="n" data-to="1" data-pre="#">0</div><div class="l">Succession planner on market</div></div>
+      <div class="stat"><div class="n" data-to="98" data-suf="%">0</div><div class="l">Team retention rate</div></div>
+    </div>
+  </section>
+
+  <!-- 10 CTA -->
+  <section class="scene" data-dur="60000" id="ctaScene">
+    <div class="mark" style="width:84px;height:84px;border-radius:22px;font-size:30px;margin-bottom:18px">YK</div>
+    <h2><span class="grad">From the door</span> to the top.</h2>
+    <p class="sub">One platform for the whole journey — knock, set, hand off, close.</p>
+    <div class="ctas">
+      <a class="btn btn-p" href="https://youtilityknock.web.app" target="_blank" rel="noopener">Explore the platform →</a>
+      <a class="btn btn-g" href="https://youtilityknock.web.app/app/?pid=a5212d55e29b494da41b275dfd49feee" target="_blank" rel="noopener">▶ See a live proposal</a>
+    </div>
+    <div class="replay"><button class="cbtn" id="replay2">↻ Replay the tour</button></div>
+  </section>
+
+  <div class="ctl" id="ctl">
+    <button class="cbtn" id="playPause">⏸ Pause</button>
+    <button class="cbtn" id="restart">↻ Replay</button>
+    <button class="cbtn" id="skip">Skip to end ⏭</button>
+  </div>
+</div>
+
+<script>
+(function(){
+  var scenes=[].slice.call(document.querySelectorAll('.scene'));
+  var bar=document.getElementById('bar');
+  var segs=scenes.map(function(){var s=document.createElement('div');s.className='seg';var i=document.createElement('i');s.appendChild(i);bar.appendChild(s);return i;});
+  var idx=-1,t0=0,raf=0,paused=false,elapsed=0;
+  var playPause=document.getElementById('playPause');
+  function durOf(n){return parseInt(scenes[n].getAttribute('data-dur'),10)||3000;}
+  function show(n){
+    if(idx>=0)scenes[idx].classList.remove('on');
+    idx=n;scenes[n].classList.add('on');
+    segs.forEach(function(s,i){s.style.transition='none';s.style.width=i<n?'100%':'0%';});
+    elapsed=0;t0=performance.now();
+    if(scenes[n].querySelector('#showImg'))retriggerImg();
+    if(scenes[n].querySelector('.stats'))runCounters(scenes[n]);
+    scenes[n].querySelectorAll('.word,.feat,.mock,.house,.route path').forEach(function(el){el.style.animation='none';el.offsetHeight;el.style.animation='';});
+    var last=(n===scenes.length-1);
+    document.getElementById('ctl').style.opacity=last?'0':'1';
+    document.getElementById('ctl').style.pointerEvents=last?'none':'auto';
+  }
+  function tick(now){
+    if(paused){raf=requestAnimationFrame(tick);return;}
+    var d=durOf(idx);elapsed=now-t0;var p=Math.min(1,elapsed/d);
+    segs[idx].style.transition='none';segs[idx].style.width=(p*100)+'%';
+    if(p>=1){if(idx<scenes.length-1){show(idx+1);}else{return;}}
+    raf=requestAnimationFrame(tick);
+  }
+  function start(from){cancelAnimationFrame(raf);show(from||0);raf=requestAnimationFrame(tick);paused=false;playPause.textContent='⏸ Pause';}
+  function runCounters(scene){
+    scene.querySelectorAll('.n').forEach(function(el){
+      var to=parseFloat(el.getAttribute('data-to'))||0,suf=el.getAttribute('data-suf')||'',pre=el.getAttribute('data-pre')||'';
+      var s=performance.now(),dur=1600;
+      function step(now){var k=Math.min(1,(now-s)/dur);var e=1-Math.pow(1-k,3);el.textContent=pre+Math.round(to*e)+suf;if(k<1)requestAnimationFrame(step);}
+      requestAnimationFrame(step);
+    });
+  }
+  var IMG_OK=false;
+  function retriggerImg(){
+    var box=document.getElementById('showImg');if(!box||IMG_OK)return;
+    var url='https://youtilityknock.web.app/app/proposal/home-ecosystem.jpg';
+    var im=new Image();
+    im.onload=function(){box.style.backgroundImage="url('"+url+"')";IMG_OK=true;};
+    im.onerror=function(){box.style.background="radial-gradient(120% 120% at 30% 20%,#13305a,#081427 70%)";};
+    im.src=url;
+  }
+  playPause.onclick=function(){paused=!paused;if(!paused)t0=performance.now()-elapsed;playPause.textContent=paused?'▶ Play':'⏸ Pause';};
+  document.getElementById('restart').onclick=function(){start(0);};
+  document.getElementById('skip').onclick=function(){start(scenes.length-1);};
+  document.getElementById('replay2').onclick=function(){start(0);};
+  var cv=document.getElementById('fx'),ctx=cv.getContext('2d'),ps=[],W,H;
+  function resize(){W=cv.width=innerWidth;H=cv.height=innerHeight;}
+  window.addEventListener('resize',resize);resize();
+  for(var i=0;i<70;i++)ps.push({x:Math.random()*W,y:Math.random()*H,r:Math.random()*1.8+.4,vx:(Math.random()-.5)*.25,vy:(Math.random()-.5)*.25,a:Math.random()*.5+.2});
+  function draw(){ctx.clearRect(0,0,W,H);for(var i=0;i<ps.length;i++){var p=ps[i];p.x+=p.vx;p.y+=p.vy;if(p.x<0)p.x=W;if(p.x>W)p.x=0;if(p.y<0)p.y=H;if(p.y>H)p.y=0;ctx.beginPath();ctx.arc(p.x,p.y,p.r,0,6.283);ctx.fillStyle='rgba(56,189,248,'+p.a+')';ctx.fill();}requestAnimationFrame(draw);}
+  draw();
+  start(0);
+})();
+</script>
+</body>
+</html>
