@@ -43,6 +43,14 @@ async function main() {
   console.log(`assemble: ${pages.length} HTML pages → ${pages.join(", ")}`);
   if (SKIP.size) console.log(`assemble: skipped (not published) → ${[...SKIP].join(", ")}`);
 
+  // Copy static media folders (promo videos, posters) served at the root.
+  for (const dir of ["promo-media"]) {
+    if (await exists(join(root, dir))) {
+      await cp(join(root, dir), join(publicDir, dir), { recursive: true });
+      console.log(`assemble: copied ${dir}/ → public/${dir}/`);
+    }
+  }
+
   // Copy the built React app under /app.
   if (!(await exists(appDist))) {
     throw new Error(
