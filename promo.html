@@ -1,0 +1,327 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+<title>YoutilityKnock — Stop Guessing. Start Winning.</title>
+<meta name="description" content="A 60-second look at YoutilityKnock: the only door-to-door platform with true succession planning, live coaching, homeowner intelligence, and interactive battery proposals that close."/>
+<meta name="theme-color" content="#0EA5E9"/>
+<meta property="og:title" content="YoutilityKnock — Stop Guessing. Start Winning."/>
+<meta property="og:description" content="The platform built to win door-to-door. Watch the 60-second promo."/>
+<meta property="og:type" content="website"/>
+<meta property="og:url" content="https://youtilityknock.web.app/promo"/>
+<link rel="preconnect" href="https://fonts.googleapis.com"/>
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700;800&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet"/>
+<style>
+:root{
+  --sky:#0EA5E9;--sky2:#38BDF8;--sky3:#7DD3FC;
+  --gold:#F59E0B;--gold2:#FCD34D;
+  --green:#10B981;--green2:#34D399;
+  --purple:#8B5CF6;--purple2:#A78BFA;
+  --ink:#E8EEF8;--ink2:#C8D3E8;--ink3:#8896AA;
+  --bg:#050C18;--bg2:#080F1E;--bg3:#0C1528;--bg4:#111E35;
+  --line:rgba(255,255,255,.07);--line2:rgba(255,255,255,.12);
+  --glass:rgba(255,255,255,.04);--glass2:rgba(255,255,255,.07);
+}
+*{box-sizing:border-box;margin:0;padding:0;}
+html,body{height:100%;}
+body{
+  font-family:'Inter',-apple-system,BlinkMacSystemFont,sans-serif;
+  color:var(--ink);background:var(--bg);overflow:hidden;
+  -webkit-font-smoothing:antialiased;
+}
+.stage{position:fixed;inset:0;background:radial-gradient(120% 90% at 50% -10%,#0d1b33 0%,var(--bg) 55%,#020812 100%);overflow:hidden;}
+canvas#fx{position:absolute;inset:0;z-index:0;opacity:.55;pointer-events:none;}
+.glow{position:absolute;border-radius:50%;filter:blur(90px);opacity:.5;z-index:0;pointer-events:none;}
+.g1{width:560px;height:560px;left:-160px;top:-160px;background:radial-gradient(circle,rgba(14,165,233,.45),transparent 70%);}
+.g2{width:620px;height:620px;right:-200px;bottom:-220px;background:radial-gradient(circle,rgba(139,92,246,.32),transparent 70%);}
+
+/* progress + controls */
+.bar{position:absolute;top:0;left:0;right:0;height:4px;z-index:40;display:flex;gap:4px;padding:8px 12px 0;}
+.seg{flex:1;height:4px;border-radius:3px;background:rgba(255,255,255,.12);overflow:hidden;}
+.seg i{display:block;height:100%;width:0;background:linear-gradient(90deg,var(--sky),var(--sky2));}
+.ctl{position:absolute;bottom:18px;left:0;right:0;z-index:40;display:flex;align-items:center;justify-content:center;gap:10px;}
+.cbtn{display:inline-flex;align-items:center;gap:7px;padding:9px 16px;border-radius:100px;font-size:13px;font-weight:600;
+  background:var(--glass2);border:1px solid var(--line2);color:var(--ink2);cursor:pointer;backdrop-filter:blur(12px);transition:all .2s;font-family:'Inter';}
+.cbtn:hover{color:var(--ink);border-color:var(--sky);background:rgba(14,165,233,.12);}
+
+/* scene layer */
+.scene{position:absolute;inset:0;z-index:10;display:flex;flex-direction:column;align-items:center;justify-content:center;
+  text-align:center;padding:6vh 6vw;opacity:0;pointer-events:none;transition:opacity .6s ease;}
+.scene.on{opacity:1;pointer-events:auto;}
+
+.kicker{display:inline-flex;align-items:center;gap:8px;padding:8px 18px;border-radius:100px;margin-bottom:24px;
+  background:rgba(14,165,233,.1);border:1px solid rgba(14,165,233,.3);
+  font-size:12px;font-weight:700;color:var(--sky2);letter-spacing:1.2px;text-transform:uppercase;}
+.kicker b{width:6px;height:6px;border-radius:50%;background:var(--sky2);animation:pd 2s infinite;}
+@keyframes pd{0%,100%{opacity:1;transform:scale(1);}50%{opacity:.4;transform:scale(.7);}}
+
+h1{font-family:'Space Grotesk';font-weight:800;line-height:.98;letter-spacing:-2px;
+  font-size:clamp(40px,9vw,118px);}
+h2{font-family:'Space Grotesk';font-weight:800;line-height:1.02;letter-spacing:-1.4px;
+  font-size:clamp(32px,6vw,76px);}
+.grad{background:linear-gradient(120deg,var(--sky3),var(--sky),var(--purple2));-webkit-background-clip:text;background-clip:text;color:transparent;}
+.gold{background:linear-gradient(120deg,var(--gold2),var(--gold));-webkit-background-clip:text;background-clip:text;color:transparent;}
+.sub{margin-top:22px;font-size:clamp(16px,2.2vw,22px);color:var(--ink2);max-width:760px;line-height:1.55;}
+
+/* logo intro */
+.mark{width:128px;height:128px;border-radius:30px;display:grid;place-items:center;
+  font-family:'Space Grotesk';font-weight:800;font-size:46px;color:#020C18;letter-spacing:-2px;
+  background:linear-gradient(135deg,var(--sky),var(--sky2));box-shadow:0 20px 60px rgba(14,165,233,.5);}
+.brand{font-family:'Space Grotesk';font-weight:700;font-size:clamp(30px,5vw,52px);letter-spacing:-1px;margin-top:26px;}
+
+/* kinetic words */
+.word{display:inline-block;opacity:0;transform:translateY(40px);filter:blur(8px);}
+.scene.on .word{animation:wIn .7s cubic-bezier(.2,.8,.2,1) forwards;}
+@keyframes wIn{to{opacity:1;transform:translateY(0);filter:blur(0);}}
+
+/* feature grid */
+.feats{display:flex;flex-wrap:wrap;gap:14px;justify-content:center;max-width:920px;margin-top:8px;}
+.feat{display:flex;align-items:center;gap:12px;padding:16px 22px;border-radius:16px;text-align:left;
+  background:var(--glass);border:1px solid var(--line2);min-width:240px;opacity:0;transform:translateY(24px) scale(.96);}
+.scene.on .feat{animation:fIn .55s cubic-bezier(.2,.8,.2,1) forwards;}
+@keyframes fIn{to{opacity:1;transform:translateY(0) scale(1);}}
+.feat .ic{width:46px;height:46px;border-radius:12px;display:grid;place-items:center;font-size:22px;flex:none;
+  background:rgba(14,165,233,.12);border:1px solid rgba(14,165,233,.25);}
+.feat h4{font-family:'Space Grotesk';font-weight:700;font-size:16px;letter-spacing:-.3px;}
+.feat p{font-size:13px;color:var(--ink3);margin-top:2px;}
+
+/* proposal showcase */
+.show{position:relative;width:min(1000px,94%);aspect-ratio:16/9;border-radius:20px;overflow:hidden;
+  border:1px solid rgba(56,189,248,.35);box-shadow:0 40px 110px rgba(0,0,0,.6),0 0 80px rgba(14,165,233,.18);
+  background:#020C18 center/cover no-repeat;transform:scale(.94);opacity:0;}
+.scene.on .show{animation:showIn 1s cubic-bezier(.2,.8,.2,1) forwards;}
+@keyframes showIn{to{transform:scale(1);opacity:1;}}
+.show::after{content:"";position:absolute;inset:0;background:linear-gradient(180deg,transparent 40%,rgba(2,8,18,.75));}
+.pin{position:absolute;z-index:3;display:flex;align-items:center;gap:8px;padding:7px 13px;border-radius:100px;
+  font-size:12.5px;font-weight:700;color:#eaf6ff;background:rgba(8,18,32,.78);border:1px solid rgba(56,189,248,.45);
+  backdrop-filter:blur(8px);white-space:nowrap;opacity:0;transform:translateY(8px);box-shadow:0 8px 24px rgba(0,0,0,.4);}
+.scene.on .pin{animation:pinIn .6s ease forwards;}
+.pin .dot{width:8px;height:8px;border-radius:50%;background:var(--sky2);box-shadow:0 0 0 0 rgba(56,189,248,.6);animation:ring 1.8s infinite;}
+.pin.gd .dot{background:var(--gold2);}.pin.gd{border-color:rgba(245,158,11,.5);}
+.pin.gr .dot{background:var(--green2);}.pin.gr{border-color:rgba(16,185,129,.5);}
+@keyframes ring{0%{box-shadow:0 0 0 0 rgba(56,189,248,.5);}70%{box-shadow:0 0 0 12px rgba(56,189,248,0);}100%{box-shadow:0 0 0 0 rgba(56,189,248,0);}}
+@keyframes pinIn{to{opacity:1;transform:translateY(0);}}
+.showcap{position:absolute;left:0;right:0;bottom:0;z-index:4;padding:22px 26px;text-align:left;}
+.showcap h3{font-family:'Space Grotesk';font-weight:800;font-size:clamp(20px,3vw,30px);letter-spacing:-.6px;}
+.showcap p{font-size:14px;color:var(--ink2);margin-top:4px;}
+
+/* stats */
+.stats{display:flex;flex-wrap:wrap;gap:32px;justify-content:center;margin-top:10px;}
+.stat{min-width:160px;}
+.stat .n{font-family:'Space Grotesk';font-weight:800;font-size:clamp(44px,7vw,84px);letter-spacing:-2px;line-height:1;
+  background:linear-gradient(120deg,var(--sky3),var(--sky));-webkit-background-clip:text;background-clip:text;color:transparent;}
+.stat.g .n{background:linear-gradient(120deg,var(--gold2),var(--gold));-webkit-background-clip:text;background-clip:text;color:transparent;}
+.stat .l{font-size:13px;color:var(--ink3);margin-top:8px;font-weight:600;max-width:180px;margin-inline:auto;}
+
+/* CTA */
+.ctas{display:flex;gap:14px;flex-wrap:wrap;justify-content:center;margin-top:34px;}
+.btn{display:inline-flex;align-items:center;gap:9px;padding:16px 32px;border-radius:14px;font-size:16px;font-weight:700;
+  cursor:pointer;transition:all .2s;border:none;font-family:'Inter';}
+.btn-p{background:linear-gradient(135deg,var(--sky),var(--sky2));color:#020C18;box-shadow:0 8px 30px rgba(14,165,233,.4);}
+.btn-p:hover{box-shadow:0 12px 40px rgba(14,165,233,.6);transform:translateY(-2px);}
+.btn-g{background:linear-gradient(135deg,var(--gold),var(--gold2));color:#020C18;box-shadow:0 8px 30px rgba(245,158,11,.4);}
+.btn-g:hover{box-shadow:0 12px 40px rgba(245,158,11,.6);transform:translateY(-2px);}
+.btn-o{background:var(--glass2);border:1px solid var(--line2);color:var(--ink);}
+.btn-o:hover{border-color:var(--sky);background:rgba(14,165,233,.12);}
+
+.replay{display:none;flex-direction:column;align-items:center;gap:18px;}
+.replay.on{display:flex;}
+
+@media(max-width:640px){
+  .feat{min-width:0;width:100%;}
+  .stats{gap:22px;}
+  h1{letter-spacing:-1px;}
+}
+@media(prefers-reduced-motion:reduce){
+  .word,.feat,.show,.pin{animation:none!important;opacity:1!important;transform:none!important;filter:none!important;}
+}
+</style>
+</head>
+<body>
+<div class="stage" id="stage">
+  <div class="glow g1"></div><div class="glow g2"></div>
+  <canvas id="fx"></canvas>
+
+  <!-- progress segments -->
+  <div class="bar" id="bar"></div>
+
+  <!-- SCENE 0 — logo intro -->
+  <section class="scene" data-dur="3400">
+    <div class="mark">YK</div>
+    <div class="brand">Youtility<span class="grad">Knock</span></div>
+    <div class="kicker" style="margin-top:26px"><b></b>The future of door-to-door is here</div>
+  </section>
+
+  <!-- SCENE 1 — problem -->
+  <section class="scene" data-dur="3200">
+    <div class="kicker"><b></b>Every other platform shows you yesterday</div>
+    <h1><span class="word" style="animation-delay:.1s">Stop</span> <span class="word" style="animation-delay:.35s">Guessing.</span></h1>
+    <p class="sub word" style="animation-delay:.9s">Gut-feel routes. Blind follow-ups. Reps who plateau and walk. The door-to-door grind has always run on guesswork.</p>
+  </section>
+
+  <!-- SCENE 2 — solution -->
+  <section class="scene" data-dur="3400">
+    <div class="kicker"><b></b>One platform. Every advantage.</div>
+    <h1><span class="word" style="animation-delay:.1s" class="grad">Start</span> <span class="grad word" style="animation-delay:.35s">Winning.</span></h1>
+    <p class="sub word" style="animation-delay:.9s">YoutilityKnock is the only platform built end-to-end to take a rep from the door to the top — and close the deal on the doorstep.</p>
+  </section>
+
+  <!-- SCENE 3 — feature montage -->
+  <section class="scene" data-dur="5200">
+    <div class="kicker"><b></b>Built to win — features no one else has</div>
+    <div class="feats">
+      <div class="feat" style="animation-delay:.05s"><div class="ic">🧭</div><div><h4>True Succession Planning</h4><p>The only succession planner in the industry.</p></div></div>
+      <div class="feat" style="animation-delay:.20s"><div class="ic">📈</div><div><h4>Live Performance Coaching</h4><p>Real statistical coaching, in real time.</p></div></div>
+      <div class="feat" style="animation-delay:.35s"><div class="ic">🏠</div><div><h4>Homeowner Intelligence</h4><p>Know before you knock.</p></div></div>
+      <div class="feat" style="animation-delay:.50s"><div class="ic">🎮</div><div><h4>Gamification Engine</h4><p>Culture and competition that retains reps.</p></div></div>
+      <div class="feat" style="animation-delay:.65s"><div class="ic">🗺️</div><div><h4>Real Route Optimization</h4><p>The smartest route, the tightest follow-up.</p></div></div>
+      <div class="feat" style="animation-delay:.80s"><div class="ic">⚡</div><div><h4>Interactive Battery Proposals</h4><p>Cinematic proposals that close on the spot.</p></div></div>
+    </div>
+  </section>
+
+  <!-- SCENE 4 — proposal showcase -->
+  <section class="scene" data-dur="6000" id="showScene">
+    <div class="kicker"><b></b>The proposal that closes the deal</div>
+    <div class="show" id="showImg">
+      <div class="pin"    style="left:24%;top:20%;animation-delay:.7s"><span class="dot"></span>Solar capture</div>
+      <div class="pin"    style="left:43%;top:58%;animation-delay:1.0s"><span class="dot"></span>Smart gateway</div>
+      <div class="pin gr" style="left:57%;top:64%;animation-delay:1.3s"><span class="dot"></span>Battery backup</div>
+      <div class="pin gd" style="left:74%;top:62%;animation-delay:1.6s"><span class="dot"></span>EV + V2H</div>
+      <div class="showcap">
+        <h3>An interactive proposal — not a PDF.</h3>
+        <p>Watch the home come alive: solar → battery → backup → EV. Compare batteries, price finance or cash, e-sign, and book the site survey — all on the doorstep.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- SCENE 5 — stats -->
+  <section class="scene" data-dur="4600">
+    <div class="kicker"><b></b>The numbers reps feel</div>
+    <div class="stats">
+      <div class="stat"><div class="n" data-to="340" data-suf="%">0</div><div class="l">Avg rep improvement</div></div>
+      <div class="stat"><div class="n" data-to="12" data-suf="">0</div><div class="l">Features no one else has</div></div>
+      <div class="stat g"><div class="n" data-to="1" data-pre="#">0</div><div class="l">True succession planner on market</div></div>
+      <div class="stat"><div class="n" data-to="98" data-suf="%">0</div><div class="l">Team retention rate</div></div>
+    </div>
+  </section>
+
+  <!-- SCENE 6 — CTA -->
+  <section class="scene" data-dur="60000" id="ctaScene">
+    <div class="mark" style="width:84px;height:84px;border-radius:22px;font-size:30px;margin-bottom:20px">YK</div>
+    <h2><span class="grad">Stop Guessing.</span><br>Start Winning.</h2>
+    <p class="sub">See the platform — and the interactive proposal — live.</p>
+    <div class="ctas">
+      <a class="btn btn-p" href="https://youtilityknock.web.app" target="_blank" rel="noopener">Explore the platform →</a>
+      <a class="btn btn-g" href="https://youtilityknock.web.app/app/?pid=a5212d55e29b494da41b275dfd49feee" target="_blank" rel="noopener">▶ See a live proposal</a>
+    </div>
+    <div class="replay on" style="margin-top:34px"><button class="cbtn" id="replay2">↻ Replay the 60-second tour</button></div>
+  </section>
+
+  <!-- controls -->
+  <div class="ctl" id="ctl">
+    <button class="cbtn" id="playPause">⏸ Pause</button>
+    <button class="cbtn" id="restart">↻ Replay</button>
+    <button class="cbtn" id="skip">Skip to end ⏭</button>
+  </div>
+</div>
+
+<script>
+(function(){
+  var scenes=[].slice.call(document.querySelectorAll('.scene'));
+  var bar=document.getElementById('bar');
+  var segs=scenes.map(function(){var s=document.createElement('div');s.className='seg';var i=document.createElement('i');s.appendChild(i);bar.appendChild(s);return i;});
+  var idx=-1,t0=0,raf=0,paused=false,elapsed=0;
+  var playPause=document.getElementById('playPause');
+
+  function durOf(n){return parseInt(scenes[n].getAttribute('data-dur'),10)||3000;}
+
+  function show(n){
+    if(idx>=0)scenes[idx].classList.remove('on');
+    idx=n;
+    scenes[n].classList.add('on');
+    // reset later segments
+    segs.forEach(function(s,i){s.style.transition='none';s.style.width=i<n?'100%':'0%';});
+    elapsed=0;t0=performance.now();
+    // trigger one-shots
+    if(scenes[n].querySelector('.show'))retriggerImg();
+    if(n===5)runCounters(scenes[n]);
+    // restart word/feature animations by reflow
+    scenes[n].querySelectorAll('.word,.feat,.pin,.show').forEach(function(el){el.style.animation='none';el.offsetHeight;el.style.animation='';});
+    var last=(n===scenes.length-1);
+    document.getElementById('ctl').style.opacity=last?'0':'1';
+    document.getElementById('ctl').style.pointerEvents=last?'none':'auto';
+  }
+
+  function tick(now){
+    if(paused){raf=requestAnimationFrame(tick);return;}
+    var d=durOf(idx);
+    elapsed=now-t0;
+    var p=Math.min(1,elapsed/d);
+    segs[idx].style.transition='none';segs[idx].style.width=(p*100)+'%';
+    if(p>=1){
+      if(idx<scenes.length-1){show(idx+1);}
+      else{return;} // hold on CTA
+    }
+    raf=requestAnimationFrame(tick);
+  }
+
+  function start(from){
+    cancelAnimationFrame(raf);
+    show(from||0);
+    raf=requestAnimationFrame(tick);
+    paused=false;playPause.textContent='⏸ Pause';
+  }
+
+  // animated counters
+  function runCounters(scene){
+    scene.querySelectorAll('.n').forEach(function(el){
+      var to=parseFloat(el.getAttribute('data-to'))||0,suf=el.getAttribute('data-suf')||'',pre=el.getAttribute('data-pre')||'';
+      var s=performance.now(),dur=1600;
+      function step(now){
+        var k=Math.min(1,(now-s)/dur);var e=1-Math.pow(1-k,3);
+        el.textContent=pre+Math.round(to*e)+suf;
+        if(k<1)requestAnimationFrame(step);
+      }
+      requestAnimationFrame(step);
+    });
+  }
+
+  // proposal image with graceful fallback
+  var IMG_OK=false;
+  function retriggerImg(){
+    var box=document.getElementById('showImg');if(!box)return;
+    if(IMG_OK)return;
+    var url='https://youtilityknock.web.app/app/proposal/home-ecosystem.jpg';
+    var im=new Image();
+    im.onload=function(){box.style.backgroundImage="url('"+url+"')";IMG_OK=true;};
+    im.onerror=function(){box.style.background="radial-gradient(120% 120% at 30% 20%,#13305a,#081427 70%)";};
+    im.src=url;
+  }
+
+  // controls
+  playPause.onclick=function(){paused=!paused;if(!paused)t0=performance.now()-elapsed;playPause.textContent=paused?'▶ Play':'⏸ Pause';};
+  document.getElementById('restart').onclick=function(){start(0);};
+  document.getElementById('skip').onclick=function(){start(scenes.length-1);};
+  document.getElementById('replay2').onclick=function(){start(0);};
+
+  // particle field
+  var cv=document.getElementById('fx'),ctx=cv.getContext('2d'),ps=[],W,H;
+  function resize(){W=cv.width=innerWidth;H=cv.height=innerHeight;}
+  window.addEventListener('resize',resize);resize();
+  for(var i=0;i<70;i++)ps.push({x:Math.random()*W,y:Math.random()*H,r:Math.random()*1.8+.4,vx:(Math.random()-.5)*.25,vy:(Math.random()-.5)*.25,a:Math.random()*.5+.2});
+  function draw(){
+    ctx.clearRect(0,0,W,H);
+    for(var i=0;i<ps.length;i++){var p=ps[i];p.x+=p.vx;p.y+=p.vy;
+      if(p.x<0)p.x=W;if(p.x>W)p.x=0;if(p.y<0)p.y=H;if(p.y>H)p.y=0;
+      ctx.beginPath();ctx.arc(p.x,p.y,p.r,0,6.283);ctx.fillStyle='rgba(56,189,248,'+p.a+')';ctx.fill();}
+    requestAnimationFrame(draw);
+  }
+  draw();
+
+  start(0);
+})();
+</script>
+</body>
+</html>
