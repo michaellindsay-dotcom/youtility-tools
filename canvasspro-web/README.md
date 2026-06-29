@@ -28,8 +28,65 @@ codebase everywhere.
 - **Super-admin** (platform operator) — a Firebase custom claim
   `superAdmin: true`. Manages all companies + users from `/admin.html`.
 
-The in-app experience is field-only (Dashboard, Lookup, Leads, Territories,
-Settings). User/company management is intentionally **not** in the app.
+The in-app experience is field-only (see **What the field app does** below).
+User/company management is intentionally **not** in the app — that lives in
+`/admin.html`.
+
+## What the field app does (today)
+
+The app ships as one React codebase that runs on the web and, via Capacitor,
+as the native **iOS / Android** field app. v1.0 is live on the App Store
+(distributed as an **unlisted** business app — installed via direct link, not
+public search).
+
+**Core field loop**
+- **Map** (`pages/Map.tsx`) — a Leaflet map of your turf: company territories,
+  leads colored by disposition, recent move-ins, and optional solar-scanner
+  pins. Homes auto-load as you pan/walk; a "follow me" mode tracks your
+  location. Tap a home to open the homeowner card.
+- **Homeowner card / disposition** (`components/DispositionModal.tsx`) — a
+  **two-step** flow. Step 1: pick a disposition and capture name / phone /
+  email / notes (auto-filled from address enrichment when available). Pressing
+  **Add Lead** validates the contact info and, for **Appointment / Go Back /
+  Pipeline / Sold**, advances to step 2 for on-the-spot scheduling + photos
+  (front of home, utility bill). Every other disposition saves immediately. A
+  GPS **geofence** (within 100 ft) decides whether the knock counts toward your
+  shift and stats.
+- **Shifts** (`shift/ShiftContext.tsx`) — start a shift from the header; it
+  becomes a live timer + door counter. Verified, on-site knocks increment the
+  count. Shifts **auto-stop after 5 minutes idle** so a forgotten shift doesn't
+  run all night.
+- **Leads** (`pages/Leads.tsx`) — filterable list of your (or your team's)
+  leads; edit or re-disposition any of them.
+
+**Plan / pace / motivate**
+- **Success Planner** (`pages/Shifts.tsx` + `components/GoalPlanner.tsx`) — the
+  rep sets **one** number, their **monthly close goal**; everything else
+  (daily / weekly / monthly targets for closes, appts, conversations, doors,
+  hours) is **derived from that goal through their rolling 30-day average** and
+  is read-only. The close goal is **locked except on Sundays**. Below it sits
+  the shift time-keeper: in the **native app** a rep sees only their own shifts
+  rolled up **one row per day for the last 30 days**; the **web/manager** view
+  shows the per-shift downstream list.
+- **Dashboard** (`pages/Dashboard.tsx`) — today's funnel (doors / convos /
+  appts / closes), pacing toward goal, and top performers.
+- **Rewards / Leaderboard / Gamify** (`rewards` plan) — points, levels, badges,
+  benchmark + redeemable rewards, and ranked leaderboards.
+- **Team Chat / Who's Working** (`chat` plan) — company channel + DMs, plus a
+  live "who's on shift" board with shout-outs.
+
+**Manage**
+- **Schedule** (`scheduling` plan) — agenda of appointments, go-backs, and
+  follow-ups; the on-the-spot bookings from the homeowner card land here.
+- **Territories** — draw and assign map territories to reps.
+- **Team** — org chart scoped to what you're allowed to see.
+- **Lookup** — standalone address-enrichment tool.
+- **Settings** — SMS phone, Google/Microsoft calendar links, password.
+
+Routes are gated by the company's plan features (see `lib/features.ts`):
+`map`, `skiptrace`, `scheduling`, `calendar`, `rewards`, `analytics`, `chat`,
+`planner`. A company with no feature list (legacy) gets everything; a suspended
+company keeps only `map`.
 
 ### Roles, hierarchy & downstream visibility
 
@@ -59,9 +116,11 @@ record. This is full act-as.
 canvasspro-web/
 ├─ src/
 │  ├─ auth/        AuthContext (sign-in only) + route guards
-│  ├─ components/  Layout, sidebar, topbar, property cards
-│  ├─ lib/         Knockstat normalization + formatters (ported from canvass-pro.html)
-│  └─ pages/       Login, Dashboard, Lookup, Leads, Territories, Settings
+│  ├─ components/  Layout, sidebar, topbar, DispositionModal, GoalPlanner, ShiftsPanel, …
+│  ├─ shift/       ShiftContext — start/stop shift, door counting, idle auto-stop
+│  ├─ lib/         dispositions, features, points/rewards, knockstat normalization, scheduling
+│  └─ pages/       Login, Dashboard, Map, Leads, Lookup, Movers, Shifts (Success Planner),
+│                  Schedule, Territories, Team, Chat, Working, Leaderboard, Gamify, Rewards, Settings
 └─ functions/      Cloud Functions: knockstat proxy + company/account management
 ```
 

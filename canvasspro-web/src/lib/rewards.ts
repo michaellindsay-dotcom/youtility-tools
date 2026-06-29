@@ -1,5 +1,5 @@
 import type { RewardMetric, RewardPeriod, UserStats } from "../types";
-import { computePoints, PTS } from "./points";
+import { computePoints } from "./points";
 
 export const METRIC_LABEL: Record<RewardMetric, string> = {
   points: "Points",
@@ -41,5 +41,3 @@ export function valsFromStats(s: Partial<UserStats>): MetricVals {
     sales: s.sales ?? 0,
   };
 }
-
-export { PTS };
