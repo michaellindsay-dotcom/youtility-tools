@@ -1,9 +1,10 @@
 import { useEffect, useState } from "react";
-import { collection, deleteDoc, doc, onSnapshot, orderBy, query, where } from "firebase/firestore";
+import { collection, onSnapshot, orderBy, query, where } from "firebase/firestore";
 import { db } from "../firebase";
 import { useAuth } from "../auth/AuthContext";
 import { Link } from "react-router-dom";
 import CalendarBanner from "../components/CalendarBanner";
+import CalendarView from "../components/CalendarView";
 import { APPT_LABEL, APPT_COLOR } from "../lib/closerDispositions";
 import type { EventType, ScheduleEvent } from "../types";
 
@@ -12,11 +13,6 @@ const META: Record<EventType, { label: string; icon: string }> = {
   go_back: { label: "Go-back", icon: "↩" },
   follow_up: { label: "Follow-up", icon: "🔁" },
 };
-
-// Group events by calendar day for a clean agenda view.
-function dayKey(ms: number): string {
-  return new Date(ms).toLocaleDateString([], { weekday: "long", month: "long", day: "numeric" });
-}
 
 export default function Schedule() {
   const { profile, role, companyId } = useAuth();
@@ -65,7 +61,6 @@ export default function Schedule() {
     );
   }, [profile]);
 
-  const now = Date.now();
   const isMgr = role === "admin" || role === "manager";
   // Appointments I set for someone else to close (exclude self-assigned).
   const routedOut = routed
@@ -75,65 +70,12 @@ export default function Schedule() {
   const assignees = isMgr
     ? Array.from(new Map(events.filter((e) => e.userId).map((e) => [e.userId, e.userName || e.userId])).entries())
     : [];
-  // Day / Week / Month window from the start of today.
-  const startToday = new Date(); startToday.setHours(0, 0, 0, 0);
-  const rangeDays = range === "day" ? 1 : range === "week" ? 7 : 31;
-  const rangeEnd = startToday.getTime() + rangeDays * 24 * 60 * 60 * 1000;
+  // Events to show on the calendar (filtered by type + assignee; the calendar
+  // owns its own date navigation, so no time window here).
   const visible = events.filter((e) =>
     (filter === "all" || e.type === filter) &&
     (assignee === "all" || e.userId === assignee)
   );
-  const upcoming = visible.filter((e) => e.startAt >= now - 60 * 60 * 1000 && e.startAt < rangeEnd);
-  const past = visible.filter((e) => e.startAt < now - 60 * 60 * 1000).reverse();
-
-  const fmtTime = (ms: number) =>
-    new Date(ms).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
-
-  const canRemove = (e: ScheduleEvent) =>
-    e.userId === profile?.uid || role === "admin" || role === "manager";
-
-  const item = (e: ScheduleEvent) => (
-    <li key={e.id} className="sched-item">
-      <span className="sched-ico">{META[e.type]?.icon || "•"}</span>
-      <div className="sched-body">
-        <div className="sched-title">
-          {e.title}
-          <span className="role-badge">{META[e.type]?.label || e.type}</span>
-          {e.source === "assigned" && <span className="role-badge role-manager">assigned</span>}
-        </div>
-        <div className="muted small">
-          {fmtTime(e.startAt)}
-          {e.durationMin ? ` · ${e.durationMin} min` : ""}
-          {e.address ? ` · ${e.address}` : ""}
-        </div>
-        <div className="muted small">
-          👤 {e.userId === profile?.uid ? "You" : (e.userName || "Unassigned")}
-          {e.closerUid && e.closerName ? ` · closer: ${e.closerName}` : ""}
-        </div>
-        {e.notes && <div className="muted small">{e.notes}</div>}
-      </div>
-      {canRemove(e) && (
-        <button
-          className="btn ghost sm"
-          title="Cancel"
-          onClick={() => {
-            if (confirm("Cancel this scheduled item?")) deleteDoc(doc(db, "events", e.id)).catch(() => {});
-          }}
-        >
-          ✕
-        </button>
-      )}
-    </li>
-  );
-
-  // Render upcoming grouped by day.
-  const groups: { day: string; items: ScheduleEvent[] }[] = [];
-  for (const e of upcoming) {
-    const k = dayKey(e.startAt);
-    const g = groups.find((x) => x.day === k);
-    if (g) g.items.push(e);
-    else groups.push({ day: k, items: [e] });
-  }
 
   return (
     <div className="page-body">
@@ -223,26 +165,7 @@ export default function Schedule() {
       {loading ? (
         <div className="muted">Loading…</div>
       ) : (
-        <>
-          <h3>Upcoming</h3>
-          {groups.length === 0 ? (
-            <div className="empty">Nothing scheduled.</div>
-          ) : (
-            groups.map((g) => (
-              <div key={g.day} style={{ marginBottom: 14 }}>
-                <div className="muted small" style={{ margin: "6px 0", fontWeight: 600 }}>{g.day}</div>
-                <ul className="sched-list">{g.items.map(item)}</ul>
-              </div>
-            ))
-          )}
-
-          {past.length > 0 && (
-            <>
-              <h3 style={{ marginTop: 18 }}>Past</h3>
-              <ul className="sched-list past">{past.slice(0, 30).map(item)}</ul>
-            </>
-          )}
-        </>
+        <CalendarView events={visible} view={range} canHearRecording={isMgr} />
       )}
     </div>
   );
