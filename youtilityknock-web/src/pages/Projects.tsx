@@ -5,6 +5,7 @@ import { ref as storageRef, uploadBytes, getDownloadURL } from "firebase/storage
 import { functions, storage } from "../firebase";
 import { useAuth } from "../auth/AuthContext";
 import { batteryContent } from "../lib/batteries";
+import { isARSupported, captureARPlacement } from "../lib/arPlacement";
 
 const MV_BASE = (import.meta.env.BASE_URL || "/").replace(/\/$/, "");
 const AR_GLB = `${MV_BASE}/battery.glb`;
@@ -272,6 +273,14 @@ function ProjectCapture({
   const [when, setWhen] = useState("");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
+  const [arOk, setArOk] = useState(false);
+
+  // Show the AR capture button only on a device whose hardware supports ARKit.
+  useEffect(() => {
+    let alive = true;
+    void isARSupported().then((ok) => { if (alive) setArOk(ok); });
+    return () => { alive = false; };
+  }, []);
 
   const addPlacementFiles = (files?: FileList | null) => {
     if (!files || !files.length) return;
@@ -281,6 +290,15 @@ function ProjectCapture({
       for (const f of arr) { if (next.length >= 3) break; next.push({ file: f, note: "" }); }
       return next;
     });
+  };
+
+  // Launch the in-app AR placer; on capture, drop the framed photo into the list.
+  // The bundled model is battery.usdz (one shared model, tinted per product in
+  // the on-screen reference viewer — the AR view uses the geometry as-is).
+  const captureAR = async () => {
+    const file = await captureARPlacement("battery");
+    if (!file) return;
+    setPlacement((p) => (p.length >= 3 ? p : [...p, { file, note: "AR" }]));
   };
 
   const upload = async (key: string, file: File): Promise<string> => {
@@ -346,11 +364,15 @@ function ProjectCapture({
         </h2>
         <p className="muted small" style={{ marginTop: -6 }}>{project.customerName} · {project.address}</p>
 
-        {/* STEP 1 — placement photos (true in-app AR is planned for a later release) */}
+        {/* STEP 1 — placement photos (in-app AR capture on supported devices) */}
         {step === "placement" && (
           <>
             <p className="muted small">
-              Snap <strong>2–3 photos</strong> of where the <strong>{project.battery}</strong> will go — tap <strong>+ Add photo</strong> to take a new photo or choose from your library. The 3D model below is just a size reference. <span className="muted">({placement.length}/3)</span>
+              Capture <strong>2–3 photos</strong> of where the <strong>{project.battery}</strong> will go.{" "}
+              {arOk
+                ? <>Tap <strong>📷 Place in AR</strong> to drop the battery on the wall and snap it in place, or <strong>+ Add photo</strong> for a plain photo.</>
+                : <>Tap <strong>+ Add photo</strong> to take a new photo or choose from your library. The 3D model below is just a size reference.</>}
+              {" "}<span className="muted">({placement.length}/3)</span>
             </p>
             <div style={{ marginBottom: 12, borderRadius: 12, overflow: "hidden", border: "1px solid rgba(255,255,255,0.1)", background: "rgba(8,5,18,0.4)" }}>
               <BatteryAR accent={batteryContent(project.batteryProductId || "").accent} />
@@ -368,9 +390,15 @@ function ProjectCapture({
                 // iOS WKWebView than a programmatic input.click() (which is often
                 // blocked). No `capture` attr → the picker offers Take Photo OR
                 // Photo Library.
-                <label htmlFor="placement-photo-input" className="btn primary sm" style={{ width: 96, height: 96, display: "flex", alignItems: "center", justifyContent: "center", textAlign: "center", cursor: "pointer", lineHeight: 1.2 }}>
+                <label htmlFor="placement-photo-input" className="btn ghost sm" style={{ width: 96, height: 96, display: "flex", alignItems: "center", justifyContent: "center", textAlign: "center", cursor: "pointer", lineHeight: 1.2 }}>
                   + Add photo
                 </label>
+              )}
+              {arOk && placement.length < 3 && (
+                <button onClick={captureAR} className="btn primary sm" style={{ width: 96, height: 96, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", textAlign: "center", cursor: "pointer", lineHeight: 1.2, gap: 4 }}>
+                  <span style={{ fontSize: 20 }}>📷</span>
+                  Place in AR
+                </button>
               )}
               <input id="placement-photo-input" type="file" accept="image/*" multiple hidden onChange={(e) => { addPlacementFiles(e.target.files); e.currentTarget.value = ""; }} />
             </div>

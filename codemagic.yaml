@@ -139,6 +139,11 @@ workflows:
           # build if GOOGLE_SERVICE_INFO_PLIST_B64 is missing (so a build that
           # would crash at launch is never shipped). See STORE_DEPLOYMENT.md.
           bash scripts/ios-push-setup.sh
+      - name: Inject in-app AR plugin (ARKit)
+        script: |
+          # Copies the AR battery-placement plugin (youtilityknock-web/ios-src)
+          # into the generated project and registers it on the App target.
+          bash scripts/ios-ar-setup.sh
       - name: Install CocoaPods
         script: |
           cd youtilityknock-web/ios/App && pod install

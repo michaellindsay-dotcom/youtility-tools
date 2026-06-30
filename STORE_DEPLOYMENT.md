@@ -174,6 +174,27 @@ yourself a chat/DM while the app is backgrounded.
 > `com.google.gms:google-services` Gradle plugin in the `android-release`
 > workflow — mirror of the iOS steps above.
 
+## In-app AR battery placement (iOS)
+
+On the project capture screen, supported iPhones show a **📷 Place in AR**
+button: the rep points the camera at the wall, drops the battery model on it
+(drag to move, pinch to resize, two-finger rotate), and taps **Capture** — the
+framed AR photo drops straight into the placement photos. Devices without ARKit
+just see the normal **+ Add photo** flow.
+
+Nothing to configure — it's wired automatically on every `ios-release` build:
+
+- Native sources live in [`youtilityknock-web/ios-src/`](./youtilityknock-web/ios-src/)
+  (`ARPlacementPlugin.swift`, `ARPlacementViewController.swift`,
+  `ARPlacementPlugin.m`) and are injected by `scripts/ios-ar-setup.sh`.
+- The 3D model is the same `youtilityknock-web/public/battery.usdz` the web app
+  ships; Capacitor bundles it into the app automatically. To use a more
+  detailed model, replace that `.usdz` (keep the filename) and rebuild — no code
+  change needed.
+
+> ⚠️ ARKit only runs on a **physical device** (not the simulator), so this can
+> only be verified from a TestFlight build on a real iPhone.
+
 ## Building / testing locally
 
 ```bash
