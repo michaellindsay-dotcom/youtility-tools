@@ -5,7 +5,6 @@ import { useAuth } from "../auth/AuthContext";
 import { Link } from "react-router-dom";
 import CalendarBanner from "../components/CalendarBanner";
 import CalendarView from "../components/CalendarView";
-import { APPT_LABEL, APPT_COLOR } from "../lib/closerDispositions";
 import type { EventType, ScheduleEvent } from "../types";
 
 const META: Record<EventType, { label: string; icon: string }> = {
@@ -62,19 +61,26 @@ export default function Schedule() {
   }, [profile]);
 
   const isMgr = role === "admin" || role === "manager";
-  // Appointments I set for someone else to close (exclude self-assigned).
-  const routedOut = routed
-    .filter((e) => e.closerUid && e.closerUid !== profile?.uid)
-    .sort((a, b) => b.startAt - a.startAt);
-  // Distinct assignees seen in the agenda (managers/admins can filter by rep).
+  // My calendar feed = events I can see (mine, or my downline via visibilityPath
+  // for managers) MERGED with appointments I personally SET that were routed to
+  // a closer — so a setter sees their booked appointments and the closer they
+  // went to, even though the closer owns them. Deduped by id. This is scoped to
+  // "mine or my downline" — never the whole company.
+  const feed = (() => {
+    const byId = new Map<string, ScheduleEvent>();
+    for (const e of events) byId.set(e.id, e);
+    for (const e of routed) if (!byId.has(e.id)) byId.set(e.id, e);
+    return Array.from(byId.values());
+  })();
+  // Distinct assignees seen in the feed (managers/admins can filter by rep).
   const assignees = isMgr
-    ? Array.from(new Map(events.filter((e) => e.userId).map((e) => [e.userId, e.userName || e.userId])).entries())
+    ? Array.from(new Map(feed.filter((e) => e.userId).map((e) => [e.userId, e.userName || e.userId])).entries())
     : [];
   // Events to show on the calendar (filtered by type + assignee; the calendar
   // owns its own date navigation, so no time window here).
-  const visible = events.filter((e) =>
+  const visible = feed.filter((e) =>
     (filter === "all" || e.type === filter) &&
-    (assignee === "all" || e.userId === assignee)
+    (assignee === "all" || e.userId === assignee || e.closerUid === assignee)
   );
 
   return (
@@ -87,35 +93,6 @@ export default function Schedule() {
       </div>
 
       <CalendarBanner />
-
-      {routedOut.length > 0 && (
-        <div className="card" style={{ marginBottom: 16 }}>
-          <h3 style={{ marginTop: 0, marginBottom: 8 }}>🤝 Appointments you set</h3>
-          <p className="muted small" style={{ marginTop: 0, marginBottom: 10 }}>
-            Routed to a closer — here's where each one stands.
-          </p>
-          <ul className="sched-list">
-            {routedOut.map((e) => (
-              <li key={e.id} className="sched-item">
-                <span className="sched-ico">🤝</span>
-                <div className="sched-body">
-                  <div className="sched-title">
-                    {e.title || e.address || "Appointment"}
-                    <span className="role-badge" style={{ background: APPT_COLOR[e.apptStatus || "scheduled"], color: "#06121f" }}>
-                      {APPT_LABEL[e.apptStatus || "scheduled"]}
-                    </span>
-                  </div>
-                  <div className="muted small">
-                    {new Date(e.startAt).toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}
-                    {e.closerName ? ` · closer: ${e.closerName}` : ""}
-                  </div>
-                  {e.apptNotes && <div className="muted small">📝 {e.apptNotes}</div>}
-                </div>
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
 
       <div className="type-pills" style={{ marginBottom: 10 }}>
         {(["day", "week", "month"] as const).map((r) => (
@@ -165,7 +142,13 @@ export default function Schedule() {
       {loading ? (
         <div className="muted">Loading…</div>
       ) : (
-        <CalendarView events={visible} view={range} canHearRecording={isMgr} />
+        <CalendarView
+          events={visible}
+          view={range}
+          canHearRecording={isMgr}
+          me={profile ? { uid: profile.uid, displayName: profile.displayName || "" } : null}
+          companyId={companyId}
+        />
       )}
     </div>
   );

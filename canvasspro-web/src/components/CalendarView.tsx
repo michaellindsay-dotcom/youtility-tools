@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useState } from "react";
-import { collection, getDocs, limit, orderBy, query, where } from "firebase/firestore";
+import { addDoc, collection, doc, getDocs, limit, orderBy, query, setDoc, where } from "firebase/firestore";
 import { getDownloadURL, ref as storageRef } from "firebase/storage";
 import { db, storage } from "../firebase";
 import { APPT_LABEL } from "../lib/closerDispositions";
 import type { ScheduleEvent } from "../types";
 
 type View = "day" | "week" | "month";
+type Me = { uid: string; displayName: string } | null;
 const DAY = 86_400_000;
 const HOUR_START = 6;   // 6 AM
 const HOUR_END = 21;    // 9 PM (inclusive row)
@@ -25,13 +26,23 @@ function colorFor(e: ScheduleEvent): string {
 function assigneeName(e: ScheduleEvent): string { return e.closerName || e.userName || "Unassigned"; }
 const fmtTime = (ms: number) => new Date(ms).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
 const hourLabel = (h: number) => new Date(2000, 0, 1, h).toLocaleTimeString([], { hour: "numeric" });
+// An appointment routed to a closer that the closer hasn't dispositioned yet
+// (still "scheduled" / blank). Overdue = its time has passed and it's still open.
+function isUndispositioned(e: ScheduleEvent): boolean {
+  return e.type === "appointment" && !!e.closerUid && (!e.apptStatus || e.apptStatus === "scheduled");
+}
+function isOverdue(e: ScheduleEvent): boolean {
+  return isUndispositioned(e) && e.startAt < Date.now();
+}
 
 export default function CalendarView({
-  events, view, canHearRecording,
+  events, view, canHearRecording, me, companyId,
 }: {
   events: ScheduleEvent[];
   view: View;
   canHearRecording: boolean;
+  me: Me;
+  companyId: string | null;
 }) {
   const [anchor, setAnchor] = useState(() => startOfDay(Date.now()));
   const [selected, setSelected] = useState<ScheduleEvent | null>(null);
@@ -72,26 +83,30 @@ export default function CalendarView({
       {view === "month" && <MonthGrid monthMs={startOfMonth(anchor)} events={events} onPick={setSelected} onOpenDay={openDay} />}
 
       {selected && (
-        <EventPopout ev={selected} canHearRecording={canHearRecording} onClose={() => setSelected(null)} />
+        <EventPopout ev={selected} canHearRecording={canHearRecording} me={me} companyId={companyId} onClose={() => setSelected(null)} />
       )}
     </div>
   );
 }
 
-// One block shown inside a time cell.
+// One block shown inside a time cell. An overdue, undispositioned appointment
+// gets a red ring + ⚠ so a setter can spot at a glance that the closer hasn't
+// recorded an outcome yet.
 function Block({ e, onPick }: { e: ScheduleEvent; onPick: (e: ScheduleEvent) => void }) {
+  const overdue = isOverdue(e);
   return (
     <button
       type="button"
       onClick={() => onPick(e)}
-      title={`${fmtTime(e.startAt)} · ${e.title} · ${assigneeName(e)}`}
+      title={`${fmtTime(e.startAt)} · ${e.title} · ${assigneeName(e)}${overdue ? " · ⚠ not dispositioned" : ""}`}
       style={{
         display: "block", width: "100%", textAlign: "left", border: "none", borderRadius: 6,
         padding: "3px 6px", marginBottom: 3, cursor: "pointer", color: "#06121f",
         background: colorFor(e), fontSize: 11, lineHeight: 1.25, overflow: "hidden",
+        boxShadow: overdue ? "inset 0 0 0 2px #ef4444" : undefined,
       }}
     >
-      <strong>{fmtTime(e.startAt)}</strong> {e.title}
+      <strong>{fmtTime(e.startAt)}</strong> {overdue ? "⚠ " : ""}{e.title}
       <div style={{ opacity: 0.85 }}>{assigneeName(e)}</div>
     </button>
   );
@@ -174,10 +189,47 @@ function MonthGrid({ monthMs, events, onPick, onOpenDay }: { monthMs: number; ev
 }
 
 // Pop-out appointment details. For managers, fetches + plays the lead's pitch
-// recording so they can hear the door when there aren't written notes.
-function EventPopout({ ev, canHearRecording, onClose }: { ev: ScheduleEvent; canHearRecording: boolean; onClose: () => void }) {
+// recording so they can hear the door when there aren't written notes. When the
+// appointment is routed to a different closer, the viewer can DM that closer to
+// chase the outcome — handy when it's overdue and still undispositioned.
+function EventPopout({ ev, canHearRecording, me, companyId, onClose }: { ev: ScheduleEvent; canHearRecording: boolean; me: Me; companyId: string | null; onClose: () => void }) {
   const [audioUrl, setAudioUrl] = useState<string | null>(null);
   const [recState, setRecState] = useState<"idle" | "loading" | "none">(canHearRecording && ev.leadId ? "loading" : "none");
+  const undisp = isUndispositioned(ev);
+  const overdue = isOverdue(ev);
+  // The viewer can message the closer when there IS a closer and it isn't them.
+  const canMessageCloser = !!(me && ev.closerUid && ev.closerName && ev.closerUid !== me.uid);
+  const [dmText, setDmText] = useState(
+    `Hey ${ev.closerName || "there"}, what's the status on the ${new Date(ev.startAt).toLocaleDateString([], { month: "short", day: "numeric" })} appointment${ev.title ? ` — ${ev.title}` : ""}?`
+  );
+  const [dmState, setDmState] = useState<"idle" | "sending" | "sent" | "error">("idle");
+
+  async function messageCloser() {
+    if (!me || !ev.closerUid || !ev.closerName) return;
+    const body = dmText.trim();
+    if (!body) return;
+    setDmState("sending");
+    try {
+      const cid = [me.uid, ev.closerUid].sort().join("__");
+      await setDoc(
+        doc(db, "dms", cid),
+        {
+          members: [me.uid, ev.closerUid],
+          memberNames: { [me.uid]: me.displayName, [ev.closerUid]: ev.closerName },
+          companyId: companyId || "",
+          lastMessage: body,
+          lastAt: Date.now(),
+        },
+        { merge: true }
+      );
+      await addDoc(collection(db, "dms", cid, "messages"), {
+        channelId: cid, userId: me.uid, userName: me.displayName, text: body, createdAt: Date.now(),
+      });
+      setDmState("sent");
+    } catch {
+      setDmState("error");
+    }
+  }
 
   useEffect(() => {
     let cancelled = false;
@@ -204,13 +256,44 @@ function EventPopout({ ev, canHearRecording, onClose }: { ev: ScheduleEvent; can
           <button className="btn ghost sm" onClick={onClose}>✕</button>
         </div>
         <div className="muted small" style={{ marginTop: 4 }}>{fmt(ev.startAt)}{ev.durationMin ? ` · ${ev.durationMin} min` : ""}</div>
+
+        {undisp && (
+          <div style={{ marginTop: 10, borderRadius: 8, padding: "8px 10px", background: "rgba(239,68,68,.12)", border: "1px solid rgba(239,68,68,.5)", color: "#fecaca", fontSize: 13 }}>
+            ⚠ {overdue ? "This appointment is past due and the closer hasn't dispositioned it yet." : "Not dispositioned by the closer yet."}
+          </div>
+        )}
+
         <dl className="fields" style={{ marginTop: 10 }}>
           <div className="field-row"><dt>Assigned to</dt><dd>👤 {ev.userName || "—"}</dd></div>
           {ev.closerName && <div className="field-row"><dt>Closer</dt><dd>{ev.closerName}</dd></div>}
           {ev.address && <div className="field-row"><dt>Address</dt><dd>{ev.address}</dd></div>}
-          {ev.apptStatus && <div className="field-row"><dt>Status</dt><dd>{APPT_LABEL[ev.apptStatus] || ev.apptStatus}</dd></div>}
+          <div className="field-row"><dt>Status</dt><dd>{ev.apptStatus ? (APPT_LABEL[ev.apptStatus] || ev.apptStatus) : "Scheduled — awaiting closer"}</dd></div>
         </dl>
         {(ev.notes || ev.apptNotes) && <div className="muted small" style={{ marginTop: 6 }}>📝 {ev.apptNotes || ev.notes}</div>}
+
+        {canMessageCloser && (
+          <div style={{ marginTop: 12, borderTop: "1px solid #21314a", paddingTop: 10 }}>
+            <div className="muted small" style={{ marginBottom: 6 }}>💬 Message {ev.closerName} for the status</div>
+            {dmState === "sent" ? (
+              <div className="muted small" style={{ color: "#86efac" }}>✓ Sent to {ev.closerName}. Reply lands in Team Chat → Direct messages.</div>
+            ) : (
+              <>
+                <textarea
+                  value={dmText}
+                  onChange={(e) => setDmText(e.target.value)}
+                  rows={2}
+                  style={{ width: "100%", resize: "vertical", borderRadius: 8, padding: 8, background: "#0b1727", color: "#e6eef8", border: "1px solid #21314a", fontSize: 13 }}
+                />
+                <div className="row" style={{ justifyContent: "flex-end", marginTop: 6, gap: 8 }}>
+                  {dmState === "error" && <span className="muted small" style={{ color: "#fca5a5" }}>Couldn't send — try again.</span>}
+                  <button className="btn primary sm" disabled={dmState === "sending" || !dmText.trim()} onClick={messageCloser}>
+                    {dmState === "sending" ? "Sending…" : "Send to closer"}
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+        )}
 
         {canHearRecording && (
           <div style={{ marginTop: 12, borderTop: "1px solid #21314a", paddingTop: 10 }}>
