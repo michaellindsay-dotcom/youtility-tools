@@ -1,5 +1,6 @@
 import type React from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import LivingEnergyScene from "./LivingEnergyScene";
 import {
   FINANCE_OPTIONS,
@@ -543,7 +544,10 @@ export default function SolarProposalShow(props: SolarShowProps) {
   const company = companyName?.trim() || "";
   const coverPhoto = homeImage || PHOTO.solar;
 
-  return (
+  // Portal to <body> so the full-screen presentation isn't trapped by an
+  // ancestor with backdrop-filter/transform (which would confine this
+  // position:fixed overlay below the app header and cut off its top content).
+  return createPortal(
     <div
       className="sps-root"
       role="dialog"
@@ -988,7 +992,8 @@ export default function SolarProposalShow(props: SolarShowProps) {
           />
         ))}
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }
 
@@ -1335,6 +1340,8 @@ const CSS = `
   position:fixed;inset:0;z-index:5000;color:var(--text);
   font-family:var(--font-body);
   background:#080512;
+  /* Clear the status bar / notch so the title and close button aren't cut off. */
+  padding-top:env(safe-area-inset-top);
   overflow:hidden;display:flex;flex-direction:column;
   -webkit-font-smoothing:antialiased;}
 

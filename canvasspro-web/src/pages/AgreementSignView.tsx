@@ -33,6 +33,10 @@ export default function AgreementSignView() {
   const params = new URLSearchParams(window.location.search);
   const id = params.get("agreement") || "";
   const t = params.get("t") || "";
+  // "rep" mode = the rep is signing on their own device, so after signing send
+  // them straight into the site survey rather than the customer confirmation.
+  const isRep = params.get("mode") === "rep";
+  const surveyUrl = `${window.location.origin}/app/projects?capture=${encodeURIComponent(id)}`;
 
   const [state, setState] = useState<"loading" | "ready" | "error" | "done">("loading");
   const [ag, setAg] = useState<Agreement | null>(null);
@@ -70,6 +74,12 @@ export default function AgreementSignView() {
         functions,
         "signBatteryAgreement"
       )({ id, t, name: name.trim(), signatureDataUrl: sig || undefined });
+      // Rep's own device → go straight to the site-survey / AR capture for this
+      // deal. (Customers signing from an emailed link just see "all set".)
+      if (isRep) {
+        window.location.href = surveyUrl;
+        return;
+      }
       setState("done");
     } catch (e) {
       setErr((e as Error)?.message || "Couldn't record your signature. Please try again.");
@@ -96,13 +106,13 @@ export default function AgreementSignView() {
           {ag?.companyName ? ` and to ${ag.companyName}` : ""}. Your rep will be in touch about scheduling your site survey
           and installation.
         </p>
-        {/* Rep continues into the site-survey flow on the same device. */}
-        <a
-          href={`${window.location.origin}/app/projects?capture=${encodeURIComponent(id)}`}
-          style={{ ...repBtn }}
-        >
-          Rep: continue to site survey →
-        </a>
+        {/* Rep continues into the site-survey flow on the same device. Hidden
+            for customers signing from an emailed link (they have no app login). */}
+        {isRep && (
+          <a href={surveyUrl} style={{ ...repBtn }}>
+            Continue to site survey →
+          </a>
+        )}
       </Shell>
     );
 
