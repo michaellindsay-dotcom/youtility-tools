@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useSearchParams } from "react-router-dom";
+import { createPortal } from "react-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
+import AgreementSignView from "./AgreementSignView";
 import { addDoc, collection, doc, getDoc, getDocs, limit, onSnapshot, query, where } from "firebase/firestore";
 import { httpsCallable } from "firebase/functions";
 import { db, functions } from "../firebase";
@@ -405,6 +407,10 @@ interface SolarDocData {
 export default function BatteryTool() {
   const { profile, companyId, role, company } = useAuth();
   const [searchParams] = useSearchParams();
+  const navigate = useNavigate();
+  // When the rep signs on this device, show the agreement sign view as an in-app
+  // overlay (never navigate out to the web URL — that drops the native session).
+  const [signOverlay, setSignOverlay] = useState<{ id: string; token: string } | null>(null);
 
   // 1. Customer
   const [customerName, setCustomerName] = useState("");
@@ -985,7 +991,7 @@ export default function BatteryTool() {
     setCloseMsg(null);
     try {
       const q = new URLSearchParams(window.location.search);
-      const { data } = await httpsCallable<{ delivery: string } & Record<string, unknown>, { ok?: boolean; signUrl?: string }>(
+      const { data } = await httpsCallable<{ delivery: string } & Record<string, unknown>, { ok?: boolean; signUrl?: string; id?: string; token?: string }>(
         functions,
         "createBatteryAgreement"
       )({
@@ -999,12 +1005,13 @@ export default function BatteryTool() {
         battery: closeSel.battery,
         payment: { method: closeSel.method, systemPrice: closeSel.systemPrice, finance: closeSel.finance, cash: closeSel.cash },
       });
-      if (delivery === "device" && data?.signUrl) {
-        // mode=rep marks this as the rep's own device so that, once signed, the
-        // app sends the rep straight into the site survey instead of the
-        // customer "all set" screen.
-        const sep = data.signUrl.includes("?") ? "&" : "?";
-        window.location.href = `${data.signUrl}${sep}mode=rep`; // hand the tablet over to sign now
+      if (delivery === "device" && data?.id && data?.token) {
+        // Sign in-app as an overlay — DON'T navigate to the web signUrl, which
+        // would leave the native bundle and drop the rep's session ("account not
+        // active"). Once signed we route straight to the site survey in-app.
+        setCloseBusy("");
+        setCloseSel(null);
+        setSignOverlay({ id: data.id, token: data.token });
         return;
       }
       setCloseMsg({ ok: true, text: `Agreement sent to ${homeownerEmail} to sign.` });
@@ -1954,6 +1961,23 @@ export default function BatteryTool() {
         sungageApplyUrl={company?.sungageApplyUrl}
         onLetsDoIt={handleLetsDoIt}
       />
+
+      {/* In-app agreement signing (rep's device). Portaled so its fixed overlay
+          isn't trapped by a blurred ancestor. On success we route to the site
+          survey for this deal — all without leaving the native app. */}
+      {signOverlay && createPortal(
+        <AgreementSignView
+          idProp={signOverlay.id}
+          tProp={signOverlay.token}
+          embedded
+          onSigned={() => {
+            const pid = signOverlay.id;
+            setSignOverlay(null);
+            navigate(`/projects?capture=${encodeURIComponent(pid)}`);
+          }}
+        />,
+        document.body
+      )}
 
       {/* Finalize: create the agreement & choose how to sign. */}
       {closeSel && (
