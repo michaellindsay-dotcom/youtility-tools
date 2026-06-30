@@ -3,6 +3,7 @@ import { Outlet } from "react-router-dom";
 import Sidebar from "./Sidebar";
 import Topbar from "./Topbar";
 import ChatFab from "./ChatFab";
+import LocationGate from "./LocationGate";
 import { usePresenceHeartbeat } from "../lib/presence";
 import { NavContext } from "./NavContext";
 
@@ -43,6 +44,7 @@ export default function Layout() {
           </main>
         </div>
         <ChatFab />
+        <LocationGate />
       </div>
     </NavContext.Provider>
   );
