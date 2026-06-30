@@ -538,6 +538,19 @@ export default function SolarProposalShow(props: SolarShowProps) {
     return () => el.removeEventListener("load", apply);
   }, [mvState, activeKey, active?.accent, selectedId]);
 
+  // Lock the page behind the full-screen presentation so it can't pan/rubber-band
+  // in any direction while the proposal is open (only the slide content scrolls).
+  useEffect(() => {
+    if (!open) return;
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    document.body.classList.add("modal-open");
+    return () => {
+      document.body.style.overflow = prevOverflow;
+      document.body.classList.remove("modal-open");
+    };
+  }, [open]);
+
   if (!open) return null;
 
   const name = customerName?.trim() || "Your Home";

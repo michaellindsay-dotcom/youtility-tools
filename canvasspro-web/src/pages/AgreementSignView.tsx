@@ -29,13 +29,27 @@ type Agreement = {
   signedName?: string;
 };
 
-export default function AgreementSignView() {
+export default function AgreementSignView({
+  idProp,
+  tProp,
+  embedded,
+  onSigned,
+}: {
+  // When embedded inside the app (rep signing on their own device) the host
+  // passes the id/token directly and an onSigned callback so we navigate with
+  // React Router and never leave the native bundle. Standalone (emailed link)
+  // reads from the URL and uses a full redirect.
+  idProp?: string;
+  tProp?: string;
+  embedded?: boolean;
+  onSigned?: () => void;
+} = {}) {
   const params = new URLSearchParams(window.location.search);
-  const id = params.get("agreement") || "";
-  const t = params.get("t") || "";
+  const id = idProp || params.get("agreement") || "";
+  const t = tProp || params.get("t") || "";
   // "rep" mode = the rep is signing on their own device, so after signing send
   // them straight into the site survey rather than the customer confirmation.
-  const isRep = params.get("mode") === "rep";
+  const isRep = embedded || params.get("mode") === "rep";
   const surveyUrl = `${window.location.origin}/app/projects?capture=${encodeURIComponent(id)}`;
 
   const [state, setState] = useState<"loading" | "ready" | "error" | "done">("loading");
@@ -76,6 +90,10 @@ export default function AgreementSignView() {
       )({ id, t, name: name.trim(), signatureDataUrl: sig || undefined });
       // Rep's own device → go straight to the site-survey / AR capture for this
       // deal. (Customers signing from an emailed link just see "all set".)
+      if (embedded && onSigned) {
+        onSigned(); // in-app React Router navigation — stays in the native app
+        return;
+      }
       if (isRep) {
         window.location.href = surveyUrl;
         return;
@@ -108,11 +126,15 @@ export default function AgreementSignView() {
         </p>
         {/* Rep continues into the site-survey flow on the same device. Hidden
             for customers signing from an emailed link (they have no app login). */}
-        {isRep && (
+        {isRep && (embedded && onSigned ? (
+          <button onClick={onSigned} style={{ ...repBtn, border: 0, cursor: "pointer" }}>
+            Continue to site survey →
+          </button>
+        ) : (
           <a href={surveyUrl} style={{ ...repBtn }}>
             Continue to site survey →
           </a>
-        )}
+        ))}
       </Shell>
     );
 
