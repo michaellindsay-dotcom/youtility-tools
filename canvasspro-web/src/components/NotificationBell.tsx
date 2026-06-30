@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { useNavigate } from "react-router-dom";
 import {
   collection,
@@ -33,6 +34,7 @@ export default function NotificationBell() {
   const [items, setItems] = useState<AppNotification[]>([]);
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (!user) return;
@@ -50,7 +52,10 @@ export default function NotificationBell() {
   // Close on outside click.
   useEffect(() => {
     const onDoc = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+      const t = e.target as Node;
+      // The panel is portaled out of `.notif`, so check it separately.
+      if (ref.current?.contains(t) || panelRef.current?.contains(t)) return;
+      setOpen(false);
     };
     document.addEventListener("mousedown", onDoc);
     return () => document.removeEventListener("mousedown", onDoc);
@@ -81,8 +86,8 @@ export default function NotificationBell() {
         🔔
         {unread > 0 && <span className="notif-badge">{unread > 99 ? "99+" : unread}</span>}
       </button>
-      {open && (
-        <div className="notif-panel">
+      {open && createPortal(
+        <div className="notif-panel" ref={panelRef}>
           <div className="notif-head">
             <strong>Notifications</strong>
             {unread > 0 && (
@@ -111,7 +116,8 @@ export default function NotificationBell() {
               ))}
             </ul>
           )}
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   );

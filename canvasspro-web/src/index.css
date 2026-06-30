@@ -2418,17 +2418,20 @@ body.modal-open .chat-fab-global { display: none; }
   border: 2px solid var(--bg-0);
 }
 .notif-panel {
-  position: absolute;
-  top: 46px;
-  right: 0;
-  width: 340px;
-  max-height: 460px;
+  /* Fixed + portaled to <body> so it's pinned to the top-right of the screen
+     and can't be clipped by the header or run off the left edge. */
+  position: fixed;
+  top: calc(env(safe-area-inset-top) + 56px);
+  right: max(10px, env(safe-area-inset-right));
+  width: min(340px, calc(100vw - 20px));
+  max-height: min(70vh, 460px);
   overflow-y: auto;
+  overscroll-behavior: contain;
   background: var(--bg-1);
   border: 1px solid var(--line-hi);
   border-radius: var(--radius);
   box-shadow: 0 20px 50px rgba(0, 0, 0, 0.5);
-  z-index: 50;
+  z-index: 3000;
 }
 .notif-head {
   display: flex;
