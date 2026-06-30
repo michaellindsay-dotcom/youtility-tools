@@ -272,7 +272,6 @@ function ProjectCapture({
   const [when, setWhen] = useState("");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
-  const placementInput = useRef<HTMLInputElement | null>(null);
 
   const addPlacementFiles = (files?: FileList | null) => {
     if (!files || !files.length) return;
@@ -351,7 +350,7 @@ function ProjectCapture({
         {step === "placement" && (
           <>
             <p className="muted small">
-              Tap <strong>View in your space</strong> below to preview your <strong>{project.battery}</strong> in AR and snap photos of where it goes. Then tap <strong>+ Add photo</strong> and pick them from your library (or take a new one). <strong>2–3 photos.</strong> <span className="muted">({placement.length}/3)</span>
+              Snap <strong>2–3 photos</strong> of where the <strong>{project.battery}</strong> will go — tap <strong>+ Add photo</strong> to take a new photo or choose from your library. The 3D model below is just a size reference. <span className="muted">({placement.length}/3)</span>
             </p>
             <div style={{ marginBottom: 12, borderRadius: 12, overflow: "hidden", border: "1px solid rgba(255,255,255,0.1)", background: "rgba(8,5,18,0.4)" }}>
               <BatteryAR accent={batteryContent(project.batteryProductId || "").accent} />
@@ -365,11 +364,15 @@ function ProjectCapture({
                 </div>
               ))}
               {placement.length < 3 && (
-                <button className="btn primary sm" style={{ width: 96, height: 96 }} onClick={() => placementInput.current?.click()}>+ Add photo</button>
+                // A <label> that opens the file input is far more reliable in the
+                // iOS WKWebView than a programmatic input.click() (which is often
+                // blocked). No `capture` attr → the picker offers Take Photo OR
+                // Photo Library.
+                <label htmlFor="placement-photo-input" className="btn primary sm" style={{ width: 96, height: 96, display: "flex", alignItems: "center", justifyContent: "center", textAlign: "center", cursor: "pointer", lineHeight: 1.2 }}>
+                  + Add photo
+                </label>
               )}
-              {/* No `capture` attribute → the picker offers Library OR Camera, so the
-                  rep can add the photos they took inside AR (saved to the camera roll). */}
-              <input ref={placementInput} type="file" accept="image/*" multiple hidden onChange={(e) => { addPlacementFiles(e.target.files); e.currentTarget.value = ""; }} />
+              <input id="placement-photo-input" type="file" accept="image/*" multiple hidden onChange={(e) => { addPlacementFiles(e.target.files); e.currentTarget.value = ""; }} />
             </div>
             {err && <p className="muted small" style={{ color: "#ef4444" }}>{err}</p>}
             <button className="btn primary block" style={{ marginTop: 14 }} onClick={goToChoice} disabled={busy || placement.length < 2}>
