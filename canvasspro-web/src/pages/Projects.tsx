@@ -342,11 +342,11 @@ function ProjectCapture({
       <div onClick={(e) => e.stopPropagation()} style={sheet}>
         <button onClick={() => !busy && onClose()} aria-label="Close" style={closeX}>✕</button>
         <h2 className="section-h" style={{ marginTop: 0 }}>
-          {step === "survey" ? "Site survey" : step === "schedule" ? "Schedule site survey" : "Place the battery"}
+          {step === "survey" ? "Site survey" : step === "schedule" ? "Schedule site survey" : "Placement photos"}
         </h2>
         <p className="muted small" style={{ marginTop: -6 }}>{project.customerName} · {project.address}</p>
 
-        {/* STEP 1 — AR placement photos */}
+        {/* STEP 1 — placement photos (true in-app AR is planned for a later release) */}
         {step === "placement" && (
           <>
             <p className="muted small">
