@@ -666,6 +666,72 @@ export const inviteUser = onCall(async (request) => {
 });
 
 // ───────────────────────────────────────────────────────────────────────────
+// relinkMyProfile — self-heal a login whose profile lives under a DIFFERENT
+// document ID than this Auth UID. The app loads a profile at users/<uid>, but
+// an imported account (or one whose Auth user was deleted and recreated) has a
+// profile keyed by some other id while still carrying the right email +
+// companyId. Such a user authenticates fine but lands on "Account not set up"
+// because users/<uid> doesn't exist. Here we find their orphaned profile BY
+// THEIR OWN VERIFIED EMAIL and re-key it onto this UID, then rebuild the org
+// chart so their managers/reports stay connected. Runs as the signed-in user;
+// only ever touches a profile that matches their own Auth email.
+// ───────────────────────────────────────────────────────────────────────────
+export const relinkMyProfile = onCall(async (request) => {
+  if (!request.auth) throw new HttpsError("unauthenticated", "Sign in required.");
+  const uid = request.auth.uid;
+
+  // Already linked — nothing to do (idempotent; safe to call on every login).
+  const mine = await db.doc(`users/${uid}`).get();
+  if (mine.exists && mine.data()?.companyId) return { ok: true, alreadyLinked: true };
+
+  // Authoritative email from the Auth record (not a spoofable client claim).
+  const authUser = await getAuth().getUser(uid).catch(() => null);
+  const email = (authUser?.email || "").trim().toLowerCase();
+  if (!email) return { ok: false, reason: "no_email" };
+
+  // Orphaned profile(s) carrying this email under a different doc id.
+  const byEmail = await db.collection("users").where("email", "==", authUser!.email).get();
+  const orphans = byEmail.docs.filter((d) => d.id !== uid && d.data()?.companyId && !d.data()?.relinkedTo);
+  if (!orphans.length) return { ok: false, reason: "no_existing_profile" };
+  // More than one distinct profile → ambiguous; don't guess, let an admin sort it.
+  if (orphans.length > 1) return { ok: false, reason: "ambiguous", count: orphans.length };
+
+  const orphan = orphans[0];
+  const data = orphan.data();
+  const companyId = data.companyId as string;
+  const oldId = orphan.id;
+
+  // Re-key the profile onto this UID (preserve provisioning + history fields).
+  await db.doc(`users/${uid}`).set(
+    { ...data, uid, disabled: false, relinkedFrom: oldId, relinkedAt: Date.now() },
+    { merge: true }
+  );
+  // Retire the orphan so it stops showing as a duplicate active account.
+  await orphan.ref.set({ relinkedTo: uid, disabled: true, updatedAt: Date.now() }, { merge: true });
+
+  // Re-point anyone whose manager chain referenced the old id, so this user's
+  // reports still ladder up to them after the re-key.
+  const company = await db.collection("users").where("companyId", "==", companyId).get();
+  let batch = db.batch();
+  let ops = 0;
+  for (const d of company.docs) {
+    const u = d.data();
+    const patch: Record<string, unknown> = {};
+    if (u.managerId === oldId) patch.managerId = uid;
+    if (u.closerManagerId === oldId) patch.closerManagerId = uid;
+    if (Object.keys(patch).length) { batch.update(d.ref, patch); if (++ops >= 450) { await batch.commit(); batch = db.batch(); ops = 0; } }
+  }
+  if (ops) await batch.commit();
+
+  // Mirror access claims and recompute every path/visibility from the links.
+  await getAuth().setCustomUserClaims(uid, { role: (data.role as string) || "user", companyId });
+  await rebuildCompanyHierarchy(companyId);
+
+  logger.info(`Relinked profile ${oldId} → ${uid} (${email}) in ${companyId}`);
+  return { ok: true, companyId, relinkedFrom: oldId };
+});
+
+// ───────────────────────────────────────────────────────────────────────────
 // Company role catalog (titles on a base tier). Company admin / super-admin.
 // ───────────────────────────────────────────────────────────────────────────
 export const createRole = onCall(async (request) => {

@@ -21,15 +21,30 @@ export default function ProtectedRoute({ children, roles }: Props) {
     return <Navigate to="/login" state={{ from: location }} replace />;
   }
   // Signed in but no company/profile — account not provisioned by an admin.
+  // We show the signed-in email + UID so an admin can tell apart the two causes:
+  //   • the account was genuinely never provisioned, or
+  //   • a profile EXISTS in the console but under a different document ID than
+  //     this login's UID (an imported account, or an Auth user that was deleted
+  //     and recreated). The app loads the profile at users/<this UID>, so an
+  //     ID that doesn't match this UID is invisible to it even though the admin
+  //     console — which lists users by their companyId field — still shows it.
   if (noAccess) {
     return (
       <div className="auth-wrap">
         <div className="auth-card card" style={{ textAlign: "center" }}>
           <h2 style={{ border: 0 }}>Account not set up</h2>
           <p className="muted">
-            Your sign-in worked, but your account hasn't been added to a company yet.
-            Ask your administrator to provision your access in the admin console.
+            Your sign-in worked, but this login isn't linked to a company profile yet.
+            Ask your administrator to provision (or re-link) your access in the admin console.
           </p>
+          <div className="muted small" style={{ marginTop: 12, textAlign: "left", wordBreak: "break-all" }}>
+            <div>Signed in as: <strong>{user.email || "—"}</strong></div>
+            <div>Account ID: <code>{user.uid}</code></div>
+            <p style={{ marginTop: 8 }}>
+              Give your administrator the Account ID above — if a profile already
+              exists for you, it needs to be linked to this exact ID.
+            </p>
+          </div>
           <button className="btn block" style={{ marginTop: 16 }} onClick={() => logout()}>
             Sign out
           </button>
