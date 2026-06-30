@@ -11,25 +11,17 @@ export default function Layout() {
   usePresenceHeartbeat();
   const [navOpen, setNavOpen] = useState(false);
 
-  // On iOS the WKWebView reports env(safe-area-inset-*) as 0 right after the app
-  // shell mounts (e.g. on first login), so the fixed header renders OVER the
-  // status bar until something forces a re-layout. A plain resize event doesn't
-  // recompute the insets — but briefly toggling the viewport meta's viewport-fit
-  // does. Kick it a few times over the first second so the header settles below
-  // the status bar from the start (this also fixes the full-screen proposal).
+  // Nudge a reflow once the shell mounts so anything that measures the viewport
+  // (map, sticky bars) settles after the login→app transition. The status-bar
+  // placement itself is handled natively (StatusBar.setOverlaysWebView) in main.
   useEffect(() => {
-    const meta = document.querySelector('meta[name="viewport"]') as HTMLMetaElement | null;
-    const base = meta?.getAttribute("content") || "";
-    const kick = () => {
+    const fire = () => {
       void document.body.offsetHeight;
       window.dispatchEvent(new Event("resize"));
-      if (meta && base.includes("viewport-fit=cover")) {
-        meta.setAttribute("content", base.replace("viewport-fit=cover", "viewport-fit=auto"));
-        requestAnimationFrame(() => meta.setAttribute("content", base));
-      }
     };
-    const timers = [80, 350, 800].map((ms) => window.setTimeout(kick, ms));
-    return () => timers.forEach((t) => clearTimeout(t));
+    const r = requestAnimationFrame(fire);
+    const t = window.setTimeout(fire, 300);
+    return () => { cancelAnimationFrame(r); clearTimeout(t); };
   }, []);
 
   return (

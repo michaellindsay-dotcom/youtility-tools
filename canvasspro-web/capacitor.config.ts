@@ -11,6 +11,9 @@ const config: CapacitorConfig = {
   appId: "us.youtility.knock",
   appName: "YoutilityKnock",
   webDir: "dist",
+  // Dark window background so the status-bar strip (and any safe-area gap) is the
+  // app's dark color, not white, now that the status bar no longer overlays.
+  backgroundColor: "#0a0f1a",
   server: {
     // Allow https scheme so Firebase Auth popups / redirects behave.
     androidScheme: "https",
