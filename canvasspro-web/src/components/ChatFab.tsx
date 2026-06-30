@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 import { Link, useLocation } from "react-router-dom";
 import { collection, limit, onSnapshot, orderBy, query, where } from "firebase/firestore";
 import { db } from "../firebase";
@@ -69,10 +70,14 @@ export default function ChatFab() {
   if (!profile || onChat) return null;
 
   const unread = latest > seen;
-  return (
+  // Render to <body> (not inside the fixed .app-shell). A position:fixed element
+  // nested in another position:fixed ancestor can drift / get clipped in the iOS
+  // WebView; portaling to the body keeps it rock-solid pinned to the viewport.
+  return createPortal(
     <Link to="/chat" className="chat-fab-global" aria-label="Team chat">
       💬
       {unread && <span className="chat-fab-dot" />}
-    </Link>
+    </Link>,
+    document.body
   );
 }
