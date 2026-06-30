@@ -2830,6 +2830,28 @@ async function serverBumpStats(rep: any, deltas: Record<string, number>) {
   ]);
 }
 
+// Auto-end shifts left running longer than 8 hours — a rep forgot to clock out.
+// Caps the recorded end at start + 8h and credits the rolled-up stats the same
+// way a manual stop does. Runs server-side so it fires even with the app closed.
+const SHIFT_MAX_MS = 8 * 60 * 60 * 1000;
+export const shiftAutoStop = onSchedule("every 30 minutes", async () => {
+  const cutoff = Date.now() - SHIFT_MAX_MS;
+  // Active shifts are few (one per working rep), so filter the start time in
+  // code rather than needing a (status, startAt) composite index.
+  const snap = await db.collection("shifts").where("status", "==", "active").get();
+  for (const d of snap.docs) {
+    const s = d.data();
+    const startAt = Number(s.startAt) || 0;
+    if (!startAt || startAt >= cutoff) continue; // not over 8h yet
+    await d.ref.set({ status: "ended", endAt: startAt + SHIFT_MAX_MS, autoEnded: true, updatedAt: Date.now() }, { merge: true });
+    const uid = (s.userId as string) || "";
+    if (uid) {
+      const rep = (await db.doc(`users/${uid}`).get()).data();
+      if (rep) await serverBumpStats(rep, { shifts: 1, doorsKnocked: Number(s.doorsKnocked) || 0 });
+    }
+  }
+});
+
 // True if the caller may manage this rep (see their report / set closes).
 function canManageRep(caller: Caller, rep: any): boolean {
   if (caller.isSuper) return true;
