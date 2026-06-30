@@ -8,6 +8,9 @@ export const FEATURES = [
   // Newer services (also configurable per role/team). These default ON at the
   // company level so adding them never hides a tool from an existing company.
   "battery", "voice", "historical", "aiRecommend", "aiTerritories",
+  // Core nav items that admins can declutter per position/team (default ON, so
+  // they only ever disappear when a role/team is explicitly restricted).
+  "movers", "leads", "team",
 ] as const;
 export type FeatureKey = (typeof FEATURES)[number];
 

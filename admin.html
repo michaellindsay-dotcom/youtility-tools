@@ -3177,7 +3177,14 @@ const SERVICES = [
   ["historical", "Historical data"],
   ["aiRecommend", "AI recommendations"],
   ["aiTerritories", "AI territories"],
+  ["movers", "Movers list"],
+  ["leads", "Leads list"],
+  ["team", "Team roster"],
 ];
+// These default ON company-wide and are only restrictable per role/team, so they
+// appear in the role/team editors but NOT the company on/off grid (where an
+// unchecked box would be a no-op and mislead).
+const PER_ROLE_ONLY = new Set(["movers", "leads", "team"]);
 
 // Structural positions (must match the Position enum in functions + the app).
 const POSITIONS = [
@@ -3233,7 +3240,7 @@ async function loadCompanyServices(companyId) {
   let c = {};
   try { const s = await getDoc(doc(db, "companies", companyId)); c = s.exists() ? s.data() : {}; } catch {}
   const on = (key) => !Array.isArray(c.features) || c.features.includes(key);
-  $("companyServicesGrid").innerHTML = SERVICES.map(([k, label]) =>
+  $("companyServicesGrid").innerHTML = SERVICES.filter(([k]) => !PER_ROLE_ONLY.has(k)).map(([k, label]) =>
     `<label class="day-chip"><input type="checkbox" class="svcChk" value="${k}" ${on(k) ? "checked" : ""} /> ${label}</label>`).join("");
   $("companyServicesPrice").value = Number(c.planPrice) || 0;
 }
