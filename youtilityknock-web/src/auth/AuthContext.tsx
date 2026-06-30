@@ -16,6 +16,7 @@ import { doc, getDoc, onSnapshot } from "firebase/firestore";
 import { httpsCallable } from "firebase/functions";
 import { auth, db, functions, googleProvider } from "../firebase";
 import { isBillingLocked, PAYMENT_LOCK_MSG } from "../lib/billing";
+import { teardownPush } from "../lib/push";
 import type { Company, Role, UserProfile, Team } from "../types";
 
 interface AuthState {
@@ -198,6 +199,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     await signInWithPopup(auth, googleProvider);
   };
   const logout = async () => {
+    await teardownPush(); // drop this device's push token before signing out
     await signOut(auth);
   };
 
