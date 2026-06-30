@@ -35,6 +35,19 @@ function isOverdue(e: ScheduleEvent): boolean {
   return isUndispositioned(e) && e.startAt < Date.now();
 }
 
+// Phone-sized layout: the 7-column hourly week grid and text-filled month cells
+// don't fit, so we switch to an agenda list / dot grid below this width.
+function useNarrow(): boolean {
+  const [n, setN] = useState(() => typeof window !== "undefined" && window.matchMedia("(max-width: 720px)").matches);
+  useEffect(() => {
+    const m = window.matchMedia("(max-width: 720px)");
+    const h = () => setN(m.matches);
+    m.addEventListener?.("change", h);
+    return () => m.removeEventListener?.("change", h);
+  }, []);
+  return n;
+}
+
 export default function CalendarView({
   events, view, canHearRecording, me, companyId,
 }: {
@@ -46,6 +59,7 @@ export default function CalendarView({
 }) {
   const [anchor, setAnchor] = useState(() => startOfDay(Date.now()));
   const [selected, setSelected] = useState<ScheduleEvent | null>(null);
+  const narrow = useNarrow();
 
   // Reset the anchor to today whenever the view mode changes.
   useEffect(() => { setAnchor(startOfDay(Date.now())); }, [view]);
@@ -79,8 +93,10 @@ export default function CalendarView({
       </div>
 
       {view === "day" && <DayGrid dayMs={anchor} events={events} onPick={setSelected} />}
-      {view === "week" && <WeekGrid weekMs={startOfWeek(anchor)} events={events} onPick={setSelected} onOpenDay={openDay} />}
-      {view === "month" && <MonthGrid monthMs={startOfMonth(anchor)} events={events} onPick={setSelected} onOpenDay={openDay} />}
+      {view === "week" && (narrow
+        ? <WeekAgenda weekMs={startOfWeek(anchor)} events={events} onPick={setSelected} />
+        : <WeekGrid weekMs={startOfWeek(anchor)} events={events} onPick={setSelected} onOpenDay={openDay} />)}
+      {view === "month" && <MonthGrid monthMs={startOfMonth(anchor)} events={events} onPick={setSelected} onOpenDay={openDay} narrow={narrow} />}
 
       {selected && (
         <EventPopout ev={selected} canHearRecording={canHearRecording} me={me} companyId={companyId} onClose={() => setSelected(null)} />
@@ -156,30 +172,70 @@ function WeekGrid({ weekMs, events, onPick, onOpenDay }: { weekMs: number; event
   );
 }
 
-function MonthGrid({ monthMs, events, onPick, onOpenDay }: { monthMs: number; events: ScheduleEvent[]; onPick: (e: ScheduleEvent) => void; onOpenDay: (ms: number) => void }) {
+// Phone week view: a readable day-by-day agenda instead of the wide hourly grid.
+function WeekAgenda({ weekMs, events, onPick }: { weekMs: number; events: ScheduleEvent[]; onPick: (e: ScheduleEvent) => void }) {
+  const days = Array.from({ length: 7 }, (_, i) => weekMs + i * DAY);
+  return (
+    <div style={{ display: "grid", gap: 10 }}>
+      {days.map((d) => {
+        const dayEvents = events.filter((e) => sameDay(e.startAt, d)).sort((a, b) => a.startAt - b.startAt);
+        const isToday = sameDay(d, Date.now());
+        return (
+          <div key={d} style={{ border: "1px solid #21314a", borderRadius: 10, overflow: "hidden", opacity: dayEvents.length ? 1 : 0.7 }}>
+            <div style={{ padding: "7px 10px", background: isToday ? "rgba(14,165,233,.16)" : "rgba(255,255,255,.03)", fontSize: 13, fontWeight: 700, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <span>{new Date(d).toLocaleDateString([], { weekday: "long", month: "short", day: "numeric" })}{isToday ? " · Today" : ""}</span>
+              {dayEvents.length > 0 && <span style={{ color: "#8aa0b8", fontSize: 12, fontWeight: 600 }}>{dayEvents.length}</span>}
+            </div>
+            {dayEvents.length > 0 && (
+              <div style={{ padding: 8, display: "grid", gap: 4 }}>
+                {dayEvents.map((e) => <Block key={e.id} e={e} onPick={onPick} />)}
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function MonthGrid({ monthMs, events, onPick, onOpenDay, narrow }: { monthMs: number; events: ScheduleEvent[]; onPick: (e: ScheduleEvent) => void; onOpenDay: (ms: number) => void; narrow?: boolean }) {
   const gridStart = startOfWeek(monthMs);
   const month = new Date(monthMs).getMonth();
   const cells = Array.from({ length: 42 }, (_, i) => gridStart + i * DAY);
   return (
     <div style={{ border: "1px solid #21314a", borderRadius: 8, overflow: "hidden" }}>
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)" }}>
-        {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((w) => (
-          <div key={w} style={{ padding: "5px 6px", fontSize: 11, color: "#8aa0b8", textAlign: "center", borderBottom: "1px solid #21314a" }}>{w}</div>
+      {/* minmax(0,1fr) lets all 7 columns fit the phone — without it the no-wrap
+          event text forces the columns wide so only ~3 days show. */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(7, minmax(0, 1fr))" }}>
+        {["S", "M", "T", "W", "T", "F", "S"].map((w, i) => (
+          <div key={i} style={{ padding: "5px 4px", fontSize: 11, color: "#8aa0b8", textAlign: "center", borderBottom: "1px solid #21314a" }}>{narrow ? w : ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"][i]}</div>
         ))}
         {cells.map((d) => {
           const dayEvents = events.filter((e) => sameDay(e.startAt, d)).sort((a, b) => a.startAt - b.startAt);
           const inMonth = new Date(d).getMonth() === month;
           return (
             <div key={d} onDoubleClick={() => onOpenDay(d)} title="Double-click to open this day"
-              style={{ minHeight: 84, borderTop: "1px solid #21314a", borderLeft: "1px solid #21314a", padding: 4, cursor: "pointer", opacity: inMonth ? 1 : 0.4, background: sameDay(d, Date.now()) ? "rgba(14,165,233,.10)" : undefined }}>
-              <div style={{ fontSize: 11, fontWeight: 700, color: "#8aa0b8", marginBottom: 2 }}>{new Date(d).getDate()}</div>
-              {dayEvents.slice(0, 3).map((e) => (
-                <button key={e.id} type="button" onClick={(ev) => { ev.stopPropagation(); onPick(e); }}
-                  style={{ display: "block", width: "100%", textAlign: "left", border: "none", borderRadius: 4, padding: "1px 4px", marginBottom: 2, cursor: "pointer", color: "#06121f", background: colorFor(e), fontSize: 10, overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis" }}>
-                  {fmtTime(e.startAt)} {assigneeName(e)}
-                </button>
-              ))}
-              {dayEvents.length > 3 && <div style={{ fontSize: 10, color: "#8aa0b8" }}>+{dayEvents.length - 3} more</div>}
+              style={{ minHeight: narrow ? 54 : 84, minWidth: 0, borderTop: "1px solid #21314a", borderLeft: "1px solid #21314a", padding: narrow ? 3 : 4, cursor: "pointer", opacity: inMonth ? 1 : 0.4, background: sameDay(d, Date.now()) ? "rgba(14,165,233,.10)" : undefined }}>
+              <div style={{ fontSize: 11, fontWeight: 700, color: sameDay(d, Date.now()) ? "#38bdf8" : "#8aa0b8", marginBottom: 2 }}>{new Date(d).getDate()}</div>
+              {narrow ? (
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 3, alignContent: "flex-start" }}>
+                  {dayEvents.slice(0, 4).map((e) => (
+                    <button key={e.id} type="button" onClick={(ev) => { ev.stopPropagation(); onPick(e); }} title={`${fmtTime(e.startAt)} · ${e.title}`}
+                      style={{ width: 9, height: 9, borderRadius: "50%", border: "none", padding: 0, cursor: "pointer", background: colorFor(e) }} />
+                  ))}
+                  {dayEvents.length > 4 && <span style={{ fontSize: 9, color: "#8aa0b8", lineHeight: "10px" }}>+{dayEvents.length - 4}</span>}
+                </div>
+              ) : (
+                <>
+                  {dayEvents.slice(0, 3).map((e) => (
+                    <button key={e.id} type="button" onClick={(ev) => { ev.stopPropagation(); onPick(e); }}
+                      style={{ display: "block", width: "100%", textAlign: "left", border: "none", borderRadius: 4, padding: "1px 4px", marginBottom: 2, cursor: "pointer", color: "#06121f", background: colorFor(e), fontSize: 10, overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis" }}>
+                      {fmtTime(e.startAt)} {assigneeName(e)}
+                    </button>
+                  ))}
+                  {dayEvents.length > 3 && <div style={{ fontSize: 10, color: "#8aa0b8" }}>+{dayEvents.length - 3} more</div>}
+                </>
+              )}
             </div>
           );
         })}
