@@ -2025,6 +2025,24 @@ export const checkAvailability = onCall(async (request) => {
   return { free };
 });
 
+// Given a list of candidate start times, return only the ones the rep is free
+// for. The client generates the day's candidate slots (it knows business hours
+// from company.scheduling); the server is needed only because the free/busy
+// check also reads external-calendar busy from server-only tokens.
+export const getFreeSlots = onCall(async (request) => {
+  const caller = await getCaller(request);
+  const { uid, durationMin, candidates } = (request.data || {}) as
+    { uid?: string; durationMin?: number; candidates?: number[] };
+  if (!Array.isArray(candidates) || !candidates.length) return { free: [] };
+  const list = candidates.filter((n) => typeof n === "number" && isFinite(n)).slice(0, 64);
+  const targetUid = uid || caller.uid;
+  const sched = caller.companyId ? await companyScheduling(caller.companyId) : DEFAULT_SCHEDULING;
+  const dur = (durationMin || sched.apptDurationMin) * 60 * 1000;
+  const flags = await Promise.all(list.map((s) =>
+    isUserFree(targetUid, s, s + dur, sched.bufferMin).catch(() => false)));
+  return { free: list.filter((_, i) => flags[i]) };
+});
+
 // Route a (non-self-gen) appointment to an available rep per company policy.
 export const assignAppointment = onCall(async (request) => {
   const caller = await getCaller(request);

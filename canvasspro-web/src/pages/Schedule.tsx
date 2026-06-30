@@ -26,6 +26,8 @@ export default function Schedule() {
   const [routed, setRouted] = useState<ScheduleEvent[]>([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<"all" | EventType>("all");
+  const [range, setRange] = useState<"day" | "week" | "month">("week");
+  const [assignee, setAssignee] = useState<string>("all");
 
   useEffect(() => {
     if (!profile || !companyId) return;
@@ -64,12 +66,24 @@ export default function Schedule() {
   }, [profile]);
 
   const now = Date.now();
+  const isMgr = role === "admin" || role === "manager";
   // Appointments I set for someone else to close (exclude self-assigned).
   const routedOut = routed
     .filter((e) => e.closerUid && e.closerUid !== profile?.uid)
     .sort((a, b) => b.startAt - a.startAt);
-  const visible = events.filter((e) => filter === "all" || e.type === filter);
-  const upcoming = visible.filter((e) => e.startAt >= now - 60 * 60 * 1000);
+  // Distinct assignees seen in the agenda (managers/admins can filter by rep).
+  const assignees = isMgr
+    ? Array.from(new Map(events.filter((e) => e.userId).map((e) => [e.userId, e.userName || e.userId])).entries())
+    : [];
+  // Day / Week / Month window from the start of today.
+  const startToday = new Date(); startToday.setHours(0, 0, 0, 0);
+  const rangeDays = range === "day" ? 1 : range === "week" ? 7 : 31;
+  const rangeEnd = startToday.getTime() + rangeDays * 24 * 60 * 60 * 1000;
+  const visible = events.filter((e) =>
+    (filter === "all" || e.type === filter) &&
+    (assignee === "all" || e.userId === assignee)
+  );
+  const upcoming = visible.filter((e) => e.startAt >= now - 60 * 60 * 1000 && e.startAt < rangeEnd);
   const past = visible.filter((e) => e.startAt < now - 60 * 60 * 1000).reverse();
 
   const fmtTime = (ms: number) =>
@@ -91,7 +105,10 @@ export default function Schedule() {
           {fmtTime(e.startAt)}
           {e.durationMin ? ` · ${e.durationMin} min` : ""}
           {e.address ? ` · ${e.address}` : ""}
-          {role !== "user" && e.userId !== profile?.uid && e.userName ? ` · ${e.userName}` : ""}
+        </div>
+        <div className="muted small">
+          👤 {e.userId === profile?.uid ? "You" : (e.userName || "Unassigned")}
+          {e.closerUid && e.closerName ? ` · closer: ${e.closerName}` : ""}
         </div>
         {e.notes && <div className="muted small">{e.notes}</div>}
       </div>
@@ -158,7 +175,19 @@ export default function Schedule() {
         </div>
       )}
 
-      <div className="type-pills" style={{ marginBottom: 16 }}>
+      <div className="type-pills" style={{ marginBottom: 10 }}>
+        {(["day", "week", "month"] as const).map((r) => (
+          <button
+            key={r}
+            className={"pill" + (range === r ? " active" : "")}
+            onClick={() => setRange(r)}
+          >
+            {r === "day" ? "Day" : r === "week" ? "Week" : "Month"}
+          </button>
+        ))}
+      </div>
+
+      <div className="type-pills" style={{ marginBottom: 10, alignItems: "center", gap: 8 }}>
         {(["all", "appointment", "go_back", "follow_up"] as const).map((t) => (
           <button
             key={t}
@@ -168,6 +197,19 @@ export default function Schedule() {
             {t === "all" ? "All" : `${META[t].icon} ${META[t].label}`}
           </button>
         ))}
+        {isMgr && assignees.length > 0 && (
+          <select
+            value={assignee}
+            onChange={(e) => setAssignee(e.target.value)}
+            style={{ marginLeft: "auto" }}
+            title="Filter by who it's assigned to"
+          >
+            <option value="all">👤 Everyone</option>
+            {assignees.map(([uid, name]) => (
+              <option key={uid} value={uid}>{name}</option>
+            ))}
+          </select>
+        )}
       </div>
 
       <div className="card" style={{ marginBottom: 16, display: "flex", gap: 10, alignItems: "center" }}>
