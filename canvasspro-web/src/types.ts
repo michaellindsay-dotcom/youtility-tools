@@ -83,6 +83,11 @@ export interface CalendarLink {
   connected: boolean;
   email?: string;
   connectedAt?: number;
+  // Set by the server when a push fails: the stored token is dead (reconnect)
+  // and/or the last sync errored. Surfaced in the app so sync isn't silently off.
+  needsReauth?: boolean;
+  lastSyncError?: string;
+  lastSyncAt?: number;
 }
 export interface CalendarLinks {
   google?: CalendarLink;

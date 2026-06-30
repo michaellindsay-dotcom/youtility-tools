@@ -1752,7 +1752,7 @@ export const connectGoogleCalendar = onCall(async (request) => {
   } catch { /* non-fatal */ }
   await db.doc(`calendarTokens/${caller.uid}`).set({ google: { refreshToken: tok.refresh_token } }, { merge: true });
   await db.doc(`users/${caller.uid}`).set(
-    { calendar: { google: { connected: true, email, connectedAt: Date.now() } } },
+    { calendar: { google: { connected: true, email, connectedAt: Date.now(), needsReauth: false, lastSyncError: "" } } },
     { merge: true }
   );
   return { ok: true, email };
@@ -1793,7 +1793,7 @@ export const connectMicrosoftCalendar = onCall(async (request) => {
   } catch { /* non-fatal */ }
   await db.doc(`calendarTokens/${caller.uid}`).set({ microsoft: { refreshToken: tok.refresh_token } }, { merge: true });
   await db.doc(`users/${caller.uid}`).set(
-    { calendar: { microsoft: { connected: true, email, connectedAt: Date.now() } } },
+    { calendar: { microsoft: { connected: true, email, connectedAt: Date.now(), needsReauth: false, lastSyncError: "" } } },
     { merge: true }
   );
   return { ok: true, email };
@@ -1913,7 +1913,24 @@ async function isUserFree(uid: string, startMs: number, endMs: number, bufferMin
   return !busy.some((b) => overlaps(win, b));
 }
 
-// Push an appointment to a rep's connected external calendars (best-effort).
+// Record the outcome of a calendar push on the user's connection summary, so a
+// dead token or a rejected event surfaces in the app instead of failing
+// silently. needsReauth=true means the stored refresh token is no longer valid
+// (the #1 cause: a Google OAuth app left in "Testing" status, whose refresh
+// tokens expire after 7 days) and the rep must reconnect.
+async function recordCalendarSync(
+  uid: string, provider: "google" | "microsoft",
+  patch: { needsReauth?: boolean; lastSyncError?: string },
+): Promise<void> {
+  await db.doc(`users/${uid}`).set(
+    { calendar: { [provider]: { ...patch, lastSyncAt: Date.now() } } },
+    { merge: true },
+  );
+}
+
+// Push an appointment to a rep's connected external calendars. Best-effort for
+// the booking itself (a calendar hiccup never blocks an appointment), but the
+// outcome is recorded so failures are visible and re-auth can be prompted.
 async function pushExternalEvent(uid: string, ev: { title: string; address?: string; notes?: string; startMs: number; endMs: number }): Promise<void> {
   const tokSnap = await db.doc(`calendarTokens/${uid}`).get();
   if (!tokSnap.exists) return;
@@ -1921,30 +1938,50 @@ async function pushExternalEvent(uid: string, ev: { title: string; address?: str
   const cfg = await getIntegrationConfig();
   const startISO = new Date(ev.startMs).toISOString();
   const endISO = new Date(ev.endMs).toISOString();
+  // Stamp the company's timezone so the event shows at the right local time.
+  let tz = "UTC";
+  try {
+    const companyId = (await db.doc(`users/${uid}`).get()).data()?.companyId as string | undefined;
+    if (companyId) tz = (await companyScheduling(companyId)).timezone || "UTC";
+  } catch { /* default UTC */ }
 
   if (t.google?.refreshToken && cfg.googleClientId) {
     try {
       const at = await googleAccessToken(t.google.refreshToken, cfg);
-      if (at) {
-        await fetch("https://www.googleapis.com/calendar/v3/calendars/primary/events", {
+      if (!at) {
+        // Refresh failed → the connection is dead; prompt the rep to reconnect.
+        await recordCalendarSync(uid, "google", { needsReauth: true, lastSyncError: "Google sign-in expired — reconnect your calendar." });
+      } else {
+        const r = await fetch("https://www.googleapis.com/calendar/v3/calendars/primary/events", {
           method: "POST",
           headers: { Authorization: `Bearer ${at}`, "Content-Type": "application/json" },
           body: JSON.stringify({
             summary: ev.title,
             location: ev.address || "",
             description: ev.notes || "Booked via YoutilityKnock",
-            start: { dateTime: startISO },
-            end: { dateTime: endISO },
+            start: { dateTime: startISO, timeZone: tz },
+            end: { dateTime: endISO, timeZone: tz },
           }),
         });
+        if (r.ok) await recordCalendarSync(uid, "google", { needsReauth: false, lastSyncError: "" });
+        else {
+          const body = await r.text().catch(() => "");
+          logger.warn(`google event push failed (${r.status})`, body);
+          await recordCalendarSync(uid, "google", { needsReauth: r.status === 401, lastSyncError: `Google Calendar rejected the event (${r.status}).` });
+        }
       }
-    } catch (e) { logger.warn("google event push failed", e); }
+    } catch (e) {
+      logger.warn("google event push failed", e);
+      await recordCalendarSync(uid, "google", { lastSyncError: "Couldn't reach Google Calendar." });
+    }
   }
   if (t.microsoft?.refreshToken && cfg.microsoftClientId) {
     try {
       const at = await microsoftAccessToken(t.microsoft.refreshToken, cfg);
-      if (at) {
-        await fetch("https://graph.microsoft.com/v1.0/me/events", {
+      if (!at) {
+        await recordCalendarSync(uid, "microsoft", { needsReauth: true, lastSyncError: "Outlook sign-in expired — reconnect your calendar." });
+      } else {
+        const r = await fetch("https://graph.microsoft.com/v1.0/me/events", {
           method: "POST",
           headers: { Authorization: `Bearer ${at}`, "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -1955,8 +1992,17 @@ async function pushExternalEvent(uid: string, ev: { title: string; address?: str
             end: { dateTime: endISO, timeZone: "UTC" },
           }),
         });
+        if (r.ok) await recordCalendarSync(uid, "microsoft", { needsReauth: false, lastSyncError: "" });
+        else {
+          const body = await r.text().catch(() => "");
+          logger.warn(`microsoft event push failed (${r.status})`, body);
+          await recordCalendarSync(uid, "microsoft", { needsReauth: r.status === 401, lastSyncError: `Outlook rejected the event (${r.status}).` });
+        }
       }
-    } catch (e) { logger.warn("microsoft event push failed", e); }
+    } catch (e) {
+      logger.warn("microsoft event push failed", e);
+      await recordCalendarSync(uid, "microsoft", { lastSyncError: "Couldn't reach Outlook." });
+    }
   }
 }
 
