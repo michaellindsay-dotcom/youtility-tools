@@ -96,20 +96,30 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (!user || !profile) return;
     let reason: string | null = null;
+    let code = "";
+    const status = String(company?.status || "active").toLowerCase();
     if (profile.disabled) {
       reason = "Your account has been deactivated. Please contact your system administrator.";
+      code = "user-disabled";
     } else if (companyLoaded) {
-      const status = String(company?.status || "active").toLowerCase();
       if (!company) {
         reason = "Your company account is no longer active. Please contact your system administrator.";
+        code = "company-missing";
       } else if (status === "suspended" || status === "inactive") {
         reason = isBillingLocked(company)
           ? PAYMENT_LOCK_MSG
           : "Your company account is inactive. Please contact your system administrator.";
+        code = isBillingLocked(company) ? "company-billing-locked" : `company-${status}`;
       }
     }
     if (reason) {
-      setBlockedReason(reason);
+      // Diagnostic breadcrumb: persisted (survives the sign-out redirect/reload)
+      // and logged, so the precise cause + which company is at fault is readable
+      // even when the on-screen banner is missed. Appended to the message too.
+      const diag = `code=${code} · company=${profile.companyId || "—"} (${company?.name || "?"}) · status=${status} · billingHold=${!!company?.billingHold} · pastDueSince=${company?.pastDueSince || 0}`;
+      console.error("[auth] signing out:", diag);
+      try { window.localStorage.setItem("ykKickDiag", `${new Date().toISOString()} — ${reason} [${diag}]`); } catch { /* ignore */ }
+      setBlockedReason(`${reason}\n\n(${diag})`);
       void signOut(auth);
     }
   }, [user, profile, company, companyLoaded]);

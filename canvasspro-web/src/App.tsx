@@ -2,7 +2,7 @@ import { Routes, Route, Navigate } from "react-router-dom";
 import ProtectedRoute from "./auth/ProtectedRoute";
 import Layout from "./components/Layout";
 import { useAuth } from "./auth/AuthContext";
-import { hasFeature, type FeatureKey } from "./lib/features";
+import { userHasService, type FeatureKey } from "./lib/features";
 import Login from "./pages/Login";
 import Dashboard from "./pages/Dashboard";
 import Lookup from "./pages/Lookup";
@@ -38,9 +38,12 @@ function Gated({
   anyOf?: FeatureKey[];
   children: React.ReactNode;
 }) {
-  const { company } = useAuth();
+  const { company, profile, team } = useAuth();
   const keys = anyOf ?? (feature ? [feature] : []);
-  const allowed = keys.some((k) => hasFeature(company, k));
+  // Honor the SAME effective access the sidebar uses (company plan + the user's
+  // role/position + team services), so a service deactivated for this role can't
+  // be reached by typing its URL — it's hidden entirely, not just from the nav.
+  const allowed = keys.some((k) => userHasService(company, profile, team, k));
   return allowed ? <>{children}</> : <Navigate to="/" replace />;
 }
 
@@ -50,10 +53,12 @@ function RoleGate({ allow, children }: { allow: ("admin" | "manager")[]; childre
   return role && allow.includes(role as "admin" | "manager") ? <>{children}</> : <Navigate to="/" replace />;
 }
 
-// Gates a route to closers (managers/admins can also view).
+// Gates a route to closers (closers, closer managers, team managers — all carry
+// isCloser — plus admins). A SETTER manager is intentionally excluded so closer
+// tools/data stay hidden from the setter org.
 function CloserGate({ children }: { children: React.ReactNode }) {
   const { profile, role } = useAuth();
-  const allowed = profile?.isCloser || role === "admin" || role === "manager";
+  const allowed = profile?.isCloser || role === "admin";
   return allowed ? <>{children}</> : <Navigate to="/" replace />;
 }
 
