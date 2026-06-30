@@ -48,8 +48,8 @@ definitions:
     - &build_web
       name: Build the web bundle (native mode)
       script: |
-        npm --prefix canvasspro-web install
-        npm --prefix canvasspro-web run build:native
+        npm --prefix youtilityknock-web install
+        npm --prefix youtilityknock-web run build:native
 
 workflows:
 
@@ -98,7 +98,7 @@ workflows:
       - *build_web
       - name: Create iOS project & sync Capacitor
         script: |
-          cd canvasspro-web
+          cd youtilityknock-web
           npm install @capacitor/ios
           [ -d ios ] || npx cap add ios
           npx cap sync ios
@@ -109,13 +109,13 @@ workflows:
             ios/App/App.xcodeproj/project.pbxproj
       - name: Generate app icons & splash screens
         script: |
-          cd canvasspro-web
+          cd youtilityknock-web
           npx capacitor-assets generate --ios \
             --iconBackgroundColor '#0ea5e9' --iconBackgroundColorDark '#0f1727' \
             --splashBackgroundColor '#0f1727' --splashBackgroundColorDark '#0f1727'
       - name: Inject iOS permission strings (location / camera / photos)
         script: |
-          PLIST=canvasspro-web/ios/App/App/Info.plist
+          PLIST=youtilityknock-web/ios/App/App/Info.plist
           P=/usr/libexec/PlistBuddy
           set_or_add () {
             $P -c "Set :$1 $2" "$PLIST" 2>/dev/null || $P -c "Add :$1 string $2" "$PLIST"
@@ -134,10 +134,10 @@ workflows:
           $P -c "Add :UISupportedInterfaceOrientations:0 string UIInterfaceOrientationPortrait" "$PLIST"
       - name: Install CocoaPods
         script: |
-          cd canvasspro-web/ios/App && pod install
+          cd youtilityknock-web/ios/App && pod install
       - name: Set marketing version & build number
         script: |
-          cd canvasspro-web/ios/App
+          cd youtilityknock-web/ios/App
           # Marketing version (CFBundleShortVersionString) is what the App Store
           # shows (e.g. 1.0, 1.1). Bump it for a new store release by setting the
           # VERSION_NAME env var; it defaults to the current shipped value.
@@ -146,7 +146,7 @@ workflows:
           agvtool new-version -all "$BUILD_NUMBER"
       - name: Fetch signing profiles & build IPA
         script: |
-          cd canvasspro-web/ios/App
+          cd youtilityknock-web/ios/App
           # Create the distribution certificate + App Store provisioning profile
           # via the App Store Connect API key, then apply them. `--create` makes
           # the very first build work from scratch — a brand-new account has no
@@ -166,7 +166,7 @@ workflows:
           xcode-project use-profiles
           xcode-project build-ipa --workspace "App.xcworkspace" --scheme "App"
     artifacts:
-      - canvasspro-web/ios/App/build/ios/ipa/*.ipa
+      - youtilityknock-web/ios/App/build/ios/ipa/*.ipa
       - /tmp/xcodebuild_logs/*.log
     publishing:
       app_store_connect:
@@ -200,13 +200,13 @@ workflows:
       - *build_web
       - name: Create Android project & sync Capacitor
         script: |
-          cd canvasspro-web
+          cd youtilityknock-web
           npm install @capacitor/android
           [ -d android ] || npx cap add android
           npx cap sync android
       - name: Generate app icons & splash screens
         script: |
-          cd canvasspro-web
+          cd youtilityknock-web
           npx capacitor-assets generate --android \
             --iconBackgroundColor '#0ea5e9' --iconBackgroundColorDark '#0f1727' \
             --splashBackgroundColor '#0f1727' --splashBackgroundColorDark '#0f1727'
@@ -215,7 +215,7 @@ workflows:
           # The @capacitor/geolocation plugin ships an empty manifest, so the
           # app must declare its own location permissions or getCurrentPosition
           # silently fails on Android.
-          MANIFEST=canvasspro-web/android/app/src/main/AndroidManifest.xml
+          MANIFEST=youtilityknock-web/android/app/src/main/AndroidManifest.xml
           grep -q 'ACCESS_FINE_LOCATION' "$MANIFEST" || \
             sed -i 's#</manifest>#    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />\n    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />\n</manifest>#' "$MANIFEST"
           # Lock MainActivity to portrait (field app — no rotation).
@@ -225,19 +225,19 @@ workflows:
         script: |
           # Google Play requires new apps to target API 35. Bump the SDK levels
           # and the Gradle/AGP toolchain that supports compiling against 35.
-          VARS=canvasspro-web/android/variables.gradle
+          VARS=youtilityknock-web/android/variables.gradle
           sed -i 's/compileSdkVersion = 34/compileSdkVersion = 35/' "$VARS"
           sed -i 's/targetSdkVersion = 34/targetSdkVersion = 35/' "$VARS"
           sed -i "s#com.android.tools.build:gradle:8.2.1#com.android.tools.build:gradle:8.6.1#" \
-            canvasspro-web/android/build.gradle
+            youtilityknock-web/android/build.gradle
           sed -i "s#gradle-8.2.1-all.zip#gradle-8.9-all.zip#" \
-            canvasspro-web/android/gradle/wrapper/gradle-wrapper.properties
+            youtilityknock-web/android/gradle/wrapper/gradle-wrapper.properties
       - name: Configure release signing & version
         script: |
           # Codemagic exposes the uploaded keystore via CM_* env vars when
           # `android_signing` is set. Gradle merges repeated `android {}`
           # blocks, so we just append a release signing + version config.
-          cat >> canvasspro-web/android/app/build.gradle <<'GRADLE'
+          cat >> youtilityknock-web/android/app/build.gradle <<'GRADLE'
 
           android {
               defaultConfig {
@@ -261,12 +261,12 @@ workflows:
           GRADLE
       - name: Build signed AAB
         script: |
-          cd canvasspro-web/android
+          cd youtilityknock-web/android
           chmod +x gradlew
           ./gradlew bundleRelease
     artifacts:
-      - canvasspro-web/android/app/build/outputs/**/*.aab
-      - canvasspro-web/android/app/build/outputs/**/mapping.txt
+      - youtilityknock-web/android/app/build/outputs/**/*.aab
+      - youtilityknock-web/android/app/build/outputs/**/mapping.txt
     publishing:
       google_play:
         credentials: $GCLOUD_SERVICE_ACCOUNT_CREDENTIALS

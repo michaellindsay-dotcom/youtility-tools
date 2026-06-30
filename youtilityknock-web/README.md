@@ -118,7 +118,7 @@ record. This is full act-as.
 ## Layout
 
 ```
-canvasspro-web/
+youtilityknock-web/
 ├─ src/
 │  ├─ auth/        AuthContext (sign-in only) + route guards
 │  ├─ components/  Layout, sidebar, topbar, DispositionModal, GoalPlanner, ShiftsPanel, …
@@ -147,7 +147,7 @@ create a **Firestore** database.
 # from repo root — builds the app, assembles public/, starts emulators
 cd .. && npm install && npm run emulators
 # or just the Vite dev server for the app:
-cd canvasspro-web && npm install && npm run dev   # http://localhost:5173/app
+cd youtilityknock-web && npm install && npm run dev   # http://localhost:5173/app
 ```
 
 ## 3. Bootstrap the first super-admin (one time)
