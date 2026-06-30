@@ -64,6 +64,7 @@ export default function Settings() {
   const row = (provider: "google" | "microsoft", label: string, icon: string) => {
     const link = cal[provider];
     const connected = !!link?.connected;
+    const needsReauth = connected && !!link?.needsReauth;
     return (
       <div className="cal-row">
         <span className="cal-ico">{icon}</span>
@@ -72,8 +73,17 @@ export default function Settings() {
           <div className="muted small">
             {connected ? `Connected${link?.email ? ` · ${link.email}` : ""}` : "Not connected"}
           </div>
+          {needsReauth && (
+            <div className="small" style={{ color: "#f59e0b", marginTop: 2 }}>
+              ⚠ Sync paused — {link?.lastSyncError || "reconnect to resume syncing."}
+            </div>
+          )}
         </div>
-        {connected ? (
+        {needsReauth ? (
+          <button className="btn primary sm" disabled={busy === provider} onClick={() => connect(provider)}>
+            {busy === provider ? "Connecting…" : "Reconnect"}
+          </button>
+        ) : connected ? (
           <button className="btn ghost sm" disabled={busy === provider} onClick={() => disconnect(provider)}>
             Disconnect
           </button>

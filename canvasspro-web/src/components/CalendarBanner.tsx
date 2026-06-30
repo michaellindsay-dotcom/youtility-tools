@@ -6,10 +6,43 @@ import { useCalendarConnect } from "../lib/calendar";
 // quietly disappears once they're set up (or if sync isn't configured at all).
 // Dismissible for the session.
 export default function CalendarBanner() {
-  const { cfg, busy, msg, connect, anyConfigured, anyConnected } = useCalendarConnect();
+  const { cfg, cal, busy, msg, connect, anyConfigured, anyConnected } = useCalendarConnect();
   const [dismissed, setDismissed] = useState(false);
 
-  if (dismissed || anyConnected || !anyConfigured) return null;
+  // A calendar that's "connected" but whose token died needs reconnecting — that
+  // silent state is exactly why appointments stop reaching the calendar.
+  const reauth =
+    (cal.google?.connected && cal.google?.needsReauth) ||
+    (cal.microsoft?.connected && cal.microsoft?.needsReauth);
+
+  if (dismissed) return null;
+  if (!reauth && (anyConnected || !anyConfigured)) return null;
+
+  if (reauth) {
+    return (
+      <div className="card cal-banner" style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap", marginBottom: 16, borderColor: "#b45309" }}>
+        <span style={{ fontSize: 22 }}>⚠️</span>
+        <div style={{ flex: 1, minWidth: 200 }}>
+          <div style={{ fontWeight: 600 }}>Calendar sync paused — reconnect</div>
+          <div className="muted small">Your calendar connection expired, so new appointments aren't syncing. Reconnect to fix it.</div>
+          {msg && <div className="muted small" style={{ marginTop: 4 }}>{msg}</div>}
+        </div>
+        <div className="row" style={{ gap: 8 }}>
+          {cal.google?.needsReauth && cfg?.google.configured && (
+            <button className="btn primary sm" disabled={busy === "google"} onClick={() => connect("google")}>
+              {busy === "google" ? "Connecting…" : "🟦 Reconnect Google"}
+            </button>
+          )}
+          {cal.microsoft?.needsReauth && cfg?.microsoft.configured && (
+            <button className="btn primary sm" disabled={busy === "microsoft"} onClick={() => connect("microsoft")}>
+              {busy === "microsoft" ? "Connecting…" : "🟪 Reconnect Outlook"}
+            </button>
+          )}
+          <button className="btn ghost sm" onClick={() => setDismissed(true)} title="Hide for now">✕</button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="card cal-banner" style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap", marginBottom: 16 }}>
