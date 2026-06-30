@@ -969,6 +969,84 @@ export const setUserDisabled = onCall(async (request) => {
 });
 
 // ───────────────────────────────────────────────────────────────────────────
+// deleteUser — permanently remove an account and (optionally) hand off their
+// book of business to another rep. Reassigns the deleted user's leads and
+// appointments (as assignee / closer / setter), re-points anyone who reported
+// to them, then deletes the Auth user + Firestore profile and rebuilds the org
+// chart. Company admin (own company) or super-admin. Irreversible.
+// ───────────────────────────────────────────────────────────────────────────
+export const deleteUser = onCall(async (request) => {
+  const caller = await getCaller(request);
+  const { companyId, uid, reassignToUid } = request.data as
+    { companyId?: string; uid?: string; reassignToUid?: string | null };
+  const company = authorizeForCompany(caller, companyId);
+  if (!uid) throw new HttpsError("invalid-argument", "uid required.");
+  if (uid === caller.uid) throw new HttpsError("permission-denied", "You can't delete your own account.");
+
+  const targetSnap = await db.doc(`users/${uid}`).get();
+  if (!targetSnap.exists) throw new HttpsError("not-found", "User not found.");
+  const target = targetSnap.data()!;
+  if ((target.companyId as string) !== company) throw new HttpsError("permission-denied", "User is not in this company.");
+  if (target.role === "admin" && !caller.isSuper) {
+    throw new HttpsError("permission-denied", "Only a super-admin can delete a company admin.");
+  }
+
+  // Resolve the reassignment target (optional — must be in the same company).
+  let toUid = ""; let toName = "";
+  if (reassignToUid) {
+    if (reassignToUid === uid) throw new HttpsError("invalid-argument", "Reassign target can't be the deleted user.");
+    const toSnap = await db.doc(`users/${reassignToUid}`).get();
+    if (!toSnap.exists || (toSnap.data()!.companyId as string) !== company) {
+      throw new HttpsError("invalid-argument", "Reassign target must be in this company.");
+    }
+    toUid = reassignToUid; toName = (toSnap.data()!.displayName as string) || "";
+  }
+
+  let batch = db.batch();
+  let ops = 0;
+  const flush = async () => { if (ops) { await batch.commit(); batch = db.batch(); ops = 0; } };
+
+  if (toUid) {
+    // Leads owned by the deleted user → the new rep.
+    const leads = await db.collection("leads").where("companyId", "==", company).where("assignedTo", "==", uid).get();
+    for (const d of leads.docs) { batch.update(d.ref, { assignedTo: toUid }); if (++ops >= 400) await flush(); }
+    await flush();
+    // Appointments / events where the deleted user is the assignee, closer or setter.
+    const eventFields: ReadonlyArray<readonly [string, string]> =
+      [["userId", "userName"], ["closerUid", "closerName"], ["setterUid", "setterName"]];
+    for (const [idField, nameField] of eventFields) {
+      const snap = await db.collection("events").where("companyId", "==", company).where(idField, "==", uid).get();
+      for (const d of snap.docs) { batch.update(d.ref, { [idField]: toUid, [nameField]: toName }); if (++ops >= 400) await flush(); }
+      await flush();
+    }
+  }
+
+  // Re-point anyone who reported to the deleted user so they aren't orphaned
+  // (to the new rep if one was given, otherwise detached).
+  const members = await db.collection("users").where("companyId", "==", company).get();
+  for (const d of members.docs) {
+    if (d.id === uid) continue;
+    const u = d.data();
+    const patch: Record<string, unknown> = {};
+    if (u.managerId === uid) patch.managerId = toUid || null;
+    if (u.closerManagerId === uid) patch.closerManagerId = toUid || null;
+    if (Object.keys(patch).length) { batch.update(d.ref, patch); if (++ops >= 400) await flush(); }
+  }
+  await flush();
+
+  // Remove the profile + stats, then the Auth user (best-effort — the doc id may
+  // not be a live Auth uid for an imported account).
+  await db.doc(`users/${uid}`).delete();
+  await db.doc(`userStats/${uid}`).delete().catch(() => undefined);
+  try { await getAuth().deleteUser(uid); }
+  catch (e: any) { logger.warn(`deleteUser: auth delete failed for ${uid}: ${e?.message}`); }
+
+  await rebuildCompanyHierarchy(company);
+  logger.info(`User ${uid} deleted by ${caller.uid}; book reassigned to ${toUid || "(none)"}`);
+  return { ok: true, reassignedTo: toUid || null };
+});
+
+// ───────────────────────────────────────────────────────────────────────────
 // impersonate — SUPER-ADMIN mirror. Returns a custom token that signs the
 // caller in AS the target user (full act-as) and writes an audit log.
 // ───────────────────────────────────────────────────────────────────────────

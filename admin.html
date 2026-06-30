@@ -1221,6 +1221,7 @@ const createCompany   = httpsCallable(fns, "createCompany");
 const createUser      = httpsCallable(fns, "createUser");
 const inviteUser      = httpsCallable(fns, "inviteUser");
 const setUserDisabled = httpsCallable(fns, "setUserDisabled");
+const deleteUserFn    = httpsCallable(fns, "deleteUser");
 const setUserRole     = httpsCallable(fns, "setUserRole");
 const setUserCloser   = httpsCallable(fns, "setUserCloser");
 const setUserFunction = httpsCallable(fns, "setUserFunction");
@@ -3574,7 +3575,8 @@ async function loadUsers() {
         <td>${u.disabled ? '<span class="badge disabled">disabled</span>' : '<span class="badge">active</span>'}</td>
         <td><div class="row">${mirrorBtn}
           <button class="btn sm resetBtn" title="Email a password-reset link">Reset PW</button>
-          <button class="btn sm ${u.disabled?'':'danger'} disBtn">${u.disabled ? "Enable" : "Disable"}</button></div></td>`;
+          <button class="btn sm ${u.disabled?'':'danger'} disBtn">${u.disabled ? "Enable" : "Disable"}</button>
+          <button class="btn sm danger delBtn" title="Permanently delete & reassign their leads">Delete</button></div></td>`;
 
       tr.querySelector(".resetBtn").addEventListener("click", async (ev) => {
         if (!u.email) return;
@@ -3628,6 +3630,7 @@ async function loadUsers() {
         try { await setUserDisabled({ uid:u.id, disabled: !u.disabled }); loadUsers(); }
         catch (e) { banner($("banner"), e.message, "error"); }
       });
+      tr.querySelector(".delBtn").addEventListener("click", () => openDeleteUserModal(u));
       const mb = tr.querySelector(".mirrorBtn");
       if (mb) mb.addEventListener("click", async () => {
         mb.disabled = true; mb.textContent = "…";
@@ -3643,6 +3646,43 @@ async function loadUsers() {
     });
     void nameOf;
   } catch (e) { body.innerHTML = `<tr><td colspan="7" class="banner error show">${esc(e.message)}</td></tr>`; }
+}
+
+// Permanently delete a user, first choosing who inherits their leads/appointments.
+function openDeleteUserModal(u) {
+  const others = (state.users || []).filter((x) => x.id !== u.id);
+  const opts = `<option value="">— Don't reassign (leave unassigned) —</option>` +
+    others.map((x) => `<option value="${x.id}">${esc(x.displayName || x.email || x.id)}</option>`).join("");
+  const ov = document.createElement("div");
+  ov.style.cssText = "position:fixed;inset:0;background:rgba(2,8,18,.6);display:grid;place-items:center;z-index:3000;padding:16px;";
+  ov.innerHTML = `<div class="card" style="max-width:460px;width:100%;" onclick="event.stopPropagation()">
+      <h3 style="margin-top:0;">Delete ${esc(u.displayName || u.email || "user")}?</h3>
+      <p class="muted small">This permanently removes the account and sign-in. Their open leads and appointments will be handed to the rep you pick below (or left unassigned). This can't be undone.</p>
+      <label class="field"><span>Reassign their leads &amp; appointments to</span>
+        <select id="delReassignSel">${opts}</select></label>
+      <div class="row" style="justify-content:flex-end;gap:8px;margin-top:14px;">
+        <button class="btn ghost" id="delCancel">Cancel</button>
+        <button class="btn danger" id="delConfirm">Delete user</button>
+      </div>
+      <div id="delBannerBox" class="banner" style="margin-top:10px;"></div>
+    </div>`;
+  ov.addEventListener("click", () => ov.remove());
+  document.body.appendChild(ov);
+  ov.querySelector("#delCancel").addEventListener("click", () => ov.remove());
+  ov.querySelector("#delConfirm").addEventListener("click", async () => {
+    const btn = ov.querySelector("#delConfirm");
+    const reassignToUid = ov.querySelector("#delReassignSel").value || null;
+    btn.disabled = true; btn.textContent = "Deleting…";
+    try {
+      await deleteUserFn({ companyId: state.selectedCompany, uid: u.id, reassignToUid });
+      ov.remove();
+      banner($("banner"), reassignToUid ? "User deleted; their leads were reassigned." : "User deleted.", "good");
+      await loadUsers(); populateUserFormSelects();
+    } catch (e) {
+      banner(ov.querySelector("#delBannerBox"), e.message || "Delete failed.", "error");
+      btn.disabled = false; btn.textContent = "Delete user";
+    }
+  });
 }
 
 function esc(s) { return String(s ?? "").replace(/[&<>"']/g, (c)=>({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;" }[c])); }
