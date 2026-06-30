@@ -64,6 +64,12 @@ Console listings. Publisher: **Sun Service**. Support/privacy contact:
 > and weekly game plan from your real pace. Plus a smoother homeowner card and
 > full-screen map, daily shift history, and reliability improvements.
 
+**What's New (1.2)**
+> Smoother, more stable screens — pages no longer drift side to side, the layout
+> is correct the moment you sign in, and the chat button stays put. The battery
+> proposal now fills the screen, signatures appear on the signed agreement, and
+> after signing you go straight to the site survey.
+
 **App Privacy (App Store "Data used to track you" → None). Data linked to you:**
 | Data type | Collected | Linked to user | Used for tracking | Purpose |
 |-----------|-----------|----------------|-------------------|---------|
