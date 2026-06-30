@@ -6,7 +6,24 @@ number automatically.
 
 ## [Unreleased]
 
+## [1.2] — 2026-06
+
+### App Store "What's New" (user-facing)
+- Smoother, more stable screens: pages no longer drift side-to-side, the layout
+  is sized correctly the moment you log in, and the chat button stays put.
+- The battery proposal now fills the screen, signatures show on the signed
+  agreement, and after signing you go straight to the site survey.
+
 ### Fixed
+- Pinned the app layout: global horizontal-overflow guard so pages can't pan
+  side-to-side, a forced reflow on login so the WKWebView sizes correctly from
+  the start, and the floating chat button now renders to `<body>` so it stays
+  pinned to the viewport.
+- Battery proposal flow: the full-screen presentation renders through a portal
+  (it was trapped below the header by a blurred ancestor); the signature pad
+  uses dark ink on a light pad so it's visible in the emailed/stored PDF (it was
+  near-white on transparent → invisible on the white page); and after signing on
+  the rep's device the app routes straight to the site-survey / AR capture.
 - Deactivated accounts and suspended/inactive companies are now locked out on
   devices with a warm cache, not just on a fresh (incognito) sign-in. The app
   trusts an explicit cached `suspended`/`inactive` company status to block the
