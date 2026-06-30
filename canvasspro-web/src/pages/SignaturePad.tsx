@@ -28,7 +28,10 @@ export default function SignaturePad({
         ctx.lineWidth = 2.2;
         ctx.lineCap = "round";
         ctx.lineJoin = "round";
-        ctx.strokeStyle = "#f4f1fb";
+        // Dark ink: the exported PNG is transparent, so near-white strokes were
+        // invisible once embedded on the white agreement PDF. Dark ink reads on
+        // both the (now light) pad and the white PDF.
+        ctx.strokeStyle = "#10121a";
       }
     };
     resize();
@@ -80,7 +83,9 @@ export default function SignaturePad({
           height: 150,
           borderRadius: 12,
           border: `1px solid rgba(255,255,255,0.18)`,
-          background: "rgba(8,5,18,0.5)",
+          // Light, paper-like pad so the dark ink is visible while signing (and
+          // matches what gets embedded on the white PDF).
+          background: "#f6f4fb",
           overflow: "hidden",
           touchAction: "none",
         }}
@@ -111,7 +116,7 @@ export default function SignaturePad({
             ✍︎ sign here
           </div>
         )}
-        <div style={{ position: "absolute", left: 14, right: 14, bottom: 10, borderBottom: "1px solid rgba(255,255,255,0.18)" }} />
+        <div style={{ position: "absolute", left: 14, right: 14, bottom: 10, borderBottom: "1px solid rgba(0,0,0,0.22)" }} />
       </div>
       <button
         onClick={clear}

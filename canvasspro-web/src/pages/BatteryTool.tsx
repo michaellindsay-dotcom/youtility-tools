@@ -1000,7 +1000,11 @@ export default function BatteryTool() {
         payment: { method: closeSel.method, systemPrice: closeSel.systemPrice, finance: closeSel.finance, cash: closeSel.cash },
       });
       if (delivery === "device" && data?.signUrl) {
-        window.location.href = data.signUrl; // hand the tablet over to sign now
+        // mode=rep marks this as the rep's own device so that, once signed, the
+        // app sends the rep straight into the site survey instead of the
+        // customer "all set" screen.
+        const sep = data.signUrl.includes("?") ? "&" : "?";
+        window.location.href = `${data.signUrl}${sep}mode=rep`; // hand the tablet over to sign now
         return;
       }
       setCloseMsg({ ok: true, text: `Agreement sent to ${homeownerEmail} to sign.` });
