@@ -28,6 +28,9 @@ export default function Login() {
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [busy, setBusy] = useState(false);
+  // Last forced sign-out breadcrumb (persisted by AuthContext) — a fallback when
+  // the live banner is missed on a redirect/reload.
+  const lastKick = typeof window !== "undefined" ? window.localStorage.getItem("ykKickDiag") : null;
 
   // If the link sign-in email was stored on this device, finish automatically.
   useEffect(() => {
@@ -190,7 +193,14 @@ export default function Login() {
                 <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="current-password" required />
               </label>
 
-              {(error || blockedReason) && <div className="banner error show">{error || blockedReason}</div>}
+              {(error || blockedReason) && <div className="banner error show" style={{ whiteSpace: "pre-wrap" }}>{error || blockedReason}</div>}
+              {/* Persisted breadcrumb from the last forced sign-out — readable even
+                  if the live banner above was missed on a redirect/reload. */}
+              {!error && !blockedReason && lastKick && (
+                <div className="banner error show" style={{ whiteSpace: "pre-wrap" }}>
+                  Last sign-out reason:{"\n"}{lastKick}
+                </div>
+              )}
               {notice && <div className="banner good show">{notice}</div>}
 
               <button className="btn primary block" type="submit" disabled={busy}>

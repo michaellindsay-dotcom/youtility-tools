@@ -40,7 +40,10 @@ export default function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
     navigate("/login", { replace: true });
   };
   const visible = links.filter((l) => {
-    if (l.closer && !(profile?.isCloser || role === "admin" || role === "manager")) return false;
+    // Closer-only tools: gate on actually being a closer (closers, closer
+    // managers and team managers all carry isCloser) or admin — NOT on the
+    // generic manager tier, so a SETTER manager never sees closer information.
+    if (l.closer && !(profile?.isCloser || role === "admin")) return false;
     if (l.roles && !(role && l.roles.includes(role))) return false;
     if (l.anyFeat) return l.anyFeat.some((f) => userHasService(company, profile, team, f));
     return !l.feat || userHasService(company, profile, team, l.feat);
