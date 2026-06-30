@@ -6,6 +6,7 @@ import { initializeApp } from "firebase-admin/app";
 import { getAuth } from "firebase-admin/auth";
 import { getFirestore, FieldValue } from "firebase-admin/firestore";
 import { getStorage } from "firebase-admin/storage";
+import { getMessaging } from "firebase-admin/messaging";
 import Stripe from "stripe";
 import * as crypto from "crypto";
 import PDFDocument from "pdfkit";
@@ -1239,6 +1240,42 @@ async function isOnline(uid: string): Promise<boolean> {
   }
 }
 
+// Send a native push to every device the user has registered. Best-effort and
+// fully self-contained: any failure is logged and swallowed so it can NEVER
+// break the in-app notification / email / SMS path that calls it. Tokens that
+// the FCM service reports as dead are pruned from the user's doc so the list
+// doesn't grow stale.
+async function sendPush(userId: string, title: string, body: string, link: string): Promise<void> {
+  try {
+    const snap = await db.doc(`users/${userId}`).get();
+    const tokens: string[] = Array.isArray(snap.data()?.fcmTokens) ? snap.data()!.fcmTokens : [];
+    if (!tokens.length) return;
+    const res = await getMessaging().sendEachForMulticast({
+      tokens,
+      notification: { title, body: body || undefined },
+      data: link ? { link } : {},
+      apns: { payload: { aps: { sound: "default" } } },
+    });
+    const dead: string[] = [];
+    res.responses.forEach((r, i) => {
+      if (r.success) return;
+      const code = r.error?.code || "";
+      if (
+        code.includes("registration-token-not-registered") ||
+        code.includes("invalid-registration-token") ||
+        code.includes("invalid-argument")
+      ) {
+        dead.push(tokens[i]);
+      }
+    });
+    if (dead.length) {
+      await db.doc(`users/${userId}`).update({ fcmTokens: FieldValue.arrayRemove(...dead) }).catch(() => {});
+    }
+  } catch (e) {
+    logger.error("sendPush failed", e);
+  }
+}
+
 interface NotifyOpts {
   userId: string;
   type: string;
@@ -1247,7 +1284,9 @@ interface NotifyOpts {
   link?: string;
 }
 
-// Write the in-app notification, then email + SMS the user iff they're offline.
+// Write the in-app notification, then push + email + SMS the user iff they're
+// offline (an active in-app session already shows the bell, so we don't double-
+// buzz). Push lands on the lock screen even when the app is backgrounded.
 async function notifyUser(opts: NotifyOpts): Promise<void> {
   const { userId, type, title, body = "", link = "" } = opts;
   await db.collection("notifications").add({
@@ -1260,7 +1299,7 @@ async function notifyUser(opts: NotifyOpts): Promise<void> {
     createdAt: Date.now(),
   });
 
-  if (await isOnline(userId)) return; // in-app/push is enough when they're active
+  if (await isOnline(userId)) return; // in-app bell is enough when they're active
 
   const userSnap = await db.doc(`users/${userId}`).get();
   if (!userSnap.exists) return;
@@ -1268,10 +1307,33 @@ async function notifyUser(opts: NotifyOpts): Promise<void> {
   const cfg = await getNotifyConfig();
   const line = body ? `${title}\n\n${body}` : title;
   await Promise.all([
+    sendPush(userId, title, body, link),
     u.email ? sendEmail(cfg, u.email, `YoutilityKnock — ${title}`, line) : Promise.resolve(false),
     u.phone ? sendSms(cfg, u.phone, line) : Promise.resolve(false),
   ]);
 }
+
+// ── push-token registration (called by the native app on launch / refresh) ──
+// User docs are otherwise server-write-only (firestore.rules), so the device
+// registers its FCM token through these callables rather than writing directly.
+export const registerPushToken = onCall(async (req: CallableRequest<{ token?: string; platform?: string }>) => {
+  const uid = req.auth?.uid;
+  if (!uid) throw new HttpsError("unauthenticated", "Sign in required.");
+  const token = String(req.data?.token || "").trim();
+  if (!token) throw new HttpsError("invalid-argument", "Missing token.");
+  await db.doc(`users/${uid}`).set({ fcmTokens: FieldValue.arrayUnion(token) }, { merge: true });
+  return { ok: true };
+});
+
+export const unregisterPushToken = onCall(async (req: CallableRequest<{ token?: string }>) => {
+  const uid = req.auth?.uid;
+  if (!uid) return { ok: true };
+  const token = String(req.data?.token || "").trim();
+  if (token) {
+    await db.doc(`users/${uid}`).update({ fcmTokens: FieldValue.arrayRemove(token) }).catch(() => {});
+  }
+  return { ok: true };
+});
 
 // ════════════════════════════════════════════════════════════════════════════
 // requestDemo — public (unauthenticated) demo request from the marketing site.

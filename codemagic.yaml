@@ -132,6 +132,18 @@ workflows:
           $P -c "Delete :UISupportedInterfaceOrientations" "$PLIST" 2>/dev/null || true
           $P -c "Add :UISupportedInterfaceOrientations array" "$PLIST"
           $P -c "Add :UISupportedInterfaceOrientations:0 string UIInterfaceOrientationPortrait" "$PLIST"
+      - name: Wire up push notifications (FCM)
+        script: |
+          # Adds GoogleService-Info.plist, the APNs entitlement, the background
+          # remote-notification mode, and the Xcode project references. Fails the
+          # build if GOOGLE_SERVICE_INFO_PLIST_B64 is missing (so a build that
+          # would crash at launch is never shipped). See STORE_DEPLOYMENT.md.
+          bash scripts/ios-push-setup.sh
+      - name: Inject in-app AR plugin (ARKit)
+        script: |
+          # Copies the AR battery-placement plugin (youtilityknock-web/ios-src)
+          # into the generated project and registers it on the App target.
+          bash scripts/ios-ar-setup.sh
       - name: Install CocoaPods
         script: |
           cd youtilityknock-web/ios/App && pod install

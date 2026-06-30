@@ -158,6 +158,7 @@ export interface UserProfile {
   pitchCertifiedAt?: number;
   createdAt?: number;
   disabled?: boolean;
+  fcmTokens?: string[]; // registered native push tokens (one per device)
 }
 
 import type { LeadStatus } from "./lib/dispositions";

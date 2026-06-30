@@ -129,6 +129,72 @@ re-reviewed by Apple/Google (yes, even an unlisted app).
 > run the workflow → add the version + "What's New" in App Store Connect →
 > submit.
 
+## Push notifications (one-time setup)
+
+The app code, the backend, and the CI wiring for native push are already in the
+repo: every notification the app already produces (chat, DMs, appointment
+reminders) is delivered as a lock-screen push to offline users via Firebase
+Cloud Messaging. The device registers its token through the `registerPushToken`
+Cloud Function; the `sendPush` helper inside `notifyUser` fans out to it.
+
+Push only needs a handful of account/console steps that can't live in the repo.
+Until they're done, push is simply silent — nothing else breaks. The
+`ios-release` build **fails loudly** if the `GoogleService-Info.plist` secret is
+missing, so you can't accidentally ship a build that crashes at launch.
+
+Do these once:
+
+1. **Register the iOS app in Firebase.** Firebase Console → Project Settings →
+   *Your apps* → Add app → iOS → bundle ID `us.youtility.knock`. Download the
+   **`GoogleService-Info.plist`** it gives you.
+2. **Enable the Push capability on the App ID.** developer.apple.com →
+   Certificates, Identifiers & Profiles → Identifiers → `us.youtility.knock` →
+   check **Push Notifications** → Save. (The next signed build regenerates the
+   provisioning profile with the capability included.)
+3. **Create an APNs Auth Key.** developer.apple.com → Keys → **+** → enable
+   *Apple Push Notifications service (APNs)* → download the `.p8` (note the Key
+   ID and your Team ID).
+4. **Give the key to Firebase.** Firebase Console → Project Settings → **Cloud
+   Messaging** → *Apple app configuration* → upload the `.p8` with its Key ID +
+   Team ID.
+5. **Put the plist in Codemagic.** Base64-encode the file and add it as a
+   **secure** environment variable named `GOOGLE_SERVICE_INFO_PLIST_B64` (in the
+   group used by `ios-release`):
+   ```bash
+   base64 -i GoogleService-Info.plist | pbcopy   # macOS — paste as the value
+   ```
+
+That's it — the next `ios-release` build (`scripts/ios-push-setup.sh` runs
+automatically) ships with working push. Verify on a TestFlight device by sending
+yourself a chat/DM while the app is backgrounded.
+
+> **Android push** isn't wired yet (the app ships iOS-only today). When you're
+> ready for Play, the parallel setup is: register the Android app in Firebase,
+> drop `google-services.json` into `android/app/`, and add the
+> `com.google.gms:google-services` Gradle plugin in the `android-release`
+> workflow — mirror of the iOS steps above.
+
+## In-app AR battery placement (iOS)
+
+On the project capture screen, supported iPhones show a **📷 Place in AR**
+button: the rep points the camera at the wall, drops the battery model on it
+(drag to move, pinch to resize, two-finger rotate), and taps **Capture** — the
+framed AR photo drops straight into the placement photos. Devices without ARKit
+just see the normal **+ Add photo** flow.
+
+Nothing to configure — it's wired automatically on every `ios-release` build:
+
+- Native sources live in [`youtilityknock-web/ios-src/`](./youtilityknock-web/ios-src/)
+  (`ARPlacementPlugin.swift`, `ARPlacementViewController.swift`,
+  `ARPlacementPlugin.m`) and are injected by `scripts/ios-ar-setup.sh`.
+- The 3D model is the same `youtilityknock-web/public/battery.usdz` the web app
+  ships; Capacitor bundles it into the app automatically. To use a more
+  detailed model, replace that `.usdz` (keep the filename) and rebuild — no code
+  change needed.
+
+> ⚠️ ARKit only runs on a **physical device** (not the simulator), so this can
+> only be verified from a TestFlight build on a real iPhone.
+
 ## Building / testing locally
 
 ```bash

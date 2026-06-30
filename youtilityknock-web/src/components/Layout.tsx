@@ -1,15 +1,24 @@
 import { useEffect, useState } from "react";
-import { Outlet } from "react-router-dom";
+import { Outlet, useNavigate } from "react-router-dom";
 import Sidebar from "./Sidebar";
 import Topbar from "./Topbar";
 import ChatFab from "./ChatFab";
 import LocationGate from "./LocationGate";
 import { usePresenceHeartbeat } from "../lib/presence";
+import { initPush } from "../lib/push";
 import { NavContext } from "./NavContext";
 
 export default function Layout() {
   usePresenceHeartbeat();
+  const navigate = useNavigate();
   const [navOpen, setNavOpen] = useState(false);
+
+  // Register for native push once the authed shell mounts (no-op on web). A
+  // tapped notification deep-links via the app's router. Safe to call here —
+  // initPush only runs once per session and swallows any failure.
+  useEffect(() => {
+    void initPush((path) => navigate(path));
+  }, [navigate]);
 
   // Nudge a reflow once the shell mounts so anything that measures the viewport
   // (map, sticky bars) settles after the login→app transition. The status-bar
