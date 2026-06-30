@@ -1,4 +1,5 @@
 import { createElement, useCallback, useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { httpsCallable } from "firebase/functions";
 import { ref as storageRef, uploadBytes, getDownloadURL } from "firebase/storage";
 import { functions, storage } from "../firebase";
@@ -337,7 +338,7 @@ function ProjectCapture({
     } catch (e) { setErr((e as Error).message || "Couldn't schedule. Try again."); } finally { setBusy(false); }
   };
 
-  return (
+  return createPortal(
     <div onClick={() => !busy && onClose()} style={overlay}>
       <div onClick={(e) => e.stopPropagation()} style={sheet}>
         <button onClick={() => !busy && onClose()} aria-label="Close" style={closeX}>✕</button>
@@ -437,12 +438,15 @@ function ProjectCapture({
           </>
         )}
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }
 
-const overlay: React.CSSProperties = { position: "fixed", inset: 0, zIndex: 6000, background: "rgba(6,4,14,0.72)", backdropFilter: "blur(6px)", display: "flex", alignItems: "flex-start", justifyContent: "center", padding: 16, overflowY: "auto" };
-const sheet: React.CSSProperties = { position: "relative", width: "min(560px,96vw)", margin: "24px 0", background: "#150f1f", border: "1px solid rgba(255,255,255,0.12)", borderRadius: 16, padding: "22px 20px 20px", boxShadow: "0 30px 80px rgba(0,0,0,0.6)" };
+const overlay: React.CSSProperties = { position: "fixed", inset: 0, zIndex: 6000, background: "rgba(6,4,14,0.72)", backdropFilter: "blur(6px)", display: "flex", alignItems: "flex-start", justifyContent: "center", padding: 16, paddingTop: "max(16px, env(safe-area-inset-top))", paddingBottom: "max(16px, env(safe-area-inset-bottom))", overflowY: "auto", overflowX: "hidden", boxSizing: "border-box" };
+// width:100% (not 96vw) so the sheet fits inside the overlay's padding instead
+// of overflowing it, which let the modal pan side to side.
+const sheet: React.CSSProperties = { position: "relative", width: "100%", maxWidth: 560, margin: "8px 0 24px", background: "#150f1f", border: "1px solid rgba(255,255,255,0.12)", borderRadius: 16, padding: "22px 20px 20px", boxShadow: "0 30px 80px rgba(0,0,0,0.6)", boxSizing: "border-box" };
 const closeX: React.CSSProperties = { position: "absolute", top: 12, right: 12, width: 32, height: 32, borderRadius: "50%", border: "1px solid rgba(255,255,255,0.18)", background: "transparent", color: "#fff", cursor: "pointer" };
 const h3: React.CSSProperties = { fontSize: 14, fontWeight: 700, margin: "18px 0 8px" };
 const photoSlot = (filled: boolean): React.CSSProperties => ({ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", minHeight: 110, padding: 8, borderRadius: 10, border: `1px ${filled ? "solid" : "dashed"} rgba(255,255,255,0.2)`, background: "rgba(8,5,18,0.5)", cursor: "pointer", color: "#cfc7e2" });
