@@ -14,6 +14,7 @@ import { fetchAreaIncentives, incentiveDates, type AreaIncentive } from "../lib/
 import { usePitchRecorder, pitchSupported } from "../lib/pitch";
 import { validAppointmentTime } from "../lib/scheduling";
 import { useShift } from "../shift/ShiftContext";
+import SlotPicker from "./SlotPicker";
 import type { LeadStatus, LeadEnrichment, EventType } from "../types";
 
 const ONSITE_FT = 100; // a knock only counts if you're within 100 ft of the home
@@ -462,11 +463,6 @@ export default function DispositionModal({
 
   if (!d) return null;
 
-  // Appointment booking window from company scheduling settings.
-  const sched = company?.scheduling;
-  const apptMin = sched ? toLocalInput(Date.now() + (sched.apptMinLeadHours || 0) * 3600_000) : undefined;
-  const apptMax = sched ? toLocalInput(Date.now() + (sched.apptMaxDaysOut || 30) * 86400_000) : undefined;
-
   // Dispositions that warrant a second screen for scheduling + photos. Everyone
   // else saves straight from step 1 so the initial card stays short.
   const needsStep2 = !!SCHEDULE_FOR[d.status] || d.status === "sold";
@@ -565,19 +561,26 @@ export default function DispositionModal({
           </label>
           {schedule && (
             <>
-              <input
-                type="datetime-local"
-                className="dispo-sched-input"
-                value={scheduleAt}
-                min={d.status === "appointment" ? apptMin : undefined}
-                max={d.status === "appointment" ? apptMax : undefined}
-                onChange={(e) => setScheduleAt(e.target.value)}
-              />
-              {d.status === "appointment" && company?.scheduling && (
-                <div className="muted small" style={{ marginTop: 6 }}>
-                  {company.scheduling.apptDurationMin}-min appointment · book {company.scheduling.apptMinLeadHours}h+
-                  out, within {company.scheduling.apptMaxDaysOut} days
-                </div>
+              {d.status === "appointment" && company?.scheduling ? (
+                <>
+                  <SlotPicker
+                    sched={company.scheduling}
+                    value={scheduleAt ? new Date(scheduleAt).getTime() : null}
+                    onChange={(ms) => setScheduleAt(toLocalInput(ms))}
+                    uid={setterSelect && closerUid ? closerUid : undefined}
+                  />
+                  <div className="muted small" style={{ marginTop: 6 }}>
+                    {company.scheduling.apptDurationMin}-min appointment · book {company.scheduling.apptMinLeadHours}h+
+                    out, within {company.scheduling.apptMaxDaysOut} days · only open times are shown
+                  </div>
+                </>
+              ) : (
+                <input
+                  type="datetime-local"
+                  className="dispo-sched-input"
+                  value={scheduleAt}
+                  onChange={(e) => setScheduleAt(e.target.value)}
+                />
               )}
               {d.status === "appointment" && setterSelect && (
                 <label className="field" style={{ marginTop: 10 }}>
