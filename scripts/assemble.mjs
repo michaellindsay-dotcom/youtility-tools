@@ -1,15 +1,15 @@
 // Assemble the Firebase Hosting `public/` directory:
 //   - static HTML tools + landing + admin console at the root
-//   - the built React field app (canvasspro-web/dist) under /app
+//   - the built React field app (youtilityknock-web/dist) under /app
 //
-// Run after `canvasspro-web` has been built (see root package.json `build`).
+// Run after `youtilityknock-web` has been built (see root package.json `build`).
 import { rm, mkdir, cp, readdir, access } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
 const publicDir = join(root, "public");
-const appDist = join(root, "canvasspro-web", "dist");
+const appDist = join(root, "youtilityknock-web", "dist");
 
 // Deny-list model: EVERY root-level *.html page is published by default, so a
 // new tool/page goes live automatically (and you can never forget to add it to

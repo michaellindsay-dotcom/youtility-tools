@@ -9,7 +9,7 @@ unlisted business app — installed via direct link rather than public search).
 
 | Path | What it is |
 |------|------------|
-| `canvasspro-web/` | The React + Vite + TypeScript **field app** (web + iOS + Android via Capacitor) and its Cloud Functions. **Start here** — see [`canvasspro-web/README.md`](canvasspro-web/README.md). |
+| `youtilityknock-web/` | The React + Vite + TypeScript **field app** (web + iOS + Android via Capacitor) and its Cloud Functions. **Start here** — see [`youtilityknock-web/README.md`](youtilityknock-web/README.md). |
 | `admin.html` | Back-office console for super-admins + company admins (create companies, provision users, manage plans, mirror users). |
 | `index.html`, `privacy.html`, `terms.html` | Marketing landing page and the public Privacy Policy / Terms (linked from the app login and the store listings). |
 | `firebase.json`, `firestore.rules`, `firestore.indexes.json`, `storage.rules` | Firebase Hosting + Firestore/Storage security and indexes (per-company isolation is enforced here, not just in the UI). |
@@ -28,7 +28,7 @@ door knocks automatically (GPS-verified), and pace yourself against a
 close-goal-driven Success Planner. Managers see their downstream team; companies
 are fully isolated by `companyId`. Accounts are **provisioned by an admin** in
 `admin.html` — there is no public sign-up. See
-[`canvasspro-web/README.md`](canvasspro-web/README.md) for the full feature tour
+[`youtilityknock-web/README.md`](youtilityknock-web/README.md) for the full feature tour
 and architecture.
 
 ## Versioning & releases

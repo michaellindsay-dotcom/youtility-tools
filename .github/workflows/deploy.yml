@@ -27,7 +27,7 @@ jobs:
           node-version: "20"
 
       # Root devDeps include firebase-tools; the build scripts install the
-      # web-app and functions deps under canvasspro-web themselves.
+      # web-app and functions deps under youtilityknock-web themselves.
       - name: Install tooling (firebase-tools)
         run: npm install
 

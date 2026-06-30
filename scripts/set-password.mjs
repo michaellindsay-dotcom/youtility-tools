@@ -7,7 +7,7 @@
 //   B) Service account key:  node scripts/set-password.mjs --key /path/key.json ...
 //
 // Run:
-//   npm --prefix canvasspro-web/functions install   # ensures firebase-admin is available
+//   npm --prefix youtilityknock-web/functions install   # ensures firebase-admin is available
 //   node scripts/set-password.mjs <email> <newPassword>
 //
 // Example:

@@ -50,5 +50,5 @@ const header=Buffer.alloc(12); header.writeUInt32LE(0x46546C67,0); header.writeU
 const jh=Buffer.alloc(8); jh.writeUInt32LE(json.length,0); jh.writeUInt32LE(0x4E4F534A,4);
 const bh=Buffer.alloc(8); bh.writeUInt32LE(binC.length,0); bh.writeUInt32LE(0x004E4942,4);
 const glb=Buffer.concat([header,jh,json,bh,binC]);
-writeFileSync("canvasspro-web/public/battery.glb",glb);
-console.log("wrote canvasspro-web/public/battery.glb",glb.length,"bytes");
+writeFileSync("youtilityknock-web/public/battery.glb",glb);
+console.log("wrote youtilityknock-web/public/battery.glb",glb.length,"bytes");

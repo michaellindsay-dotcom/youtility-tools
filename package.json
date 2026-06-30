@@ -5,8 +5,8 @@
   "description": "Youtility tools + YoutilityKnock dashboard, deployed to one Firebase Hosting site.",
   "type": "module",
   "scripts": {
-    "build:app": "npm --prefix canvasspro-web install && npm --prefix canvasspro-web run build",
-    "build:functions": "npm --prefix canvasspro-web/functions install && npm --prefix canvasspro-web/functions run build",
+    "build:app": "npm --prefix youtilityknock-web install && npm --prefix youtilityknock-web run build",
+    "build:functions": "npm --prefix youtilityknock-web/functions install && npm --prefix youtilityknock-web/functions run build",
     "assemble": "node scripts/assemble.mjs",
     "build": "npm run build:app && npm run assemble",
     "deploy": "npm run build && npm run build:functions && firebase deploy",

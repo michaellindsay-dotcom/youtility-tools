@@ -9,14 +9,14 @@
 // available in this environment).
 //
 //   node scripts/gen-battery-usdz.mjs
-//   → canvasspro-web/public/battery.usdz
+//   → youtilityknock-web/public/battery.usdz
 import { writeFileSync } from "node:fs";
 import { crc32 } from "node:zlib";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const OUT = resolve(__dirname, "../canvasspro-web/public/battery.usdz");
+const OUT = resolve(__dirname, "../youtilityknock-web/public/battery.usdz");
 
 // ── Box geometry (a wall battery: 0.6 W × 1.0 H × 0.2 D metres, base at y=0) ──
 const W = 0.3, H = 1.0, D = 0.1; // half-width, full-height, half-depth

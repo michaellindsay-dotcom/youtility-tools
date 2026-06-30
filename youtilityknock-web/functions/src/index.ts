@@ -2865,7 +2865,7 @@ function rFunnel(leads: any[], since: number) {
   };
 }
 
-// Server-side season-period helpers (mirror canvasspro-web/src/lib/season.ts).
+// Server-side season-period helpers (mirror youtilityknock-web/src/lib/season.ts).
 function rPeriodKey(kind: string, d = new Date()): string {
   if (kind === "year") return `${d.getFullYear()}`;
   if (kind === "month") return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;

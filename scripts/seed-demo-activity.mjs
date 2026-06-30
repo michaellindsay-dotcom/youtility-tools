@@ -69,7 +69,7 @@ const DISPO_WEIGHTS = [
 ];
 const CONVO = new Set(["pipeline", "appointment", "not_interested", "sold"]);
 
-// ── season helpers (mirror canvasspro-web/src/lib/season.ts) ─────────────────
+// ── season helpers (mirror youtilityknock-web/src/lib/season.ts) ─────────────────
 function periodKey(kind, d = new Date()) {
   if (kind === "year") return `${d.getFullYear()}`;
   if (kind === "month") return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;

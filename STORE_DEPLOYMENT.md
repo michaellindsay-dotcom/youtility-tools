@@ -1,6 +1,6 @@
 # Shipping YoutilityKnock to the App Store & Google Play
 
-YoutilityKnock is one React/Vite codebase (`canvasspro-web/`) wrapped for native
+YoutilityKnock is one React/Vite codebase (`youtilityknock-web/`) wrapped for native
 with **Capacitor** and built **without a Mac** on **Codemagic**. This guide is
 the end-to-end runbook to get it live on **both** stores.
 
@@ -15,7 +15,7 @@ You supply signing credentials once per store in the Codemagic UI.
 | Privacy Policy  | `https://youtilityknock.web.app/privacy` |
 | Terms of Service | `https://youtilityknock.web.app/terms`  |
 | CI config       | [`codemagic.yaml`](./codemagic.yaml) |
-| Icon/splash art | [`canvasspro-web/assets/`](./canvasspro-web/assets/) |
+| Icon/splash art | [`youtilityknock-web/assets/`](./youtilityknock-web/assets/) |
 | Listing copy    | [`STORE_LISTING.md`](./STORE_LISTING.md) |
 | Publisher       | Sun Service (info@sunservice.io) |
 
@@ -26,7 +26,7 @@ You supply signing credentials once per store in the Codemagic UI.
 - ✅ **Android platform** wired into Capacitor (`@capacitor/android`) — previously
   iOS-only.
 - ✅ **App icons + splash screens** for both platforms, generated from
-  `canvasspro-web/assets/` via `@capacitor/assets` (`npm run assets:generate`).
+  `youtilityknock-web/assets/` via `@capacitor/assets` (`npm run assets:generate`).
 - ✅ **Codemagic `android-release` workflow** — builds a signed `.aab`, targets
   Android 15 (API 35, required by Play), injects location permissions, and ships
   to the Play **Internal** track.
@@ -132,7 +132,7 @@ re-reviewed by Apple/Google (yes, even an unlisted app).
 ## Building / testing locally
 
 ```bash
-cd canvasspro-web
+cd youtilityknock-web
 npm install
 
 # Web build that Capacitor bundles (points the API at the live backend):
@@ -145,5 +145,5 @@ npx cap add ios && npx cap sync ios && npm run assets:generate && npx cap open i
 npx cap add android && npx cap sync android && npm run assets:generate && npx cap open android
 ```
 
-To rebrand the icon/splash, replace the PNGs in `canvasspro-web/assets/`
+To rebrand the icon/splash, replace the PNGs in `youtilityknock-web/assets/`
 (same names + sizes) and re-run `npm run assets:generate`.
