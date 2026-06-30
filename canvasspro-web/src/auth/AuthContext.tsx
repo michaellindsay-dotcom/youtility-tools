@@ -12,8 +12,9 @@ import {
   signOut,
   type User,
 } from "firebase/auth";
-import { doc, onSnapshot } from "firebase/firestore";
-import { auth, db, googleProvider } from "../firebase";
+import { doc, getDoc, onSnapshot } from "firebase/firestore";
+import { httpsCallable } from "firebase/functions";
+import { auth, db, functions, googleProvider } from "../firebase";
 import { isBillingLocked, PAYMENT_LOCK_MSG } from "../lib/billing";
 import type { Company, Role, UserProfile, Team } from "../types";
 
@@ -115,6 +116,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     let unsubProfile: (() => void) | null = null;
+    // Track the UID we've already tried to self-heal so a permanently
+    // profile-less account doesn't loop calling relinkMyProfile.
+    let relinkTried: string | null = null;
     const stopProfile = () => {
       if (unsubProfile) {
         unsubProfile();
@@ -139,6 +143,26 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         doc(db, "users", u.uid),
         (snap) => {
           const p = toProfile(u.uid, snap.exists() ? snap.data() : undefined);
+          // No profile at this UID? Before declaring "no access", try once to
+          // self-heal an account whose profile lives under a different doc id
+          // (imported, or an Auth user that was recreated). On success the
+          // server writes users/<uid>, which re-fires THIS listener with the
+          // real profile — so we just wait rather than flashing the gate.
+          if (p === null && !snap.metadata.fromCache && relinkTried !== u.uid) {
+            relinkTried = u.uid;
+            httpsCallable(functions, "relinkMyProfile")()
+              .catch((err) => console.error("relinkMyProfile failed", err))
+              .finally(() => {
+                // If nothing got linked, the listener won't re-fire — settle the
+                // no-access state here so we don't hang on the loader forever.
+                if (auth.currentUser?.uid === u.uid) {
+                  void getDoc(doc(db, "users", u.uid)).then((s) => {
+                    if (!s.exists()) { setNoAccess(true); setLoading(false); }
+                  });
+                }
+              });
+            return;
+          }
           setProfile(p);
           setNoAccess(p === null);
           setLoading(false);
