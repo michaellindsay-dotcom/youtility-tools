@@ -2348,6 +2348,37 @@ export const setCompanyBranding = onCall(async (request) => {
   return { ok: true, ...update };
 });
 
+// The company's core profile: legal/display name + general contact info. Company
+// admin (own company) or super-admin (any company). Separate from the RallyCard
+// branding fields above (which control what's shown on a rep's card) and from
+// setCompanyBilling (which controls who invoices go to).
+export const setCompanyProfile = onCall(async (request) => {
+  const caller = await getCaller(request);
+  const { companyId, name, phone, address, email } = (request.data || {}) as {
+    companyId?: string; name?: string; phone?: string; address?: string; email?: string;
+  };
+  authorizeForCompany(caller, companyId);
+  const update: Record<string, unknown> = {};
+  if (typeof name === "string") {
+    const trimmed = name.trim().slice(0, 200);
+    if (!trimmed) throw new HttpsError("invalid-argument", "Company name can't be empty.");
+    update.name = trimmed;
+  }
+  if (typeof phone === "string") update.phone = phone.trim().slice(0, 30);
+  if (typeof address === "string") update.address = address.trim().slice(0, 200);
+  if (typeof email === "string") {
+    const trimmedEmail = email.trim().slice(0, 200);
+    if (trimmedEmail && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(trimmedEmail)) {
+      throw new HttpsError("invalid-argument", "Enter a valid email address.");
+    }
+    update.email = trimmedEmail;
+  }
+  if (Object.keys(update).length === 0) throw new HttpsError("invalid-argument", "Nothing to update.");
+  update.updatedAt = Date.now();
+  await db.doc(`companies/${companyId}`).set(update, { merge: true });
+  return { ok: true, ...update };
+});
+
 // Public (no auth): a visitor submits the lead-capture form on a rep's card.
 // Mirrors the crmApi lead-upsert shape above, but the rep IS the assignee.
 export const submitCardLead = onCall(async (request) => {
