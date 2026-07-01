@@ -18,6 +18,13 @@ number automatically.
   map/movers/territories/closer tools entirely and turns the whole app into a
   card + leads + team-chat + competitions surface. Upgrading later to a
   Canvass/Pro/Elite plan adds the map back with nothing else to migrate.
+- RallyCard now looks like an actual business card: a logo/photo/name hero
+  panel (shared between the live public card and the editor's preview) shows
+  the **company logo** — set once by an admin under Settings → RallyCard
+  branding (also carries website + phone), used on every rep's card — or a
+  rep's own uploaded logo if they override it. Every card also gets a stable,
+  randomly-assigned display number ("No. 348219") the first time it's saved,
+  so a brand-new account doesn't read as customer/rep #1.
 
 ## [1.2] — 2026-06
 

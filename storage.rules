@@ -52,5 +52,15 @@ service firebase.storage {
                    && request.resource.size < 8 * 1024 * 1024
                    && request.resource.contentType.matches('image/.*');
     }
+
+    // Company logo (RallyCard branding): publicly readable, any signed-in user
+    // can upload — same trust level as the reward-image uploads above; the
+    // admin console is the only surface that exposes this control.
+    match /branding/{companyId}/{fileName} {
+      allow read: if true;
+      allow write: if request.auth != null
+                   && request.resource.size < 4 * 1024 * 1024
+                   && request.resource.contentType.matches('image/.*');
+    }
   }
 }

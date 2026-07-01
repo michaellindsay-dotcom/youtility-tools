@@ -1842,7 +1842,7 @@ export const setMyCard = onCall(async (request) => {
   const caller = await getCaller(request);
   const d = (request.data || {}) as {
     slug?: string; enabled?: boolean; title?: string; bio?: string; serviceArea?: string;
-    photoUrl?: string; reviews?: unknown;
+    photoUrl?: string; logoUrl?: string; reviews?: unknown;
   };
   const update: Record<string, unknown> = {};
   if (typeof d.slug === "string") {
@@ -1861,15 +1861,19 @@ export const setMyCard = onCall(async (request) => {
   if (typeof d.bio === "string") update.cardBio = d.bio.trim().slice(0, 1000);
   if (typeof d.serviceArea === "string") update.cardServiceArea = d.serviceArea.trim().slice(0, 200);
   if (typeof d.photoUrl === "string") update.cardPhotoUrl = d.photoUrl.trim().slice(0, 1000);
+  if (typeof d.logoUrl === "string") update.cardLogoUrl = d.logoUrl.trim().slice(0, 1000);
   if (d.reviews !== undefined) update.cardReviews = sanitizeCardReviews(d.reviews);
   if (Object.keys(update).length === 0) throw new HttpsError("invalid-argument", "Nothing to update.");
 
-  if (update.cardEnabled === true && !update.cardSlug) {
-    const me = await db.doc(`users/${caller.uid}`).get();
-    if (!(me.data() as any)?.cardSlug) {
-      throw new HttpsError("failed-precondition", "Choose a card link before turning your card on.");
-    }
+  const me = await db.doc(`users/${caller.uid}`).get();
+  const meData = (me.data() || {}) as any;
+  if (update.cardEnabled === true && !update.cardSlug && !meData.cardSlug) {
+    throw new HttpsError("failed-precondition", "Choose a card link before turning your card on.");
   }
+  // A stable, randomly-assigned display number ("No. 348219") — cosmetic only,
+  // assigned once on a rep's first save so their card doesn't read like id #1.
+  if (!meData.cardMemberId) update.cardMemberId = 100000 + crypto.randomInt(900000);
+
   await db.doc(`users/${caller.uid}`).set(update, { merge: true });
   return { ok: true, ...update };
 });
@@ -1890,13 +1894,35 @@ export const getRepCard = onCall(async (request) => {
     displayName: r.displayName || "",
     title: r.cardTitle || r.title || "",
     photoUrl: r.cardPhotoUrl || "",
+    logoUrl: r.cardLogoUrl || c.logoUrl || "",
     bio: r.cardBio || "",
     serviceArea: r.cardServiceArea || "",
     reviews: Array.isArray(r.cardReviews) ? r.cardReviews : [],
     phone: r.phone || "",
     email: r.email || "",
     companyName: c.name || "",
+    companyWebsite: c.website || "",
+    companyPhone: c.phone || "",
+    memberId: typeof r.cardMemberId === "number" ? r.cardMemberId : null,
   };
+});
+
+// Company branding shown on every rep's card (logo, website, phone) unless a
+// rep overrides the logo with their own. Company admin (own company) or
+// super-admin (any company).
+export const setCompanyBranding = onCall(async (request) => {
+  const caller = await getCaller(request);
+  const { companyId, logoUrl, website, phone } = (request.data || {}) as {
+    companyId?: string; logoUrl?: string; website?: string; phone?: string;
+  };
+  authorizeForCompany(caller, companyId);
+  const update: Record<string, unknown> = {};
+  if (typeof logoUrl === "string") update.logoUrl = logoUrl.trim().slice(0, 1000);
+  if (typeof website === "string") update.website = website.trim().slice(0, 200);
+  if (typeof phone === "string") update.phone = phone.trim().slice(0, 30);
+  if (Object.keys(update).length === 0) throw new HttpsError("invalid-argument", "Nothing to update.");
+  await db.doc(`companies/${companyId}`).set(update, { merge: true });
+  return { ok: true, ...update };
 });
 
 // Public (no auth): a visitor submits the lead-capture form on a rep's card.

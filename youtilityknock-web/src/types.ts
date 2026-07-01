@@ -76,6 +76,11 @@ export interface Company {
   batteryDepositPct?: number; // % of system price; takes precedence when > 0
   sungageApplyUrl?: string; // dealer's Sungage application link (else portal fallback)
   createdAt?: number;
+  // Company branding — shown on every rep's RallyCard unless the rep uploads
+  // their own logo override (UserProfile.cardLogoUrl).
+  logoUrl?: string;
+  website?: string;
+  phone?: string;
 }
 
 // A rep's linked external calendars (status only — tokens live server-side).
@@ -166,6 +171,8 @@ export interface UserProfile {
   cardServiceArea?: string;
   cardPhotoUrl?: string;
   cardReviews?: CardReview[];
+  cardLogoUrl?: string; // overrides the company logo on this rep's card, if set
+  cardMemberId?: number; // stable, randomly-assigned display id (e.g. "No. 348219")
 }
 
 export interface CardReview {
