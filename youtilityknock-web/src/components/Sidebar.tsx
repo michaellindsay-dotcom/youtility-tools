@@ -38,6 +38,7 @@ const links: { to: string; label: string; icon: string; end?: boolean; feat?: Fe
   { to: "/gamify", label: "Gamify", icon: "🎮", feat: "rewards" },
   { to: "/rewards", label: "Rewards", icon: "🎁", feat: "rewards" },
   { to: "/territories", label: "Territories", icon: "▰", feat: "aiTerritories" },
+  { to: "/card", label: "My Business Card", icon: "🪪" },
   { to: "/settings", label: "Settings", icon: "⚐" },
 ];
 

@@ -7,6 +7,7 @@ import { AuthProvider } from "./auth/AuthContext";
 import { ShiftProvider } from "./shift/ShiftContext";
 import SharedProposalView from "./pages/SharedProposalView";
 import AgreementSignView from "./pages/AgreementSignView";
+import PublicCard from "./pages/PublicCard";
 import "./index.css";
 
 // On iOS this WKWebView reports env(safe-area-inset-top) as 0, so the fixed
@@ -31,6 +32,7 @@ const qs = typeof window !== "undefined" ? new URLSearchParams(window.location.s
 // Standalone, no-login entry points (outside the auth gate + router):
 //  • ?pid=<id>        → the homeowner's interactive proposal viewer
 //  • ?agreement=<id>  → the customer's battery-agreement sign page
+//  • ?card=<slug>     → a rep's public digital business card
 if (qs.has("agreement")) {
   root.render(
     <React.StrictMode>
@@ -41,6 +43,12 @@ if (qs.has("agreement")) {
   root.render(
     <React.StrictMode>
       <SharedProposalView />
+    </React.StrictMode>
+  );
+} else if (qs.has("card")) {
+  root.render(
+    <React.StrictMode>
+      <PublicCard />
     </React.StrictMode>
   );
 } else {

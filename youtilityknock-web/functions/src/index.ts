@@ -1806,6 +1806,145 @@ export const setMyProfile = onCall(async (request) => {
   return { ok: true, ...update };
 });
 
+// ── Digital business card ─────────────────────────────────────────────────────
+// A rep's public, shareable profile page for lead capture (photo, bio, service
+// area, reviews, click-to-contact) — reachable at /app?card=<slug> with no
+// login, in the same "public onCall, no firestore.rules changes" style as
+// getSharedProposal/AgreementSignView above: the Admin SDK does the read/write,
+// so `users`/`leads` stay fully locked down to signed-in members.
+const CARD_SLUG_RE = /^[a-z0-9](?:[a-z0-9-]{1,30}[a-z0-9])?$/;
+
+function normalizeCardSlug(input: string): string {
+  return String(input || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9-]+/g, "-")
+    .replace(/-{2,}/g, "-")
+    .replace(/^-|-$/g, "")
+    .slice(0, 32);
+}
+
+function sanitizeCardReviews(input: unknown): { name: string; text: string; rating: number }[] {
+  if (!Array.isArray(input)) return [];
+  return input
+    .slice(0, 20)
+    .map((r) => ({
+      name: String((r as any)?.name || "").trim().slice(0, 80),
+      text: String((r as any)?.text || "").trim().slice(0, 500),
+      rating: Math.min(5, Math.max(1, Math.round(Number((r as any)?.rating) || 5))),
+    }))
+    .filter((r) => r.text);
+}
+
+// A rep edits their own card. `slug` must be unique across the whole platform
+// (every company shares one hosting domain, so the card URL space is global).
+export const setMyCard = onCall(async (request) => {
+  const caller = await getCaller(request);
+  const d = (request.data || {}) as {
+    slug?: string; enabled?: boolean; title?: string; bio?: string; serviceArea?: string;
+    photoUrl?: string; reviews?: unknown;
+  };
+  const update: Record<string, unknown> = {};
+  if (typeof d.slug === "string") {
+    const slug = normalizeCardSlug(d.slug);
+    if (!CARD_SLUG_RE.test(slug)) {
+      throw new HttpsError("invalid-argument", "Link must be 3-32 lowercase letters, numbers, or hyphens.");
+    }
+    const existing = await db.collection("users").where("cardSlug", "==", slug).limit(1).get();
+    if (!existing.empty && existing.docs[0].id !== caller.uid) {
+      throw new HttpsError("already-exists", "That link is already taken — try another.");
+    }
+    update.cardSlug = slug;
+  }
+  if (typeof d.enabled === "boolean") update.cardEnabled = d.enabled;
+  if (typeof d.title === "string") update.cardTitle = d.title.trim().slice(0, 80);
+  if (typeof d.bio === "string") update.cardBio = d.bio.trim().slice(0, 1000);
+  if (typeof d.serviceArea === "string") update.cardServiceArea = d.serviceArea.trim().slice(0, 200);
+  if (typeof d.photoUrl === "string") update.cardPhotoUrl = d.photoUrl.trim().slice(0, 1000);
+  if (d.reviews !== undefined) update.cardReviews = sanitizeCardReviews(d.reviews);
+  if (Object.keys(update).length === 0) throw new HttpsError("invalid-argument", "Nothing to update.");
+
+  if (update.cardEnabled === true && !update.cardSlug) {
+    const me = await db.doc(`users/${caller.uid}`).get();
+    if (!(me.data() as any)?.cardSlug) {
+      throw new HttpsError("failed-precondition", "Choose a card link before turning your card on.");
+    }
+  }
+  await db.doc(`users/${caller.uid}`).set(update, { merge: true });
+  return { ok: true, ...update };
+});
+
+// Public (no auth): fetch a rep's digital business card by its slug.
+export const getRepCard = onCall(async (request) => {
+  const slug = normalizeCardSlug(String((request.data as any)?.slug || ""));
+  if (!slug) throw new HttpsError("invalid-argument", "Missing card link.");
+  const q = await db.collection("users").where("cardSlug", "==", slug).limit(1).get();
+  if (q.empty) throw new HttpsError("not-found", "This card isn't available.");
+  const r = q.docs[0].data() as any;
+  if (!r.cardEnabled || r.disabled) throw new HttpsError("not-found", "This card isn't available.");
+  const company = await db.doc(`companies/${r.companyId}`).get();
+  const c = company.data() as any;
+  if (!c || c.status === "suspended") throw new HttpsError("not-found", "This card isn't available.");
+  return {
+    slug,
+    displayName: r.displayName || "",
+    title: r.cardTitle || r.title || "",
+    photoUrl: r.cardPhotoUrl || "",
+    bio: r.cardBio || "",
+    serviceArea: r.cardServiceArea || "",
+    reviews: Array.isArray(r.cardReviews) ? r.cardReviews : [],
+    phone: r.phone || "",
+    email: r.email || "",
+    companyName: c.name || "",
+  };
+});
+
+// Public (no auth): a visitor submits the lead-capture form on a rep's card.
+// Mirrors the crmApi lead-upsert shape above, but the rep IS the assignee.
+export const submitCardLead = onCall(async (request) => {
+  const d = (request.data || {}) as {
+    slug?: string; name?: string; phone?: string; email?: string; address?: string; notes?: string; hp?: string;
+  };
+  if (d.hp) return { ok: true }; // honeypot field tripped — silently drop, pretend success
+
+  const slug = normalizeCardSlug(String(d.slug || ""));
+  if (!slug) throw new HttpsError("invalid-argument", "Missing card link.");
+  const name = String(d.name || "").trim().slice(0, 120);
+  const phone = String(d.phone || "").trim().slice(0, 30);
+  const email = String(d.email || "").trim().slice(0, 120);
+  if (!name || (!phone && !email)) {
+    throw new HttpsError("invalid-argument", "Name and a phone or email are required.");
+  }
+
+  const q = await db.collection("users").where("cardSlug", "==", slug).limit(1).get();
+  if (q.empty) throw new HttpsError("not-found", "This card isn't available.");
+  const repUid = q.docs[0].id;
+  const rep = q.docs[0].data() as any;
+  if (!rep.cardEnabled || rep.disabled) throw new HttpsError("not-found", "This card isn't available.");
+  const company = await db.doc(`companies/${rep.companyId}`).get();
+  if (!company.exists || (company.data() as any)?.status === "suspended") {
+    throw new HttpsError("not-found", "This card isn't available.");
+  }
+
+  const now = Date.now();
+  const ref = await db.collection("leads").add({
+    companyId: rep.companyId,
+    address: String(d.address || "").trim().slice(0, 200) || "(no address provided)",
+    ownerName: name,
+    phone: phone || null,
+    email: email || null,
+    notes: String(d.notes || "").trim().slice(0, 1000) || null,
+    status: "new",
+    assignedTo: repUid,
+    visibilityPath: [repUid, ...(Array.isArray(rep.managerPath) ? rep.managerPath : [])],
+    createdBy: repUid,
+    source: "digitalCard",
+    createdAt: now,
+    updatedAt: now,
+  });
+  return { ok: true, leadId: ref.id };
+});
+
 // ── integration credentials (OAuth client id/secret) — super-admin only ──────
 interface IntegrationConfig {
   googleClientId: string;
