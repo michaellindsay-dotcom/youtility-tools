@@ -10,6 +10,7 @@ interface CardPayload {
   title: string;
   photoUrl: string;
   logoUrl: string;
+  bgImageUrl: string;
   bio: string;
   serviceArea: string;
   reviews: { name: string; text: string; rating: number }[];
@@ -85,6 +86,7 @@ export default function PublicCard() {
               title={card.title}
               companyName={card.companyName}
               logoUrl={card.logoUrl}
+              bgImageUrl={card.bgImageUrl}
               photoUrl={card.photoUrl}
               serviceArea={card.serviceArea}
               memberId={card.memberId}

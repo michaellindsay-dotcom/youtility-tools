@@ -181,6 +181,7 @@ export default function BusinessCard() {
           companyName={company?.name}
           logoUrl={effectiveLogo}
           photoUrl={photoUrl}
+          bgImageUrl={company?.bgImageUrl}
           serviceArea={serviceArea}
           memberId={profile?.cardMemberId ?? null}
           idPrefix={company?.idPrefix}

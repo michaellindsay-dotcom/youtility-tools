@@ -79,6 +79,7 @@ export interface Company {
   // Company branding — shown on every rep's RallyCard unless the rep uploads
   // their own logo override (UserProfile.cardLogoUrl).
   logoUrl?: string;
+  bgImageUrl?: string; // subtle photo shown behind every rep's card
   website?: string;
   phone?: string;
   address?: string;
