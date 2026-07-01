@@ -2750,7 +2750,7 @@ body.modal-open .chat-fab-global { display: none; }
 /* ── Business-card hero (shared by the editor preview + the public page) ── */
 .biz-card {
   position: relative;
-  aspect-ratio: 1.5 / 1;
+  min-height: 320px;
   width: 100%;
   max-width: 680px;
   margin: 0 auto;
