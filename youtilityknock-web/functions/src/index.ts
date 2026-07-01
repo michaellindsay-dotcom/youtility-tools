@@ -2108,6 +2108,15 @@ function normalizeCardSlug(input: string): string {
     .slice(0, 32);
 }
 
+// A website saved without "http(s)://" (e.g. "youtility.us") renders as a
+// broken relative link (`https://youtilityknock.web.app/youtility.us`)
+// instead of opening the real site — assume https when no scheme is given.
+function withUrlProtocol(input: string): string {
+  const url = String(input || "").trim();
+  if (!url) return "";
+  return /^https?:\/\//i.test(url) ? url : `https://${url}`;
+}
+
 function sanitizeCardReviews(input: unknown): { name: string; text: string; rating: number }[] {
   if (!Array.isArray(input)) return [];
   return input
@@ -2195,13 +2204,76 @@ export const getRepCard = onCall(async (request) => {
     phone: r.phone || "",
     email: r.email || "",
     companyName: c.name || "",
-    companyWebsite: c.website || "",
+    companyWebsite: withUrlProtocol(c.website),
     companyPhone: c.phone || "",
     companyAddress: c.address || "",
+    companyIdPrefix: c.idPrefix || "",
     accentColor: r.cardAccentColor || "",
     theme: r.cardTheme || "default",
     memberId: typeof r.cardMemberId === "number" ? r.cardMemberId : null,
   };
+});
+
+// Public (no auth): server-rendered share link for a rep's card. The SPA at
+// /app?card=<slug> can't carry per-rep Open Graph tags (it's one static
+// index.html), so link unfurlers (iMessage, SMS, Slack, etc.) only ever saw
+// the generic site preview. This route returns a tiny HTML shell with the
+// rep's real name/title/photo as og:title/og:description/og:image, then
+// immediately sends real visitors on to the interactive card.
+export const cardShare = onRequest({ cors: true }, async (req, res) => {
+  // Path may arrive with or without the "/c" rewrite prefix.
+  const parts = req.path.split("/").filter(Boolean).filter((p) => p !== "c");
+  const slug = normalizeCardSlug(parts[0] || "");
+  const appUrl = `${APP_URL}/app${slug ? `?card=${encodeURIComponent(slug)}` : ""}`;
+
+  let displayName = "", cardTitle = "", bio = "", photoUrl = "", companyName = "", logoUrl = "";
+  let found = false;
+  if (slug) {
+    try {
+      const q = await db.collection("users").where("cardSlug", "==", slug).limit(1).get();
+      if (!q.empty) {
+        const r = q.docs[0].data() as any;
+        if (r.cardEnabled && !r.disabled) {
+          found = true;
+          displayName = r.displayName || "";
+          cardTitle = r.cardTitle || r.title || "";
+          bio = r.cardBio || "";
+          photoUrl = r.cardPhotoUrl || "";
+          if (r.companyId) {
+            const c = (await db.doc(`companies/${r.companyId}`).get()).data() as any;
+            if (c) { companyName = c.name || ""; logoUrl = r.cardLogoUrl || c.logoUrl || ""; }
+          }
+        }
+      }
+    } catch {
+      // fall through to the generic redirect below
+    }
+  }
+
+  const image = photoUrl || logoUrl || "";
+  const title = found
+    ? `${displayName}${cardTitle ? ` — ${cardTitle}` : ""}`
+    : "Digital Business Card";
+  const desc = found
+    ? (bio ? bio.slice(0, 200) : `${companyName ? `${companyName} — ` : ""}Tap to view my digital business card.`)
+    : "Tap to view this digital business card.";
+
+  res.set("Cache-Control", "public, max-age=300");
+  res.status(200).send(`<!doctype html>
+<html><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>${escHtml(title)}</title>
+<meta property="og:type" content="profile">
+<meta property="og:title" content="${escHtml(title)}">
+<meta property="og:description" content="${escHtml(desc)}">
+${image ? `<meta property="og:image" content="${escHtml(image)}">\n<meta name="twitter:card" content="summary_large_image">` : ""}
+<meta property="og:url" content="${escHtml(`${APP_URL}/c/${slug}`)}">
+<meta http-equiv="refresh" content="0; url=${escHtml(appUrl)}">
+<script>location.replace(${JSON.stringify(appUrl)});</script>
+</head><body>
+<p>Redirecting to <a href="${escHtml(appUrl)}">the card</a>…</p>
+</body></html>`);
 });
 
 // Company branding shown on every rep's card (logo, website, phone, address) unless a
@@ -2209,15 +2281,16 @@ export const getRepCard = onCall(async (request) => {
 // super-admin (any company).
 export const setCompanyBranding = onCall(async (request) => {
   const caller = await getCaller(request);
-  const { companyId, logoUrl, website, phone, address } = (request.data || {}) as {
-    companyId?: string; logoUrl?: string; website?: string; phone?: string; address?: string;
+  const { companyId, logoUrl, website, phone, address, idPrefix } = (request.data || {}) as {
+    companyId?: string; logoUrl?: string; website?: string; phone?: string; address?: string; idPrefix?: string;
   };
   authorizeForCompany(caller, companyId);
   const update: Record<string, unknown> = {};
   if (typeof logoUrl === "string") update.logoUrl = logoUrl.trim().slice(0, 1000);
-  if (typeof website === "string") update.website = website.trim().slice(0, 200);
+  if (typeof website === "string") update.website = withUrlProtocol(website.slice(0, 200));
   if (typeof phone === "string") update.phone = phone.trim().slice(0, 30);
   if (typeof address === "string") update.address = address.trim().slice(0, 200);
+  if (typeof idPrefix === "string") update.idPrefix = idPrefix.trim().toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 6);
   if (Object.keys(update).length === 0) throw new HttpsError("invalid-argument", "Nothing to update.");
   await db.doc(`companies/${companyId}`).set(update, { merge: true });
   return { ok: true, ...update };

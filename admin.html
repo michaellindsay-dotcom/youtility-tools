@@ -795,7 +795,11 @@
       <label class="field" style="max-width:260px;"><span>Website</span><input type="text" id="brandingWebsite" placeholder="https://example.com" /></label>
       <label class="field" style="max-width:200px;"><span>Company phone</span><input type="text" id="brandingPhone" placeholder="(555) 123-4567" /></label>
       <label class="field" style="max-width:320px;"><span>Company address</span><input type="text" id="brandingAddress" placeholder="123 Main St, Salt Lake City, UT" /></label>
+      <label class="field" style="max-width:140px;"><span>Member ID prefix</span><input type="text" id="brandingIdPrefix" placeholder="YT" maxlength="6" style="text-transform:uppercase;" /></label>
     </div>
+    <p class="muted small" style="margin:10px 0 0;">
+      Reps' card member numbers show as this prefix + their number (e.g. "YT195474") instead of a plain, comma-formatted number.
+    </p>
     <div class="row" style="margin-top:12px;">
       <button class="btn primary sm" id="brandingSave">Save branding</button>
     </div>
@@ -3408,6 +3412,7 @@ async function loadCompanyBranding(companyId) {
   $("brandingWebsite").value = c.website || "";
   $("brandingPhone").value = c.phone || "";
   $("brandingAddress").value = c.address || "";
+  $("brandingIdPrefix").value = c.idPrefix || "";
 }
 $("brandingLogoFile").addEventListener("change", async (e) => {
   const cid = state.selectedCompany;
@@ -3428,7 +3433,7 @@ $("brandingSave").addEventListener("click", async () => {
   if (!cid) return;
   $("brandingSave").disabled = true;
   try {
-    await setCompanyBranding({ companyId: cid, logoUrl: brandingLogoUrl, website: $("brandingWebsite").value, phone: $("brandingPhone").value, address: $("brandingAddress").value });
+    await setCompanyBranding({ companyId: cid, logoUrl: brandingLogoUrl, website: $("brandingWebsite").value, phone: $("brandingPhone").value, address: $("brandingAddress").value, idPrefix: $("brandingIdPrefix").value });
     banner($("brandingBanner"), "Branding saved.", "good");
   } catch (e) { banner($("brandingBanner"), e.message || "Save failed.", "error"); }
   finally { $("brandingSave").disabled = false; }

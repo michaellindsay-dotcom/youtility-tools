@@ -8,7 +8,11 @@ import BizCardHero from "../components/BizCardHero";
 import type { CardReview } from "../types";
 import { CARD_THEMES, CARD_THEME_KEYS, cardAccentVars, cardThemeBg } from "../lib/cardTheme";
 
-const CARD_BASE_URL = "https://youtilityknock.web.app/app";
+// A rich-preview link (real og:title/description/image) that immediately
+// redirects into the app — see the `cardShare` function. Used for anything
+// people actually send (share sheet, text, email, QR) so link previews show
+// the rep's name/photo instead of the site's generic preview.
+const CARD_SHARE_BASE_URL = "https://youtilityknock.web.app/c";
 
 export default function BusinessCard() {
   const { profile, company } = useAuth();
@@ -44,7 +48,7 @@ export default function BusinessCard() {
   // Company logo unless the rep uploaded their own override.
   const effectiveLogo = logoUrl || company?.logoUrl || "";
 
-  const shareUrl = profile?.cardSlug ? `${CARD_BASE_URL}?card=${profile.cardSlug}` : "";
+  const shareUrl = profile?.cardSlug ? `${CARD_SHARE_BASE_URL}/${profile.cardSlug}` : "";
 
   useEffect(() => {
     if (!shareUrl) { setQrDataUrl(""); return; }
@@ -179,9 +183,12 @@ export default function BusinessCard() {
           photoUrl={photoUrl}
           serviceArea={serviceArea}
           memberId={profile?.cardMemberId ?? null}
+          idPrefix={company?.idPrefix}
+          phone={profile?.phone}
+          email={profile?.email}
         />
         {profile?.cardMemberId && (
-          <p className="muted small" style={{ marginTop: 10 }}>Your RallyCard ID: No. {profile.cardMemberId.toLocaleString()}</p>
+          <p className="muted small" style={{ marginTop: 10 }}>Your RallyCard ID: No. {company?.idPrefix || ""}{profile.cardMemberId}</p>
         )}
       </div>
 
@@ -253,7 +260,7 @@ export default function BusinessCard() {
           Pick something short and memorable — this is what people type or scan.
         </p>
         <div className="row" style={{ alignItems: "center" }}>
-          <span className="muted small">{CARD_BASE_URL}?card=</span>
+          <span className="muted small">{CARD_SHARE_BASE_URL}/</span>
           <input
             className="input"
             style={{ maxWidth: 220 }}

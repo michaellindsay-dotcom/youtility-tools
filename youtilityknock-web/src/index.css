@@ -2756,29 +2756,58 @@ body.modal-open .chat-fab-global { display: none; }
 
 /* ── Business-card hero (shared by the editor preview + the public page) ── */
 .biz-card {
+  position: relative;
   aspect-ratio: 1.65 / 1;
   width: 100%;
   max-width: 400px;
   margin: 0 auto;
-  border-radius: 16px;
-  padding: 16px 18px;
-  background: linear-gradient(135deg, var(--bg-2), var(--bg-1) 70%);
-  border: 1px solid var(--line-hi);
-  box-shadow: 0 8px 24px rgba(0,0,0,.35);
+  border-radius: 18px;
+  padding: 20px 20px 16px;
+  background: linear-gradient(150deg, var(--bg-2), var(--bg-1) 65%);
+  border: 1px solid color-mix(in srgb, var(--accent) 45%, var(--line-hi));
+  box-shadow: 0 10px 30px rgba(0,0,0,.4), 0 0 0 1px rgba(255,255,255,.02) inset;
   display: flex;
   flex-direction: column;
   justify-content: space-between;
+  gap: 10px;
   color: var(--ink);
+  overflow: hidden;
+}
+.biz-card::before {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 4px;
+  background: linear-gradient(90deg, var(--accent), var(--accent-2));
 }
 .biz-card-top { display: flex; align-items: flex-start; justify-content: space-between; }
 .biz-card-logo { max-height: 34px; max-width: 55%; object-fit: contain; }
 .biz-card-company { font-family: "Space Grotesk", sans-serif; font-weight: 700; font-size: 14px; color: var(--ink-mid); }
-.biz-card-id { font-size: 11px; color: var(--ink-dim); font-variant-numeric: tabular-nums; letter-spacing: .3px; }
-.biz-card-mid { display: flex; align-items: center; gap: 12px; }
-.biz-card-avatar { width: 52px; height: 52px; border-radius: 50%; object-fit: cover; border: 2px solid var(--line-hi); flex-shrink: 0; }
+.biz-card-id-wrap { display: flex; flex-direction: column; align-items: flex-end; gap: 3px; }
+.biz-card-id-label { font-size: 9px; text-transform: uppercase; letter-spacing: 1.4px; color: var(--ink-dim); }
+.biz-card-id {
+  font-family: "Space Grotesk", sans-serif;
+  font-size: 15px;
+  font-weight: 800;
+  color: #fff;
+  letter-spacing: 1px;
+  font-variant-numeric: tabular-nums;
+  padding: 3px 10px;
+  border-radius: 6px;
+  background: rgba(255,255,255,.06);
+  border: 1px solid var(--accent);
+  text-shadow: 0 0 12px rgba(255,255,255,.35);
+}
+.biz-card-mid { display: flex; align-items: center; gap: 14px; }
+.biz-card-avatar {
+  width: 56px; height: 56px; border-radius: 50%; object-fit: cover;
+  border: 2px solid var(--accent); flex-shrink: 0;
+  box-shadow: 0 0 0 3px rgba(255,255,255,.04);
+}
 .biz-card-avatar-placeholder { display: flex; align-items: center; justify-content: center; background: var(--bg-0); color: var(--ink-mid); font-weight: 700; font-size: 20px; }
-.biz-card-name { font-family: "Space Grotesk", sans-serif; font-size: 19px; font-weight: 700; line-height: 1.15; }
-.biz-card-title { font-size: 13px; color: var(--ink-mid); margin-top: 2px; }
+.biz-card-name { font-family: "Space Grotesk", sans-serif; font-size: 20px; font-weight: 700; line-height: 1.15; }
+.biz-card-title { font-size: 13px; color: var(--accent-2); font-weight: 600; margin-top: 2px; }
+.biz-card-contact { display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: 12px; color: var(--ink-mid); }
 .biz-card-bottom { display: flex; justify-content: space-between; font-size: 12px; color: var(--ink-mid); }
 
 /* ── Text inbox (lead SMS conversations) ─────────────────────────────── */

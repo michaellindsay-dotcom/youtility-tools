@@ -81,6 +81,8 @@ export interface Company {
   logoUrl?: string;
   website?: string;
   phone?: string;
+  address?: string;
+  idPrefix?: string; // short code (e.g. "YT") prefixed to each rep's card member number
 }
 
 // A rep's linked external calendars (status only — tokens live server-side).
