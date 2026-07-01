@@ -64,6 +64,34 @@ service cloud.firestore {
       match /recap/{docId} {
         allow read, write: if false;
       }
+
+      // Lead outreach automation rules: any company member reads (to see what's
+      // configured); company admins (or super) create/edit/remove them. Actually
+      // sending/enqueuing is Cloud-Functions-only (see outreachQueue below).
+      match /outreachRules/{ruleId} {
+        allow read: if inMyCompany(companyId);
+        allow write: if isSuper() || (isSignedIn() && companyId == myCompany() && isCompanyAdmin());
+      }
+    }
+
+    // ── outreach queue (scheduled automated sends) — Cloud Functions only ────
+    match /outreachQueue/{queueId} {
+      allow read, write: if false;
+    }
+
+    // ── SMS conversation log (rep text inbox) ────────────────────────────
+    // The owning rep and their company admin/super-admin can read; all writes
+    // (sending + inbound logging) go through Cloud Functions.
+    match /smsMessages/{msgId} {
+      allow read: if isSuper()
+                  || (isSignedIn() && resource.data.repUid == request.auth.uid)
+                  || (isSignedIn() && resource.data.companyId == myCompany() && isCompanyAdmin());
+      allow write: if false;
+    }
+
+    // ── SMS opt-out suppression list (TCPA) — Cloud Functions only ───────
+    match /smsSuppressions/{phone} {
+      allow read, write: if false;
     }
 
     // ── organizations (parent grouping over companies) ───────────────────

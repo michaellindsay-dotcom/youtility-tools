@@ -244,6 +244,7 @@
       <button class="home-btn" data-card="teamsCard"><span class="hb-ico">🗂️</span><b>Teams</b><small>Group reps into teams</small></button>
       <button class="home-btn" data-card="rewardsCard"><span class="hb-ico">🎁</span><b>Rewards</b><small>Incentives, benchmarks &amp; the rewards store</small></button>
       <button class="home-btn" data-card="redemptionsCard"><span class="hb-ico">✅</span><b>Redemptions</b><small>Approve &amp; fulfill reward redemptions</small></button>
+      <button class="home-btn" data-card="outreachCard"><span class="hb-ico">📨</span><b>Lead outreach</b><small>Automated texts/emails triggered by disposition changes</small></button>
       <button class="home-btn" data-card="companyBillingCard"><span class="hb-ico">💳</span><b>Billing &amp; invoices</b><small>Billing contact, card on file, contract &amp; invoices</small></button>
     </div>
   </section>
@@ -309,7 +310,7 @@
       <button class="home-btn" data-go="payments"><span class="hb-ico">💳</span><b>Pricing &amp; Packages</b><small>Build tiers &amp; prices, load defaults, connect Stripe billing</small></button>
       <button class="home-btn" data-go="receivables"><span class="hb-ico">📊</span><b>Accounts Receivable</b><small>Upcoming charges, due dates, balances &amp; invoices</small></button>
       <button class="home-btn" data-go="apis"><span class="hb-ico">🔌</span><b>Integrations &amp; APIs</b><small>ATTOM, BatchData, Google/Microsoft calendars, CRM keys</small></button>
-      <button class="home-btn" data-go="notifications"><span class="hb-ico">🔔</span><b>Notifications</b><small>SendGrid email &amp; Twilio SMS providers</small></button>
+      <button class="home-btn" data-go="notifications"><span class="hb-ico">🔔</span><b>Notifications</b><small>SendGrid email &amp; Telnyx SMS/voice providers</small></button>
       <button class="home-btn" data-go="account"><span class="hb-ico">👤</span><b>My Account</b><small>Update your super-admin profile &amp; password</small></button>
     </div>
   </section>
@@ -381,6 +382,7 @@
       <button class="home-btn" data-card="crmCompanyCard"><span class="hb-ico">🔗</span><b>CRM link</b><small>Connect this company to YoutilityCRM</small></button>
       <button class="home-btn" data-card="rewardsCard"><span class="hb-ico">🎁</span><b>Rewards</b><small>Incentives, benchmarks &amp; the rewards store</small></button>
       <button class="home-btn" data-card="redemptionsCard"><span class="hb-ico">✅</span><b>Redemptions</b><small>Approve &amp; fulfill reward redemptions</small></button>
+      <button class="home-btn" data-card="outreachCard"><span class="hb-ico">📨</span><b>Lead outreach</b><small>Automated texts/emails triggered by disposition changes</small></button>
       <button class="home-btn" data-card="companyBillingCard"><span class="hb-ico">💳</span><b>Billing &amp; invoices</b><small>Billing contact, card on file, contract &amp; invoices</small></button>
     </div>
   </section>
@@ -512,15 +514,21 @@
       <button id="sgSave" class="btn primary sm">Save email keys</button>
     </div>
 
-    <h3 style="font-size:14px;margin:22px 0 10px;">📱 SMS — Twilio <span id="twStatus" class="pill"></span></h3>
+    <h3 style="font-size:14px;margin:22px 0 10px;">📱 SMS &amp; calls — Telnyx <span id="tnStatus" class="pill"></span></h3>
+    <p class="muted small" style="margin:-4px 0 10px;">
+      Point Telnyx's webhooks at <span class="mono">https://youtilityknock.web.app/telnyx/sms</span> (Messaging Profile)
+      and <span class="mono">https://youtilityknock.web.app/telnyx/voice</span> (Call Control Application) — that's
+      what routes inbound texts/calls to the right rep's ported number.
+    </p>
     <div class="grid-2">
-      <div class="field"><span>Account SID</span><input id="twSid" type="password" placeholder="ACxxxxx (leave blank to keep)" autocomplete="off" /></div>
-      <div class="field"><span>Auth token</span><input id="twToken" type="password" placeholder="leave blank to keep" autocomplete="off" /></div>
-      <div class="field"><span>From number *</span><input id="twFrom" placeholder="+15551234567" /></div>
+      <div class="field"><span>API key</span><input id="tnKey" type="password" placeholder="KEYxxxxx (leave blank to keep)" autocomplete="off" /></div>
+      <div class="field"><span>From number (platform default) *</span><input id="tnFrom" placeholder="+15551234567" /></div>
+      <div class="field"><span>Messaging Profile ID</span><input id="tnProfile" placeholder="optional" /></div>
+      <div class="field"><span>Public key (webhook signature)</span><input id="tnPubKey" type="password" placeholder="leave blank to keep" autocomplete="off" /></div>
     </div>
     <div class="row" style="justify-content:flex-end;gap:8px;margin-top:8px;">
-      <button id="twClear" class="btn ghost sm">Clear keys</button>
-      <button id="twSave" class="btn primary sm">Save SMS keys</button>
+      <button id="tnClear" class="btn ghost sm">Clear keys</button>
+      <button id="tnSave" class="btn primary sm">Save SMS/voice keys</button>
     </div>
     <div id="notifyBanner" class="banner"></div>
   </section>
@@ -1205,6 +1213,51 @@
       <tbody id="redemptionsBody"><tr><td colspan="5" class="muted">No redemptions yet.</td></tr></tbody>
     </table>
   </section>
+
+  <!-- Lead outreach automation (per company) -->
+  <section id="outreachCard" class="card hidden">
+    <h2><span id="outreachTitle">Lead outreach automation</span>
+      <button id="newOutreachBtn" class="btn primary sm">+ New rule</button>
+    </h2>
+    <p class="muted" style="margin:-6px 0 14px;font-size:13px;">
+      When a lead's disposition changes to the trigger below, wait the delay, then send — only if the
+      homeowner has opted in to texts (captured at the door) and hasn't replied STOP. Texts send from the
+      rep's own ported number when they have one, otherwise the platform default.
+    </p>
+    <div id="outreachForm" class="hidden" style="margin-bottom:16px;">
+      <div class="grid-2">
+        <div class="field"><span>Name *</span><input id="ocName" placeholder="e.g. Go-back follow-up" /></div>
+        <div class="field"><span>Trigger disposition</span>
+          <select id="ocTrigger">
+            <option value="not_home">Not Home 1</option>
+            <option value="not_home_2">Not Home 2</option>
+            <option value="go_back" selected>Go Back</option>
+            <option value="pipeline">Pipeline</option>
+            <option value="appointment">Appointment</option>
+            <option value="not_interested">Not Interested</option>
+          </select>
+        </div>
+        <div class="field"><span>Channel</span>
+          <select id="ocChannel"><option value="sms">Text</option><option value="email">Email</option></select>
+        </div>
+        <div class="field"><span>Delay (minutes)</span><input id="ocDelay" type="number" min="0" value="60" /></div>
+      </div>
+      <div class="field"><span>Message</span>
+        <textarea id="ocTemplate" rows="3" placeholder="Hi {{firstName}}, it's {{repName}} — sorry I missed you..."></textarea>
+      </div>
+      <p class="muted small" style="margin-top:-6px;">Placeholders: <span class="mono">{{firstName}} {{repName}} {{repPhone}} {{companyName}}</span></p>
+      <label class="day-chip"><input type="checkbox" id="ocActive" checked /> Active</label>
+      <div class="row" style="justify-content:flex-end;">
+        <button id="ocCancel" class="btn ghost sm">Cancel</button>
+        <button id="ocSave" class="btn primary sm">Create rule</button>
+      </div>
+      <div id="outreachBanner" class="banner"></div>
+    </div>
+    <table>
+      <thead><tr><th>Rule</th><th>Trigger</th><th>Delay</th><th>Channel</th><th>Status</th><th></th></tr></thead>
+      <tbody id="outreachBody"><tr><td colspan="6" class="muted">Select a company…</td></tr></tbody>
+    </table>
+  </section>
 </div>
 
 <script type="module">
@@ -1259,6 +1312,7 @@ const deleteRole      = httpsCallable(fns, "deleteRole");
 const createTeam      = httpsCallable(fns, "createTeam");
 const updateTeam      = httpsCallable(fns, "updateTeam");
 const assignUserHierarchy = httpsCallable(fns, "assignUserHierarchy");
+const setUserPhoneRouting = httpsCallable(fns, "setUserPhoneRouting");
 const setPositionServices = httpsCallable(fns, "setPositionServices");
 const reassignAppointment = httpsCallable(fns, "reassignAppointment");
 const impersonate     = httpsCallable(fns, "impersonate");
@@ -1352,7 +1406,7 @@ function showLogin() {
 }
 // ── Tabs (super-admin) ────────────────────────────────────────────────────
 const TAB_CARDS = {
-  companies: ["companiesCard","companyServicesCard","companyBrandingCard","roleServicesCard","schedulingCard","companySettingsCard","batteryPricingCard","crmCompanyCard","rolesCard","teamsCard","rewardsCard","redemptionsCard","companyBillingCard","usersCard"],
+  companies: ["companiesCard","companyServicesCard","companyBrandingCard","roleServicesCard","schedulingCard","companySettingsCard","batteryPricingCard","crmCompanyCard","rolesCard","teamsCard","rewardsCard","redemptionsCard","outreachCard","companyBillingCard","usersCard"],
   orgs: ["orgsCard"],
   demos: ["demoRequestsCard"],
   payments: ["plansCard","billingCard"],
@@ -1361,7 +1415,7 @@ const TAB_CARDS = {
   apis: ["apiKeysCard","integrationsCard","crmCard"],
   account: ["myAccountCard"],
 };
-const COMPANY_ONLY = new Set(["companyServicesCard","companyBrandingCard","roleServicesCard","schedulingCard","companySettingsCard","batteryPricingCard","crmCompanyCard","rolesCard","teamsCard","rewardsCard","redemptionsCard","companyBillingCard","usersCard"]);
+const COMPANY_ONLY = new Set(["companyServicesCard","companyBrandingCard","roleServicesCard","schedulingCard","companySettingsCard","batteryPricingCard","crmCompanyCard","rolesCard","teamsCard","rewardsCard","redemptionsCard","outreachCard","companyBillingCard","usersCard"]);
 const ALL_TAB_CARDS = Object.values(TAB_CARDS).flat();
 
 function renderTab() {
@@ -1454,7 +1508,7 @@ function enterConsole() {
 }
 
 // ── Company-admin view toggle: Town Hall ⇄ Settings ───────────────────────
-const COMPANY_SETTINGS_CARDS = ["schedulingCard","companySettingsCard","companyBrandingCard","batteryPricingCard","rolesCard","teamsCard","rewardsCard","redemptionsCard","companyBillingCard","usersCard"];
+const COMPANY_SETTINGS_CARDS = ["schedulingCard","companySettingsCard","companyBrandingCard","batteryPricingCard","rolesCard","teamsCard","rewardsCard","redemptionsCard","outreachCard","companyBillingCard","usersCard"];
 function hideAllSettingCards() {
   COMPANY_SETTINGS_CARDS.forEach((id) => { const el = $(id); if (el) el.classList.add("hidden"); });
 }
@@ -1506,9 +1560,11 @@ async function selectCompany(companyId, companyName) {
   $("schedulingTitle").textContent = "Scheduling" + suffix;
   $("crmCompanyTitle").textContent = "YoutilityCRM link" + suffix;
   $("rewardsTitle").textContent = "Rewards & Gamify" + suffix;
+  $("outreachTitle").textContent = "Lead outreach automation" + suffix;
   $("companyServicesTitle").textContent = "Services" + suffix;
   loadCompanyServices(companyId);
   loadCompanyBranding(companyId);
+  loadOutreachRules(companyId);
   loadRoleServices(companyId);
   if (state.isSuper) {
     state.currentTab = "companies";
@@ -1828,6 +1884,54 @@ async function loadRewards(companyId) {
         `<td class="row" style="gap:6px;"><button class="btn ghost sm tgl">${active?"Deactivate":"Activate"}</button><button class="btn ghost sm del">Delete</button></td>`;
       tr.querySelector(".tgl").addEventListener("click", async () => { await updateDoc(doc(db,"companies",companyId,"rewards",r.id), { active: !active }); loadRewards(companyId); });
       tr.querySelector(".del").addEventListener("click", async () => { if (confirm(`Delete "${r.name}"?`)) { await deleteDoc(doc(db,"companies",companyId,"rewards",r.id)); loadRewards(companyId); } });
+      body.appendChild(tr);
+    });
+  } catch (e) { body.innerHTML = `<tr><td colspan="6" class="banner error show">${esc(e.message)}</td></tr>`; }
+}
+// ── Lead outreach automation rules (per company) ─────────────────────────
+const DISPOSITION_LBL = {
+  new: "New", not_home: "Not Home 1", not_home_2: "Not Home 2", go_back: "Go Back",
+  pipeline: "Pipeline", appointment: "Appointment", not_interested: "Not Interested", sold: "Sold", dnc: "Do Not Contact",
+};
+$("newOutreachBtn").addEventListener("click", () => $("outreachForm").classList.toggle("hidden"));
+$("ocCancel").addEventListener("click", () => $("outreachForm").classList.add("hidden"));
+$("ocSave").addEventListener("click", async () => {
+  const companyId = state.selectedCompany; if (!companyId) return;
+  const name = $("ocName").value.trim();
+  const template = $("ocTemplate").value.trim();
+  if (!name || !template) { banner($("outreachBanner"), "Name and message are required.", "error"); return; }
+  $("ocSave").disabled = true;
+  try {
+    await addDoc(collection(db, "companies", companyId, "outreachRules"), {
+      companyId, name, trigger: $("ocTrigger").value, channel: $("ocChannel").value,
+      delayMinutes: Math.max(0, Number($("ocDelay").value) || 0),
+      template, active: $("ocActive").checked,
+      createdAt: Date.now(), updatedAt: Date.now(),
+    });
+    $("ocName").value = ""; $("ocTemplate").value = ""; $("ocDelay").value = "60"; $("ocActive").checked = true;
+    $("outreachForm").classList.add("hidden");
+    banner($("banner"), "Outreach rule created.", "good");
+    await loadOutreachRules(companyId);
+  } catch (e) { banner($("outreachBanner"), e.message || "Could not save rule.", "error"); }
+  finally { $("ocSave").disabled = false; }
+});
+async function loadOutreachRules(companyId) {
+  const body = $("outreachBody");
+  body.innerHTML = `<tr><td colspan="6" class="muted">Loading…</td></tr>`;
+  try {
+    const snap = await getDocs(collection(db, "companies", companyId, "outreachRules"));
+    const rows = snap.docs.map((d) => ({ id:d.id, ...d.data() }));
+    if (!rows.length) { body.innerHTML = `<tr><td colspan="6" class="muted">No outreach rules yet.</td></tr>`; return; }
+    body.innerHTML = "";
+    rows.forEach((r) => {
+      const active = r.active !== false;
+      const tr = document.createElement("tr");
+      tr.innerHTML = `<td>${esc(r.name)}</td><td>${esc(DISPOSITION_LBL[r.trigger]||r.trigger)}</td>`+
+        `<td class="muted small">${Number(r.delayMinutes)||0} min</td><td>${esc(r.channel==="email"?"Email":"Text")}</td>`+
+        `<td><span class="badge ${active?"":"disabled"}">${active?"active":"inactive"}</span></td>`+
+        `<td class="row" style="gap:6px;"><button class="btn ghost sm tgl">${active?"Deactivate":"Activate"}</button><button class="btn ghost sm del">Delete</button></td>`;
+      tr.querySelector(".tgl").addEventListener("click", async () => { await updateDoc(doc(db,"companies",companyId,"outreachRules",r.id), { active: !active, updatedAt: Date.now() }); loadOutreachRules(companyId); });
+      tr.querySelector(".del").addEventListener("click", async () => { if (confirm(`Delete "${r.name}"?`)) { await deleteDoc(doc(db,"companies",companyId,"outreachRules",r.id)); loadOutreachRules(companyId); } });
       body.appendChild(tr);
     });
   } catch (e) { body.innerHTML = `<tr><td colspan="6" class="banner error show">${esc(e.message)}</td></tr>`; }
@@ -3108,10 +3212,11 @@ async function loadNotifyConfig() {
     $("sgFrom").value = data.sendgrid.from || "";
     $("sgFromName").value = data.sendgrid.fromName || "";
     $("sgKey").placeholder = data.sendgrid.configured ? `${data.sendgrid.keyMask} (leave blank to keep)` : "SG.xxxxx";
-    setStatusPill($("twStatus"), data.twilio.configured);
-    $("twFrom").value = data.twilio.from || "";
-    $("twSid").placeholder = data.twilio.configured ? `${data.twilio.sidMask} (leave blank to keep)` : "ACxxxxx";
-    $("twToken").placeholder = data.twilio.configured ? `${data.twilio.tokenMask} (leave blank to keep)` : "leave blank to keep";
+    setStatusPill($("tnStatus"), data.telnyx.configured);
+    $("tnFrom").value = data.telnyx.from || "";
+    $("tnProfile").value = data.telnyx.messagingProfileId || "";
+    $("tnKey").placeholder = data.telnyx.configured ? `${data.telnyx.keyMask} (leave blank to keep)` : "KEYxxxxx";
+    $("tnPubKey").placeholder = data.telnyx.publicKeyMask ? `${data.telnyx.publicKeyMask} (leave blank to keep)` : "leave blank to keep";
   } catch (e) {
     banner($("notifyBanner"), e.message || "Could not load notification config.", "error");
   }
@@ -3153,28 +3258,29 @@ $("sgSave").addEventListener("click", async () => {
   } catch (e) { banner($("notifyBanner"), e.message || "Save failed.", "error"); }
   finally { $("sgSave").disabled = false; }
 });
-$("twSave").addEventListener("click", async () => {
-  $("twSave").disabled = true;
+$("tnSave").addEventListener("click", async () => {
+  $("tnSave").disabled = true;
   try {
     await setNotificationConfig({
-      twilioSid: $("twSid").value,
-      twilioToken: $("twToken").value,
-      twilioFrom: $("twFrom").value,
+      telnyxApiKey: $("tnKey").value,
+      telnyxFrom: $("tnFrom").value,
+      telnyxMessagingProfileId: $("tnProfile").value,
+      telnyxPublicKey: $("tnPubKey").value,
     });
-    $("twSid").value = ""; $("twToken").value = "";
-    banner($("notifyBanner"), "SMS keys saved.", "good");
+    $("tnKey").value = ""; $("tnPubKey").value = "";
+    banner($("notifyBanner"), "SMS/voice keys saved.", "good");
     loadNotifyConfig();
   } catch (e) { banner($("notifyBanner"), e.message || "Save failed.", "error"); }
-  finally { $("twSave").disabled = false; }
+  finally { $("tnSave").disabled = false; }
 });
 $("sgClear").addEventListener("click", async () => {
   if (!confirm("Clear the SendGrid keys? Email alerts will stop until re-entered.")) return;
   try { await clearNotificationProvider({ provider:"sendgrid" }); $("sgKey").value=""; $("sgFrom").value=""; $("sgFromName").value=""; banner($("notifyBanner"),"Email keys cleared.","good"); loadNotifyConfig(); }
   catch (e) { banner($("notifyBanner"), e.message || "Clear failed.", "error"); }
 });
-$("twClear").addEventListener("click", async () => {
-  if (!confirm("Clear the Twilio keys? SMS alerts will stop until re-entered.")) return;
-  try { await clearNotificationProvider({ provider:"twilio" }); $("twSid").value=""; $("twToken").value=""; $("twFrom").value=""; banner($("notifyBanner"),"SMS keys cleared.","good"); loadNotifyConfig(); }
+$("tnClear").addEventListener("click", async () => {
+  if (!confirm("Clear the Telnyx keys? SMS/voice will stop until re-entered.")) return;
+  try { await clearNotificationProvider({ provider:"telnyx" }); $("tnKey").value=""; $("tnFrom").value=""; $("tnProfile").value=""; $("tnPubKey").value=""; banner($("notifyBanner"),"SMS/voice keys cleared.","good"); loadNotifyConfig(); }
   catch (e) { banner($("notifyBanner"), e.message || "Clear failed.", "error"); }
 });
 
@@ -3640,6 +3746,8 @@ async function loadUsers() {
           <select class="closerMgrSel" title="Closer manager" ${isCloserFn?'':'disabled'}>${closerMgrOptions}</select>
           <label class="day-chip reassignWrap" style="font-size:11px;${curPos==='closer_manager'?'':'display:none;'}"><input type="checkbox" class="reassignChk" ${u.canReassignAppointments?'checked':''}/> Can reassign appts</label>
           <select class="mgdTeams" multiple size="2" title="Teams this manager oversees" style="font-size:11px;${curPos==='team_manager'?'':'display:none;'}">${teamOpts}</select>
+          <input type="text" class="smsNumInput" title="Ported texting/calling number (set once porting is done)" placeholder="Texting # +1…" value="${esc(u.smsNumber||'')}" style="font-size:11px;padding:3px 6px;" />
+          <input type="text" class="smsFwdInput" title="Where calls to that number forward" placeholder="Forward calls to" value="${esc(u.smsForwardTo||'')}" style="font-size:11px;padding:3px 6px;" />
         </div></td>
         <td>${u.disabled ? '<span class="badge disabled">disabled</span>' : '<span class="badge">active</span>'}</td>
         <td><div class="row">${mirrorBtn}
@@ -3695,6 +3803,14 @@ async function loadUsers() {
           banner($("banner"),"Managed teams updated.","good"); }
         catch (e) { banner($("banner"), e.message, "error"); loadUsers(); }
       });
+      const savePhoneRouting = async () => {
+        try {
+          await setUserPhoneRouting({ uid:u.id, smsNumber: tr.querySelector(".smsNumInput").value, smsForwardTo: tr.querySelector(".smsFwdInput").value });
+          banner($("banner"), "Texting number updated.", "good");
+        } catch (e) { banner($("banner"), e.message, "error"); }
+      };
+      tr.querySelector(".smsNumInput").addEventListener("change", savePhoneRouting);
+      tr.querySelector(".smsFwdInput").addEventListener("change", savePhoneRouting);
       tr.querySelector(".disBtn").addEventListener("click", async () => {
         try { await setUserDisabled({ uid:u.id, disabled: !u.disabled }); loadUsers(); }
         catch (e) { banner($("banner"), e.message, "error"); }

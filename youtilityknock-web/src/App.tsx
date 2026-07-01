@@ -27,6 +27,7 @@ import Chat from "./pages/Chat";
 import Schedule from "./pages/Schedule";
 import Settings from "./pages/Settings";
 import BusinessCard from "./pages/BusinessCard";
+import Inbox from "./pages/Inbox";
 
 // Blocks a route (by direct URL) when the company's plan doesn't include it.
 // Pass one feature, or `anyOf` to allow access when the plan has any of them.
@@ -114,6 +115,7 @@ export default function App() {
         <Route path="schedule" element={<Gated feature="scheduling"><Schedule /></Gated>} />
         <Route path="territories" element={<CanvassGate><Territories /></CanvassGate>} />
         <Route path="card" element={<BusinessCard />} />
+        <Route path="inbox" element={<Inbox />} />
         <Route path="settings" element={<Settings />} />
       </Route>
     </Routes>

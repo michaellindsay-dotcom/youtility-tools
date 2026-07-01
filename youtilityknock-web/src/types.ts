@@ -175,6 +175,11 @@ export interface UserProfile {
   cardMemberId?: number; // stable, randomly-assigned display id (e.g. "No. 348219")
   cardAccentColor?: string; // hex color, recolors the card's buttons/accents
   cardTheme?: string; // background preset key, see lib/cardTheme.ts
+  // Lead outreach — this rep's ported number (calls/texts to homeowners go out
+  // as this rep, not a shared company line). Admin-assigned once porting to the
+  // messaging provider completes.
+  smsNumber?: string; // E.164, e.g. "+13855550142"
+  smsForwardTo?: string; // where inbound calls to smsNumber ring instead (their new personal line)
 }
 
 export interface CardReview {
@@ -242,6 +247,40 @@ export interface Lead {
   createdBy: string; // uid
   createdAt: number;
   updatedAt: number;
+  // SMS compliance (TCPA): a homeowner must affirmatively opt in before any
+  // automated or bulk text goes out. Captured at the door in DispositionModal.
+  smsOptIn?: boolean;
+  smsOptInAt?: number;
+  smsConsentSource?: "door" | "call" | "manual";
+  smsOptOutAt?: number; // set when they reply STOP (also checked platform-wide via smsSuppressions)
+}
+
+// One automated outreach step: when a lead's status flips to `trigger`, wait
+// `delayMinutes`, then send `template` over `channel` — if the lead is still
+// opted in, not suppressed, and (for sms) within quiet hours.
+export interface OutreachRule {
+  id: string;
+  companyId: string;
+  name: string;
+  trigger: LeadStatus;
+  delayMinutes: number;
+  channel: "sms" | "email";
+  template: string; // supports {{firstName}}, {{repName}}, {{repPhone}}, {{companyName}}
+  active: boolean;
+  createdAt: number;
+  updatedAt: number;
+}
+
+// A single sent/received text tied to a lead, shown in a rep's text inbox.
+export interface SmsMessage {
+  id: string;
+  companyId: string;
+  repUid: string;
+  leadId?: string;
+  phone: string; // the homeowner's number
+  direction: "in" | "out";
+  body: string;
+  at: number;
 }
 
 export interface Territory {

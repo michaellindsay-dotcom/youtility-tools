@@ -24,6 +24,7 @@ const links: { to: string; label: string; icon: string; end?: boolean; feat?: Fe
   { to: "/map", label: "Map", icon: "◉", canvassOnly: true },
   { to: "/movers", label: "Movers", icon: "🚚", feat: "movers", mobileHidden: true, canvassOnly: true },
   { to: "/card", label: "RallyCard", icon: "🪪" },
+  { to: "/inbox", label: "Texts", icon: "📨" },
   { to: "/leads", label: "Leads", icon: "☰", feat: "leads", mobileHidden: true },
   { to: "/chat", label: "Team Chat", icon: "💬", feat: "chat", mobileHidden: true },
   { to: "/schedule", label: "Schedule", icon: "📅", feat: "scheduling" },
