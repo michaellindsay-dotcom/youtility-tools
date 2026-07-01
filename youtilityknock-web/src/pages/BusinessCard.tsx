@@ -182,7 +182,6 @@ export default function BusinessCard() {
           logoUrl={effectiveLogo}
           photoUrl={photoUrl}
           bgImageUrl={company?.bgImageUrl}
-          serviceArea={serviceArea}
           memberId={profile?.cardMemberId ?? null}
           idPrefix={company?.idPrefix}
           phone={profile?.phone}
@@ -190,7 +189,6 @@ export default function BusinessCard() {
           website={company?.website}
           companyPhone={company?.phone}
           companyAddress={company?.address}
-          bio={bio}
           vcfUrl={profile?.cardSlug ? `https://youtilityknock.web.app/vcf/${profile.cardSlug}` : undefined}
           leadAnchorId="pc-lead-form"
         />

@@ -89,7 +89,6 @@ export default function PublicCard() {
               logoUrl={card.logoUrl}
               bgImageUrl={card.bgImageUrl}
               photoUrl={card.photoUrl}
-              serviceArea={card.serviceArea}
               memberId={card.memberId}
               idPrefix={card.companyIdPrefix}
               phone={card.phone}
@@ -97,10 +96,17 @@ export default function PublicCard() {
               website={card.companyWebsite}
               companyPhone={card.companyPhone}
               companyAddress={card.companyAddress}
-              bio={card.bio}
               vcfUrl={vcfUrl}
               leadAnchorId="pc-lead-form"
             />
+
+            {(card.bio || card.serviceArea) && (
+              <p className="pc-bio">
+                {card.bio}
+                {card.bio && card.serviceArea && <br />}
+                {card.serviceArea && `Serving ${card.serviceArea} and nearby areas.`}
+              </p>
+            )}
 
             {card.reviews.length > 0 && (
               <div className="pc-reviews">

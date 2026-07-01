@@ -12,7 +12,6 @@ export interface BizCardHeroProps {
   logoUrl?: string;
   photoUrl?: string;
   bgImageUrl?: string; // subtle photo behind the card, e.g. a jobsite/install shot
-  serviceArea?: string;
   memberId?: number | null;
   idPrefix?: string; // company code (e.g. "YT") shown before the member number, license-plate style
   phone?: string;
@@ -20,14 +19,13 @@ export interface BizCardHeroProps {
   website?: string;
   companyPhone?: string;
   companyAddress?: string;
-  bio?: string; // short pitch shown between the contact rows and the CTA tiles
   vcfUrl?: string; // "save contact" vCard link — drives the footer QR code
   leadAnchorId?: string; // element id the "Leave Your Info" tile scrolls to
 }
 
 export default function BizCardHero({
-  displayName, title, companyName, logoUrl, photoUrl, bgImageUrl, serviceArea, memberId, idPrefix,
-  phone, email, website, companyPhone, companyAddress, bio, vcfUrl, leadAnchorId,
+  displayName, title, companyName, logoUrl, photoUrl, bgImageUrl, memberId, idPrefix,
+  phone, email, website, companyPhone, companyAddress, vcfUrl, leadAnchorId,
 }: BizCardHeroProps) {
   const [qrDataUrl, setQrDataUrl] = useState("");
 
@@ -107,38 +105,29 @@ export default function BizCardHero({
           </div>
         )}
 
-        {(bio || serviceArea || phone || email) && (
+        {(phone || email) && (
           <>
             <div className="biz-card-divider" />
-            <div className="biz-card-promo">
-              <div className="biz-card-promo-text">
-                {bio ? (
-                  <p className="biz-card-tagline">{bio}</p>
-                ) : (
-                  serviceArea && <p className="biz-card-tagline">Serving {serviceArea} and nearby areas.</p>
-                )}
-              </div>
-              <div className="biz-card-cta-row">
-                {phone && (
-                  <a className="biz-card-cta" href={`tel:${phone}`}>
-                    <span className="biz-card-cta-ico">📞</span>
-                    <span className="biz-card-cta-label">Call or Text</span>
-                    <span className="biz-card-cta-sub">Fast response</span>
-                  </a>
-                )}
-                {email && (
-                  <a className="biz-card-cta" href={`mailto:${email}`}>
-                    <span className="biz-card-cta-ico">💬</span>
-                    <span className="biz-card-cta-label">Leave a Message</span>
-                    <span className="biz-card-cta-sub">I'll follow up</span>
-                  </a>
-                )}
-                <a className="biz-card-cta" href={`#${leadAnchorId || "pc-lead-form"}`}>
-                  <span className="biz-card-cta-ico">📝</span>
-                  <span className="biz-card-cta-label">Leave Your Info</span>
-                  <span className="biz-card-cta-sub">Get your options</span>
+            <div className="biz-card-cta-row">
+              {phone && (
+                <a className="biz-card-cta" href={`tel:${phone}`}>
+                  <span className="biz-card-cta-ico">📞</span>
+                  <span className="biz-card-cta-label">Call or Text</span>
+                  <span className="biz-card-cta-sub">Fast response</span>
                 </a>
-              </div>
+              )}
+              {email && (
+                <a className="biz-card-cta" href={`mailto:${email}`}>
+                  <span className="biz-card-cta-ico">💬</span>
+                  <span className="biz-card-cta-label">Leave a Message</span>
+                  <span className="biz-card-cta-sub">I'll follow up</span>
+                </a>
+              )}
+              <a className="biz-card-cta" href={`#${leadAnchorId || "pc-lead-form"}`}>
+                <span className="biz-card-cta-ico">📝</span>
+                <span className="biz-card-cta-label">Leave Your Info</span>
+                <span className="biz-card-cta-sub">Get your options</span>
+              </a>
             </div>
           </>
         )}
