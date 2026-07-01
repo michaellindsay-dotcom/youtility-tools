@@ -1813,6 +1813,8 @@ export const setMyProfile = onCall(async (request) => {
 // getSharedProposal/AgreementSignView above: the Admin SDK does the read/write,
 // so `users`/`leads` stay fully locked down to signed-in members.
 const CARD_SLUG_RE = /^[a-z0-9](?:[a-z0-9-]{1,30}[a-z0-9])?$/;
+const CARD_HEX_COLOR_RE = /^#[0-9a-fA-F]{6}$/;
+const CARD_THEME_KEYS = new Set(["default", "midnight", "forest", "sunset", "royal", "slate"]);
 
 function normalizeCardSlug(input: string): string {
   return String(input || "")
@@ -1842,7 +1844,7 @@ export const setMyCard = onCall(async (request) => {
   const caller = await getCaller(request);
   const d = (request.data || {}) as {
     slug?: string; enabled?: boolean; title?: string; bio?: string; serviceArea?: string;
-    photoUrl?: string; logoUrl?: string; reviews?: unknown;
+    photoUrl?: string; logoUrl?: string; reviews?: unknown; accentColor?: string; theme?: string;
   };
   const update: Record<string, unknown> = {};
   if (typeof d.slug === "string") {
@@ -1863,6 +1865,16 @@ export const setMyCard = onCall(async (request) => {
   if (typeof d.photoUrl === "string") update.cardPhotoUrl = d.photoUrl.trim().slice(0, 1000);
   if (typeof d.logoUrl === "string") update.cardLogoUrl = d.logoUrl.trim().slice(0, 1000);
   if (d.reviews !== undefined) update.cardReviews = sanitizeCardReviews(d.reviews);
+  if (typeof d.accentColor === "string") {
+    const c = d.accentColor.trim();
+    if (c && !CARD_HEX_COLOR_RE.test(c)) throw new HttpsError("invalid-argument", "Accent color must be a hex value like #2563eb.");
+    update.cardAccentColor = c;
+  }
+  if (typeof d.theme === "string") {
+    const t = d.theme.trim();
+    if (t && !CARD_THEME_KEYS.has(t)) throw new HttpsError("invalid-argument", "Unknown card theme.");
+    update.cardTheme = t;
+  }
   if (Object.keys(update).length === 0) throw new HttpsError("invalid-argument", "Nothing to update.");
 
   const me = await db.doc(`users/${caller.uid}`).get();
@@ -1903,23 +1915,27 @@ export const getRepCard = onCall(async (request) => {
     companyName: c.name || "",
     companyWebsite: c.website || "",
     companyPhone: c.phone || "",
+    companyAddress: c.address || "",
+    accentColor: r.cardAccentColor || "",
+    theme: r.cardTheme || "default",
     memberId: typeof r.cardMemberId === "number" ? r.cardMemberId : null,
   };
 });
 
-// Company branding shown on every rep's card (logo, website, phone) unless a
+// Company branding shown on every rep's card (logo, website, phone, address) unless a
 // rep overrides the logo with their own. Company admin (own company) or
 // super-admin (any company).
 export const setCompanyBranding = onCall(async (request) => {
   const caller = await getCaller(request);
-  const { companyId, logoUrl, website, phone } = (request.data || {}) as {
-    companyId?: string; logoUrl?: string; website?: string; phone?: string;
+  const { companyId, logoUrl, website, phone, address } = (request.data || {}) as {
+    companyId?: string; logoUrl?: string; website?: string; phone?: string; address?: string;
   };
   authorizeForCompany(caller, companyId);
   const update: Record<string, unknown> = {};
   if (typeof logoUrl === "string") update.logoUrl = logoUrl.trim().slice(0, 1000);
   if (typeof website === "string") update.website = website.trim().slice(0, 200);
   if (typeof phone === "string") update.phone = phone.trim().slice(0, 30);
+  if (typeof address === "string") update.address = address.trim().slice(0, 200);
   if (Object.keys(update).length === 0) throw new HttpsError("invalid-argument", "Nothing to update.");
   await db.doc(`companies/${companyId}`).set(update, { merge: true });
   return { ok: true, ...update };
