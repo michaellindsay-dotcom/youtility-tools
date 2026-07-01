@@ -11,6 +11,10 @@ export const FEATURES = [
   // Core nav items that admins can declutter per position/team (default ON, so
   // they only ever disappear when a role/team is explicitly restricted).
   "movers", "leads", "team",
+  // RallyCard — the digital business card + lead capture. Default ON company-
+  // wide (same opt-out style as the row above) so it never disappears for an
+  // existing customer; a company can still be RallyCard-only (see below).
+  "card",
 ] as const;
 export type FeatureKey = (typeof FEATURES)[number];
 
@@ -31,6 +35,15 @@ export function hasFeature(company: Company | null | undefined, key: FeatureKey)
   if (!Array.isArray(company.features)) return true;
   if (company.features.includes(key)) return true;
   return !COMPANY_GATED.has(key); // newer service keys default on
+}
+
+// RallyCard (digital card, lead capture, and — layered on top of the existing
+// rewards/chat/scheduling services — recruiting/competitions) can be sold as
+// its own product: a company whose plan omits "map" gets ONLY the RallyCard
+// surface (no canvassing map/movers/territories/etc.), while every existing
+// company keeps the full platform exactly as today (map is on by default).
+export function isRallyCardOnly(company: Company | null | undefined): boolean {
+  return !hasFeature(company, "map");
 }
 
 // Effective per-USER access: the company plan AND, when configured, the user's

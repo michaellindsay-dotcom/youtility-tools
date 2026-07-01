@@ -7,10 +7,17 @@ number automatically.
 ## [Unreleased]
 
 ### Added
-- **Digital Business Card** — every rep can publish a public, no-login profile
-  page (photo, bio, service area, reviews, click-to-call/text/email, and a
-  lead-capture form that drops straight into their Leads) at a shareable link
-  and downloadable QR code. Manage it from **My Business Card** in the sidebar.
+- **RallyCard** (formerly "Digital Business Card") — every rep can publish a
+  public, no-login profile page (photo, bio, service area, reviews,
+  click-to-call/text/email, and a lead-capture form that drops straight into
+  their Leads) at a shareable link and downloadable QR code. Manage it from
+  **RallyCard** in the sidebar. It's on by default for every company and can't
+  be bundled away from an existing plan — but it's also a real standalone
+  product now: a company can be provisioned on the new **RallyCard** plan
+  (admin.html → Plans → "Create default packages"), which drops the canvassing
+  map/movers/territories/closer tools entirely and turns the whole app into a
+  card + leads + team-chat + competitions surface. Upgrading later to a
+  Canvass/Pro/Elite plan adds the map back with nothing else to migrate.
 
 ## [1.2] — 2026-06
 

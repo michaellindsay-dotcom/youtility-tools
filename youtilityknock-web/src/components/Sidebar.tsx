@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { NavLink, useNavigate } from "react-router-dom";
 import { useAuth } from "../auth/AuthContext";
-import { userHasService, type FeatureKey } from "../lib/features";
+import { userHasService, isRallyCardOnly, type FeatureKey } from "../lib/features";
 import type { Role, Position } from "../types";
 
 // Roles an admin can preview the menu as (admin themselves sees everything).
@@ -17,28 +17,30 @@ const PREVIEW_POSITIONS: { value: Position; label: string }[] = [
 // when the plan has any one of several. `mobileHidden` hides the link on the
 // phone layout (Movers lives on the map; Leads/Team Chat are reachable from the
 // main flow), keeping the mobile nav lean while desktop keeps the full list.
-const links: { to: string; label: string; icon: string; end?: boolean; feat?: FeatureKey; anyFeat?: FeatureKey[]; roles?: Role[]; closer?: boolean; mobileHidden?: boolean }[] = [
-  { to: "/", label: "Dashboard", icon: "▦", end: true },
-  { to: "/map", label: "Map", icon: "◉" },
-  { to: "/movers", label: "Movers", icon: "🚚", feat: "movers", mobileHidden: true },
+// `canvassOnly` hides the link entirely for a RallyCard-only company (no
+// canvassing map) — see `isRallyCardOnly` in lib/features.
+const links: { to: string; label: string; icon: string; end?: boolean; feat?: FeatureKey; anyFeat?: FeatureKey[]; roles?: Role[]; closer?: boolean; mobileHidden?: boolean; canvassOnly?: boolean }[] = [
+  { to: "/", label: "Dashboard", icon: "▦", end: true, canvassOnly: true },
+  { to: "/map", label: "Map", icon: "◉", canvassOnly: true },
+  { to: "/movers", label: "Movers", icon: "🚚", feat: "movers", mobileHidden: true, canvassOnly: true },
+  { to: "/card", label: "RallyCard", icon: "🪪" },
   { to: "/leads", label: "Leads", icon: "☰", feat: "leads", mobileHidden: true },
   { to: "/chat", label: "Team Chat", icon: "💬", feat: "chat", mobileHidden: true },
   { to: "/schedule", label: "Schedule", icon: "📅", feat: "scheduling" },
-  { to: "/shifts", label: "Success Planner", icon: "◎", anyFeat: ["planner", "analytics"] },
+  { to: "/shifts", label: "Success Planner", icon: "◎", anyFeat: ["planner", "analytics"], canvassOnly: true },
   { to: "/team", label: "Team", icon: "⛩", feat: "team" },
-  { to: "/closer", label: "Closer", icon: "🤝", closer: true },
-  { to: "/battery", label: "Battery Tool", icon: "🔋", closer: true, feat: "battery" },
-  { to: "/projects", label: "Sold Projects", icon: "📋", closer: true },
-  { to: "/reports", label: "Reports", icon: "📊", roles: ["admin", "manager"] },
-  { to: "/pitches", label: "My Pitches", icon: "🎙️", feat: "pitch" },
-  { to: "/training", label: "Training", icon: "🎓", feat: "voice" },
-  { to: "/pitch-library", label: "Pitch Library", icon: "🎬", feat: "pitch", roles: ["admin", "manager"] },
-  { to: "/working", label: "Who's Working", icon: "🔥", feat: "chat" },
+  { to: "/closer", label: "Closer", icon: "🤝", closer: true, canvassOnly: true },
+  { to: "/battery", label: "Battery Tool", icon: "🔋", closer: true, feat: "battery", canvassOnly: true },
+  { to: "/projects", label: "Sold Projects", icon: "📋", closer: true, canvassOnly: true },
+  { to: "/reports", label: "Reports", icon: "📊", roles: ["admin", "manager"], canvassOnly: true },
+  { to: "/pitches", label: "My Pitches", icon: "🎙️", feat: "pitch", canvassOnly: true },
+  { to: "/training", label: "Training", icon: "🎓", feat: "voice", canvassOnly: true },
+  { to: "/pitch-library", label: "Pitch Library", icon: "🎬", feat: "pitch", roles: ["admin", "manager"], canvassOnly: true },
+  { to: "/working", label: "Who's Working", icon: "🔥", feat: "chat", canvassOnly: true },
   { to: "/leaderboard", label: "Leaderboard", icon: "🏆", feat: "rewards" },
   { to: "/gamify", label: "Gamify", icon: "🎮", feat: "rewards" },
   { to: "/rewards", label: "Rewards", icon: "🎁", feat: "rewards" },
-  { to: "/territories", label: "Territories", icon: "▰", feat: "aiTerritories" },
-  { to: "/card", label: "My Business Card", icon: "🪪" },
+  { to: "/territories", label: "Territories", icon: "▰", feat: "aiTerritories", canvassOnly: true },
   { to: "/settings", label: "Settings", icon: "⚐" },
 ];
 
@@ -64,7 +66,13 @@ export default function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
     return { role: r, profile: profile ? { ...profile, position: previewPos, isCloser, role: r } : profile };
   }, [previewPos, canPreview, role, profile]);
 
+  // A company on a RallyCard-only plan (no "map" feature) gets the card +
+  // lead capture + team competitions, with the canvassing-only tools removed
+  // entirely rather than just hidden per-role — this company never had them.
+  const rallyOnly = isRallyCardOnly(company);
+
   const visible = links.filter((l) => {
+    if (l.canvassOnly && rallyOnly) return false;
     // Closer-only tools: gate on actually being a closer (closers, closer
     // managers and team managers all carry isCloser) or admin — NOT on the
     // generic manager tier, so a SETTER manager never sees closer information.
@@ -76,10 +84,10 @@ export default function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
   return (
     <aside className="sidebar">
       <div className="brand">
-        <div className="brand-mark">YK</div>
+        <div className="brand-mark">{rallyOnly ? "RC" : "YK"}</div>
         <div>
-          <div className="brand-name">YoutilityKnock</div>
-          <div className="brand-sub">Field intel</div>
+          <div className="brand-name">{rallyOnly ? "RallyCard" : "YoutilityKnock"}</div>
+          <div className="brand-sub">{rallyOnly ? "Cards, leads & competitions" : "Field intel"}</div>
         </div>
       </div>
 

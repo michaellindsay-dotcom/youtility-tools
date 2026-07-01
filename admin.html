@@ -2912,6 +2912,10 @@ $("planSave").addEventListener("click", async () => {
 // One-click: create the standard packages (skips any that already exist by name).
 // baseFee = minimum monthly fee (covers includedUsers); perUserPrice = each extra user.
 const DEFAULT_PACKAGES = [
+  { name: "RallyCard", baseFee: 15, includedUsers: 3, perUserPrice: 5, priceMonthly: 15, custom: false, maxUsers: 0, features: ["rewards","chat","scheduling"],
+    description: "Just the card, no canvassing map — a digital business card per rep (photo, reviews, "+
+      "lead capture, QR code) with team leaderboards/competitions and scheduling. Upgrade to Canvass/Pro/"+
+      "Elite anytime to add the map and door-knocking tools; nothing about the card changes." },
   { name: "Canvass", baseFee: 29, includedUsers: 3, perUserPrice: 10, priceMonthly: 29, custom: false, maxUsers: 0, features: ["map","rewards"],
     description: "Bare-bones canvassing — map, leads, territories, movers, and gamify." },
   { name: "Pro", baseFee: 59, includedUsers: 5, perUserPrice: 12, priceMonthly: 59, custom: false, maxUsers: 0,
