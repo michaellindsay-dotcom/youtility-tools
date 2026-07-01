@@ -2757,9 +2757,9 @@ body.modal-open .chat-fab-global { display: none; }
 /* ── Business-card hero (shared by the editor preview + the public page) ── */
 .biz-card {
   position: relative;
-  aspect-ratio: 1.65 / 1;
+  aspect-ratio: 1.75 / 1;
   width: 100%;
-  max-width: 460px;
+  max-width: 560px;
   margin: 0 auto;
   border-radius: 18px;
   background: linear-gradient(150deg, var(--bg-2), var(--bg-1) 65%);
@@ -2791,12 +2791,12 @@ body.modal-open .chat-fab-global { display: none; }
   flex: 1;
   display: flex;
   flex-direction: column;
-  justify-content: center;
+  justify-content: flex-start;
   gap: 12px;
   padding: 20px 20px 14px;
 }
 .biz-card-top { display: flex; align-items: flex-start; justify-content: space-between; }
-.biz-card-logo { max-height: 34px; max-width: 55%; object-fit: contain; }
+.biz-card-logo { max-height: 76px; max-width: 60%; object-fit: contain; object-position: left center; }
 .biz-card-company { font-family: "Space Grotesk", sans-serif; font-weight: 700; font-size: 14px; color: var(--ink-mid); }
 .biz-card-id-wrap { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; }
 .biz-card-id-label { font-size: 9px; text-transform: uppercase; letter-spacing: 1.4px; color: var(--accent-2); font-weight: 600; }
