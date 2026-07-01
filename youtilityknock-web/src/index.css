@@ -2738,6 +2738,7 @@ body.modal-open .chat-fab-global { display: none; }
   padding: 28px 22px;
 }
 .pc-state { text-align: center; color: var(--ink-mid); padding: 40px 0; }
+.pc-bio { color: var(--ink-mid); font-size: 14px; line-height: 1.6; text-align: center; margin: 18px 0 0; }
 .pc-reviews { margin: 18px 0; padding-top: 16px; border-top: 1px solid var(--line); }
 .pc-reviews h3 { font-family: "Space Grotesk", sans-serif; font-size: 15px; margin-bottom: 10px; }
 .pc-review { background: rgba(255,255,255,.03); border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px; margin-bottom: 8px; }
@@ -2827,18 +2828,13 @@ body.modal-open .chat-fab-global { display: none; }
   display: flex; align-items: center; justify-content: center; font-size: 11px;
 }
 .biz-card-divider { border-top: 1px solid rgba(255,255,255,.12); }
-.biz-card-promo { display: flex; gap: 18px; align-items: stretch; }
-.biz-card-promo-text { flex: 1.1; min-width: 0; display: flex; align-items: center; }
-.biz-card-tagline { font-size: 13px; line-height: 1.45; color: var(--ink-mid); margin: 0; }
 .biz-card-cta-row {
-  flex: 1.3;
   display: flex;
   gap: 14px;
-  border-left: 1px solid rgba(255,255,255,.12);
-  padding-left: 18px;
+  justify-content: space-around;
 }
 .biz-card-cta {
-  flex: 1;
+  flex: 0 1 140px;
   display: flex;
   flex-direction: column;
   align-items: center;
