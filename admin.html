@@ -1172,8 +1172,8 @@
       <div id="inviteLinkBox" class="banner" style="word-break:break-all;"></div>
     </div>
     <table>
-      <thead><tr><th>Name</th><th>Email</th><th>Role / title</th><th>Position</th><th>Reports to (setter / closer)</th><th>Status</th><th></th></tr></thead>
-      <tbody id="usersBody"><tr><td colspan="7" class="muted">Select a company…</td></tr></tbody>
+      <thead><tr><th>Name</th><th>Email</th><th>Role / title</th><th>Position</th><th>Team</th><th>Reports to (setter / closer)</th><th>Status</th><th></th></tr></thead>
+      <tbody id="usersBody"><tr><td colspan="8" class="muted">Select a company…</td></tr></tbody>
     </table>
   </section>
 
@@ -3528,12 +3528,31 @@ $("roleSave").addEventListener("click", async () => {
   finally { $("roleSave").disabled = false; }
 });
 
+// Base tier + rank used when auto-seeding a role for each Role-services position
+// (Company Admin excluded — it's assigned via the "tier:admin" option, not a role).
+const POSITION_ROLE_TIER = { team_manager: "manager", closer_manager: "manager", setter_manager: "manager", closer: "user", setter: "user" };
+const POSITION_ROLE_RANK = { team_manager: 90, closer_manager: 85, setter_manager: 80, closer: 20, setter: 15 };
+
 async function loadRoles() {
   const body = $("rolesBody");
   body.innerHTML = `<tr><td colspan="4" class="muted">Loading…</td></tr>`;
   try {
-    const snap = await getDocs(query(collection(db, `companies/${state.selectedCompany}/roles`), orderBy("rank","desc")));
+    let snap = await getDocs(query(collection(db, `companies/${state.selectedCompany}/roles`), orderBy("rank","desc")));
     state.roles = snap.docs.map((d) => ({ id:d.id, ...d.data() }));
+    // Keep "Roles & titles" lined up with "Role services": auto-create a role for
+    // any structural position that doesn't have a matching title yet.
+    const missing = Object.keys(POSITION_ROLE_TIER).filter((p) =>
+      !state.roles.some((r) => (r.title || "").trim().toLowerCase() === POSITION_LABEL[p].toLowerCase()));
+    if (missing.length) {
+      for (const p of missing) {
+        try {
+          await createRole({ companyId: state.selectedCompany, title: POSITION_LABEL[p],
+            baseTier: POSITION_ROLE_TIER[p], rank: POSITION_ROLE_RANK[p] });
+        } catch {}
+      }
+      snap = await getDocs(query(collection(db, `companies/${state.selectedCompany}/roles`), orderBy("rank","desc")));
+      state.roles = snap.docs.map((d) => ({ id:d.id, ...d.data() }));
+    }
     if (!state.roles.length) { body.innerHTML = `<tr><td colspan="4" class="muted">No roles.</td></tr>`; return; }
     body.innerHTML = "";
     state.roles.forEach((r) => {
@@ -3596,7 +3615,6 @@ async function loadTeams() {
   try {
     const snap = await getDocs(query(collection(db, `companies/${state.selectedCompany}/teams`), orderBy("createdAt","asc")));
     state.teams = snap.docs.map((d) => ({ id:d.id, ...d.data() }));
-    const nameOf = (id) => (state.teams.find((t)=>t.id===id)||{}).name || "—";
     // parent-team dropdown in the team form
     $("teamParent").innerHTML = `<option value="">— none (top level) —</option>` +
       state.teams.map((t)=>`<option value="${t.id}">${esc(t.name)}</option>`).join("");
@@ -3604,8 +3622,13 @@ async function loadTeams() {
     body.innerHTML = "";
     state.teams.forEach((t) => {
       const tr = document.createElement("tr");
+      // Parent is editable here so an org chart can be re-parented after creation
+      // (e.g. moving a company/department team to sit under "Corporate").
+      const parentOpts = `<option value="">— none (top level) —</option>` +
+        state.teams.filter((x) => x.id !== t.id).map((x) =>
+          `<option value="${x.id}" ${t.parentTeamId===x.id?'selected':''}>${esc(x.name)}</option>`).join("");
       tr.innerHTML = `<td><strong class="teamOpen" style="cursor:pointer;color:#0EA5E9;" title="Open team">${esc(t.name)}</strong></td>
-        <td class="muted">${t.parentTeamId ? esc(nameOf(t.parentTeamId)) : "—"}</td>
+        <td><select class="teamParentSel">${parentOpts}</select></td>
         <td><button class="btn ghost sm teamOpenBtn">Open ▾</button></td>`;
       const detail = document.createElement("tr");
       detail.className = "hidden";
@@ -3617,6 +3640,15 @@ async function loadTeams() {
       };
       tr.querySelector(".teamOpen").addEventListener("dblclick", toggle);
       tr.querySelector(".teamOpenBtn").addEventListener("click", toggle);
+      tr.querySelector(".teamParentSel").addEventListener("change", async (ev) => {
+        const newParent = ev.target.value || null;
+        if (newParent === t.id) return;
+        try {
+          await updateTeam({ companyId: state.selectedCompany, teamId: t.id, parentTeamId: newParent });
+          banner($("banner"), `${esc(t.name)}: parent team updated.`, "good");
+          await loadTeams();
+        } catch (e) { banner($("banner"), e.message || "Update failed.", "error"); loadTeams(); }
+      });
       body.appendChild(tr);
       body.appendChild(detail);
     });
@@ -3624,9 +3656,16 @@ async function loadTeams() {
 }
 
 // Open team view: locked-baseline service permissions + drag-drop reporting lines.
+// A team named "Corporate" is the umbrella/overview team: it shows every account
+// in the company (Company Admin sees all, per the platform's access model), while
+// every other team is scoped to its own roster and hides Company Admin accounts —
+// admins sit above the org chart, not inside a department's downline.
 function renderTeamDetail(t, el) {
   const tsp = Array.isArray(t.servicePermissions) ? t.servicePermissions : [];
-  const members = state.users.filter((u) => u.teamId === t.id);
+  const isCorporate = /^corporate$/i.test((t.name || "").trim());
+  const members = isCorporate
+    ? state.users.slice()
+    : state.users.filter((u) => u.teamId === t.id && u.role !== "admin");
   const svc = SERVICES.map(([k, l]) => `<label class="day-chip"><input type="checkbox" class="tsvc" value="${k}" ${tsp.includes(k) ? 'checked' : ''}/> ${l}</label>`).join("");
   const mlist = members.length ? members.map((u) => {
     const mgr = u.managerId ? ((state.users.find((x) => x.id === u.managerId) || {}).displayName || "—") : "—";
@@ -3753,13 +3792,13 @@ $("userSave").addEventListener("click", async () => {
 
 async function loadUsers() {
   const body = $("usersBody");
-  if (!state.selectedCompany) { body.innerHTML = `<tr><td colspan="7" class="muted">Select a company…</td></tr>`; return; }
-  body.innerHTML = `<tr><td colspan="7" class="muted">Loading…</td></tr>`;
+  if (!state.selectedCompany) { body.innerHTML = `<tr><td colspan="8" class="muted">Select a company…</td></tr>`; return; }
+  body.innerHTML = `<tr><td colspan="8" class="muted">Loading…</td></tr>`;
   try {
     const snap = await getDocs(query(collection(db, "users"),
       where("companyId", "==", state.selectedCompany), orderBy("createdAt", "desc")));
     state.users = snap.docs.map((d) => ({ id:d.id, ...d.data() }));
-    if (!state.users.length) { body.innerHTML = `<tr><td colspan="7" class="muted">No accounts yet.</td></tr>`; return; }
+    if (!state.users.length) { body.innerHTML = `<tr><td colspan="8" class="muted">No accounts yet.</td></tr>`; return; }
     const nameOf = (uid) => { const u = state.users.find((x)=>x.id===uid); return u ? (u.displayName||u.email) : uid; };
     body.innerHTML = "";
     state.users.forEach((u) => {
@@ -3779,11 +3818,14 @@ async function loadUsers() {
         POSITIONS.map(([p, l]) => `<option value="${p}" ${curPos === p ? 'selected' : ''}>${l}</option>`).join("");
       const isCloserFn = u.isCloser || curPos === "closer" || curPos === "closer_manager";
       const teamOpts = state.teams.map((t) => `<option value="${t.id}" ${(u.managedTeamIds || []).includes(t.id) ? 'selected' : ''}>${esc(t.name)}</option>`).join("");
+      const myTeamOptions = `<option value="">— none —</option>` +
+        state.teams.map((t) => `<option value="${t.id}" ${u.teamId===t.id?'selected':''}>${esc(t.name)}</option>`).join("");
       const mirrorBtn = state.isSuper ? `<button class="btn sm mirrorBtn">Mirror</button>` : "";
       tr.innerHTML = `<td>${esc(u.displayName||"—")}${u.role==='admin'?' <span class="badge admin">admin</span>':''}</td>
         <td class="muted">${esc(u.email||"")}</td>
         <td><select class="roleSel">${roleOptions}</select></td>
         <td><select class="posSel">${posOptions}</select></td>
+        <td><select class="myTeamSel">${myTeamOptions}</select></td>
         <td><div style="display:grid;gap:4px;">
           <select class="mgrSel" title="Setter manager">${mgrOptions}</select>
           <select class="closerMgrSel" title="Closer manager" ${isCloserFn?'':'disabled'}>${closerMgrOptions}</select>
@@ -3833,6 +3875,11 @@ async function loadUsers() {
           banner($("banner"),"Position updated.","good"); await loadUsers(); populateUserFormSelects(); }
         catch (e) { banner($("banner"), e.message, "error"); loadUsers(); }
       });
+      tr.querySelector(".myTeamSel").addEventListener("change", async (ev) => {
+        try { await assignUserHierarchy({ uid:u.id, teamId: ev.target.value || null });
+          banner($("banner"),"Team updated.","good"); await loadUsers(); }
+        catch (e) { banner($("banner"), e.message, "error"); loadUsers(); }
+      });
       const reassignChk = tr.querySelector(".reassignChk");
       if (reassignChk) reassignChk.addEventListener("change", async (ev) => {
         try { await assignUserHierarchy({ uid:u.id, canReassignAppointments: ev.target.checked });
@@ -3873,7 +3920,7 @@ async function loadUsers() {
       body.appendChild(tr);
     });
     void nameOf;
-  } catch (e) { body.innerHTML = `<tr><td colspan="7" class="banner error show">${esc(e.message)}</td></tr>`; }
+  } catch (e) { body.innerHTML = `<tr><td colspan="8" class="banner error show">${esc(e.message)}</td></tr>`; }
 }
 
 // Permanently delete a user, first choosing who inherits their leads/appointments.
