@@ -94,61 +94,13 @@ export default function PublicCard() {
               idPrefix={card.companyIdPrefix}
               phone={card.phone}
               email={card.email}
+              website={card.companyWebsite}
+              companyPhone={card.companyPhone}
+              companyAddress={card.companyAddress}
+              bio={card.bio}
+              vcfUrl={vcfUrl}
+              leadAnchorId="pc-lead-form"
             />
-
-            {card.bio && <p className="pc-bio">{card.bio}</p>}
-
-            <div className="pc-contact-row">
-              {card.phone && (
-                <>
-                  <a className="btn primary" href={`tel:${card.phone}`}>📞 Call</a>
-                  <a className="btn ghost" href={`sms:${card.phone}`}>💬 Text</a>
-                </>
-              )}
-              {card.email && <a className="btn ghost" href={`mailto:${card.email}`}>✉️ Email</a>}
-              {card.companyWebsite && (
-                <a className="btn ghost" href={card.companyWebsite} target="_blank" rel="noopener noreferrer">🌐 Website</a>
-              )}
-              {vcfUrl && <a className="btn ghost" href={vcfUrl}>💾 Save Contact</a>}
-            </div>
-
-            <div className="pc-info">
-              {card.phone && (
-                <div className="pc-info-row">
-                  <span className="pc-info-ico">📱</span>
-                  <a href={`tel:${card.phone}`}>{card.phone}</a>
-                </div>
-              )}
-              {card.email && (
-                <div className="pc-info-row">
-                  <span className="pc-info-ico">✉️</span>
-                  <a href={`mailto:${card.email}`}>{card.email}</a>
-                </div>
-              )}
-              {card.companyPhone && (
-                <div className="pc-info-row">
-                  <span className="pc-info-ico">☎️</span>
-                  <a href={`tel:${card.companyPhone}`}>{card.companyPhone}</a>
-                </div>
-              )}
-              {card.companyAddress && (
-                <div className="pc-info-row">
-                  <span className="pc-info-ico">📍</span>
-                  <a
-                    href={`https://maps.google.com/?q=${encodeURIComponent(card.companyAddress)}`}
-                    target="_blank" rel="noopener noreferrer"
-                  >
-                    {card.companyAddress}
-                  </a>
-                </div>
-              )}
-              {card.companyWebsite && (
-                <div className="pc-info-row">
-                  <span className="pc-info-ico">🌐</span>
-                  <a href={card.companyWebsite} target="_blank" rel="noopener noreferrer">{card.companyWebsite}</a>
-                </div>
-              )}
-            </div>
 
             {card.reviews.length > 0 && (
               <div className="pc-reviews">
@@ -163,7 +115,7 @@ export default function PublicCard() {
               </div>
             )}
 
-            <div className="pc-form-block">
+            <div className="pc-form-block" id="pc-lead-form">
               <h3>Get in touch</h3>
               {submitted ? (
                 <p className="pc-thanks">Thanks — {card.displayName.split(" ")[0]} will reach out soon.</p>
