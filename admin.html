@@ -237,6 +237,7 @@
       <button class="home-btn" data-card="usersCard"><span class="hb-ico">👥</span><b>Accounts</b><small>Add people, set setter/closer function &amp; managers, reset passwords</small></button>
       <button class="home-btn" data-card="schedulingCard"><span class="hb-ico">📅</span><b>Scheduling &amp; Closers</b><small>Booking window, business hours, appointment routing &amp; closers</small></button>
       <button class="home-btn" data-card="companySettingsCard"><span class="hb-ico">🛠️</span><b>Company settings</b><small>Max territories per rep &amp; other company options</small></button>
+      <button class="home-btn" data-card="companyBrandingCard"><span class="hb-ico">🏷</span><b>RallyCard branding</b><small>Company logo, website &amp; phone shown on every rep's card</small></button>
       <button class="home-btn" data-card="batteryPricingCard"><span class="hb-ico">🔋</span><b>Battery pricing</b><small>Per-product price &amp; install adder for proposals</small></button>
       <a class="home-btn" href="/pm" target="_blank" rel="noopener" style="text-decoration:none;color:inherit;"><span class="hb-ico">🏗️</span><b>Project Management</b><small>Signed deals, site surveys &amp; the install pipeline</small></a>
       <button class="home-btn" data-card="rolesCard"><span class="hb-ico">🏷️</span><b>Roles &amp; titles</b><small>Custom titles and the access tier each grants</small></button>
@@ -373,6 +374,7 @@
       <button class="home-btn" data-card="teamsCard"><span class="hb-ico">🗂️</span><b>Teams</b><small>Group reps into teams</small></button>
       <button class="home-btn" data-card="schedulingCard"><span class="hb-ico">📅</span><b>Scheduling &amp; Closers</b><small>Booking window, business hours &amp; appointment routing</small></button>
       <button class="home-btn" data-card="companyServicesCard"><span class="hb-ico">🧩</span><b>Services</b><small>Turn tools on/off for this company &amp; set the price override</small></button>
+      <button class="home-btn" data-card="companyBrandingCard"><span class="hb-ico">🏷</span><b>RallyCard branding</b><small>Company logo, website &amp; phone shown on every rep's card</small></button>
       <button class="home-btn" data-card="roleServicesCard"><span class="hb-ico">🔐</span><b>Role services</b><small>What each role (position) sees at login &amp; in the app</small></button>
       <button class="home-btn" data-card="companySettingsCard"><span class="hb-ico">⚙️</span><b>Settings</b><small>Max territories per rep &amp; other company options</small></button>
       <button class="home-btn" data-card="batteryPricingCard"><span class="hb-ico">🔋</span><b>Battery pricing</b><small>Per-product price &amp; install adder for proposals</small></button>
@@ -766,6 +768,29 @@
       <button class="btn primary sm" id="companyServicesSave">Save services</button>
     </div>
     <div id="companyServicesBanner" class="banner"></div>
+  </section>
+
+  <!-- RallyCard branding (company logo + contact info shown on every rep's card) -->
+  <section id="companyBrandingCard" class="card hidden">
+    <h2>RallyCard branding</h2>
+    <p class="muted small" style="margin:-4px 0 14px;">
+      Shown on every rep's RallyCard unless a rep uploads their own logo override.
+    </p>
+    <div class="row" style="gap:14px;align-items:center;flex-wrap:wrap;">
+      <img id="brandingLogoPreview" alt="" style="max-height:48px;max-width:160px;object-fit:contain;display:none;" />
+      <label class="btn ghost sm" style="cursor:pointer;">
+        Upload logo
+        <input type="file" id="brandingLogoFile" accept="image/*" style="display:none;" />
+      </label>
+    </div>
+    <div class="row" style="gap:10px;flex-wrap:wrap;margin-top:12px;">
+      <label class="field" style="max-width:260px;"><span>Website</span><input type="text" id="brandingWebsite" placeholder="https://example.com" /></label>
+      <label class="field" style="max-width:200px;"><span>Company phone</span><input type="text" id="brandingPhone" placeholder="(555) 123-4567" /></label>
+    </div>
+    <div class="row" style="margin-top:12px;">
+      <button class="btn primary sm" id="brandingSave">Save branding</button>
+    </div>
+    <div id="brandingBanner" class="banner"></div>
   </section>
 
   <!-- Services by role (position): what each role sees at login + in the app -->
@@ -1226,6 +1251,7 @@ const setUserRole     = httpsCallable(fns, "setUserRole");
 const setUserCloser   = httpsCallable(fns, "setUserCloser");
 const setUserFunction = httpsCallable(fns, "setUserFunction");
 const setCompanyOptions = httpsCallable(fns, "setCompanyOptions");
+const setCompanyBranding = httpsCallable(fns, "setCompanyBranding");
 const setBatteryPricing = httpsCallable(fns, "setBatteryPricing");
 const createRole      = httpsCallable(fns, "createRole");
 const deleteRole      = httpsCallable(fns, "deleteRole");
@@ -1325,7 +1351,7 @@ function showLogin() {
 }
 // ── Tabs (super-admin) ────────────────────────────────────────────────────
 const TAB_CARDS = {
-  companies: ["companiesCard","companyServicesCard","roleServicesCard","schedulingCard","companySettingsCard","batteryPricingCard","crmCompanyCard","rolesCard","teamsCard","rewardsCard","redemptionsCard","companyBillingCard","usersCard"],
+  companies: ["companiesCard","companyServicesCard","companyBrandingCard","roleServicesCard","schedulingCard","companySettingsCard","batteryPricingCard","crmCompanyCard","rolesCard","teamsCard","rewardsCard","redemptionsCard","companyBillingCard","usersCard"],
   orgs: ["orgsCard"],
   demos: ["demoRequestsCard"],
   payments: ["plansCard","billingCard"],
@@ -1334,7 +1360,7 @@ const TAB_CARDS = {
   apis: ["apiKeysCard","integrationsCard","crmCard"],
   account: ["myAccountCard"],
 };
-const COMPANY_ONLY = new Set(["companyServicesCard","roleServicesCard","schedulingCard","companySettingsCard","batteryPricingCard","crmCompanyCard","rolesCard","teamsCard","rewardsCard","redemptionsCard","companyBillingCard","usersCard"]);
+const COMPANY_ONLY = new Set(["companyServicesCard","companyBrandingCard","roleServicesCard","schedulingCard","companySettingsCard","batteryPricingCard","crmCompanyCard","rolesCard","teamsCard","rewardsCard","redemptionsCard","companyBillingCard","usersCard"]);
 const ALL_TAB_CARDS = Object.values(TAB_CARDS).flat();
 
 function renderTab() {
@@ -1427,7 +1453,7 @@ function enterConsole() {
 }
 
 // ── Company-admin view toggle: Town Hall ⇄ Settings ───────────────────────
-const COMPANY_SETTINGS_CARDS = ["schedulingCard","companySettingsCard","batteryPricingCard","rolesCard","teamsCard","rewardsCard","redemptionsCard","companyBillingCard","usersCard"];
+const COMPANY_SETTINGS_CARDS = ["schedulingCard","companySettingsCard","companyBrandingCard","batteryPricingCard","rolesCard","teamsCard","rewardsCard","redemptionsCard","companyBillingCard","usersCard"];
 function hideAllSettingCards() {
   COMPANY_SETTINGS_CARDS.forEach((id) => { const el = $(id); if (el) el.classList.add("hidden"); });
 }
@@ -1481,6 +1507,7 @@ async function selectCompany(companyId, companyName) {
   $("rewardsTitle").textContent = "Rewards & Gamify" + suffix;
   $("companyServicesTitle").textContent = "Services" + suffix;
   loadCompanyServices(companyId);
+  loadCompanyBranding(companyId);
   loadRoleServices(companyId);
   if (state.isSuper) {
     state.currentTab = "companies";
@@ -3261,6 +3288,42 @@ $("companyServicesSave").addEventListener("click", async () => {
     loadBilling(cid); // keep the billing total in sync with the new features/price
   } catch (e) { banner($("companyServicesBanner"), e.message || "Update failed.", "error"); }
   finally { $("companyServicesSave").disabled = false; }
+});
+
+// RallyCard branding (company logo shown on every rep's card + website/phone).
+let brandingLogoUrl = "";
+async function loadCompanyBranding(companyId) {
+  let c = {};
+  try { const s = await getDoc(doc(db, "companies", companyId)); c = s.exists() ? s.data() : {}; } catch {}
+  brandingLogoUrl = c.logoUrl || "";
+  $("brandingLogoPreview").src = brandingLogoUrl;
+  $("brandingLogoPreview").style.display = brandingLogoUrl ? "" : "none";
+  $("brandingWebsite").value = c.website || "";
+  $("brandingPhone").value = c.phone || "";
+}
+$("brandingLogoFile").addEventListener("change", async (e) => {
+  const cid = state.selectedCompany;
+  const file = e.target.files?.[0];
+  e.target.value = "";
+  if (!cid || !file) return;
+  try {
+    const r = sRef(storage, `branding/${cid}/${Date.now()}_${file.name.replace(/[^\w.-]/g,"_")}`);
+    await uploadBytes(r, file);
+    brandingLogoUrl = await getDownloadURL(r);
+    $("brandingLogoPreview").src = brandingLogoUrl;
+    $("brandingLogoPreview").style.display = "";
+    banner($("brandingBanner"), "Logo uploaded — click Save branding to apply.", "good");
+  } catch (e) { banner($("brandingBanner"), e.message || "Upload failed (is Storage enabled?).", "error"); }
+});
+$("brandingSave").addEventListener("click", async () => {
+  const cid = state.selectedCompany;
+  if (!cid) return;
+  $("brandingSave").disabled = true;
+  try {
+    await setCompanyBranding({ companyId: cid, logoUrl: brandingLogoUrl, website: $("brandingWebsite").value, phone: $("brandingPhone").value });
+    banner($("brandingBanner"), "Branding saved.", "good");
+  } catch (e) { banner($("brandingBanner"), e.message || "Save failed.", "error"); }
+  finally { $("brandingSave").disabled = false; }
 });
 
 // Services-by-role: a position × services grid. Null (unconfigured) = all on.

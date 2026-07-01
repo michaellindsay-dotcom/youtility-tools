@@ -1,18 +1,23 @@
 import { useEffect, useState } from "react";
 import { httpsCallable } from "firebase/functions";
 import { functions } from "../firebase";
+import BizCardHero from "../components/BizCardHero";
 
 interface CardPayload {
   slug: string;
   displayName: string;
   title: string;
   photoUrl: string;
+  logoUrl: string;
   bio: string;
   serviceArea: string;
   reviews: { name: string; text: string; rating: number }[];
   phone: string;
   email: string;
   companyName: string;
+  companyWebsite: string;
+  companyPhone: string;
+  memberId: number | null;
 }
 
 type Status = "loading" | "ready" | "error";
@@ -70,17 +75,15 @@ export default function PublicCard() {
         {status === "error" && <div className="pc-state">{errorMsg}</div>}
         {status === "ready" && card && (
           <>
-            <div className="pc-hero">
-              {card.photoUrl ? (
-                <img src={card.photoUrl} alt={card.displayName} className="pc-photo" />
-              ) : (
-                <div className="pc-photo pc-photo-placeholder">{card.displayName.slice(0, 1)}</div>
-              )}
-              <h1 className="pc-name">{card.displayName}</h1>
-              {card.title && <div className="pc-title">{card.title}</div>}
-              {card.companyName && <div className="pc-company">{card.companyName}</div>}
-              {card.serviceArea && <div className="pc-area">📍 {card.serviceArea}</div>}
-            </div>
+            <BizCardHero
+              displayName={card.displayName}
+              title={card.title}
+              companyName={card.companyName}
+              logoUrl={card.logoUrl}
+              photoUrl={card.photoUrl}
+              serviceArea={card.serviceArea}
+              memberId={card.memberId}
+            />
 
             {card.bio && <p className="pc-bio">{card.bio}</p>}
 
@@ -92,6 +95,9 @@ export default function PublicCard() {
                 </>
               )}
               {card.email && <a className="btn ghost" href={`mailto:${card.email}`}>✉️ Email</a>}
+              {card.companyWebsite && (
+                <a className="btn ghost" href={card.companyWebsite} target="_blank" rel="noopener noreferrer">🌐 Website</a>
+              )}
             </div>
 
             {card.reviews.length > 0 && (

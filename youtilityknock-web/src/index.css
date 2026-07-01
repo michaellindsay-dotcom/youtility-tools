@@ -2738,17 +2738,7 @@ body.modal-open .chat-fab-global { display: none; }
   padding: 28px 22px;
 }
 .pc-state { text-align: center; color: var(--ink-mid); padding: 40px 0; }
-.pc-hero { text-align: center; margin-bottom: 14px; }
-.pc-photo { width: 104px; height: 104px; border-radius: 50%; object-fit: cover; border: 2px solid var(--line-hi); }
-.pc-photo-placeholder {
-  display: flex; align-items: center; justify-content: center; margin: 0 auto;
-  font-size: 40px; font-weight: 700; background: var(--bg-2); color: var(--ink-mid);
-}
-.pc-name { font-family: "Space Grotesk", sans-serif; font-size: 22px; margin: 12px 0 2px; }
-.pc-title { color: var(--ink-mid); font-size: 14px; }
-.pc-company { color: var(--ink-dim); font-size: 13px; margin-top: 2px; }
-.pc-area { color: var(--ink-mid); font-size: 13px; margin-top: 6px; }
-.pc-bio { color: var(--ink-mid); font-size: 14px; line-height: 1.5; text-align: center; margin: 14px 0; }
+.pc-bio { color: var(--ink-mid); font-size: 14px; line-height: 1.5; text-align: center; margin: 18px 0 14px; }
 .pc-contact-row { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; margin-bottom: 18px; }
 .pc-reviews { margin: 18px 0; padding-top: 16px; border-top: 1px solid var(--line); }
 .pc-reviews h3 { font-family: "Space Grotesk", sans-serif; font-size: 15px; margin-bottom: 10px; }
@@ -2758,3 +2748,30 @@ body.modal-open .chat-fab-global { display: none; }
 .pc-form-block h3 { font-family: "Space Grotesk", sans-serif; font-size: 15px; margin-bottom: 10px; }
 .pc-thanks { color: #34D399; text-align: center; padding: 16px 0; }
 .pc-foot { text-align: center; margin-top: 20px; }
+
+/* ── Business-card hero (shared by the editor preview + the public page) ── */
+.biz-card {
+  aspect-ratio: 1.65 / 1;
+  width: 100%;
+  max-width: 400px;
+  margin: 0 auto;
+  border-radius: 16px;
+  padding: 16px 18px;
+  background: linear-gradient(135deg, var(--bg-2), var(--bg-1) 70%);
+  border: 1px solid var(--line-hi);
+  box-shadow: 0 8px 24px rgba(0,0,0,.35);
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  color: var(--ink);
+}
+.biz-card-top { display: flex; align-items: flex-start; justify-content: space-between; }
+.biz-card-logo { max-height: 34px; max-width: 55%; object-fit: contain; }
+.biz-card-company { font-family: "Space Grotesk", sans-serif; font-weight: 700; font-size: 14px; color: var(--ink-mid); }
+.biz-card-id { font-size: 11px; color: var(--ink-dim); font-variant-numeric: tabular-nums; letter-spacing: .3px; }
+.biz-card-mid { display: flex; align-items: center; gap: 12px; }
+.biz-card-avatar { width: 52px; height: 52px; border-radius: 50%; object-fit: cover; border: 2px solid var(--line-hi); flex-shrink: 0; }
+.biz-card-avatar-placeholder { display: flex; align-items: center; justify-content: center; background: var(--bg-0); color: var(--ink-mid); font-weight: 700; font-size: 20px; }
+.biz-card-name { font-family: "Space Grotesk", sans-serif; font-size: 19px; font-weight: 700; line-height: 1.15; }
+.biz-card-title { font-size: 13px; color: var(--ink-mid); margin-top: 2px; }
+.biz-card-bottom { display: flex; justify-content: space-between; font-size: 12px; color: var(--ink-mid); }

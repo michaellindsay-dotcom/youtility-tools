@@ -4,20 +4,23 @@ import { ref as storageRef, uploadBytes, getDownloadURL } from "firebase/storage
 import QRCode from "qrcode";
 import { storage, functions } from "../firebase";
 import { useAuth } from "../auth/AuthContext";
+import BizCardHero from "../components/BizCardHero";
 import type { CardReview } from "../types";
 
 const CARD_BASE_URL = "https://youtilityknock.web.app/app";
 
 export default function BusinessCard() {
-  const { profile } = useAuth();
+  const { profile, company } = useAuth();
   const [slug, setSlug] = useState(profile?.cardSlug || "");
   const [enabled, setEnabled] = useState(!!profile?.cardEnabled);
   const [title, setTitle] = useState(profile?.cardTitle || profile?.title || "");
   const [bio, setBio] = useState(profile?.cardBio || "");
   const [serviceArea, setServiceArea] = useState(profile?.cardServiceArea || "");
   const [photoUrl, setPhotoUrl] = useState(profile?.cardPhotoUrl || "");
+  const [logoUrl, setLogoUrl] = useState(profile?.cardLogoUrl || "");
   const [reviews, setReviews] = useState<CardReview[]>(profile?.cardReviews || []);
   const [uploading, setUploading] = useState(false);
+  const [uploadingLogo, setUploadingLogo] = useState(false);
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState("");
   const [qrDataUrl, setQrDataUrl] = useState("");
@@ -29,8 +32,12 @@ export default function BusinessCard() {
     setBio(profile?.cardBio || "");
     setServiceArea(profile?.cardServiceArea || "");
     setPhotoUrl(profile?.cardPhotoUrl || "");
+    setLogoUrl(profile?.cardLogoUrl || "");
     setReviews(profile?.cardReviews || []);
   }, [profile]);
+
+  // Company logo unless the rep uploaded their own override.
+  const effectiveLogo = logoUrl || company?.logoUrl || "";
 
   const shareUrl = profile?.cardSlug ? `${CARD_BASE_URL}?card=${profile.cardSlug}` : "";
 
@@ -60,6 +67,25 @@ export default function BusinessCard() {
     }
   }
 
+  async function onLogoChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file || !profile) return;
+    setUploadingLogo(true);
+    setMsg("");
+    try {
+      const safe = file.name.replace(/[^a-zA-Z0-9_.-]/g, "_");
+      const r = storageRef(storage, `cards/${profile.uid}/logo_${Date.now()}_${safe}`);
+      await uploadBytes(r, file, { contentType: file.type || "image/png" });
+      const url = await getDownloadURL(r);
+      setLogoUrl(url);
+    } catch (e) {
+      setMsg((e as Error).message || "Logo upload failed.");
+    } finally {
+      setUploadingLogo(false);
+    }
+  }
+
   function updateReview(i: number, patch: Partial<CardReview>) {
     setReviews((rs) => rs.map((r, idx) => (idx === i ? { ...r, ...patch } : r)));
   }
@@ -80,6 +106,7 @@ export default function BusinessCard() {
         bio,
         serviceArea,
         photoUrl,
+        logoUrl,
         reviews,
         enabled: nextEnabled ?? enabled,
       });
@@ -116,6 +143,44 @@ export default function BusinessCard() {
           one-tap way to call, text, or leave you their info. Share the link or print the QR code
           on a door hanger or yard sign.
         </p>
+      </div>
+
+      <div className="card" style={{ textAlign: "center" }}>
+        <BizCardHero
+          displayName={profile?.displayName || ""}
+          title={title || profile?.title}
+          companyName={company?.name}
+          logoUrl={effectiveLogo}
+          photoUrl={photoUrl}
+          serviceArea={serviceArea}
+          memberId={profile?.cardMemberId ?? null}
+        />
+        {profile?.cardMemberId && (
+          <p className="muted small" style={{ marginTop: 10 }}>Your RallyCard ID: No. {profile.cardMemberId.toLocaleString()}</p>
+        )}
+      </div>
+
+      <div className="card">
+        <h3 style={{ marginBottom: 4 }}>Company logo</h3>
+        <p className="muted small" style={{ marginBottom: 12 }}>
+          {company?.logoUrl
+            ? "Your company logo shows on your card by default — upload your own below to override it."
+            : "Your company hasn't set a logo yet — you can upload your own."}
+        </p>
+        <div className="row" style={{ alignItems: "center", gap: 12 }}>
+          {effectiveLogo ? (
+            <img src={effectiveLogo} alt="" style={{ maxHeight: 44, maxWidth: 140, objectFit: "contain" }} />
+          ) : (
+            <span className="muted small">No logo yet</span>
+          )}
+          <label className="btn ghost sm" style={{ cursor: "pointer" }}>
+            {uploadingLogo ? "Uploading…" : "Upload my own logo"}
+            <input type="file" accept="image/*" onChange={onLogoChange} disabled={uploadingLogo} style={{ display: "none" }} />
+          </label>
+          {logoUrl && (
+            <button className="btn ghost sm" onClick={() => setLogoUrl("")}>Use company logo instead</button>
+          )}
+        </div>
       </div>
 
       <div className="card">
