@@ -237,7 +237,7 @@
       <button class="home-btn" data-card="usersCard"><span class="hb-ico">👥</span><b>Accounts</b><small>Add people, set setter/closer function &amp; managers, reset passwords</small></button>
       <button class="home-btn" data-card="schedulingCard"><span class="hb-ico">📅</span><b>Scheduling &amp; Closers</b><small>Booking window, business hours, appointment routing &amp; closers</small></button>
       <button class="home-btn" data-card="companySettingsCard"><span class="hb-ico">🛠️</span><b>Company settings</b><small>Max territories per rep &amp; other company options</small></button>
-      <button class="home-btn" data-card="companyBrandingCard"><span class="hb-ico">🏷</span><b>RallyCard branding</b><small>Company logo, website &amp; phone shown on every rep's card</small></button>
+      <button class="home-btn" data-card="companyBrandingCard"><span class="hb-ico">🏷</span><b>RallyCard branding</b><small>Company logo, website, phone &amp; address shown on every rep's card</small></button>
       <button class="home-btn" data-card="batteryPricingCard"><span class="hb-ico">🔋</span><b>Battery pricing</b><small>Per-product price &amp; install adder for proposals</small></button>
       <a class="home-btn" href="/pm" target="_blank" rel="noopener" style="text-decoration:none;color:inherit;"><span class="hb-ico">🏗️</span><b>Project Management</b><small>Signed deals, site surveys &amp; the install pipeline</small></a>
       <button class="home-btn" data-card="rolesCard"><span class="hb-ico">🏷️</span><b>Roles &amp; titles</b><small>Custom titles and the access tier each grants</small></button>
@@ -375,7 +375,7 @@
       <button class="home-btn" data-card="teamsCard"><span class="hb-ico">🗂️</span><b>Teams</b><small>Group reps into teams</small></button>
       <button class="home-btn" data-card="schedulingCard"><span class="hb-ico">📅</span><b>Scheduling &amp; Closers</b><small>Booking window, business hours &amp; appointment routing</small></button>
       <button class="home-btn" data-card="companyServicesCard"><span class="hb-ico">🧩</span><b>Services</b><small>Turn tools on/off for this company &amp; set the price override</small></button>
-      <button class="home-btn" data-card="companyBrandingCard"><span class="hb-ico">🏷</span><b>RallyCard branding</b><small>Company logo, website &amp; phone shown on every rep's card</small></button>
+      <button class="home-btn" data-card="companyBrandingCard"><span class="hb-ico">🏷</span><b>RallyCard branding</b><small>Company logo, website, phone &amp; address shown on every rep's card</small></button>
       <button class="home-btn" data-card="roleServicesCard"><span class="hb-ico">🔐</span><b>Role services</b><small>What each role (position) sees at login &amp; in the app</small></button>
       <button class="home-btn" data-card="companySettingsCard"><span class="hb-ico">⚙️</span><b>Settings</b><small>Max territories per rep &amp; other company options</small></button>
       <button class="home-btn" data-card="batteryPricingCard"><span class="hb-ico">🔋</span><b>Battery pricing</b><small>Per-product price &amp; install adder for proposals</small></button>
@@ -794,6 +794,7 @@
     <div class="row" style="gap:10px;flex-wrap:wrap;margin-top:12px;">
       <label class="field" style="max-width:260px;"><span>Website</span><input type="text" id="brandingWebsite" placeholder="https://example.com" /></label>
       <label class="field" style="max-width:200px;"><span>Company phone</span><input type="text" id="brandingPhone" placeholder="(555) 123-4567" /></label>
+      <label class="field" style="max-width:320px;"><span>Company address</span><input type="text" id="brandingAddress" placeholder="123 Main St, Salt Lake City, UT" /></label>
     </div>
     <div class="row" style="margin-top:12px;">
       <button class="btn primary sm" id="brandingSave">Save branding</button>
@@ -3406,6 +3407,7 @@ async function loadCompanyBranding(companyId) {
   $("brandingLogoPreview").style.display = brandingLogoUrl ? "" : "none";
   $("brandingWebsite").value = c.website || "";
   $("brandingPhone").value = c.phone || "";
+  $("brandingAddress").value = c.address || "";
 }
 $("brandingLogoFile").addEventListener("change", async (e) => {
   const cid = state.selectedCompany;
@@ -3426,7 +3428,7 @@ $("brandingSave").addEventListener("click", async () => {
   if (!cid) return;
   $("brandingSave").disabled = true;
   try {
-    await setCompanyBranding({ companyId: cid, logoUrl: brandingLogoUrl, website: $("brandingWebsite").value, phone: $("brandingPhone").value });
+    await setCompanyBranding({ companyId: cid, logoUrl: brandingLogoUrl, website: $("brandingWebsite").value, phone: $("brandingPhone").value, address: $("brandingAddress").value });
     banner($("brandingBanner"), "Branding saved.", "good");
   } catch (e) { banner($("brandingBanner"), e.message || "Save failed.", "error"); }
   finally { $("brandingSave").disabled = false; }

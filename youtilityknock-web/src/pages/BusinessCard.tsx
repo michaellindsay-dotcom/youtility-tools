@@ -6,6 +6,7 @@ import { storage, functions } from "../firebase";
 import { useAuth } from "../auth/AuthContext";
 import BizCardHero from "../components/BizCardHero";
 import type { CardReview } from "../types";
+import { CARD_THEMES, CARD_THEME_KEYS, cardAccentVars, cardThemeBg } from "../lib/cardTheme";
 
 const CARD_BASE_URL = "https://youtilityknock.web.app/app";
 
@@ -19,6 +20,8 @@ export default function BusinessCard() {
   const [photoUrl, setPhotoUrl] = useState(profile?.cardPhotoUrl || "");
   const [logoUrl, setLogoUrl] = useState(profile?.cardLogoUrl || "");
   const [reviews, setReviews] = useState<CardReview[]>(profile?.cardReviews || []);
+  const [accentColor, setAccentColor] = useState(profile?.cardAccentColor || "#38bdf8");
+  const [theme, setTheme] = useState(profile?.cardTheme || "default");
   const [uploading, setUploading] = useState(false);
   const [uploadingLogo, setUploadingLogo] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -34,6 +37,8 @@ export default function BusinessCard() {
     setPhotoUrl(profile?.cardPhotoUrl || "");
     setLogoUrl(profile?.cardLogoUrl || "");
     setReviews(profile?.cardReviews || []);
+    setAccentColor(profile?.cardAccentColor || "#38bdf8");
+    setTheme(profile?.cardTheme || "default");
   }, [profile]);
 
   // Company logo unless the rep uploaded their own override.
@@ -108,6 +113,8 @@ export default function BusinessCard() {
         photoUrl,
         logoUrl,
         reviews,
+        accentColor,
+        theme,
         enabled: nextEnabled ?? enabled,
       });
       const data = r.data as { cardSlug?: string; cardEnabled?: boolean };
@@ -145,7 +152,10 @@ export default function BusinessCard() {
         </p>
       </div>
 
-      <div className="card" style={{ textAlign: "center" }}>
+      <div
+        className="card"
+        style={{ textAlign: "center", background: cardThemeBg(theme), ...cardAccentVars(accentColor) }}
+      >
         <BizCardHero
           displayName={profile?.displayName || ""}
           title={title || profile?.title}
@@ -158,6 +168,45 @@ export default function BusinessCard() {
         {profile?.cardMemberId && (
           <p className="muted small" style={{ marginTop: 10 }}>Your RallyCard ID: No. {profile.cardMemberId.toLocaleString()}</p>
         )}
+      </div>
+
+      <div className="card">
+        <h3 style={{ marginBottom: 4 }}>Colors &amp; style</h3>
+        <p className="muted small" style={{ marginBottom: 12 }}>
+          Pick an accent color and background to make your card your own.
+        </p>
+        <div className="row" style={{ alignItems: "center", gap: 10, marginBottom: 14 }}>
+          <input
+            type="color"
+            value={accentColor}
+            onChange={(e) => setAccentColor(e.target.value)}
+            style={{ width: 40, height: 40, padding: 0, border: "1px solid var(--line-hi)", borderRadius: 8, background: "none", cursor: "pointer" }}
+            aria-label="Accent color"
+          />
+          <input
+            className="input"
+            style={{ maxWidth: 120 }}
+            value={accentColor}
+            onChange={(e) => setAccentColor(e.target.value)}
+            placeholder="#38bdf8"
+          />
+          <span className="muted small">Accent color (buttons &amp; highlights)</span>
+        </div>
+        <div className="row" style={{ gap: 8, flexWrap: "wrap" }}>
+          {CARD_THEME_KEYS.map((key) => (
+            <button
+              key={key}
+              type="button"
+              onClick={() => setTheme(key)}
+              title={CARD_THEMES[key].label}
+              style={{
+                width: 56, height: 36, borderRadius: 8, cursor: "pointer",
+                background: CARD_THEMES[key].bg,
+                border: theme === key ? "2px solid var(--accent)" : "1px solid var(--line-hi)",
+              }}
+            />
+          ))}
+        </div>
       </div>
 
       <div className="card">

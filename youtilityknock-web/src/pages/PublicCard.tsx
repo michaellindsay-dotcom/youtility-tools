@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { httpsCallable } from "firebase/functions";
 import { functions } from "../firebase";
 import BizCardHero from "../components/BizCardHero";
+import { cardAccentVars, cardThemeBg } from "../lib/cardTheme";
 
 interface CardPayload {
   slug: string;
@@ -17,6 +18,9 @@ interface CardPayload {
   companyName: string;
   companyWebsite: string;
   companyPhone: string;
+  companyAddress: string;
+  accentColor: string;
+  theme: string;
   memberId: number | null;
 }
 
@@ -69,8 +73,8 @@ export default function PublicCard() {
   }
 
   return (
-    <div className="pc-wrap">
-      <div className="pc-card">
+    <div className="pc-wrap" style={card ? { background: cardThemeBg(card.theme) } : undefined}>
+      <div className="pc-card" style={card ? cardAccentVars(card.accentColor) : undefined}>
         {status === "loading" && <div className="pc-state">Loading…</div>}
         {status === "error" && <div className="pc-state">{errorMsg}</div>}
         {status === "ready" && card && (
@@ -97,6 +101,19 @@ export default function PublicCard() {
               {card.email && <a className="btn ghost" href={`mailto:${card.email}`}>✉️ Email</a>}
               {card.companyWebsite && (
                 <a className="btn ghost" href={card.companyWebsite} target="_blank" rel="noopener noreferrer">🌐 Website</a>
+              )}
+            </div>
+
+            <div className="pc-info">
+              {card.phone && <div className="pc-info-row"><span className="pc-info-ico">📱</span>{card.phone}</div>}
+              {card.email && <div className="pc-info-row"><span className="pc-info-ico">✉️</span>{card.email}</div>}
+              {card.companyPhone && <div className="pc-info-row"><span className="pc-info-ico">☎️</span>{card.companyPhone}</div>}
+              {card.companyAddress && <div className="pc-info-row"><span className="pc-info-ico">📍</span>{card.companyAddress}</div>}
+              {card.companyWebsite && (
+                <div className="pc-info-row">
+                  <span className="pc-info-ico">🌐</span>
+                  <a href={card.companyWebsite} target="_blank" rel="noopener noreferrer">{card.companyWebsite}</a>
+                </div>
               )}
             </div>
 

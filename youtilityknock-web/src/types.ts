@@ -173,6 +173,8 @@ export interface UserProfile {
   cardReviews?: CardReview[];
   cardLogoUrl?: string; // overrides the company logo on this rep's card, if set
   cardMemberId?: number; // stable, randomly-assigned display id (e.g. "No. 348219")
+  cardAccentColor?: string; // hex color, recolors the card's buttons/accents
+  cardTheme?: string; // background preset key, see lib/cardTheme.ts
   // Lead outreach — this rep's ported number (calls/texts to homeowners go out
   // as this rep, not a shared company line). Admin-assigned once porting to the
   // messaging provider completes.

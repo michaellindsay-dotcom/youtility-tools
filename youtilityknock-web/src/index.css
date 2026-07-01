@@ -2740,6 +2740,11 @@ body.modal-open .chat-fab-global { display: none; }
 .pc-state { text-align: center; color: var(--ink-mid); padding: 40px 0; }
 .pc-bio { color: var(--ink-mid); font-size: 14px; line-height: 1.5; text-align: center; margin: 18px 0 14px; }
 .pc-contact-row { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; margin-bottom: 18px; }
+.pc-info { display: flex; flex-direction: column; gap: 6px; padding: 14px 16px; margin-bottom: 18px; background: rgba(255,255,255,.03); border: 1px solid var(--line); border-radius: 12px; }
+.pc-info-row { display: flex; align-items: center; gap: 8px; font-size: 13.5px; color: var(--ink-mid); word-break: break-word; }
+.pc-info-row a { color: inherit; text-decoration: none; }
+.pc-info-row a:hover { color: var(--accent); }
+.pc-info-ico { flex: 0 0 auto; }
 .pc-reviews { margin: 18px 0; padding-top: 16px; border-top: 1px solid var(--line); }
 .pc-reviews h3 { font-family: "Space Grotesk", sans-serif; font-size: 15px; margin-bottom: 10px; }
 .pc-review { background: rgba(255,255,255,.03); border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px; margin-bottom: 8px; }
