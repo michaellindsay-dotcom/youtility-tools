@@ -791,6 +791,15 @@
         <input type="file" id="brandingLogoFile" accept="image/*" style="display:none;" />
       </label>
     </div>
+    <div class="row" style="gap:14px;align-items:center;flex-wrap:wrap;margin-top:10px;">
+      <img id="brandingBgPreview" alt="" style="height:48px;width:84px;object-fit:cover;border-radius:6px;display:none;" />
+      <label class="btn ghost sm" style="cursor:pointer;">
+        Upload card background photo
+        <input type="file" id="brandingBgFile" accept="image/*" style="display:none;" />
+      </label>
+      <span class="muted small">A subtle photo (e.g. a jobsite or install) shown behind every rep's card.</span>
+      <button class="btn ghost sm" id="brandingBgClear" style="display:none;">Remove</button>
+    </div>
     <div class="row" style="gap:10px;flex-wrap:wrap;margin-top:12px;">
       <label class="field" style="max-width:260px;"><span>Website</span><input type="text" id="brandingWebsite" placeholder="https://example.com" /></label>
       <label class="field" style="max-width:200px;"><span>Company phone</span><input type="text" id="brandingPhone" placeholder="(555) 123-4567" /></label>
@@ -3403,12 +3412,17 @@ $("companyServicesSave").addEventListener("click", async () => {
 
 // RallyCard branding (company logo shown on every rep's card + website/phone).
 let brandingLogoUrl = "";
+let brandingBgUrl = "";
 async function loadCompanyBranding(companyId) {
   let c = {};
   try { const s = await getDoc(doc(db, "companies", companyId)); c = s.exists() ? s.data() : {}; } catch {}
   brandingLogoUrl = c.logoUrl || "";
   $("brandingLogoPreview").src = brandingLogoUrl;
   $("brandingLogoPreview").style.display = brandingLogoUrl ? "" : "none";
+  brandingBgUrl = c.bgImageUrl || "";
+  $("brandingBgPreview").src = brandingBgUrl;
+  $("brandingBgPreview").style.display = brandingBgUrl ? "" : "none";
+  $("brandingBgClear").style.display = brandingBgUrl ? "" : "none";
   $("brandingWebsite").value = c.website || "";
   $("brandingPhone").value = c.phone || "";
   $("brandingAddress").value = c.address || "";
@@ -3428,12 +3442,36 @@ $("brandingLogoFile").addEventListener("change", async (e) => {
     banner($("brandingBanner"), "Logo uploaded — click Save branding to apply.", "good");
   } catch (e) { banner($("brandingBanner"), e.message || "Upload failed (is Storage enabled?).", "error"); }
 });
+$("brandingBgFile").addEventListener("change", async (e) => {
+  const cid = state.selectedCompany;
+  const file = e.target.files?.[0];
+  e.target.value = "";
+  if (!cid || !file) return;
+  try {
+    const r = sRef(storage, `branding/${cid}/bg_${Date.now()}_${file.name.replace(/[^\w.-]/g,"_")}`);
+    await uploadBytes(r, file);
+    brandingBgUrl = await getDownloadURL(r);
+    $("brandingBgPreview").src = brandingBgUrl;
+    $("brandingBgPreview").style.display = "";
+    $("brandingBgClear").style.display = "";
+    banner($("brandingBanner"), "Background photo uploaded — click Save branding to apply.", "good");
+  } catch (e) { banner($("brandingBanner"), e.message || "Upload failed (is Storage enabled?).", "error"); }
+});
+$("brandingBgClear").addEventListener("click", () => {
+  brandingBgUrl = "";
+  $("brandingBgPreview").style.display = "none";
+  $("brandingBgClear").style.display = "none";
+});
 $("brandingSave").addEventListener("click", async () => {
   const cid = state.selectedCompany;
   if (!cid) return;
   $("brandingSave").disabled = true;
   try {
-    await setCompanyBranding({ companyId: cid, logoUrl: brandingLogoUrl, website: $("brandingWebsite").value, phone: $("brandingPhone").value, address: $("brandingAddress").value, idPrefix: $("brandingIdPrefix").value });
+    await setCompanyBranding({
+      companyId: cid, logoUrl: brandingLogoUrl, bgImageUrl: brandingBgUrl,
+      website: $("brandingWebsite").value, phone: $("brandingPhone").value,
+      address: $("brandingAddress").value, idPrefix: $("brandingIdPrefix").value,
+    });
     banner($("brandingBanner"), "Branding saved.", "good");
   } catch (e) { banner($("brandingBanner"), e.message || "Save failed.", "error"); }
   finally { $("brandingSave").disabled = false; }

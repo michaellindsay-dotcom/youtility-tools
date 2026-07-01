@@ -2198,6 +2198,7 @@ export const getRepCard = onCall(async (request) => {
     title: r.cardTitle || r.title || "",
     photoUrl: r.cardPhotoUrl || "",
     logoUrl: r.cardLogoUrl || c.logoUrl || "",
+    bgImageUrl: c.bgImageUrl || "",
     bio: r.cardBio || "",
     serviceArea: r.cardServiceArea || "",
     reviews: Array.isArray(r.cardReviews) ? r.cardReviews : [],
@@ -2281,12 +2282,13 @@ ${image ? `<meta property="og:image" content="${escHtml(image)}">\n<meta name="t
 // super-admin (any company).
 export const setCompanyBranding = onCall(async (request) => {
   const caller = await getCaller(request);
-  const { companyId, logoUrl, website, phone, address, idPrefix } = (request.data || {}) as {
-    companyId?: string; logoUrl?: string; website?: string; phone?: string; address?: string; idPrefix?: string;
+  const { companyId, logoUrl, bgImageUrl, website, phone, address, idPrefix } = (request.data || {}) as {
+    companyId?: string; logoUrl?: string; bgImageUrl?: string; website?: string; phone?: string; address?: string; idPrefix?: string;
   };
   authorizeForCompany(caller, companyId);
   const update: Record<string, unknown> = {};
   if (typeof logoUrl === "string") update.logoUrl = logoUrl.trim().slice(0, 1000);
+  if (typeof bgImageUrl === "string") update.bgImageUrl = bgImageUrl.trim().slice(0, 1000);
   if (typeof website === "string") update.website = withUrlProtocol(website.slice(0, 200));
   if (typeof phone === "string") update.phone = phone.trim().slice(0, 30);
   if (typeof address === "string") update.address = address.trim().slice(0, 200);
