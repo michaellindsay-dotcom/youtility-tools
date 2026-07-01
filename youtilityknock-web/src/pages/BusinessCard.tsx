@@ -187,6 +187,12 @@ export default function BusinessCard() {
           idPrefix={company?.idPrefix}
           phone={profile?.phone}
           email={profile?.email}
+          website={company?.website}
+          companyPhone={company?.phone}
+          companyAddress={company?.address}
+          bio={bio}
+          vcfUrl={profile?.cardSlug ? `https://youtilityknock.web.app/vcf/${profile.cardSlug}` : undefined}
+          leadAnchorId="pc-lead-form"
         />
         {profile?.cardMemberId && (
           <p className="muted small" style={{ marginTop: 10 }}>Your RallyCard ID: No. {company?.idPrefix || ""}{profile.cardMemberId}</p>

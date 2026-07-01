@@ -1,5 +1,10 @@
+import { useEffect, useState } from "react";
+import QRCode from "qrcode";
+
 // The "physical business card" visual — shared by the public card page and the
-// rep's own editor (as a live preview) so they always match exactly.
+// rep's own editor (as a live preview) so they always match exactly. This is
+// the whole self-contained flyer: contact info, a pitch, one-tap actions, and
+// a "scan to save contact" footer — not just a name/photo header.
 export interface BizCardHeroProps {
   displayName: string;
   title?: string;
@@ -12,11 +17,29 @@ export interface BizCardHeroProps {
   idPrefix?: string; // company code (e.g. "YT") shown before the member number, license-plate style
   phone?: string;
   email?: string;
+  website?: string;
+  companyPhone?: string;
+  companyAddress?: string;
+  bio?: string; // short pitch shown between the contact rows and the CTA tiles
+  vcfUrl?: string; // "save contact" vCard link — drives the footer QR code
+  leadAnchorId?: string; // element id the "Leave Your Info" tile scrolls to
 }
 
 export default function BizCardHero({
-  displayName, title, companyName, logoUrl, photoUrl, bgImageUrl, serviceArea, memberId, idPrefix, phone, email,
+  displayName, title, companyName, logoUrl, photoUrl, bgImageUrl, serviceArea, memberId, idPrefix,
+  phone, email, website, companyPhone, companyAddress, bio, vcfUrl, leadAnchorId,
 }: BizCardHeroProps) {
+  const [qrDataUrl, setQrDataUrl] = useState("");
+
+  useEffect(() => {
+    if (!vcfUrl) { setQrDataUrl(""); return; }
+    let cancelled = false;
+    QRCode.toDataURL(vcfUrl, { width: 240, margin: 1, color: { dark: "#0a0f1a", light: "#ffffff" } })
+      .then((url) => { if (!cancelled) setQrDataUrl(url); })
+      .catch(() => { if (!cancelled) setQrDataUrl(""); });
+    return () => { cancelled = true; };
+  }, [vcfUrl]);
+
   return (
     <div className="biz-card">
       {bgImageUrl && (
@@ -50,28 +73,85 @@ export default function BizCardHero({
             {title && <div className="biz-card-title">{title}</div>}
           </div>
         </div>
-        {(phone || email) && (
+        {(phone || email || website || companyPhone || companyAddress) && (
           <div className="biz-card-contact">
             {phone && (
-              <span className="biz-card-contact-item">
+              <a className="biz-card-contact-item" href={`tel:${phone}`}>
                 <span className="biz-card-contact-ico">📞</span>{phone}
-              </span>
+              </a>
             )}
             {email && (
-              <span className="biz-card-contact-item">
+              <a className="biz-card-contact-item" href={`mailto:${email}`}>
                 <span className="biz-card-contact-ico">✉</span>{email}
-              </span>
+              </a>
+            )}
+            {companyPhone && companyPhone !== phone && (
+              <a className="biz-card-contact-item" href={`tel:${companyPhone}`}>
+                <span className="biz-card-contact-ico">☎</span>{companyPhone}
+              </a>
+            )}
+            {website && (
+              <a className="biz-card-contact-item" href={website} target="_blank" rel="noopener noreferrer">
+                <span className="biz-card-contact-ico">🌐</span>{website.replace(/^https?:\/\//, "")}
+              </a>
+            )}
+            {companyAddress && (
+              <a
+                className="biz-card-contact-item"
+                href={`https://maps.google.com/?q=${encodeURIComponent(companyAddress)}`}
+                target="_blank" rel="noopener noreferrer"
+              >
+                <span className="biz-card-contact-ico">📍</span>{companyAddress}
+              </a>
             )}
           </div>
         )}
+
+        {(bio || serviceArea || phone || email) && (
+          <>
+            <div className="biz-card-divider" />
+            <div className="biz-card-promo">
+              <div className="biz-card-promo-text">
+                {bio ? (
+                  <p className="biz-card-tagline">{bio}</p>
+                ) : (
+                  serviceArea && <p className="biz-card-tagline">Serving {serviceArea} and nearby areas.</p>
+                )}
+              </div>
+              <div className="biz-card-cta-row">
+                {phone && (
+                  <a className="biz-card-cta" href={`tel:${phone}`}>
+                    <span className="biz-card-cta-ico">📞</span>
+                    <span className="biz-card-cta-label">Call or Text</span>
+                    <span className="biz-card-cta-sub">Fast response</span>
+                  </a>
+                )}
+                {email && (
+                  <a className="biz-card-cta" href={`mailto:${email}`}>
+                    <span className="biz-card-cta-ico">💬</span>
+                    <span className="biz-card-cta-label">Leave a Message</span>
+                    <span className="biz-card-cta-sub">I'll follow up</span>
+                  </a>
+                )}
+                <a className="biz-card-cta" href={`#${leadAnchorId || "pc-lead-form"}`}>
+                  <span className="biz-card-cta-ico">📝</span>
+                  <span className="biz-card-cta-label">Leave Your Info</span>
+                  <span className="biz-card-cta-sub">Get your options</span>
+                </a>
+              </div>
+            </div>
+          </>
+        )}
       </div>
       <div className="biz-card-bottom">
-        <span>
-          {logoUrl && companyName && companyName}
-          {logoUrl && companyName && serviceArea && " · "}
-          {serviceArea && `📍 ${serviceArea}`}
-        </span>
-        {memberId != null && <span className="biz-card-bottom-id">RallyCard ID: {idPrefix || ""}{memberId}</span>}
+        <div className="biz-card-bottom-left">
+          {qrDataUrl && <img src={qrDataUrl} alt="Scan to save contact" className="biz-card-qr" />}
+          <span>Scan to save<br />my contact</span>
+        </div>
+        <div className="biz-card-bottom-right">
+          <span>No login. No app. Just results.</span>
+          {memberId != null && <span className="biz-card-bottom-id">RallyCard ID: {idPrefix || ""}{memberId}</span>}
+        </div>
       </div>
     </div>
   );
