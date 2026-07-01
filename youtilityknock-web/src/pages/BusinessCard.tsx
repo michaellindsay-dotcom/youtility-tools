@@ -183,11 +183,12 @@ export default function BusinessCard() {
           photoUrl={photoUrl}
           serviceArea={serviceArea}
           memberId={profile?.cardMemberId ?? null}
+          idPrefix={company?.idPrefix}
           phone={profile?.phone}
           email={profile?.email}
         />
         {profile?.cardMemberId && (
-          <p className="muted small" style={{ marginTop: 10 }}>Your RallyCard ID: No. {profile.cardMemberId.toLocaleString()}</p>
+          <p className="muted small" style={{ marginTop: 10 }}>Your RallyCard ID: No. {company?.idPrefix || ""}{profile.cardMemberId}</p>
         )}
       </div>
 

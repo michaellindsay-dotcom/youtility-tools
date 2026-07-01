@@ -1826,6 +1826,15 @@ function normalizeCardSlug(input: string): string {
     .slice(0, 32);
 }
 
+// A website saved without "http(s)://" (e.g. "youtility.us") renders as a
+// broken relative link (`https://youtilityknock.web.app/youtility.us`)
+// instead of opening the real site — assume https when no scheme is given.
+function withUrlProtocol(input: string): string {
+  const url = String(input || "").trim();
+  if (!url) return "";
+  return /^https?:\/\//i.test(url) ? url : `https://${url}`;
+}
+
 function sanitizeCardReviews(input: unknown): { name: string; text: string; rating: number }[] {
   if (!Array.isArray(input)) return [];
   return input
@@ -1913,9 +1922,10 @@ export const getRepCard = onCall(async (request) => {
     phone: r.phone || "",
     email: r.email || "",
     companyName: c.name || "",
-    companyWebsite: c.website || "",
+    companyWebsite: withUrlProtocol(c.website),
     companyPhone: c.phone || "",
     companyAddress: c.address || "",
+    companyIdPrefix: c.idPrefix || "",
     accentColor: r.cardAccentColor || "",
     theme: r.cardTheme || "default",
     memberId: typeof r.cardMemberId === "number" ? r.cardMemberId : null,
@@ -1989,15 +1999,16 @@ ${image ? `<meta property="og:image" content="${escHtml(image)}">\n<meta name="t
 // super-admin (any company).
 export const setCompanyBranding = onCall(async (request) => {
   const caller = await getCaller(request);
-  const { companyId, logoUrl, website, phone, address } = (request.data || {}) as {
-    companyId?: string; logoUrl?: string; website?: string; phone?: string; address?: string;
+  const { companyId, logoUrl, website, phone, address, idPrefix } = (request.data || {}) as {
+    companyId?: string; logoUrl?: string; website?: string; phone?: string; address?: string; idPrefix?: string;
   };
   authorizeForCompany(caller, companyId);
   const update: Record<string, unknown> = {};
   if (typeof logoUrl === "string") update.logoUrl = logoUrl.trim().slice(0, 1000);
-  if (typeof website === "string") update.website = website.trim().slice(0, 200);
+  if (typeof website === "string") update.website = withUrlProtocol(website.slice(0, 200));
   if (typeof phone === "string") update.phone = phone.trim().slice(0, 30);
   if (typeof address === "string") update.address = address.trim().slice(0, 200);
+  if (typeof idPrefix === "string") update.idPrefix = idPrefix.trim().toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 6);
   if (Object.keys(update).length === 0) throw new HttpsError("invalid-argument", "Nothing to update.");
   await db.doc(`companies/${companyId}`).set(update, { merge: true });
   return { ok: true, ...update };

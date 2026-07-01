@@ -19,6 +19,7 @@ interface CardPayload {
   companyWebsite: string;
   companyPhone: string;
   companyAddress: string;
+  companyIdPrefix: string;
   accentColor: string;
   theme: string;
   memberId: number | null;
@@ -87,6 +88,7 @@ export default function PublicCard() {
               photoUrl={card.photoUrl}
               serviceArea={card.serviceArea}
               memberId={card.memberId}
+              idPrefix={card.companyIdPrefix}
               phone={card.phone}
               email={card.email}
             />

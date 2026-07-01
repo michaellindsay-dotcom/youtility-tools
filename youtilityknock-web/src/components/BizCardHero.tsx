@@ -8,12 +8,13 @@ export interface BizCardHeroProps {
   photoUrl?: string;
   serviceArea?: string;
   memberId?: number | null;
+  idPrefix?: string; // company code (e.g. "YT") shown before the member number, license-plate style
   phone?: string;
   email?: string;
 }
 
 export default function BizCardHero({
-  displayName, title, companyName, logoUrl, photoUrl, serviceArea, memberId, phone, email,
+  displayName, title, companyName, logoUrl, photoUrl, serviceArea, memberId, idPrefix, phone, email,
 }: BizCardHeroProps) {
   return (
     <div className="biz-card">
@@ -26,7 +27,7 @@ export default function BizCardHero({
         {memberId != null && (
           <div className="biz-card-id-wrap">
             <span className="biz-card-id-label">Member No.</span>
-            <span className="biz-card-id">{memberId.toLocaleString()}</span>
+            <span className="biz-card-id">{idPrefix || ""}{memberId}</span>
           </div>
         )}
       </div>
