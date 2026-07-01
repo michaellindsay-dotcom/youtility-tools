@@ -29,6 +29,18 @@ function Node({
             <span className={`role-badge ${TIER_BADGE[user.role] || ""}`}>
               {user.title || user.role}
             </span>
+            {user.cardEnabled && user.cardSlug && (
+              <a
+                className="pill"
+                style={{ marginLeft: 6 }}
+                href={`https://youtilityknock.web.app/app?card=${user.cardSlug}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                title="View RallyCard"
+              >
+                🪪 RallyCard
+              </a>
+            )}
           </div>
           <div className="muted small">{user.email}</div>
         </div>

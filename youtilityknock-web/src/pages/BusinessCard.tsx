@@ -110,7 +110,7 @@ export default function BusinessCard() {
   return (
     <div className="page-body">
       <div className="page-head">
-        <h1>My Digital Business Card</h1>
+        <h1>My RallyCard</h1>
         <p className="page-sub">
           A public, no-login page homeowners can visit — your photo, story, and reviews, with a
           one-tap way to call, text, or leave you their info. Share the link or print the QR code

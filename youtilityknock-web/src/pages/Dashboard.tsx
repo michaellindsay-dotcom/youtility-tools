@@ -209,6 +209,19 @@ export default function Dashboard() {
 
       <CalendarBanner />
 
+      {!profile?.cardEnabled && (
+        <div className="card row" style={{ justifyContent: "space-between", alignItems: "center" }}>
+          <div>
+            <strong>🪪 Set up your RallyCard</strong>
+            <p className="muted small" style={{ marginTop: 2 }}>
+              A shareable digital business card — photo, reviews, and a lead-capture form homeowners
+              can fill out right on the doorstep.
+            </p>
+          </div>
+          <Link className="btn primary sm" to="/card">Get started</Link>
+        </div>
+      )}
+
       <div className="dash-2col">
         {/* Success planner (optional service) */}
         {showPlanner && (

@@ -2757,3 +2757,4 @@ body.modal-open .chat-fab-global { display: none; }
 .pc-form-block { margin-top: 18px; padding-top: 16px; border-top: 1px solid var(--line); }
 .pc-form-block h3 { font-family: "Space Grotesk", sans-serif; font-size: 15px; margin-bottom: 10px; }
 .pc-thanks { color: #34D399; text-align: center; padding: 16px 0; }
+.pc-foot { text-align: center; margin-top: 20px; }

@@ -2,7 +2,7 @@ import { Routes, Route, Navigate } from "react-router-dom";
 import ProtectedRoute from "./auth/ProtectedRoute";
 import Layout from "./components/Layout";
 import { useAuth } from "./auth/AuthContext";
-import { userHasService, type FeatureKey } from "./lib/features";
+import { userHasService, isRallyCardOnly, type FeatureKey } from "./lib/features";
 import Login from "./pages/Login";
 import Dashboard from "./pages/Dashboard";
 import Lookup from "./pages/Lookup";
@@ -63,6 +63,22 @@ function CloserGate({ children }: { children: React.ReactNode }) {
   return allowed ? <>{children}</> : <Navigate to="/" replace />;
 }
 
+// Blocks the canvassing-only surface (map, movers, territories, closer tools,
+// shift tracking, reports, pitch practice) for a RallyCard-only company — one
+// whose plan has no "map" feature. Redirects to the card instead of the
+// (nonexistent, for them) canvassing dashboard.
+function CanvassGate({ children }: { children: React.ReactNode }) {
+  const { company } = useAuth();
+  return isRallyCardOnly(company) ? <Navigate to="/card" replace /> : <>{children}</>;
+}
+
+// The landing route: the canvassing Dashboard for a full-platform company, or
+// straight to the card for a RallyCard-only one (it has no Dashboard).
+function Home() {
+  const { company } = useAuth();
+  return isRallyCardOnly(company) ? <Navigate to="/card" replace /> : <Dashboard />;
+}
+
 export default function App() {
   return (
     <Routes>
@@ -74,29 +90,29 @@ export default function App() {
           </ProtectedRoute>
         }
       >
-        <Route index element={<Dashboard />} />
-        <Route path="lookup" element={<Lookup />} />
+        <Route index element={<Home />} />
+        <Route path="lookup" element={<CanvassGate><Lookup /></CanvassGate>} />
         <Route path="leads" element={<Leads />} />
-        <Route path="map" element={<MapPage />} />
-        <Route path="movers" element={<Movers />} />
+        <Route path="map" element={<CanvassGate><MapPage /></CanvassGate>} />
+        <Route path="movers" element={<CanvassGate><Movers /></CanvassGate>} />
         <Route path="team" element={<Team />} />
-        <Route path="reports" element={<RoleGate allow={["admin", "manager"]}><Reports /></RoleGate>} />
-        <Route path="closer" element={<CloserGate><Closer /></CloserGate>} />
-        <Route path="battery" element={<CloserGate><BatteryTool /></CloserGate>} />
-        <Route path="projects" element={<CloserGate><Projects /></CloserGate>} />
-        <Route path="pitches" element={<Gated feature="pitch"><Pitches /></Gated>} />
-        <Route path="training" element={<Training />} />
-        <Route path="pitch-library" element={<Gated feature="pitch"><RoleGate allow={["admin", "manager"]}><PitchLibrary /></RoleGate></Gated>} />
-        <Route path="shifts" element={<Gated anyOf={["planner", "analytics"]}><Shifts /></Gated>} />
+        <Route path="reports" element={<CanvassGate><RoleGate allow={["admin", "manager"]}><Reports /></RoleGate></CanvassGate>} />
+        <Route path="closer" element={<CanvassGate><CloserGate><Closer /></CloserGate></CanvassGate>} />
+        <Route path="battery" element={<CanvassGate><CloserGate><BatteryTool /></CloserGate></CanvassGate>} />
+        <Route path="projects" element={<CanvassGate><CloserGate><Projects /></CloserGate></CanvassGate>} />
+        <Route path="pitches" element={<CanvassGate><Gated feature="pitch"><Pitches /></Gated></CanvassGate>} />
+        <Route path="training" element={<CanvassGate><Training /></CanvassGate>} />
+        <Route path="pitch-library" element={<CanvassGate><Gated feature="pitch"><RoleGate allow={["admin", "manager"]}><PitchLibrary /></RoleGate></Gated></CanvassGate>} />
+        <Route path="shifts" element={<CanvassGate><Gated anyOf={["planner", "analytics"]}><Shifts /></Gated></CanvassGate>} />
         {/* Analytics merged into the Success Planner screen; keep the old path working. */}
         <Route path="stats" element={<Navigate to="/shifts" replace />} />
         <Route path="leaderboard" element={<Gated feature="rewards"><Leaderboard /></Gated>} />
         <Route path="gamify" element={<Gated feature="rewards"><Gamify /></Gated>} />
         <Route path="rewards" element={<Gated feature="rewards"><Rewards /></Gated>} />
-        <Route path="working" element={<Gated feature="chat"><Working /></Gated>} />
+        <Route path="working" element={<CanvassGate><Gated feature="chat"><Working /></Gated></CanvassGate>} />
         <Route path="chat" element={<Gated feature="chat"><Chat /></Gated>} />
         <Route path="schedule" element={<Gated feature="scheduling"><Schedule /></Gated>} />
-        <Route path="territories" element={<Territories />} />
+        <Route path="territories" element={<CanvassGate><Territories /></CanvassGate>} />
         <Route path="card" element={<BusinessCard />} />
         <Route path="settings" element={<Settings />} />
       </Route>

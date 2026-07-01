@@ -129,6 +129,7 @@ export default function PublicCard() {
                 </form>
               )}
             </div>
+            <div className="pc-foot muted small">Powered by RallyCard</div>
           </>
         )}
       </div>
