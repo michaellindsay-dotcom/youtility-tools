@@ -285,7 +285,11 @@ export default function BusinessCard() {
                 ✉️ Email it
               </a>
               <button className="btn ghost sm" onClick={copyLink}>🔗 Copy link</button>
+              <a className="btn ghost sm" href={`https://youtilityknock.web.app/vcf/${profile?.cardSlug}`}>💾 Download vCard</a>
             </div>
+            <p className="muted small" style={{ marginTop: 8 }}>
+              Anyone who opens your card link can tap "Save Contact" to add you to their phone — no login, no app.
+            </p>
           </>
         )}
         <div className="row" style={{ marginTop: 14, alignItems: "center" }}>

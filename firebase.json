@@ -11,6 +11,7 @@
       { "source": "/sign-api/**", "function": "invoiceSign" },
       { "source": "/crm/**", "function": "crmApi" },
       { "source": "/c/**", "function": "cardShare" },
+      { "source": "/vcf/**", "function": "cardVcf" },
       { "source": "/telnyx/sms", "function": "telnyxSmsWebhook" },
       { "source": "/telnyx/voice", "function": "telnyxVoiceWebhook" },
       { "source": "/app/**", "destination": "/app/index.html" }

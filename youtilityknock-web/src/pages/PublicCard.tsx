@@ -48,6 +48,7 @@ export default function PublicCard() {
   const [formMsg, setFormMsg] = useState("");
 
   const slug = typeof window !== "undefined" ? new URLSearchParams(window.location.search).get("card") || "" : "";
+  const vcfUrl = slug && typeof window !== "undefined" ? `${window.location.origin}/vcf/${encodeURIComponent(slug)}` : "";
 
   useEffect(() => {
     if (!slug) { setStatus("error"); setErrorMsg("Missing card link."); return; }
@@ -108,13 +109,39 @@ export default function PublicCard() {
               {card.companyWebsite && (
                 <a className="btn ghost" href={card.companyWebsite} target="_blank" rel="noopener noreferrer">🌐 Website</a>
               )}
+              {vcfUrl && <a className="btn ghost" href={vcfUrl}>💾 Save Contact</a>}
             </div>
 
             <div className="pc-info">
-              {card.phone && <div className="pc-info-row"><span className="pc-info-ico">📱</span>{card.phone}</div>}
-              {card.email && <div className="pc-info-row"><span className="pc-info-ico">✉️</span>{card.email}</div>}
-              {card.companyPhone && <div className="pc-info-row"><span className="pc-info-ico">☎️</span>{card.companyPhone}</div>}
-              {card.companyAddress && <div className="pc-info-row"><span className="pc-info-ico">📍</span>{card.companyAddress}</div>}
+              {card.phone && (
+                <div className="pc-info-row">
+                  <span className="pc-info-ico">📱</span>
+                  <a href={`tel:${card.phone}`}>{card.phone}</a>
+                </div>
+              )}
+              {card.email && (
+                <div className="pc-info-row">
+                  <span className="pc-info-ico">✉️</span>
+                  <a href={`mailto:${card.email}`}>{card.email}</a>
+                </div>
+              )}
+              {card.companyPhone && (
+                <div className="pc-info-row">
+                  <span className="pc-info-ico">☎️</span>
+                  <a href={`tel:${card.companyPhone}`}>{card.companyPhone}</a>
+                </div>
+              )}
+              {card.companyAddress && (
+                <div className="pc-info-row">
+                  <span className="pc-info-ico">📍</span>
+                  <a
+                    href={`https://maps.google.com/?q=${encodeURIComponent(card.companyAddress)}`}
+                    target="_blank" rel="noopener noreferrer"
+                  >
+                    {card.companyAddress}
+                  </a>
+                </div>
+              )}
               {card.companyWebsite && (
                 <div className="pc-info-row">
                   <span className="pc-info-ico">🌐</span>
