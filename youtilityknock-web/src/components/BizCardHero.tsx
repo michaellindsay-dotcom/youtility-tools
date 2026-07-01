@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import QRCode from "qrcode";
+import { Phone, Smartphone, Mail, Globe, MapPin, MessageSquare, ClipboardList } from "lucide-react";
 
 // The "physical business card" visual — shared by the public card page and the
 // rep's own editor (as a live preview) so they always match exactly. This is
@@ -75,22 +76,22 @@ export default function BizCardHero({
           <div className="biz-card-contact">
             {phone && (
               <a className="biz-card-contact-item" href={`tel:${phone}`}>
-                <span className="biz-card-contact-ico">📞</span>{phone}
+                <span className="biz-card-contact-ico"><Smartphone size={13} strokeWidth={2.2} /></span>{phone}
               </a>
             )}
             {email && (
               <a className="biz-card-contact-item" href={`mailto:${email}`}>
-                <span className="biz-card-contact-ico">✉</span>{email}
+                <span className="biz-card-contact-ico"><Mail size={13} strokeWidth={2.2} /></span>{email}
               </a>
             )}
             {companyPhone && companyPhone !== phone && (
               <a className="biz-card-contact-item" href={`tel:${companyPhone}`}>
-                <span className="biz-card-contact-ico">☎</span>{companyPhone}
+                <span className="biz-card-contact-ico"><Phone size={13} strokeWidth={2.2} /></span>{companyPhone}
               </a>
             )}
             {website && (
               <a className="biz-card-contact-item" href={website} target="_blank" rel="noopener noreferrer">
-                <span className="biz-card-contact-ico">🌐</span>{website.replace(/^https?:\/\//, "")}
+                <span className="biz-card-contact-ico"><Globe size={13} strokeWidth={2.2} /></span>{website.replace(/^https?:\/\//, "")}
               </a>
             )}
             {companyAddress && (
@@ -99,7 +100,7 @@ export default function BizCardHero({
                 href={`https://maps.google.com/?q=${encodeURIComponent(companyAddress)}`}
                 target="_blank" rel="noopener noreferrer"
               >
-                <span className="biz-card-contact-ico">📍</span>{companyAddress}
+                <span className="biz-card-contact-ico"><MapPin size={13} strokeWidth={2.2} /></span>{companyAddress}
               </a>
             )}
           </div>
@@ -111,20 +112,20 @@ export default function BizCardHero({
             <div className="biz-card-cta-row">
               {phone && (
                 <a className="biz-card-cta" href={`tel:${phone}`}>
-                  <span className="biz-card-cta-ico">📞</span>
+                  <span className="biz-card-cta-ico"><Phone size={15} strokeWidth={2.2} /></span>
                   <span className="biz-card-cta-label">Call or Text</span>
                   <span className="biz-card-cta-sub">Fast response</span>
                 </a>
               )}
               {email && (
                 <a className="biz-card-cta" href={`mailto:${email}`}>
-                  <span className="biz-card-cta-ico">💬</span>
+                  <span className="biz-card-cta-ico"><MessageSquare size={15} strokeWidth={2.2} /></span>
                   <span className="biz-card-cta-label">Leave a Message</span>
                   <span className="biz-card-cta-sub">I'll follow up</span>
                 </a>
               )}
               <a className="biz-card-cta" href={`#${leadAnchorId || "pc-lead-form"}`}>
-                <span className="biz-card-cta-ico">📝</span>
+                <span className="biz-card-cta-ico"><ClipboardList size={15} strokeWidth={2.2} /></span>
                 <span className="biz-card-cta-label">Leave Your Info</span>
                 <span className="biz-card-cta-sub">Get your options</span>
               </a>
