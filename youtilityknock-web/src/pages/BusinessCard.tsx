@@ -133,6 +133,21 @@ export default function BusinessCard() {
     navigator.clipboard?.writeText(shareUrl).then(() => setMsg("Link copied ✓")).catch(() => {});
   }
 
+  const shareText = `Check out my digital business card${profile?.displayName ? ` — ${profile.displayName}` : ""}: ${shareUrl}`;
+
+  async function shareCard() {
+    if (!shareUrl) return;
+    if (navigator.share) {
+      try {
+        await navigator.share({ title: "My RallyCard", text: shareText, url: shareUrl });
+      } catch {
+        // user cancelled the share sheet — nothing to do
+      }
+    } else {
+      copyLink();
+    }
+  }
+
   function downloadQr() {
     if (!qrDataUrl) return;
     const a = document.createElement("a");
@@ -248,10 +263,22 @@ export default function BusinessCard() {
           />
         </div>
         {shareUrl && (
-          <div className="row" style={{ marginTop: 10, alignItems: "center" }}>
-            <a href={shareUrl} target="_blank" rel="noopener noreferrer" className="small">{shareUrl}</a>
-            <button className="btn ghost sm" onClick={copyLink}>Copy link</button>
-          </div>
+          <>
+            <div className="row" style={{ marginTop: 10, alignItems: "center" }}>
+              <a href={shareUrl} target="_blank" rel="noopener noreferrer" className="small">{shareUrl}</a>
+            </div>
+            <div className="row" style={{ marginTop: 10, gap: 8, flexWrap: "wrap" }}>
+              <button className="btn primary sm" onClick={shareCard}>📤 Share my card</button>
+              <a className="btn ghost sm" href={`sms:?&body=${encodeURIComponent(shareText)}`}>💬 Text it</a>
+              <a
+                className="btn ghost sm"
+                href={`mailto:?subject=${encodeURIComponent("My digital business card")}&body=${encodeURIComponent(shareText)}`}
+              >
+                ✉️ Email it
+              </a>
+              <button className="btn ghost sm" onClick={copyLink}>🔗 Copy link</button>
+            </div>
+          </>
         )}
         <div className="row" style={{ marginTop: 14, alignItems: "center" }}>
           <label className="row small" style={{ alignItems: "center", gap: 6 }}>
