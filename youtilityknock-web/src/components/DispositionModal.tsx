@@ -77,6 +77,7 @@ export interface DispoInput {
   enrichment?: LeadEnrichment;
   photoHomeUrl?: string;
   photoBillUrl?: string;
+  smsOptIn?: boolean;
 }
 
 interface Form {
@@ -92,6 +93,7 @@ interface Form {
   enrichment?: LeadEnrichment;
   photoHomeUrl?: string;
   photoBillUrl?: string;
+  smsOptIn: boolean;
 }
 
 function summarize(e?: LeadEnrichment): string {
@@ -192,6 +194,7 @@ export default function DispositionModal({
       phone: "",
       email: "",
       notes: "",
+      smsOptIn: false,
       ...target,
     });
     setStep(1);
@@ -353,6 +356,9 @@ export default function DispositionModal({
         verified: geo.verified,
         distanceFt: geo.ft ?? null,
         knockedAt: now,
+        smsOptIn: !!d.smsOptIn,
+        smsOptInAt: d.smsOptIn ? now : undefined,
+        smsConsentSource: d.smsOptIn ? "door" : undefined,
         // Area incentives captured for this lead (travel to the closer).
         incentives: incentives.length ? incentives : undefined,
         incentivesUtility: incentives.length ? incUtility : undefined,
@@ -540,6 +546,12 @@ export default function DispositionModal({
           <input value={d.phone} placeholder="(555) 000-0000" onChange={(e) => setD({ ...d, phone: e.target.value })} />
         </label>
       </div>
+      {d.phone.trim() && (
+        <label className="row small" style={{ alignItems: "center", gap: 6, marginBottom: 10 }}>
+          <input type="checkbox" checked={d.smsOptIn} onChange={(e) => setD({ ...d, smsOptIn: e.target.checked })} />
+          Homeowner OK to receive text updates from us
+        </label>
+      )}
       <label className="field">
         <span>Email</span>
         <input value={d.email} placeholder="email@example.com" onChange={(e) => setD({ ...d, email: e.target.value })} />

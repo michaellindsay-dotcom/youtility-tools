@@ -11,6 +11,7 @@ import * as crypto from "crypto";
 import PDFDocument from "pdfkit";
 import * as nodemailer from "nodemailer";
 import { spawn } from "child_process";
+import nacl from "tweetnacl";
 import ffmpegPath from "ffmpeg-static";
 import { tmpdir } from "os";
 import { join } from "path";
@@ -942,6 +943,23 @@ export const setUserFunction = onCall(async (request) => {
   return { ok: true };
 });
 
+// Assigns a rep's ported number (Telnyx) + where their calls forward to. Set
+// once a number's porting has actually completed — company admin or super-admin.
+export const setUserPhoneRouting = onCall(async (request) => {
+  const caller = await getCaller(request);
+  const { uid, smsNumber, smsForwardTo } = (request.data || {}) as { uid?: string; smsNumber?: string; smsForwardTo?: string };
+  if (!uid) throw new HttpsError("invalid-argument", "uid required.");
+  const snap = await db.doc(`users/${uid}`).get();
+  if (!snap.exists) throw new HttpsError("not-found", "User not found.");
+  authorizeForCompany(caller, (snap.data() as any).companyId);
+  const update: Record<string, unknown> = {};
+  if (typeof smsNumber === "string") update.smsNumber = smsNumber.trim();
+  if (typeof smsForwardTo === "string") update.smsForwardTo = smsForwardTo.trim();
+  if (Object.keys(update).length === 0) throw new HttpsError("invalid-argument", "Nothing to update.");
+  await db.doc(`users/${uid}`).set(update, { merge: true });
+  return { ok: true, ...update };
+});
+
 // ───────────────────────────────────────────────────────────────────────────
 // setUserRole / setUserDisabled (base-tier changes + enable/disable).
 // ───────────────────────────────────────────────────────────────────────────
@@ -1084,7 +1102,7 @@ export const impersonate = onCall(async (request) => {
 //   • An in-app notification doc is ALWAYS written (drives the bell + badge and
 //     becomes a native push once the mobile apps ship).
 //   • If the recipient is currently OFFLINE (no presence heartbeat in the last
-//     ONLINE_WINDOW_MS), we ALSO send email (SendGrid) and SMS (Twilio) so they
+//     ONLINE_WINDOW_MS), we ALSO send email (SendGrid) and SMS (Telnyx) so they
 //     hear about it before the apps are live.
 // Provider keys come from the super-admin console (Firestore config/notifications),
 // falling back to env vars. Absent keys → email/SMS skipped, no error, so the
@@ -1103,9 +1121,11 @@ interface NotifyConfig {
   sendgridKey: string;
   sendgridFrom: string;
   sendgridFromName: string;
-  twilioSid: string;
-  twilioToken: string;
-  twilioFrom: string;
+  // Telnyx (SMS + voice for ported rep numbers, and the platform SMS fallback).
+  telnyxApiKey: string;
+  telnyxFrom: string; // platform default From when a rep has no ported number yet
+  telnyxMessagingProfileId: string;
+  telnyxPublicKey: string; // webhook Ed25519 signature verification
 }
 
 // Read provider config: Firestore (set via super-admin console) overrides env.
@@ -1128,10 +1148,24 @@ async function getNotifyConfig(): Promise<NotifyConfig> {
     sendgridKey: c.sendgridKey || process.env.SENDGRID_API_KEY || "",
     sendgridFrom: c.sendgridFrom || process.env.SENDGRID_FROM || "",
     sendgridFromName: c.sendgridFromName || process.env.SENDGRID_FROM_NAME || "YoutilityKnock",
-    twilioSid: c.twilioSid || process.env.TWILIO_ACCOUNT_SID || "",
-    twilioToken: c.twilioToken || process.env.TWILIO_AUTH_TOKEN || "",
-    twilioFrom: c.twilioFrom || process.env.TWILIO_FROM || "",
+    telnyxApiKey: c.telnyxApiKey || process.env.TELNYX_API_KEY || "",
+    telnyxFrom: c.telnyxFrom || process.env.TELNYX_FROM || "",
+    telnyxMessagingProfileId: c.telnyxMessagingProfileId || process.env.TELNYX_MESSAGING_PROFILE_ID || "",
+    telnyxPublicKey: c.telnyxPublicKey || process.env.TELNYX_PUBLIC_KEY || "",
   };
+}
+
+// A phone number that has texted STOP (or been manually suppressed) — checked
+// before every homeowner-facing send, platform-wide, regardless of which lead
+// record it's attached to. E.164 keys.
+async function isSuppressed(phoneE164: string): Promise<boolean> {
+  if (!phoneE164) return true;
+  try {
+    const snap = await db.doc(`smsSuppressions/${phoneE164}`).get();
+    return snap.exists;
+  } catch {
+    return false;
+  }
 }
 
 // A user is considered "online" if their presence doc was touched this recently.
@@ -1211,17 +1245,21 @@ async function sendEmail(
   return (await sendEmailDetailed(cfg, to, subject, text, attachments)).ok;
 }
 
-async function sendSms(cfg: NotifyConfig, to: string, body: string): Promise<boolean> {
-  if (!cfg.twilioSid || !cfg.twilioToken || !cfg.twilioFrom || !to) return false;
+// `from` lets a homeowner-facing send go out as a specific rep's ported number
+// instead of the platform default (cfg.telnyxFrom) — falls back to the
+// platform number when the rep hasn't been ported yet, so sends never hard-fail.
+async function sendSms(cfg: NotifyConfig, to: string, body: string, from?: string): Promise<boolean> {
+  const sender = from || cfg.telnyxFrom;
+  if (!cfg.telnyxApiKey || !sender || !to) return false;
   try {
-    const form = new URLSearchParams({ To: to, From: cfg.twilioFrom, Body: body });
-    const auth = Buffer.from(`${cfg.twilioSid}:${cfg.twilioToken}`).toString("base64");
-    const res = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${cfg.twilioSid}/Messages.json`, {
+    const payload: Record<string, unknown> = { from: sender, to, text: body };
+    if (cfg.telnyxMessagingProfileId) payload.messaging_profile_id = cfg.telnyxMessagingProfileId;
+    const res = await fetch("https://api.telnyx.com/v2/messages", {
       method: "POST",
-      headers: { Authorization: `Basic ${auth}`, "Content-Type": "application/x-www-form-urlencoded" },
-      body: form.toString(),
+      headers: { Authorization: `Bearer ${cfg.telnyxApiKey}`, "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
     });
-    if (!res.ok) logger.warn(`Twilio ${res.status}: ${await res.text().catch(() => "")}`);
+    if (!res.ok) logger.warn(`Telnyx ${res.status}: ${await res.text().catch(() => "")}`);
     return res.ok;
   } catch (e) {
     logger.error("sendSms failed", e);
@@ -1272,6 +1310,248 @@ async function notifyUser(opts: NotifyOpts): Promise<void> {
     u.phone ? sendSms(cfg, u.phone, line) : Promise.resolve(false),
   ]);
 }
+
+// ════════════════════════════════════════════════════════════════════════════
+// LEAD OUTREACH AUTOMATION — ported rep numbers via Telnyx.
+// ----------------------------------------------------------------------------
+// Each rep can be assigned a ported personal number (UserProfile.smsNumber);
+// automated + manual texts to their leads go out as that number so it reads as
+// a real conversation with that rep, not a shared company line. Two Telnyx
+// webhooks (SMS + Call Control voice) route inbound traffic; a Firestore
+// trigger + scheduled function drive the actual drip sequences.
+//
+// Compliance (TCPA): a lead must have `smsOptIn` set (captured at the door)
+// before ANY automated text goes out, `smsOptOutAt`/`smsSuppressions` are
+// checked before every send, and sends are held to 8am-9pm in the company's
+// configured timezone as a stand-in for the recipient's local time.
+// ════════════════════════════════════════════════════════════════════════════
+
+// Telnyx signs webhooks with Ed25519: signature over `${timestamp}|${rawBody}`,
+// verified against the public key shown in the Telnyx portal for your app.
+function verifyTelnyxSignature(rawBody: string, signatureB64: string, timestamp: string, publicKeyB64: string): boolean {
+  if (!signatureB64 || !timestamp || !publicKeyB64) return false;
+  try {
+    const signed = Buffer.from(`${timestamp}|${rawBody}`, "utf8");
+    const sig = Buffer.from(signatureB64, "base64");
+    const key = Buffer.from(publicKeyB64, "base64");
+    return nacl.sign.detached.verify(signed, sig, key);
+  } catch {
+    return false;
+  }
+}
+
+const STOP_WORDS = new Set(["stop", "stopall", "unsubscribe", "cancel", "end", "quit"]);
+const START_WORDS = new Set(["start", "unstop", "yes"]);
+const HELP_WORDS = new Set(["help", "info"]);
+
+// Inbound SMS from a homeowner — handles STOP/START/HELP per TCPA, otherwise
+// logs the reply so the owning rep sees it in their text inbox.
+export const telnyxSmsWebhook = onRequest({ cors: false }, async (req, res) => {
+  const cfg = await getNotifyConfig();
+  const raw = (req as unknown as { rawBody: Buffer }).rawBody?.toString("utf8") || "";
+  const sig = String(req.headers["telnyx-signature-ed25519"] || "");
+  const ts = String(req.headers["telnyx-timestamp"] || "");
+  if (cfg.telnyxPublicKey && !verifyTelnyxSignature(raw, sig, ts, cfg.telnyxPublicKey)) {
+    res.status(400).send("bad signature");
+    return;
+  }
+  res.status(200).json({ received: true }); // ack immediately; Telnyx retries on non-2xx
+
+  try {
+    const event = JSON.parse(raw || "{}");
+    const payload = event?.data?.payload;
+    if (event?.data?.event_type !== "message.received" || !payload) return;
+    const from = String(payload.from?.phone_number || "");
+    const to = String(payload.to?.[0]?.phone_number || "");
+    const text = String(payload.text || "").trim();
+    const word = text.toLowerCase();
+    if (!from) return;
+
+    if (STOP_WORDS.has(word)) {
+      await db.doc(`smsSuppressions/${from}`).set({ phone: from, reason: "stop_keyword", createdAt: Date.now() });
+      const leads = await db.collection("leads").where("phone", "==", from).get();
+      await Promise.all(leads.docs.map((d) => d.ref.set({ smsOptOutAt: Date.now() }, { merge: true })));
+      await sendSms(cfg, from, "You've been unsubscribed and won't receive further texts. Reply START to opt back in.", to || undefined);
+      return;
+    }
+    if (START_WORDS.has(word)) {
+      await db.doc(`smsSuppressions/${from}`).delete().catch(() => {});
+      await sendSms(cfg, from, "You're re-subscribed to texts. Reply STOP anytime to opt out again.", to || undefined);
+      return;
+    }
+    if (HELP_WORDS.has(word)) {
+      await sendSms(cfg, from, "This number is used by your solar rep to follow up about your appointment. Reply STOP to opt out.", to || undefined);
+      return;
+    }
+
+    // A normal reply — file it against the owning rep's text inbox.
+    const repSnap = to ? await db.collection("users").where("smsNumber", "==", to).limit(1).get() : null;
+    if (repSnap && !repSnap.empty) {
+      const rep = repSnap.docs[0];
+      const leadSnap = await db.collection("leads")
+        .where("companyId", "==", (rep.data() as any).companyId)
+        .where("phone", "==", from).limit(1).get();
+      await db.collection("smsMessages").add({
+        companyId: (rep.data() as any).companyId,
+        repUid: rep.id,
+        leadId: leadSnap.empty ? null : leadSnap.docs[0].id,
+        phone: from,
+        direction: "in",
+        body: text,
+        at: Date.now(),
+      });
+    }
+  } catch (e) {
+    logger.error("telnyxSmsWebhook handler error", e);
+  }
+});
+
+// Inbound calls to a ported number — forward to the rep's real personal line.
+export const telnyxVoiceWebhook = onRequest({ cors: false }, async (req, res) => {
+  res.status(200).send(""); // ack immediately; Call Control commands are async
+  try {
+    const cfg = await getNotifyConfig();
+    const event = req.body?.data;
+    const payload = event?.payload;
+    if (event?.event_type !== "call.initiated" || payload?.direction !== "incoming" || !payload?.call_control_id) return;
+    const to = String(payload.to || "");
+    const callControlId = String(payload.call_control_id);
+    const repSnap = await db.collection("users").where("smsNumber", "==", to).limit(1).get();
+    const forwardTo = repSnap.empty ? "" : String((repSnap.docs[0].data() as any).smsForwardTo || "");
+    const action = forwardTo ? "transfer" : "hangup";
+    await fetch(`https://api.telnyx.com/v2/calls/${callControlId}/actions/${action}`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${cfg.telnyxApiKey}`, "Content-Type": "application/json" },
+      body: JSON.stringify(forwardTo ? { to: forwardTo } : {}),
+    });
+  } catch (e) {
+    logger.error("telnyxVoiceWebhook handler error", e);
+  }
+});
+
+// A rep manually texting one of their own leads from their ported number.
+export const sendLeadSms = onCall(async (request) => {
+  const caller = await getCaller(request);
+  const { leadId, body } = (request.data || {}) as { leadId?: string; body?: string };
+  const text = String(body || "").trim();
+  if (!leadId || !text) throw new HttpsError("invalid-argument", "leadId and body are required.");
+  const leadSnap = await db.doc(`leads/${leadId}`).get();
+  if (!leadSnap.exists) throw new HttpsError("not-found", "Lead not found.");
+  const lead = leadSnap.data() as any;
+  if (lead.companyId !== caller.companyId && !caller.isSuper) throw new HttpsError("permission-denied", "Not your lead.");
+  const phone = String(lead.phone || "");
+  if (!phone) throw new HttpsError("failed-precondition", "This lead has no phone number.");
+  if (await isSuppressed(phone)) throw new HttpsError("failed-precondition", "This homeowner has opted out of texts.");
+
+  const me = (await db.doc(`users/${caller.uid}`).get()).data() as any;
+  const cfg = await getNotifyConfig();
+  const ok = await sendSms(cfg, phone, text, me?.smsNumber || undefined);
+  if (!ok) throw new HttpsError("internal", "Text failed to send — check your texting number is set up.");
+  await db.collection("smsMessages").add({
+    companyId: lead.companyId, repUid: caller.uid, leadId, phone, direction: "out", body: text, at: Date.now(),
+  });
+  return { ok: true };
+});
+
+// ── Outreach rules: enqueue a message when a lead's status flips to a rule's
+// trigger status, then a scheduled job sends whatever's due. ─────────────────
+function fillTemplate(tpl: string, vars: Record<string, string>): string {
+  return tpl.replace(/\{\{(\w+)\}\}/g, (_, k) => vars[k] ?? "");
+}
+
+export const onLeadStatusChange = onDocumentWritten("leads/{leadId}", async (event) => {
+  const before = event.data?.before?.data() as any;
+  const after = event.data?.after?.data() as any;
+  if (!after || !after.status || before?.status === after.status) return; // create-with-no-prior-status still fires once, that's fine
+  if (after.status === "dnc") return;
+
+  const rulesSnap = await db.collection("companies").doc(after.companyId).collection("outreachRules")
+    .where("trigger", "==", after.status).where("active", "==", true).get();
+  if (rulesSnap.empty) return;
+
+  const leadId = event.params.leadId;
+  const now = Date.now();
+  await Promise.all(rulesSnap.docs.map((r) => {
+    const rule = r.data();
+    return db.collection("outreachQueue").add({
+      companyId: after.companyId,
+      leadId,
+      ruleId: r.id,
+      repUid: after.assignedTo || null,
+      channel: rule.channel,
+      sendAt: now + Math.max(0, Number(rule.delayMinutes) || 0) * 60000,
+      status: "pending",
+      createdAt: now,
+    });
+  }));
+});
+
+// Sends between 8am-9pm in the company's configured timezone (a stand-in for
+// the recipient's actual local time — good enough for a regional business,
+// avoids waking someone up with an automated text).
+function withinQuietHours(timezone: string): boolean {
+  try {
+    const hour = Number(new Intl.DateTimeFormat("en-US", { hour: "numeric", hour12: false, timeZone: timezone || "America/Denver" }).format(new Date()));
+    return hour >= 8 && hour < 21;
+  } catch {
+    return true;
+  }
+}
+
+export const processOutreachQueue = onSchedule("every 15 minutes", async () => {
+  const now = Date.now();
+  const due = await db.collection("outreachQueue").where("status", "==", "pending").where("sendAt", "<=", now).limit(200).get();
+  if (due.empty) return;
+  const cfg = await getNotifyConfig();
+
+  for (const doc of due.docs) {
+    const q = doc.data();
+    try {
+      const [leadSnap, companySnap, ruleSnap] = await Promise.all([
+        db.doc(`leads/${q.leadId}`).get(),
+        db.doc(`companies/${q.companyId}`).get(),
+        db.doc(`companies/${q.companyId}/outreachRules/${q.ruleId}`).get(),
+      ]);
+      const lead = leadSnap.data() as any;
+      const rule = ruleSnap.data() as any;
+      const company = companySnap.data() as any;
+      if (!lead || !rule || !rule.active) { await doc.ref.set({ status: "skipped", skippedReason: "rule or lead gone" }, { merge: true }); continue; }
+      if (lead.status === "dnc" || lead.status !== rule.trigger) { await doc.ref.set({ status: "skipped", skippedReason: "lead status changed" }, { merge: true }); continue; }
+
+      const rep = q.repUid ? (await db.doc(`users/${q.repUid}`).get()).data() as any : null;
+      const vars = {
+        firstName: String(lead.ownerName || "").split(" ")[0] || "there",
+        repName: rep?.displayName || "your rep",
+        repPhone: rep?.smsNumber || rep?.phone || "",
+        companyName: company?.name || "",
+      };
+      const text = fillTemplate(rule.template || "", vars);
+
+      if (rule.channel === "sms") {
+        if (!lead.phone || !lead.smsOptIn || lead.smsOptOutAt || await isSuppressed(lead.phone)) {
+          await doc.ref.set({ status: "skipped", skippedReason: "no consent or opted out" }, { merge: true });
+          continue;
+        }
+        if (!withinQuietHours(company?.scheduling?.timezone)) {
+          await doc.ref.set({ sendAt: now + 30 * 60000 }, { merge: true }); // try again in 30 min
+          continue;
+        }
+        const ok = await sendSms(cfg, lead.phone, text, rep?.smsNumber || undefined);
+        await doc.ref.set({ status: ok ? "sent" : "failed", sentAt: ok ? Date.now() : null }, { merge: true });
+        if (ok) await db.collection("smsMessages").add({
+          companyId: q.companyId, repUid: q.repUid || null, leadId: q.leadId, phone: lead.phone, direction: "out", body: text, at: Date.now(),
+        });
+      } else {
+        if (!lead.email) { await doc.ref.set({ status: "skipped", skippedReason: "no email" }, { merge: true }); continue; }
+        const ok = await sendEmail(cfg, lead.email, `${company?.name || "Your rep"} — following up`, text);
+        await doc.ref.set({ status: ok ? "sent" : "failed", sentAt: ok ? Date.now() : null }, { merge: true });
+      }
+    } catch (e) {
+      logger.error(`processOutreachQueue failed for ${doc.id}`, e);
+      await doc.ref.set({ status: "failed", skippedReason: "internal error" }, { merge: true }).catch(() => {});
+    }
+  }
+});
 
 // ════════════════════════════════════════════════════════════════════════════
 // requestDemo — public (unauthenticated) demo request from the marketing site.
@@ -1436,7 +1716,7 @@ export const eventReminders = onSchedule("every 15 minutes", async () => {
   );
 });
 
-// ── super-admin: notification provider config (SendGrid / Twilio) ────────────
+// ── super-admin: notification provider config (SendGrid / Telnyx) ────────────
 // Secrets live in Firestore config/notifications, readable ONLY by Cloud
 // Functions (rules deny client access). getNotificationConfig returns a MASKED
 // view (configured flags + non-secret fields) so the console can show status
@@ -1468,11 +1748,12 @@ export const getNotificationConfig = onCall(async (request) => {
       from: c.sendgridFrom || "",
       fromName: c.sendgridFromName || "",
     },
-    twilio: {
-      configured: !!c.twilioSid && !!c.twilioToken,
-      sidMask: mask(c.twilioSid),
-      tokenMask: mask(c.twilioToken),
-      from: c.twilioFrom || "",
+    telnyx: {
+      configured: !!c.telnyxApiKey,
+      keyMask: mask(c.telnyxApiKey),
+      from: c.telnyxFrom || "",
+      messagingProfileId: c.telnyxMessagingProfileId || "",
+      publicKeyMask: mask(c.telnyxPublicKey),
     },
   };
 });
@@ -1496,9 +1777,10 @@ export const setNotificationConfig = onCall(async (request) => {
   if (typeof d.sendgridKey === "string" && d.sendgridKey.trim()) update.sendgridKey = d.sendgridKey.trim();
   if (typeof d.sendgridFrom === "string") update.sendgridFrom = d.sendgridFrom.trim();
   if (typeof d.sendgridFromName === "string") update.sendgridFromName = d.sendgridFromName.trim();
-  if (typeof d.twilioSid === "string" && d.twilioSid.trim()) update.twilioSid = d.twilioSid.trim();
-  if (typeof d.twilioToken === "string" && d.twilioToken.trim()) update.twilioToken = d.twilioToken.trim();
-  if (typeof d.twilioFrom === "string") update.twilioFrom = d.twilioFrom.trim();
+  if (typeof d.telnyxApiKey === "string" && d.telnyxApiKey.trim()) update.telnyxApiKey = d.telnyxApiKey.trim();
+  if (typeof d.telnyxFrom === "string") update.telnyxFrom = d.telnyxFrom.trim();
+  if (typeof d.telnyxMessagingProfileId === "string") update.telnyxMessagingProfileId = d.telnyxMessagingProfileId.trim();
+  if (typeof d.telnyxPublicKey === "string" && d.telnyxPublicKey.trim()) update.telnyxPublicKey = d.telnyxPublicKey.trim();
   await db.doc("config/notifications").set(update, { merge: true });
   logger.info(`notification config updated by ${caller.uid}`);
   return { ok: true };
@@ -1514,10 +1796,10 @@ export const clearNotificationProvider = onCall(async (request) => {
     await ref.set({ smtpHost: "", smtpPort: "", smtpSecure: false, smtpUser: "", smtpPass: "", smtpFrom: "", smtpFromName: "" }, { merge: true });
   } else if (provider === "sendgrid") {
     await ref.set({ sendgridKey: "", sendgridFrom: "", sendgridFromName: "" }, { merge: true });
-  } else if (provider === "twilio") {
-    await ref.set({ twilioSid: "", twilioToken: "", twilioFrom: "" }, { merge: true });
+  } else if (provider === "telnyx") {
+    await ref.set({ telnyxApiKey: "", telnyxFrom: "", telnyxMessagingProfileId: "", telnyxPublicKey: "" }, { merge: true });
   } else {
-    throw new HttpsError("invalid-argument", "provider must be 'smtp', 'sendgrid' or 'twilio'.");
+    throw new HttpsError("invalid-argument", "provider must be 'smtp', 'sendgrid' or 'telnyx'.");
   }
   return { ok: true };
 });
@@ -5538,7 +5820,7 @@ async function squareCfg() {
 }
 
 // Thin REST wrapper (Square's Node SDK churns its types; the codebase already
-// talks to ATTOM/SendGrid/Twilio over fetch, so we do the same here).
+// talks to ATTOM/SendGrid/Telnyx over fetch, so we do the same here).
 async function squareApi(cfg: { token: string; base: string }, path: string, body?: unknown) {
   const res = await fetch(cfg.base + path, {
     method: "POST",

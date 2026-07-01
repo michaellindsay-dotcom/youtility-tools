@@ -25,6 +25,18 @@ number automatically.
   rep's own uploaded logo if they override it. Every card also gets a stable,
   randomly-assigned display number ("No. 348219") the first time it's saved,
   so a brand-new account doesn't read as customer/rep #1.
+- **Lead outreach automation**, built on a rep's own ported phone number
+  (via Telnyx, not a shared company line): calls forward to the rep's real
+  personal number; texts show/reply from that same number and live in a new
+  **Texts** inbox in the app. Company admins define outreach rules (Settings →
+  Lead outreach automation) that fire an SMS or email a set delay after a
+  lead's disposition changes (e.g. a "go back" follow-up an hour later).
+  TCPA compliance is built in from day one: a homeowner must opt in at the
+  door before any automated text goes out (`DispositionModal` now asks), a
+  STOP/HELP/START keyword handler suppresses future texts platform-wide, and
+  sends are held to 8am–9pm in the company's timezone. Admins assign each
+  rep's ported number under Accounts once porting is complete — porting
+  itself is a carrier process outside the app.
 
 ## [1.2] — 2026-06
 

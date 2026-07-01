@@ -2809,3 +2809,19 @@ body.modal-open .chat-fab-global { display: none; }
 .biz-card-title { font-size: 13px; color: var(--accent-2); font-weight: 600; margin-top: 2px; }
 .biz-card-contact { display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: 12px; color: var(--ink-mid); }
 .biz-card-bottom { display: flex; justify-content: space-between; font-size: 12px; color: var(--ink-mid); }
+
+/* ── Text inbox (lead SMS conversations) ─────────────────────────────── */
+.inbox-layout { display: grid; grid-template-columns: 260px 1fr; gap: 16px; min-height: 420px; }
+.inbox-list { display: flex; flex-direction: column; gap: 4px; overflow-y: auto; }
+.inbox-row { text-align: left; background: none; border: 1px solid transparent; border-radius: var(--radius-sm); padding: 8px 10px; cursor: pointer; color: var(--ink); }
+.inbox-row:hover { background: rgba(255,255,255,.04); }
+.inbox-row.active { background: rgba(14,165,233,.12); border-color: var(--line-hi); }
+.inbox-row-name { font-weight: 600; font-size: 14px; }
+.inbox-row-preview { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.inbox-thread { display: flex; flex-direction: column; border: 1px solid var(--line); border-radius: var(--radius-sm); padding: 14px; min-height: 420px; }
+.inbox-thread-head { font-weight: 700; margin-bottom: 10px; }
+.inbox-thread-msgs { flex: 1; display: flex; flex-direction: column; gap: 8px; overflow-y: auto; margin-bottom: 12px; }
+.inbox-bubble { max-width: 75%; padding: 8px 12px; border-radius: 14px; font-size: 14px; line-height: 1.4; }
+.inbox-bubble.in { align-self: flex-start; background: var(--bg-2); }
+.inbox-bubble.out { align-self: flex-end; background: #0EA5E9; color: #06121f; }
+.inbox-reply { display: flex; gap: 8px; }
