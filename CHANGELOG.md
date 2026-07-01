@@ -6,6 +6,37 @@ number automatically.
 
 ## [Unreleased]
 
+## [1.3] — 2026-07
+
+### App Store "What's New" (user-facing)
+- Get a push notification the moment a lead, message, or appointment needs you —
+  even when the app is closed.
+- Place the battery in the room with your camera: line it up on the wall in AR
+  and snap the photo right into the site survey.
+- Cleaner menus — admins control exactly which tools each role sees.
+
+### Added
+- **Push notifications (iOS).** Every in-app notification (chat, direct
+  messages, appointment reminders) now also delivers as a native push via
+  Firebase Cloud Messaging, so reps are reached when the app is backgrounded or
+  closed. Device tokens are registered through a Cloud Function (the user doc
+  stays server-write-only); sending piggybacks on the existing notify pipeline,
+  so all notification types get push with no per-trigger changes. Push is a
+  silent no-op until the one-time APNs/Firebase console setup is done
+  (`STORE_DEPLOYMENT.md`).
+- **In-app AR battery placement.** On ARKit-capable iPhones the project capture
+  screen gains a "📷 Place in AR" button: drop the battery model on a real
+  surface (drag to move, pinch to resize, two-finger rotate) and tap Capture to
+  drop the framed AR photo straight into the placement photos. Devices without
+  ARKit keep the existing photo flow. Native sources live in
+  `youtilityknock-web/ios-src/` and are injected at build time.
+
+### Changed
+- Per-role menu gating for Movers / Leads / Team, plus an admin-only "Preview
+  menu as" selector, so admins can declutter what each position sees.
+- Renamed the app source folder `canvasspro-web/` → `youtilityknock-web/` to
+  match the product name (no behavior change).
+
 ## [1.2] — 2026-06
 
 ### App Store "What's New" (user-facing)

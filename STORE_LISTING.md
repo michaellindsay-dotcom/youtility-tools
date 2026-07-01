@@ -70,6 +70,12 @@ Console listings. Publisher: **Sun Service**. Support/privacy contact:
 > proposal now fills the screen, signatures appear on the signed agreement, and
 > after signing you go straight to the site survey.
 
+**What's New (1.3)**
+> Push notifications: get alerted the moment a lead, message, or appointment
+> needs you — even when the app is closed. New in-app AR — line the battery up
+> on the wall with your camera and snap the photo straight into the site survey.
+> Plus cleaner menus that admins tailor to each role.
+
 **App Privacy (App Store "Data used to track you" → None). Data linked to you:**
 | Data type | Collected | Linked to user | Used for tracking | Purpose |
 |-----------|-----------|----------------|-------------------|---------|

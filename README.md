@@ -33,7 +33,7 @@ and architecture.
 
 ## Versioning & releases
 
-- **Marketing version** (what the store shows): currently **1.0**. Bump it for a
+- **Marketing version** (what the store shows): currently **1.3**. Bump it for a
   new store release by setting the `VERSION_NAME` env var in Codemagic; it flows
   into both the iOS (`agvtool new-marketing-version`) and Android (`versionName`)
   builds. Update `CHANGELOG.md` and the store "What's New" at the same time.
