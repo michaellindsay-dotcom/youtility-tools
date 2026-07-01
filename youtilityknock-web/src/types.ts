@@ -158,6 +158,20 @@ export interface UserProfile {
   pitchCertifiedAt?: number;
   createdAt?: number;
   disabled?: boolean;
+  // Digital business card — public, shareable rep profile for lead capture.
+  cardSlug?: string; // globally unique, drives the public /app?card=<slug> URL
+  cardEnabled?: boolean;
+  cardTitle?: string; // overrides `title` on the card if set
+  cardBio?: string;
+  cardServiceArea?: string;
+  cardPhotoUrl?: string;
+  cardReviews?: CardReview[];
+}
+
+export interface CardReview {
+  name: string;
+  text: string;
+  rating: number; // 1-5
 }
 
 import type { LeadStatus } from "./lib/dispositions";

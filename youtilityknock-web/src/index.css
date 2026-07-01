@@ -2722,3 +2722,38 @@ body.modal-open .chat-fab-global { display: none; }
 .pl-score { font-family: "Space Grotesk", sans-serif; font-weight: 700; }
 .pl-score small { font-size: 11px; color: var(--ink-mid); font-weight: 500; }
 .ps-hi { color: #34D399; } .ps-mid { color: #F59E0B; } .ps-lo { color: #F87171; }
+
+/* ── Public digital business card (no login, standalone entry point) ────── */
+.pc-wrap {
+  min-height: 100vh;
+  display: flex; justify-content: center;
+  padding: 32px 16px;
+  background: linear-gradient(180deg, var(--bg-0), var(--bg-1) 60%, var(--bg-2));
+  color: var(--ink);
+}
+.pc-card {
+  width: 100%; max-width: 480px;
+  background: var(--panel, rgba(255,255,255,0.03));
+  border: 1px solid var(--line); border-radius: 20px;
+  padding: 28px 22px;
+}
+.pc-state { text-align: center; color: var(--ink-mid); padding: 40px 0; }
+.pc-hero { text-align: center; margin-bottom: 14px; }
+.pc-photo { width: 104px; height: 104px; border-radius: 50%; object-fit: cover; border: 2px solid var(--line-hi); }
+.pc-photo-placeholder {
+  display: flex; align-items: center; justify-content: center; margin: 0 auto;
+  font-size: 40px; font-weight: 700; background: var(--bg-2); color: var(--ink-mid);
+}
+.pc-name { font-family: "Space Grotesk", sans-serif; font-size: 22px; margin: 12px 0 2px; }
+.pc-title { color: var(--ink-mid); font-size: 14px; }
+.pc-company { color: var(--ink-dim); font-size: 13px; margin-top: 2px; }
+.pc-area { color: var(--ink-mid); font-size: 13px; margin-top: 6px; }
+.pc-bio { color: var(--ink-mid); font-size: 14px; line-height: 1.5; text-align: center; margin: 14px 0; }
+.pc-contact-row { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; margin-bottom: 18px; }
+.pc-reviews { margin: 18px 0; padding-top: 16px; border-top: 1px solid var(--line); }
+.pc-reviews h3 { font-family: "Space Grotesk", sans-serif; font-size: 15px; margin-bottom: 10px; }
+.pc-review { background: rgba(255,255,255,.03); border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px; margin-bottom: 8px; }
+.pc-review p { margin: 6px 0 4px; font-size: 14px; }
+.pc-form-block { margin-top: 18px; padding-top: 16px; border-top: 1px solid var(--line); }
+.pc-form-block h3 { font-family: "Space Grotesk", sans-serif; font-size: 15px; margin-bottom: 10px; }
+.pc-thanks { color: #34D399; text-align: center; padding: 16px 0; }

@@ -26,6 +26,7 @@ import Working from "./pages/Working";
 import Chat from "./pages/Chat";
 import Schedule from "./pages/Schedule";
 import Settings from "./pages/Settings";
+import BusinessCard from "./pages/BusinessCard";
 
 // Blocks a route (by direct URL) when the company's plan doesn't include it.
 // Pass one feature, or `anyOf` to allow access when the plan has any of them.
@@ -96,6 +97,7 @@ export default function App() {
         <Route path="chat" element={<Gated feature="chat"><Chat /></Gated>} />
         <Route path="schedule" element={<Gated feature="scheduling"><Schedule /></Gated>} />
         <Route path="territories" element={<Territories />} />
+        <Route path="card" element={<BusinessCard />} />
         <Route path="settings" element={<Settings />} />
       </Route>
     </Routes>

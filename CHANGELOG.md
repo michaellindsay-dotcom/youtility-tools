@@ -6,6 +6,12 @@ number automatically.
 
 ## [Unreleased]
 
+### Added
+- **Digital Business Card** — every rep can publish a public, no-login profile
+  page (photo, bio, service area, reviews, click-to-call/text/email, and a
+  lead-capture form that drops straight into their Leads) at a shareable link
+  and downloadable QR code. Manage it from **My Business Card** in the sidebar.
+
 ## [1.2] — 2026-06
 
 ### App Store "What's New" (user-facing)
