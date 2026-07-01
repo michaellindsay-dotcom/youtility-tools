@@ -1922,6 +1922,68 @@ export const getRepCard = onCall(async (request) => {
   };
 });
 
+// Public (no auth): server-rendered share link for a rep's card. The SPA at
+// /app?card=<slug> can't carry per-rep Open Graph tags (it's one static
+// index.html), so link unfurlers (iMessage, SMS, Slack, etc.) only ever saw
+// the generic site preview. This route returns a tiny HTML shell with the
+// rep's real name/title/photo as og:title/og:description/og:image, then
+// immediately sends real visitors on to the interactive card.
+export const cardShare = onRequest({ cors: true }, async (req, res) => {
+  // Path may arrive with or without the "/c" rewrite prefix.
+  const parts = req.path.split("/").filter(Boolean).filter((p) => p !== "c");
+  const slug = normalizeCardSlug(parts[0] || "");
+  const appUrl = `${APP_URL}/app${slug ? `?card=${encodeURIComponent(slug)}` : ""}`;
+
+  let displayName = "", cardTitle = "", bio = "", photoUrl = "", companyName = "", logoUrl = "";
+  let found = false;
+  if (slug) {
+    try {
+      const q = await db.collection("users").where("cardSlug", "==", slug).limit(1).get();
+      if (!q.empty) {
+        const r = q.docs[0].data() as any;
+        if (r.cardEnabled && !r.disabled) {
+          found = true;
+          displayName = r.displayName || "";
+          cardTitle = r.cardTitle || r.title || "";
+          bio = r.cardBio || "";
+          photoUrl = r.cardPhotoUrl || "";
+          if (r.companyId) {
+            const c = (await db.doc(`companies/${r.companyId}`).get()).data() as any;
+            if (c) { companyName = c.name || ""; logoUrl = r.cardLogoUrl || c.logoUrl || ""; }
+          }
+        }
+      }
+    } catch {
+      // fall through to the generic redirect below
+    }
+  }
+
+  const image = photoUrl || logoUrl || "";
+  const title = found
+    ? `${displayName}${cardTitle ? ` — ${cardTitle}` : ""}`
+    : "Digital Business Card";
+  const desc = found
+    ? (bio ? bio.slice(0, 200) : `${companyName ? `${companyName} — ` : ""}Tap to view my digital business card.`)
+    : "Tap to view this digital business card.";
+
+  res.set("Cache-Control", "public, max-age=300");
+  res.status(200).send(`<!doctype html>
+<html><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>${escHtml(title)}</title>
+<meta property="og:type" content="profile">
+<meta property="og:title" content="${escHtml(title)}">
+<meta property="og:description" content="${escHtml(desc)}">
+${image ? `<meta property="og:image" content="${escHtml(image)}">\n<meta name="twitter:card" content="summary_large_image">` : ""}
+<meta property="og:url" content="${escHtml(`${APP_URL}/c/${slug}`)}">
+<meta http-equiv="refresh" content="0; url=${escHtml(appUrl)}">
+<script>location.replace(${JSON.stringify(appUrl)});</script>
+</head><body>
+<p>Redirecting to <a href="${escHtml(appUrl)}">the card</a>…</p>
+</body></html>`);
+});
+
 // Company branding shown on every rep's card (logo, website, phone, address) unless a
 // rep overrides the logo with their own. Company admin (own company) or
 // super-admin (any company).

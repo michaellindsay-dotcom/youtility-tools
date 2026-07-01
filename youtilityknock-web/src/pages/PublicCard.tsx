@@ -87,6 +87,8 @@ export default function PublicCard() {
               photoUrl={card.photoUrl}
               serviceArea={card.serviceArea}
               memberId={card.memberId}
+              phone={card.phone}
+              email={card.email}
             />
 
             {card.bio && <p className="pc-bio">{card.bio}</p>}

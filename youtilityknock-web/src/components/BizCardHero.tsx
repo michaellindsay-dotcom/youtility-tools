@@ -8,9 +8,13 @@ export interface BizCardHeroProps {
   photoUrl?: string;
   serviceArea?: string;
   memberId?: number | null;
+  phone?: string;
+  email?: string;
 }
 
-export default function BizCardHero({ displayName, title, companyName, logoUrl, photoUrl, serviceArea, memberId }: BizCardHeroProps) {
+export default function BizCardHero({
+  displayName, title, companyName, logoUrl, photoUrl, serviceArea, memberId, phone, email,
+}: BizCardHeroProps) {
   return (
     <div className="biz-card">
       <div className="biz-card-top">
@@ -19,7 +23,12 @@ export default function BizCardHero({ displayName, title, companyName, logoUrl, 
         ) : (
           <span className="biz-card-company">{companyName}</span>
         )}
-        {memberId != null && <span className="biz-card-id">No. {memberId.toLocaleString()}</span>}
+        {memberId != null && (
+          <div className="biz-card-id-wrap">
+            <span className="biz-card-id-label">Member No.</span>
+            <span className="biz-card-id">{memberId.toLocaleString()}</span>
+          </div>
+        )}
       </div>
       <div className="biz-card-mid">
         {photoUrl ? (
@@ -32,6 +41,12 @@ export default function BizCardHero({ displayName, title, companyName, logoUrl, 
           {title && <div className="biz-card-title">{title}</div>}
         </div>
       </div>
+      {(phone || email) && (
+        <div className="biz-card-contact">
+          {phone && <span>📞 {phone}</span>}
+          {email && <span>✉️ {email}</span>}
+        </div>
+      )}
       <div className="biz-card-bottom">
         {logoUrl && companyName && <span>{companyName}</span>}
         {serviceArea && <span>📍 {serviceArea}</span>}
