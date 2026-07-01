@@ -2277,6 +2277,56 @@ ${image ? `<meta property="og:image" content="${escHtml(image)}">\n<meta name="t
 </body></html>`);
 });
 
+function escVcf(s: unknown): string {
+  return String(s ?? "").replace(/\\/g, "\\\\").replace(/;/g, "\\;").replace(/,/g, "\\,").replace(/\n/g, "\\n");
+}
+
+// Public (no auth): a rep's card as a downloadable .vcf — so opening the
+// share link (or scanning the printed QR) can save the contact directly,
+// with no app or login. Same lookup as getRepCard/cardShare.
+export const cardVcf = onRequest({ cors: true }, async (req, res) => {
+  const parts = req.path.split("/").filter(Boolean).filter((p) => p !== "vcf");
+  const slug = normalizeCardSlug(parts[0] || "");
+  if (!slug) { res.status(404).send("Not found"); return; }
+
+  const q = await db.collection("users").where("cardSlug", "==", slug).limit(1).get();
+  if (q.empty) { res.status(404).send("This card isn't available."); return; }
+  const r = q.docs[0].data() as any;
+  if (!r.cardEnabled || r.disabled) { res.status(404).send("This card isn't available."); return; }
+  const c = (await db.doc(`companies/${r.companyId}`).get()).data() as any;
+  if (!c || c.status === "suspended") { res.status(404).send("This card isn't available."); return; }
+
+  const displayName: string = r.displayName || "Contact";
+  const [first, ...restName] = displayName.trim().split(/\s+/);
+  const last = restName.join(" ");
+  const title: string = r.cardTitle || r.title || "";
+  const companyName: string = c.name || "";
+  const phone: string = r.phone || "";
+  const email: string = r.email || "";
+  const website = withUrlProtocol(c.website);
+  const address: string = c.address || "";
+
+  const lines = [
+    "BEGIN:VCARD",
+    "VERSION:3.0",
+    `N:${escVcf(last)};${escVcf(first || displayName)};;;`,
+    `FN:${escVcf(displayName)}`,
+  ];
+  if (companyName) lines.push(`ORG:${escVcf(companyName)}`);
+  if (title) lines.push(`TITLE:${escVcf(title)}`);
+  if (phone) lines.push(`TEL;TYPE=CELL,VOICE:${escVcf(phone)}`);
+  if (email) lines.push(`EMAIL;TYPE=INTERNET:${escVcf(email)}`);
+  if (website) lines.push(`URL:${escVcf(website)}`);
+  if (address) lines.push(`ADR;TYPE=WORK:;;${escVcf(address)};;;;`);
+  lines.push("END:VCARD");
+
+  const safeName = displayName.replace(/[^\w.-]+/g, "_") || "contact";
+  res.set("Content-Type", "text/vcard; charset=utf-8");
+  res.set("Content-Disposition", `attachment; filename="${safeName}.vcf"`);
+  res.set("Cache-Control", "public, max-age=300");
+  res.status(200).send(lines.join("\r\n"));
+});
+
 // Company branding shown on every rep's card (logo, website, phone, address) unless a
 // rep overrides the logo with their own. Company admin (own company) or
 // super-admin (any company).
