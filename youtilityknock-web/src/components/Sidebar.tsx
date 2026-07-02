@@ -32,7 +32,10 @@ const links: { to: string; label: string; icon: string; end?: boolean; feat?: Fe
   { to: "/leads", label: "Leads", icon: "☰", feat: "leads", mobileHidden: true },
   // Team Chat has no nav item — the floating chat button (ChatFab) is on
   // every page.
-  { to: "/schedule", label: "Schedule", icon: "📅", feat: "scheduling" },
+  // Schedule opens from the Dashboard's Today's Schedule card (shown to
+  // everyone). RallyCard-only companies keep the nav link — they have no
+  // Dashboard.
+  { to: "/schedule", label: "Schedule", icon: "📅", feat: "scheduling", rallyOnlyLink: true },
   // Success Planner is reached from its Dashboard card (tap it to open).
   // Team members show up in Team Chat; managers/admins get team ratings on the
   // Leaderboard, which also links to the org chart & accounts page.

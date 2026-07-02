@@ -3,6 +3,7 @@ import { collection, onSnapshot, orderBy, query, where } from "firebase/firestor
 import { db } from "../firebase";
 import { useAuth } from "../auth/AuthContext";
 import { Link } from "react-router-dom";
+import { isRallyCardOnly } from "../lib/features";
 import CalendarBanner from "../components/CalendarBanner";
 import CalendarView from "../components/CalendarView";
 import type { EventType, ScheduleEvent } from "../types";
@@ -14,7 +15,7 @@ const META: Record<EventType, { label: string; icon: string }> = {
 };
 
 export default function Schedule() {
-  const { profile, role, companyId } = useAuth();
+  const { profile, role, companyId, company } = useAuth();
   const [events, setEvents] = useState<ScheduleEvent[]>([]);
   // Appointments this user SET that were routed out to a closer (they don't
   // appear in the agenda above, which is keyed on the closer as the owner).
@@ -86,7 +87,13 @@ export default function Schedule() {
   return (
     <div className="page-body">
       <div className="page-head">
-        <h1>Schedule</h1>
+        <div className="row" style={{ justifyContent: "space-between", alignItems: "flex-start", gap: 10, flexWrap: "wrap" }}>
+          <h1>Schedule</h1>
+          {/* RallyCard-only companies have no Dashboard to go back to. */}
+          {!isRallyCardOnly(company) && (
+            <Link className="btn ghost sm" to="/">← Back to Dashboard</Link>
+          )}
+        </div>
         <p className="page-sub">
           Your appointments, go-backs and follow-ups. You'll get an alert before each one.
         </p>
