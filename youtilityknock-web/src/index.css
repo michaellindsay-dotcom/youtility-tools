@@ -2896,7 +2896,9 @@ body.modal-open .chat-fab-global { display: none; }
   font-family: "Space Grotesk", sans-serif; font-weight: 600;
   font-variant-numeric: tabular-nums; min-width: 64px;
 }
-.today-sched-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* flex: 1 + min-width: 0 lets the title shrink inside the flex row, so long
+   addresses truncate with an ellipsis instead of spilling out of the card. */
+.today-sched-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* ── Leaderboard: team ratings (managers & admins) ───────── */
 .lb-teams { margin: 4px 0 14px; display: grid; gap: 10px; }

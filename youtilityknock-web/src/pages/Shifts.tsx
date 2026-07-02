@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 import { collection, onSnapshot, query, where } from "firebase/firestore";
 import { db } from "../firebase";
 import { useAuth } from "../auth/AuthContext";
@@ -54,7 +55,10 @@ export default function Shifts() {
     <div className="page-body">
       <div className="page-head row">
         <div>
-          <h1>Success Planner</h1>
+          <div className="row" style={{ alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+            <h1>Success Planner</h1>
+            <Link className="btn ghost sm" to="/">← Back to Dashboard</Link>
+          </div>
           <p className="page-sub">
             Set your goal and see what it takes, track the team's performance, then clock your
             canvassing time. Door knocks count automatically while on shift.
