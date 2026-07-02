@@ -4,12 +4,11 @@ import { collection, doc, getDoc, getDocs, limit, orderBy, query, where } from "
 import { db } from "../firebase";
 import { useAuth } from "../auth/AuthContext";
 import { hasFeature } from "../lib/features";
-import { DISPOSITIONS } from "../lib/dispositions";
 import CalendarBanner from "../components/CalendarBanner";
 import BizCardHero from "../components/BizCardHero";
 import { cardAccentVars, cardThemeBg } from "../lib/cardTheme";
 import { CARD_SHARE_BASE_URL } from "./BusinessCard";
-import type { Lead, Shift, UserStats } from "../types";
+import type { EventType, Lead, ScheduleEvent, Shift, UserStats } from "../types";
 
 // Default targets (configurable later via a company `config` doc).
 const GOALS = {
@@ -245,19 +244,8 @@ export default function Dashboard() {
           <span className="muted small">View full leaderboard →</span>
         </Link>
 
-        {/* Admin/manager tools — replace the old Leads & Team sidebar links.
-            Reps work their own leads on the Map while knocking; team members
-            show up in Team Chat. */}
-        {(role === "admin" || role === "manager") && <RecentLeadsCard />}
-        {(role === "admin" || role === "manager") && (
-          <Link to="/team" className="card link-card">
-            <h2>⛩ Team <span className="muted small" style={{ fontWeight: 400 }}>→</span></h2>
-            <p className="muted small">
-              Org chart, teams &amp; accounts. Everyone can also see team members in Team Chat.
-            </p>
-            <span className="muted small">Manage your team →</span>
-          </Link>
-        )}
+        {/* Today's agenda — whole card links to the full schedule */}
+        <TodayScheduleCard />
       </div>
 
       {/* Today's funnel */}
@@ -295,48 +283,92 @@ export default function Dashboard() {
   );
 }
 
-// The company's lead list, surfaced on the admin/manager dashboard now that
-// the Leads sidebar link is gone (reps see their leads on the Map while
-// knocking). Shows the latest few; the whole card opens the full list.
-function RecentLeadsCard() {
-  const { profile, role } = useAuth();
-  const [recent, setRecent] = useState<Lead[]>([]);
+const EVENT_META: Record<EventType, { label: string; icon: string; color: string }> = {
+  appointment: { label: "Appointment", icon: "📅", color: "#38bdf8" },
+  go_back: { label: "Go-back", icon: "↩", color: "#fbbf24" },
+  follow_up: { label: "Follow-up", icon: "🔁", color: "#a78bfa" },
+};
+
+const fmtTime = (ms: number) =>
+  new Date(ms).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+
+// Today's agenda, mini-calendar style: the rep's appointments, go-backs and
+// follow-ups for the day — including appointments they set that were routed to
+// a closer (mirrors the Schedule page's feed). Whole card opens the Schedule.
+function TodayScheduleCard() {
+  const { profile } = useAuth();
+  const [events, setEvents] = useState<ScheduleEvent[]>([]);
 
   useEffect(() => {
-    if (!profile?.companyId) return;
+    if (!profile) return;
     let cancelled = false;
-    // Mirrors the Leads page queries (same composite indexes): admins see the
-    // whole company, managers their downstream.
-    const filters = [where("companyId", "==", profile.companyId)];
-    if (role !== "admin") filters.push(where("visibilityPath", "array-contains", profile.uid));
-    getDocs(query(collection(db, "leads"), ...filters, orderBy("updatedAt", "desc"), limit(4)))
-      .then((snap) => {
-        if (!cancelled) setRecent(snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<Lead, "id">) })));
-      })
-      .catch((err) => console.warn("recent leads fetch failed", err));
+    const dayStart = startOfToday();
+    const dayEnd = dayStart + 24 * 3600000;
+    (async () => {
+      try {
+        // My own events from today on (same index the Schedule page uses)…
+        const mineSnap = await getDocs(
+          query(
+            collection(db, "events"),
+            where("userId", "==", profile.uid),
+            where("startAt", ">=", dayStart),
+            orderBy("startAt", "asc"),
+            limit(20)
+          )
+        );
+        // …plus appointments I set that were routed to a closer (single-field
+        // query; today-filtered client-side), so setters see their bookings.
+        const routedSnap = await getDocs(
+          query(collection(db, "events"), where("setterUid", "==", profile.uid))
+        ).catch(() => null);
+        if (cancelled) return;
+        const byId = new Map<string, ScheduleEvent>();
+        for (const d of mineSnap.docs) byId.set(d.id, { id: d.id, ...(d.data() as Omit<ScheduleEvent, "id">) });
+        for (const d of routedSnap?.docs ?? []) {
+          if (!byId.has(d.id)) byId.set(d.id, { id: d.id, ...(d.data() as Omit<ScheduleEvent, "id">) });
+        }
+        setEvents(
+          [...byId.values()]
+            .filter((e) => e.startAt >= dayStart && e.startAt < dayEnd)
+            .sort((a, b) => a.startAt - b.startAt)
+        );
+      } catch (err) {
+        console.warn("today's schedule fetch failed", err);
+      }
+    })();
     return () => {
       cancelled = true;
     };
-  }, [profile, role]);
-
-  const statusLabel = (s: string) => DISPOSITIONS.find((d) => d.value === s)?.label ?? s;
+  }, [profile]);
 
   return (
-    <Link to="/leads" className="card link-card">
-      <h2>☰ Leads <span className="muted small" style={{ fontWeight: 400 }}>→</span></h2>
-      {recent.length === 0 ? (
-        <p className="muted small">No leads yet — new leads land here as your team knocks.</p>
+    <Link to="/schedule" className="card link-card">
+      <h2>📅 Today's Schedule <span className="muted small" style={{ fontWeight: 400 }}>→</span></h2>
+      <p className="muted small" style={{ marginTop: 2 }}>
+        {new Date().toLocaleDateString([], { weekday: "long", month: "long", day: "numeric" })}
+      </p>
+      {events.length === 0 ? (
+        <p className="muted small">
+          Nothing booked today — appointments, go-backs and follow-ups you schedule show up here.
+        </p>
       ) : (
-        <ol className="top-list">
-          {recent.map((l) => (
-            <li key={l.id}>
-              <span>{l.address}</span>
-              <span className="muted">{statusLabel(l.status)}</span>
-            </li>
-          ))}
-        </ol>
+        <div className="today-sched">
+          {events.map((e) => {
+            const m = EVENT_META[e.type] ?? EVENT_META.follow_up;
+            return (
+              <div className="today-sched-row" key={e.id} style={{ borderLeftColor: m.color }}>
+                <span className="today-sched-time">{fmtTime(e.startAt)}</span>
+                <span>{m.icon}</span>
+                <span className="today-sched-title">
+                  {e.title || m.label}
+                  {e.address ? <span className="muted"> · {e.address}</span> : null}
+                </span>
+              </div>
+            );
+          })}
+        </div>
       )}
-      <span className="muted small">View all leads →</span>
+      <span className="muted small">Open full schedule →</span>
     </Link>
   );
 }
