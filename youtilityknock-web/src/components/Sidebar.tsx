@@ -30,7 +30,8 @@ const links: { to: string; label: string; icon: string; end?: boolean; feat?: Fe
   { to: "/card", label: "RallyCard", icon: "🪪", rallyOnlyLink: true },
   { to: "/inbox", label: "Texts", icon: "📨" },
   { to: "/leads", label: "Leads", icon: "☰", feat: "leads", mobileHidden: true },
-  { to: "/chat", label: "Team Chat", icon: "💬", feat: "chat", mobileHidden: true },
+  // Team Chat has no nav item — the floating chat button (ChatFab) is on
+  // every page.
   { to: "/schedule", label: "Schedule", icon: "📅", feat: "scheduling" },
   // Success Planner is reached from its Dashboard card (tap it to open).
   // Team members show up in Team Chat; managers/admins get team ratings on the
