@@ -3703,11 +3703,47 @@ async function loadTeams() {
   } catch (e) { body.innerHTML = `<tr><td colspan="3" class="banner error show">${esc(e.message)}</td></tr>`; }
 }
 
-// Open team view: locked-baseline service permissions + drag-drop reporting lines.
+// Open team view: locked-baseline service permissions + a drill-down org chart.
 // A team named "Corporate" is the umbrella/overview team: it shows every account
 // in the company (Company Admin sees all, per the platform's access model), while
 // every other team is scoped to its own roster and hides Company Admin accounts —
 // admins sit above the org chart, not inside a department's downline.
+// The chart opens at the top of the reporting chain; click a member to descend
+// into their direct reports, in downline order. Drag a member onto another to
+// reassign their manager; drag onto "Team top" to clear it (make them a root).
+function directReportsOf(members, uid) {
+  return members
+    .filter((u) => (u.managerId || null) === uid)
+    .sort((a, b) => (a.displayName || a.email || "").localeCompare(b.displayName || b.email || ""));
+}
+function teamRoots(members) {
+  const ids = new Set(members.map((u) => u.id));
+  return members
+    .filter((u) => !u.managerId || !ids.has(u.managerId))
+    .sort((a, b) => (a.displayName || a.email || "").localeCompare(b.displayName || b.email || ""));
+}
+function pathToMember(members, uid) {
+  const path = [];
+  const seen = new Set();
+  let cur = members.find((m) => m.id === uid);
+  while (cur && !seen.has(cur.id)) {
+    path.unshift(cur);
+    seen.add(cur.id);
+    cur = cur.managerId ? members.find((m) => m.id === cur.managerId) : null;
+  }
+  return path;
+}
+function isDescendantOf(members, ancestorUid, uid) {
+  let cur = members.find((m) => m.id === uid);
+  const seen = new Set();
+  while (cur && cur.managerId && !seen.has(cur.id)) {
+    if (cur.managerId === ancestorUid) return true;
+    seen.add(cur.id);
+    cur = members.find((m) => m.id === cur.managerId);
+  }
+  return false;
+}
+
 function renderTeamDetail(t, el) {
   const tsp = Array.isArray(t.servicePermissions) ? t.servicePermissions : [];
   const isCorporate = /^corporate$/i.test((t.name || "").trim());
@@ -3715,19 +3751,41 @@ function renderTeamDetail(t, el) {
     ? state.users.slice()
     : state.users.filter((u) => u.teamId === t.id && u.role !== "admin");
   const svc = SERVICES.map(([k, l]) => `<label class="day-chip"><input type="checkbox" class="tsvc" value="${k}" ${tsp.includes(k) ? 'checked' : ''}/> ${l}</label>`).join("");
-  const mlist = members.length ? members.map((u) => {
-    const mgr = u.managerId ? ((state.users.find((x) => x.id === u.managerId) || {}).displayName || "—") : "—";
-    return `<div class="teamMember" draggable="true" data-uid="${u.id}" style="padding:8px 10px;border:1px solid #21314a;border-radius:8px;margin:4px 0;cursor:grab;">
-      <strong>${esc(u.displayName || u.email)}</strong> <span class="muted small">${esc(POSITION_LABEL[u.position] || '')}</span>
-      <span class="muted small" style="float:right;">reports to: ${esc(mgr)}</span></div>`;
-  }).join("") : '<div class="muted small">No members on this team yet — assign people to this team in Accounts.</div>';
+
+  const focusUid = t._focusUid && members.some((m) => m.id === t._focusUid) ? t._focusUid : null;
+  const path = focusUid ? pathToMember(members, focusUid) : [];
+  const listing = focusUid ? directReportsOf(members, focusUid) : teamRoots(members);
+  const focusMember = focusUid ? members.find((m) => m.id === focusUid) : null;
+
+  const crumbs = [`<button type="button" class="orgCrumb" data-uid="">Team top</button>`]
+    .concat(path.map((p) => `<button type="button" class="orgCrumb" data-uid="${p.id}">${esc(p.displayName || p.email)}</button>`))
+    .join('<span class="muted small"> / </span>');
+
+  const rows = listing.length ? listing.map((u) => {
+    const reportCount = directReportsOf(members, u.id).length;
+    return `<div class="orgNode" draggable="true" data-uid="${u.id}" style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:9px 12px;border:1px solid #21314a;border-radius:8px;margin:5px 0;cursor:grab;">
+      <div>
+        <strong>${esc(u.displayName || u.email)}</strong>
+        <span class="muted small">${esc(POSITION_LABEL[u.position] || '')}</span>
+      </div>
+      <div class="row" style="gap:8px;align-items:center;">
+        ${reportCount ? `<span class="muted small">${reportCount} direct report${reportCount === 1 ? '' : 's'}</span>` : `<span class="muted small">No direct reports</span>`}
+        ${reportCount ? `<button type="button" class="btn ghost sm orgDrill" data-uid="${u.id}">Open ›</button>` : ''}
+      </div>
+    </div>`;
+  }).join("") : (focusUid
+    ? '<div class="muted small">No direct reports yet — drag a member here to have them report to this person.</div>'
+    : '<div class="muted small">No members on this team yet — assign people to this team in Accounts.</div>');
+
   el.innerHTML = `
     <h4 style="margin:4px 0;font-size:13px;">Team services <span class="muted small">— locked baseline for everyone on the team</span></h4>
     <div class="svc-grid">${svc}</div>
     <div class="row" style="justify-content:flex-end;margin:8px 0;"><button class="btn primary sm tsvcSave">Save team services</button></div>
-    <h4 style="margin:10px 0 4px;font-size:13px;">Reporting lines <span class="muted small">— drag a member onto their manager</span></h4>
-    <div class="teamMembers">${mlist}</div>
+    <h4 style="margin:10px 0 4px;font-size:13px;">Reporting lines <span class="muted small">— click a member to see their downline; drag one member onto another to reassign</span></h4>
+    <div class="orgCrumbs" style="margin:4px 0 8px;">${crumbs}</div>
+    <div class="orgNodes" data-uid="">${rows}</div>
     <div class="banner teamDetailBanner"></div>`;
+
   el.querySelector(".tsvcSave").addEventListener("click", async () => {
     const perms = [...el.querySelectorAll(".tsvc")].filter((x) => x.checked).map((x) => x.value);
     try {
@@ -3736,23 +3794,57 @@ function renderTeamDetail(t, el) {
       banner(el.querySelector(".teamDetailBanner"), "Team services saved.", "good");
     } catch (e) { banner(el.querySelector(".teamDetailBanner"), e.message || "Save failed.", "error"); }
   });
-  el.querySelectorAll(".teamMember").forEach((node) => {
-    node.addEventListener("dragstart", (e) => { e.dataTransfer.setData("text/uid", node.dataset.uid); node.style.opacity = "0.5"; });
-    node.addEventListener("dragend", () => { node.style.opacity = "1"; });
-    node.addEventListener("dragover", (e) => { e.preventDefault(); node.style.outline = "2px solid #0EA5E9"; });
-    node.addEventListener("dragleave", () => { node.style.outline = "none"; });
-    node.addEventListener("drop", async (e) => {
-      e.preventDefault(); node.style.outline = "none";
-      const dragUid = e.dataTransfer.getData("text/uid");
-      const targetUid = node.dataset.uid;
-      if (!dragUid || dragUid === targetUid) return;
-      try {
-        await assignUserHierarchy({ uid: dragUid, managerId: targetUid });
-        banner(el.querySelector(".teamDetailBanner"), "Reporting line updated.", "good");
-        await loadUsers(); renderTeamDetail(t, el);
-      } catch (err) { banner(el.querySelector(".teamDetailBanner"), err.message || "Update failed.", "error"); }
+
+  // Breadcrumbs: click to jump back up to that point in the chain (or "Team top").
+  el.querySelectorAll(".orgCrumb").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      t._focusUid = btn.dataset.uid || null;
+      renderTeamDetail(t, el);
     });
   });
+  // Drill in explicitly via the "Open ›" button, or by clicking anywhere else on the row.
+  el.querySelectorAll(".orgDrill").forEach((btn) => {
+    btn.addEventListener("click", (e) => { e.stopPropagation(); t._focusUid = btn.dataset.uid; renderTeamDetail(t, el); });
+  });
+  el.querySelectorAll(".orgNode").forEach((node) => {
+    node.addEventListener("click", () => {
+      if (directReportsOf(members, node.dataset.uid).length) { t._focusUid = node.dataset.uid; renderTeamDetail(t, el); }
+    });
+  });
+
+  async function reassign(dragUid, targetUid) {
+    if (!dragUid || dragUid === targetUid) return;
+    if (targetUid && isDescendantOf(members, dragUid, targetUid)) {
+      banner(el.querySelector(".teamDetailBanner"), "Can't move someone under their own downline.", "error");
+      return;
+    }
+    try {
+      await assignUserHierarchy({ uid: dragUid, managerId: targetUid || null });
+      banner(el.querySelector(".teamDetailBanner"), "Reporting line updated.", "good");
+      await loadUsers(); renderTeamDetail(t, el);
+    } catch (err) { banner(el.querySelector(".teamDetailBanner"), err.message || "Update failed.", "error"); }
+  }
+
+  el.querySelectorAll(".orgNode").forEach((node) => {
+    node.addEventListener("dragstart", (e) => { e.dataTransfer.setData("text/uid", node.dataset.uid); node.style.opacity = "0.5"; });
+    node.addEventListener("dragend", () => { node.style.opacity = "1"; });
+    node.addEventListener("dragover", (e) => { e.preventDefault(); e.stopPropagation(); node.style.outline = "2px solid #0EA5E9"; });
+    node.addEventListener("dragleave", () => { node.style.outline = "none"; });
+    node.addEventListener("drop", (e) => {
+      e.preventDefault(); e.stopPropagation(); node.style.outline = "none";
+      reassign(e.dataTransfer.getData("text/uid"), node.dataset.uid);
+    });
+  });
+  // Drop on "Team top" to clear a manager (promote to the root of the chain).
+  el.querySelectorAll('.orgCrumb[data-uid=""]').forEach((crumb) => {
+    crumb.addEventListener("dragover", (e) => { e.preventDefault(); crumb.style.outline = "2px solid #0EA5E9"; });
+    crumb.addEventListener("dragleave", () => { crumb.style.outline = "none"; });
+    crumb.addEventListener("drop", (e) => {
+      e.preventDefault(); crumb.style.outline = "none";
+      reassign(e.dataTransfer.getData("text/uid"), null);
+    });
+  });
+  void focusMember;
 }
 
 // ── Users / accounts ─────────────────────────────────────────────────────
