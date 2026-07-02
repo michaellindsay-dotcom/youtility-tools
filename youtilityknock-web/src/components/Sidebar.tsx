@@ -42,7 +42,10 @@ const links: { to: string; label: string; icon: string; end?: boolean; feat?: Fe
   { to: "/training", label: "Training", icon: "🎓", feat: "voice", canvassOnly: true },
   { to: "/pitch-library", label: "Pitch Library", icon: "🎬", feat: "pitch", roles: ["admin", "manager"], canvassOnly: true },
   { to: "/working", label: "Who's Working", icon: "🔥", feat: "chat", canvassOnly: true },
-  { to: "/leaderboard", label: "Leaderboard", icon: "🏆", feat: "rewards" },
+  // Like RallyCard: the Dashboard's Top Performers card links here, so
+  // full-platform companies don't need a nav item; RallyCard-only companies
+  // keep it (they have no Dashboard).
+  { to: "/leaderboard", label: "Leaderboard", icon: "🏆", feat: "rewards", rallyOnlyLink: true },
   { to: "/gamify", label: "Gamify", icon: "🎮", feat: "rewards" },
   { to: "/rewards", label: "Rewards", icon: "🎁", feat: "rewards" },
   { to: "/territories", label: "Territories", icon: "▰", feat: "aiTerritories", canvassOnly: true },
