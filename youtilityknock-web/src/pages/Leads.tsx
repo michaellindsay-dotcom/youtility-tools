@@ -10,8 +10,10 @@ import {
   updateDoc,
   where,
 } from "firebase/firestore";
+import { Link } from "react-router-dom";
 import { db } from "../firebase";
 import { useAuth } from "../auth/AuthContext";
+import { isRallyCardOnly } from "../lib/features";
 import { bumpStats } from "../lib/stats";
 import { DISPOSITIONS } from "../lib/dispositions";
 import DispositionModal, { type DispoInput } from "../components/DispositionModal";
@@ -20,7 +22,7 @@ import type { Lead, LeadStatus } from "../types";
 const STATUSES = DISPOSITIONS;
 
 export default function Leads() {
-  const { profile, role, companyId } = useAuth();
+  const { profile, role, companyId, company } = useAuth();
   const [leads, setLeads] = useState<Lead[]>([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<LeadStatus | "all">("all");
@@ -89,6 +91,10 @@ export default function Leads() {
           <p className="page-sub">{shown.length} shown</p>
         </div>
         <div className="row">
+          {/* RallyCard-only companies have no Dashboard to go back to. */}
+          {!isRallyCardOnly(company) && (
+            <Link className="btn ghost sm" to="/">← Back to Dashboard</Link>
+          )}
           {(role === "admin" || role === "manager") && leads.length > 0 && (
             <button className="btn ghost sm danger" onClick={clearAll}>
               Clear all ({leads.length})
