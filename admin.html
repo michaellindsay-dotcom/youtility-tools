@@ -3688,11 +3688,26 @@ async function loadTeams() {
   const body = $("teamsBody");
   body.innerHTML = `<tr><td colspan="3" class="muted">Loading…</td></tr>`;
   try {
-    const snap = await getDocs(query(collection(db, `companies/${state.selectedCompany}/teams`), orderBy("createdAt","asc")));
+    let snap = await getDocs(query(collection(db, `companies/${state.selectedCompany}/teams`), orderBy("createdAt","asc")));
     state.teams = snap.docs.map((d) => ({ id:d.id, ...d.data() }));
-    // parent-team dropdown in the team form
+    // Everyone hangs off "Corporate" by default — it's the umbrella at the top
+    // of the org chart. Any other team with no parent yet gets backfilled onto
+    // it, so a manager only needs to branch off a new team when their downline
+    // actually grows past what one team roster covers.
+    const corporate = state.teams.find((t) => /^corporate$/i.test((t.name || "").trim()));
+    if (corporate) {
+      const unparented = state.teams.filter((t) => t.id !== corporate.id && !t.parentTeamId);
+      if (unparented.length) {
+        await Promise.all(unparented.map((t) =>
+          updateTeam({ companyId: state.selectedCompany, teamId: t.id, parentTeamId: corporate.id }).catch(() => {})));
+        snap = await getDocs(query(collection(db, `companies/${state.selectedCompany}/teams`), orderBy("createdAt","asc")));
+        state.teams = snap.docs.map((d) => ({ id:d.id, ...d.data() }));
+      }
+    }
+    // parent-team dropdown in the team form — defaults to Corporate, since
+    // that's where a newly branched-off team should sit unless re-parented.
     $("teamParent").innerHTML = `<option value="">— none (top level) —</option>` +
-      state.teams.map((t)=>`<option value="${t.id}">${esc(t.name)}</option>`).join("");
+      state.teams.map((t)=>`<option value="${t.id}" ${corporate && t.id===corporate.id ? 'selected' : ''}>${esc(t.name)}</option>`).join("");
     if (!state.teams.length) { body.innerHTML = `<tr><td colspan="3" class="muted">No teams.</td></tr>`; return; }
     body.innerHTML = "";
     state.teams.forEach((t) => {
@@ -3735,35 +3750,30 @@ async function loadTeams() {
   } catch (e) { body.innerHTML = `<tr><td colspan="3" class="banner error show">${esc(e.message)}</td></tr>`; }
 }
 
-// Open team view: locked-baseline service permissions + a drill-down org chart.
-// A team named "Corporate" is the umbrella/overview team: it shows every account
-// in the company (Company Admin sees all, per the platform's access model), while
-// every other team is scoped to its own roster and hides Company Admin accounts —
-// admins sit above the org chart, not inside a department's downline.
-// The chart opens at the top of the reporting chain; click a member to descend
-// into their direct reports, in downline order. Drag a member onto another to
-// reassign their manager; drag onto "Team top" to clear it (make them a root).
+// Open team view: locked-baseline service permissions + an expand/collapse org
+// chart. A team named "Corporate" is the umbrella/overview team: it shows every
+// account in the company (Company Admin sees all, per the platform's access
+// model), while every other team is scoped to its own roster and hides Company
+// Admin accounts — admins sit above the org chart, not inside a department's
+// downline. Click a member's name to expand their downline in place; click
+// again to fold it back up. Drag a member onto another to reassign their
+// manager; drag onto the top drop zone to clear it (make them a root).
+// Managers sort above individual contributors at every level, so whoever runs
+// a team/branch is always the first thing you see.
+const ORG_RANK = { admin: 0, team_manager: 1, closer_manager: 2, setter_manager: 2, closer: 3, setter: 3 };
+function sortDownline(list) {
+  return list.slice().sort((a, b) => {
+    const ra = ORG_RANK[a.position] ?? 4, rb = ORG_RANK[b.position] ?? 4;
+    if (ra !== rb) return ra - rb;
+    return (a.displayName || a.email || "").localeCompare(b.displayName || b.email || "");
+  });
+}
 function directReportsOf(members, uid) {
-  return members
-    .filter((u) => (u.managerId || null) === uid)
-    .sort((a, b) => (a.displayName || a.email || "").localeCompare(b.displayName || b.email || ""));
+  return sortDownline(members.filter((u) => (u.managerId || null) === uid));
 }
 function teamRoots(members) {
   const ids = new Set(members.map((u) => u.id));
-  return members
-    .filter((u) => !u.managerId || !ids.has(u.managerId))
-    .sort((a, b) => (a.displayName || a.email || "").localeCompare(b.displayName || b.email || ""));
-}
-function pathToMember(members, uid) {
-  const path = [];
-  const seen = new Set();
-  let cur = members.find((m) => m.id === uid);
-  while (cur && !seen.has(cur.id)) {
-    path.unshift(cur);
-    seen.add(cur.id);
-    cur = cur.managerId ? members.find((m) => m.id === cur.managerId) : null;
-  }
-  return path;
+  return sortDownline(members.filter((u) => !u.managerId || !ids.has(u.managerId)));
 }
 function isDescendantOf(members, ancestorUid, uid) {
   let cur = members.find((m) => m.id === uid);
@@ -3784,30 +3794,33 @@ function renderTeamDetail(t, el) {
     : state.users.filter((u) => u.teamId === t.id && u.role !== "admin");
   const svc = SERVICES.map(([k, l]) => `<label class="day-chip"><input type="checkbox" class="tsvc" value="${k}" ${tsp.includes(k) ? 'checked' : ''}/> ${l}</label>`).join("");
 
-  const focusUid = t._focusUid && members.some((m) => m.id === t._focusUid) ? t._focusUid : null;
-  const path = focusUid ? pathToMember(members, focusUid) : [];
-  const listing = focusUid ? directReportsOf(members, focusUid) : teamRoots(members);
-  const focusMember = focusUid ? members.find((m) => m.id === focusUid) : null;
-
-  const crumbs = [`<button type="button" class="orgCrumb" data-uid="">Team top</button>`]
-    .concat(path.map((p) => `<button type="button" class="orgCrumb" data-uid="${p.id}">${esc(p.displayName || p.email)}</button>`))
-    .join('<span class="muted small"> / </span>');
-
-  const rows = listing.length ? listing.map((u) => {
-    const reportCount = directReportsOf(members, u.id).length;
-    return `<div class="orgNode" draggable="true" data-uid="${u.id}" style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:9px 12px;border:1px solid #21314a;border-radius:8px;margin:5px 0;cursor:grab;">
-      <div>
-        <strong>${esc(u.displayName || u.email)}</strong>
-        <span class="muted small">${esc(POSITION_LABEL[u.position] || '')}</span>
-      </div>
-      <div class="row" style="gap:8px;align-items:center;">
-        ${reportCount ? `<span class="muted small">${reportCount} direct report${reportCount === 1 ? '' : 's'}</span>` : `<span class="muted small">No direct reports</span>`}
-        ${reportCount ? `<button type="button" class="btn ghost sm orgDrill" data-uid="${u.id}">Open ›</button>` : ''}
-      </div>
-    </div>`;
-  }).join("") : (focusUid
-    ? '<div class="muted small">No direct reports yet — drag a member here to have them report to this person.</div>'
-    : '<div class="muted small">No members on this team yet — assign people to this team in Accounts.</div>');
+  if (!t._expanded) t._expanded = new Set();
+  function renderOrgNodes(parentUid, depth) {
+    const list = parentUid === null ? teamRoots(members) : directReportsOf(members, parentUid);
+    if (!list.length) {
+      return depth === 0 ? '<div class="muted small">No members on this team yet — assign people to this team in Accounts.</div>' : '';
+    }
+    return list.map((u) => {
+      const kids = directReportsOf(members, u.id);
+      const hasKids = kids.length > 0;
+      const expanded = hasKids && t._expanded.has(u.id);
+      return `<div style="margin-left:${depth * 22}px;">
+        <div class="orgNode" draggable="true" data-uid="${u.id}" data-has-kids="${hasKids ? '1' : ''}"
+             style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:9px 12px;border:1px solid #21314a;border-radius:8px;margin:5px 0;cursor:${hasKids ? 'pointer' : 'grab'};">
+          <div class="row" style="align-items:center;gap:8px;">
+            <span class="orgChevron" style="width:14px;display:inline-block;color:var(--ink-dim);font-size:11px;">${hasKids ? (expanded ? '▾' : '▸') : ''}</span>
+            <div>
+              <strong>${esc(u.displayName || u.email)}</strong>
+              <span class="muted small">${esc(POSITION_LABEL[u.position] || '')}</span>
+            </div>
+          </div>
+          <span class="muted small">${hasKids ? `${kids.length} direct report${kids.length === 1 ? '' : 's'}` : 'No direct reports'}</span>
+        </div>
+        ${expanded ? renderOrgNodes(u.id, depth + 1) : ''}
+      </div>`;
+    }).join("");
+  }
+  const treeHtml = renderOrgNodes(null, 0);
 
   el.innerHTML = `
     <h4 style="margin:4px 0;font-size:13px;">Team info</h4>
@@ -3826,9 +3839,9 @@ function renderTeamDetail(t, el) {
     <h4 style="margin:14px 0 4px;font-size:13px;">Team services <span class="muted small">— locked baseline for everyone on the team</span></h4>
     <div class="svc-grid">${svc}</div>
     <div class="row" style="justify-content:flex-end;margin:8px 0;"><button class="btn primary sm tsvcSave">Save team services</button></div>
-    <h4 style="margin:10px 0 4px;font-size:13px;">Reporting lines <span class="muted small">— click a member to see their downline; drag one member onto another to reassign</span></h4>
-    <div class="orgCrumbs" style="margin:4px 0 8px;">${crumbs}</div>
-    <div class="orgNodes" data-uid="">${rows}</div>
+    <h4 style="margin:10px 0 4px;font-size:13px;">Reporting lines <span class="muted small">— click a name to expand/collapse their downline; drag one member onto another to reassign</span></h4>
+    <div class="orgTopDrop muted small" style="padding:6px 10px;border:1px dashed var(--line-hi);border-radius:8px;margin-bottom:8px;">Drop a member here to clear their manager (make them top-level)</div>
+    <div class="orgNodes">${treeHtml}</div>
     <div class="banner teamDetailBanner"></div>`;
 
   let pendingLogoUrl = t.logoUrl || "";
@@ -3896,20 +3909,12 @@ function renderTeamDetail(t, el) {
     } catch (e) { banner(el.querySelector(".teamDetailBanner"), e.message || "Save failed.", "error"); }
   });
 
-  // Breadcrumbs: click to jump back up to that point in the chain (or "Team top").
-  el.querySelectorAll(".orgCrumb").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      t._focusUid = btn.dataset.uid || null;
-      renderTeamDetail(t, el);
-    });
-  });
-  // Drill in explicitly via the "Open ›" button, or by clicking anywhere else on the row.
-  el.querySelectorAll(".orgDrill").forEach((btn) => {
-    btn.addEventListener("click", (e) => { e.stopPropagation(); t._focusUid = btn.dataset.uid; renderTeamDetail(t, el); });
-  });
-  el.querySelectorAll(".orgNode").forEach((node) => {
+  // Click a member with a downline to expand/fold it in place.
+  el.querySelectorAll('.orgNode[data-has-kids="1"]').forEach((node) => {
     node.addEventListener("click", () => {
-      if (directReportsOf(members, node.dataset.uid).length) { t._focusUid = node.dataset.uid; renderTeamDetail(t, el); }
+      const uid = node.dataset.uid;
+      if (t._expanded.has(uid)) t._expanded.delete(uid); else t._expanded.add(uid);
+      renderTeamDetail(t, el);
     });
   });
 
@@ -3936,16 +3941,14 @@ function renderTeamDetail(t, el) {
       reassign(e.dataTransfer.getData("text/uid"), node.dataset.uid);
     });
   });
-  // Drop on "Team top" to clear a manager (promote to the root of the chain).
-  el.querySelectorAll('.orgCrumb[data-uid=""]').forEach((crumb) => {
-    crumb.addEventListener("dragover", (e) => { e.preventDefault(); crumb.style.outline = "2px solid #0EA5E9"; });
-    crumb.addEventListener("dragleave", () => { crumb.style.outline = "none"; });
-    crumb.addEventListener("drop", (e) => {
-      e.preventDefault(); crumb.style.outline = "none";
-      reassign(e.dataTransfer.getData("text/uid"), null);
-    });
+  // Drop on the top zone to clear a manager (promote to the root of the chain).
+  const topDrop = el.querySelector(".orgTopDrop");
+  topDrop.addEventListener("dragover", (e) => { e.preventDefault(); topDrop.style.outline = "2px solid #0EA5E9"; });
+  topDrop.addEventListener("dragleave", () => { topDrop.style.outline = "none"; });
+  topDrop.addEventListener("drop", (e) => {
+    e.preventDefault(); topDrop.style.outline = "none";
+    reassign(e.dataTransfer.getData("text/uid"), null);
   });
-  void focusMember;
 }
 
 // ── Users / accounts ─────────────────────────────────────────────────────
