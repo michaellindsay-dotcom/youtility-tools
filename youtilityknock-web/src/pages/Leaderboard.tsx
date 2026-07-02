@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import { collection, doc, onSnapshot, query, where } from "firebase/firestore";
+import { collection, doc, getDocs, onSnapshot, query, where } from "firebase/firestore";
 import { db } from "../firebase";
 import { useAuth } from "../auth/AuthContext";
 import { isRallyCardOnly } from "../lib/features";
@@ -8,7 +8,7 @@ import {
   PTS, LEVEL_PTS, computePoints, levelInfo, tierFor, initials, avatarColor, pointLines,
 } from "../lib/points";
 import { periodKey, seasonDocId, activeDaysThisYear, SEASON_LABEL, type SeasonView } from "../lib/season";
-import type { UserStats } from "../types";
+import type { Team, UserProfile, UserStats } from "../types";
 
 interface Ranked extends UserStats {
   points: number; // raw season points
@@ -61,6 +61,16 @@ export default function Leaderboard() {
       (e) => console.error("self stats", e)
     );
   }, [profile, view]);
+
+  // Current-period stats by user, for the team ratings section. Both userStats
+  // and seasonStats docs carry a real `uid` field, so this keys correctly on
+  // every view.
+  const statsByUid = useMemo(() => {
+    const m = new Map<string, UserStats>();
+    for (const r of rows) m.set(r.uid, r);
+    if (selfRow) m.set(selfRow.uid, selfRow);
+    return m;
+  }, [rows, selfRow]);
 
   const ranked: Ranked[] = useMemo(() => {
     const prorate = view === "year";
@@ -129,6 +139,8 @@ export default function Leaderboard() {
         <MetricTop title="💰 Sales" rows={metricTops.sales} mine={profile?.uid} />
       </div>
 
+      {(role === "admin" || role === "manager") && <TeamRatings statsByUid={statsByUid} />}
+
       {view === "year" && (
         <div className="card lb-prorate-note">
           ⚖️ The yearly board is ranked by <strong>points per day since you joined</strong> — so newcomers get a
@@ -162,6 +174,169 @@ export default function Leaderboard() {
           {rest.map((r) => <RankRow key={r.uid} r={r} you={r.uid === profile?.uid} leaderScore={leaderScore} />)}
         </div>
       )}
+    </div>
+  );
+}
+
+// ── Team ratings (managers & admins) ─────────────────────────────────────────
+// Each team expands into its hierarchy (downline order, indented). Every member
+// gets a 0–100 rating for the selected period: 75% production — closes for
+// closers, appointments set + sat for setters, each normalized against the best
+// in that function — and 25% overall activity (gamify points: doors, shifts,
+// conversations, hours on the grind). Production is deliberately king.
+const scoreColor = (n: number) =>
+  n >= 75 ? "#34D399" : n >= 45 ? "#38BDF8" : n >= 20 ? "#FBBF24" : "#94A3B8";
+
+function TeamRatings({ statsByUid }: { statsByUid: Map<string, UserStats> }) {
+  const { profile, role, companyId } = useAuth();
+  const [members, setMembers] = useState<UserProfile[]>([]);
+  const [teams, setTeams] = useState<Team[]>([]);
+  const [open, setOpen] = useState<Record<string, boolean>>({});
+
+  useEffect(() => {
+    if (!profile || !companyId) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        // Same visibility as the Team page: admins see the whole company,
+        // managers their downline (self merged back in).
+        const base = collection(db, "users");
+        const q =
+          role === "admin"
+            ? query(base, where("companyId", "==", companyId))
+            : query(base, where("companyId", "==", companyId), where("managerPath", "array-contains", profile.uid));
+        const snap = await getDocs(q);
+        let list = snap.docs.map((d) => ({ uid: d.id, ...(d.data() as Omit<UserProfile, "uid">) }));
+        if (role !== "admin" && !list.some((u) => u.uid === profile.uid)) list = [profile, ...list];
+        const teamSnap = await getDocs(collection(db, "companies", companyId, "teams")).catch(() => null);
+        if (cancelled) return;
+        setMembers(list.filter((u) => !u.disabled));
+        setTeams(teamSnap ? teamSnap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<Team, "id">) })) : []);
+      } catch (err) {
+        console.warn("team ratings fetch failed", err);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [profile, role, companyId]);
+
+  // Per-member rating, normalized within function (closer vs setter) so a
+  // 5-person setter squad isn't measured against the top closer's sales.
+  const rating = useMemo(() => {
+    const primaryOf = (u: UserProfile, s?: UserStats) =>
+      u.isCloser ? (s?.sales ?? 0) + (s?.closerCloses ?? 0) : (s?.appointments ?? 0) + (s?.sits ?? 0);
+    const maxPrim = { closer: 0, setter: 0 };
+    let maxAct = 0;
+    const raw = members.map((u) => {
+      const s = statsByUid.get(u.uid);
+      const p = primaryOf(u, s);
+      const a = computePoints(s ?? {});
+      const g: "closer" | "setter" = u.isCloser ? "closer" : "setter";
+      maxPrim[g] = Math.max(maxPrim[g], p);
+      maxAct = Math.max(maxAct, a);
+      return { uid: u.uid, p, a, g };
+    });
+    const m = new Map<string, { score: number; p: number; a: number; closer: boolean }>();
+    for (const r of raw) {
+      const pn = maxPrim[r.g] > 0 ? r.p / maxPrim[r.g] : 0;
+      const an = maxAct > 0 ? r.a / maxAct : 0;
+      m.set(r.uid, { score: Math.round(100 * (0.75 * pn + 0.25 * an)), p: r.p, a: r.a, closer: r.g === "closer" });
+    }
+    return m;
+  }, [members, statsByUid]);
+
+  // Group members by team (unknown/absent team → "No team" bucket).
+  const groups = useMemo(() => {
+    const byTeam = new Map<string, UserProfile[]>();
+    for (const u of members) {
+      const key = u.teamId && teams.some((t) => t.id === u.teamId) ? u.teamId : "__none";
+      const arr = byTeam.get(key) ?? [];
+      arr.push(u);
+      byTeam.set(key, arr);
+    }
+    const named = teams
+      .filter((t) => byTeam.has(t.id))
+      .map((t) => ({ id: t.id, name: t.name, members: byTeam.get(t.id)! }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+    if (byTeam.has("__none")) named.push({ id: "__none", name: "No team", members: byTeam.get("__none")! });
+    return named;
+  }, [members, teams]);
+
+  // Downline order inside a team: managers first, their reports indented under
+  // them; siblings sorted by rating so the strongest performers float up.
+  const branchRows = (group: UserProfile[]) => {
+    const ids = new Set(group.map((g) => g.uid));
+    const byScore = (a: UserProfile, b: UserProfile) =>
+      (rating.get(b.uid)?.score ?? 0) - (rating.get(a.uid)?.score ?? 0);
+    const kids = (uid: string) => group.filter((u) => u.managerId === uid).sort(byScore);
+    const roots = group.filter((u) => !u.managerId || !ids.has(u.managerId)).sort(byScore);
+    const out: { u: UserProfile; depth: number }[] = [];
+    const walk = (u: UserProfile, depth: number) => {
+      out.push({ u, depth });
+      for (const k of kids(u.uid)) walk(k, depth + 1);
+    };
+    for (const r of roots) walk(r, 0);
+    return out;
+  };
+
+  if (members.length === 0) return null;
+
+  return (
+    <div className="lb-teams">
+      <div className="row" style={{ justifyContent: "space-between", alignItems: "baseline", flexWrap: "wrap", gap: 8 }}>
+        <h2 className="section-h" style={{ margin: "4px 0" }}>⛩ Team Ratings</h2>
+        <Link to="/team" className="btn ghost sm">Org chart &amp; accounts →</Link>
+      </div>
+      <p className="muted small" style={{ margin: 0 }}>
+        Tap a team to open its downline. Ratings follow the period selected above — 75% production
+        (closes for closers, appointments set &amp; sat for setters) + 25% activity (doors, shifts, points).
+      </p>
+      {groups.map((g) => {
+        const scores = g.members.map((u) => rating.get(u.uid)?.score ?? 0);
+        const avg = Math.round(scores.reduce((s, n) => s + n, 0) / (scores.length || 1));
+        const isOpen = !!open[g.id];
+        return (
+          <div className="card team-acc" key={g.id}>
+            <button className="team-acc-head" onClick={() => setOpen((o) => ({ ...o, [g.id]: !o[g.id] }))}>
+              <span>{isOpen ? "▾" : "▸"}</span>
+              <span className="team-acc-name">{g.name}</span>
+              <span className="muted small">{g.members.length} {g.members.length === 1 ? "member" : "members"}</span>
+              <span className="muted small" style={{ marginLeft: "auto" }}>
+                avg <strong style={{ color: scoreColor(avg) }}>{avg}</strong>
+              </span>
+            </button>
+            {isOpen && (
+              <div className="team-acc-body">
+                {branchRows(g.members).map(({ u, depth }) => {
+                  const r = rating.get(u.uid);
+                  return (
+                    <div
+                      className={"tr-row" + (u.uid === profile?.uid ? " you" : "")}
+                      key={u.uid}
+                      style={{ marginLeft: Math.min(depth, 4) * 18 }}
+                    >
+                      <div className="lb-avatar" style={{ background: avatarColor(u.uid) }}>{initials(u.displayName)}</div>
+                      <div className="tr-main">
+                        <div>{u.displayName || u.email}</div>
+                        <div className="muted small">
+                          {u.isCloser ? "Closer" : "Setter"}
+                          {u.title ? ` · ${u.title}` : ""}
+                          {" · "}
+                          {r?.closer ? `${r?.p ?? 0} closes` : `${r?.p ?? 0} appts set+sat`}
+                          {" · "}
+                          {(r?.a ?? 0).toLocaleString()} pts
+                        </div>
+                      </div>
+                      <div className="tr-score" style={{ color: scoreColor(r?.score ?? 0) }}>{r?.score ?? 0}</div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        );
+      })}
     </div>
   );
 }

@@ -29,15 +29,12 @@ const links: { to: string; label: string; icon: string; end?: boolean; feat?: Fe
   // the card IS their home page and they have no Dashboard.
   { to: "/card", label: "RallyCard", icon: "🪪", rallyOnlyLink: true },
   { to: "/inbox", label: "Texts", icon: "📨" },
-  // Reps work their leads on the Map; admins/managers reach the full list from
-  // the Dashboard's Leads card. RallyCard-only companies keep the link — leads
-  // are a core surface for them and they have no Map or Dashboard.
-  { to: "/leads", label: "Leads", icon: "☰", feat: "leads", mobileHidden: true, rallyOnlyLink: true },
+  { to: "/leads", label: "Leads", icon: "☰", feat: "leads", mobileHidden: true },
   { to: "/chat", label: "Team Chat", icon: "💬", feat: "chat", mobileHidden: true },
   { to: "/schedule", label: "Schedule", icon: "📅", feat: "scheduling" },
   { to: "/shifts", label: "Success Planner", icon: "◎", anyFeat: ["planner", "analytics"], canvassOnly: true },
-  // Team members show up in Team Chat; org-chart & account management stays
-  // reachable from the Dashboard's Team card (admins/managers).
+  // Team members show up in Team Chat; managers/admins get team ratings on the
+  // Leaderboard, which also links to the org chart & accounts page.
   { to: "/team", label: "Team", icon: "⛩", feat: "team", rallyOnlyLink: true },
   { to: "/closer", label: "Closer", icon: "🤝", closer: true, canvassOnly: true },
   { to: "/battery", label: "Battery Tool", icon: "🔋", closer: true, feat: "battery", canvassOnly: true },
