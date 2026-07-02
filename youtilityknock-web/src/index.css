@@ -2127,12 +2127,14 @@ body.modal-open .chat-fab-global { display: none; }
 }
 .dash-2col {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  /* minmax(0, 1fr) (not 1fr) so a card with un-wrappable content — e.g. the
+     Today's Schedule rows — truncates instead of forcing its column wider. */
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   gap: 16px;
 }
 @media (max-width: 800px) {
   .dash-2col {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
   }
 }
 @media (max-width: 620px) {
@@ -2887,9 +2889,9 @@ body.modal-open .chat-fab-global { display: none; }
 .inbox-reply { display: flex; gap: 8px; }
 
 /* ── Dashboard: Today's Schedule mini-agenda ─────────────── */
-.today-sched { display: grid; gap: 6px; margin: 8px 0 10px; }
+.today-sched { display: grid; grid-template-columns: minmax(0, 1fr); gap: 6px; margin: 8px 0 10px; }
 .today-sched-row {
-  display: flex; align-items: center; gap: 8px; font-size: 14px;
+  display: flex; align-items: center; gap: 8px; font-size: 14px; min-width: 0;
   border-left: 3px solid var(--line-hi); padding: 3px 0 3px 8px; border-radius: 2px;
 }
 .today-sched-time {
