@@ -8,6 +8,7 @@ import {
   PTS, LEVEL_PTS, computePoints, levelInfo, tierFor, initials, avatarColor, pointLines,
 } from "../lib/points";
 import { periodKey, seasonDocId, activeDaysThisYear, SEASON_LABEL, type SeasonView } from "../lib/season";
+import Podium from "../components/Podium";
 import type { Team, UserProfile, UserStats } from "../types";
 
 interface Ranked extends UserStats {
@@ -159,13 +160,7 @@ export default function Leaderboard() {
 
       {me && <StandingHero me={me} total={ranked.length} prorated={view === "year"} />}
 
-      {podium.length > 0 && (
-        <div className="podium">
-          {[podium[1], podium[0], podium[2]].map((p, i) =>
-            p ? <PodiumSpot key={p.uid} r={p} you={p.uid === profile?.uid} /> : <div key={`e-${i}`} className="podium-empty" />
-          )}
-        </div>
-      )}
+      <Podium entries={podium} youUid={profile?.uid} />
 
       {ranked.length === 0 ? (
         <div className="empty">No points yet {view !== "alltime" ? `for ${SEASON_LABEL[view].toLowerCase()}` : ""} — they pile up as the team knocks, books, and closes. 🚪→💰</div>
@@ -391,27 +386,6 @@ function StandingHero({ me, total, prorated }: { me: Ranked; total: number; pror
         <div className="lb-hero-pts-n">{me.headline}</div>
         <div className="muted small">{prorated ? me.sub : "points"}</div>
       </div>
-    </div>
-  );
-}
-
-function PodiumSpot({ r, you }: { r: Ranked; you: boolean }) {
-  const place = r.rank;
-  const lvl = levelInfo(r.points);
-  const tier = tierFor(lvl.level);
-  const medal = place === 1 ? "🥇" : place === 2 ? "🥈" : "🥉";
-  return (
-    <div className={`podium-spot place-${place}` + (you ? " you" : "")}>
-      {place === 1 && <div className="podium-crown">👑</div>}
-      <div className="podium-avatar" style={{ background: avatarColor(r.uid) }}>
-        {initials(r.userName)}
-        <span className="podium-medal">{medal}</span>
-      </div>
-      <div className="podium-name">{r.userName || "—"}{you && <span className="you-pill">YOU</span>}</div>
-      <div className="podium-tier" style={{ color: tier.color }}>{tier.emoji} L{lvl.level}</div>
-      <div className="podium-pts">{r.headline}</div>
-      <div className={`podium-base base-${place}`}><span className="podium-base-n">{place}</span></div>
-      <div className="muted small podium-sub">{r.sub || `${r.sales ?? 0}💰 · ${r.appointments ?? 0}📅`}</div>
     </div>
   );
 }

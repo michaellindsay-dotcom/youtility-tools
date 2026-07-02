@@ -2924,3 +2924,7 @@ body.modal-open .chat-fab-global { display: none; }
 /* ── Who's Working embedded in the Chat main pane ────────── */
 .chat-working { flex: 1; min-height: 0; overflow-y: auto; padding: 16px 18px; }
 .chat-working .page-head { margin-bottom: 12px; }
+
+/* ── Dashboard top-3 podium card ─────────────────────────── */
+.dash-podium { display: block; }
+.dash-podium .podium { margin: 14px 0 6px; }

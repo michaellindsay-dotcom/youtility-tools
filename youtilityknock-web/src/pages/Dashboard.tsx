@@ -4,8 +4,10 @@ import { collection, doc, getDoc, getDocs, limit, orderBy, query, where } from "
 import { db } from "../firebase";
 import { useAuth } from "../auth/AuthContext";
 import { hasFeature } from "../lib/features";
+import { computePoints } from "../lib/points";
 import CalendarBanner from "../components/CalendarBanner";
 import BizCardHero from "../components/BizCardHero";
+import Podium from "../components/Podium";
 import { cardAccentVars, cardThemeBg } from "../lib/cardTheme";
 import { CARD_SHARE_BASE_URL } from "./BusinessCard";
 import type { EventType, Lead, ScheduleEvent, Shift, UserStats } from "../types";
@@ -172,6 +174,13 @@ export default function Dashboard() {
     return { today: since(windows.today), week: since(windows.week), month: since(windows.month) };
   }, [leads, shifts, soldLeads]);
 
+  // Top-3 for the dashboard podium, ranked by leaderboard points (closes,
+  // appointments, shifts, …) so it previews the all-time leaderboard podium.
+  const podiumTop = useMemo(
+    () => [...top].sort((a, b) => computePoints(b) - computePoints(a)).slice(0, 3),
+    [top]
+  );
+
   // Success planner — what they need to hit goals at current pace.
   const plan = useMemo(() => {
     const now = new Date();
@@ -248,6 +257,16 @@ export default function Dashboard() {
         {/* Today's agenda — whole card links to the full schedule */}
         <TodayScheduleCard />
       </div>
+
+      {/* Top-3 podium — a preview of the leaderboard; tap through to the team
+          breakdown (Team Ratings live on the Leaderboard). */}
+      {podiumTop.length > 0 && (
+        <Link to="/leaderboard" className="card link-card dash-podium">
+          <h2>🏆 Top 3 <span className="muted small" style={{ fontWeight: 400 }}>→</span></h2>
+          <Podium entries={podiumTop} youUid={profile?.uid} />
+          <span className="muted small">Tap for the full team breakdown →</span>
+        </Link>
+      )}
 
       {/* Today's funnel */}
       <div className="row" style={{ alignItems: "baseline", gap: 12, flexWrap: "wrap" }}>
