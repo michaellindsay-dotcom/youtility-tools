@@ -779,13 +779,14 @@ export const deleteRole = onCall(async (request) => {
 // ───────────────────────────────────────────────────────────────────────────
 export const createTeam = onCall(async (request) => {
   const caller = await getCaller(request);
-  const { companyId, name, parentTeamId, leadUserId, servicePermissions } = request.data as
-    { companyId?: string; name?: string; parentTeamId?: string | null; leadUserId?: string; servicePermissions?: string[] };
+  const { companyId, name, parentTeamId, leadUserId, servicePermissions, logoUrl } = request.data as
+    { companyId?: string; name?: string; parentTeamId?: string | null; leadUserId?: string; servicePermissions?: string[]; logoUrl?: string | null };
   const company = authorizeForCompany(caller, companyId);
   if (!name?.trim()) throw new HttpsError("invalid-argument", "Team name required.");
   const ref = await db.collection(`companies/${company}/teams`).add({
     companyId: company, name: name.trim(),
     parentTeamId: parentTeamId || null, leadUserId: leadUserId || null,
+    logoUrl: logoUrl || null,
     // Locked-baseline services granted to everyone on the team.
     servicePermissions: Array.isArray(servicePermissions) ? servicePermissions : [],
     createdAt: Date.now(),
@@ -795,8 +796,8 @@ export const createTeam = onCall(async (request) => {
 
 export const updateTeam = onCall(async (request) => {
   const caller = await getCaller(request);
-  const { companyId, teamId, name, parentTeamId, leadUserId, servicePermissions } = request.data as
-    { companyId?: string; teamId?: string; name?: string; parentTeamId?: string | null; leadUserId?: string; servicePermissions?: string[] };
+  const { companyId, teamId, name, parentTeamId, leadUserId, servicePermissions, logoUrl } = request.data as
+    { companyId?: string; teamId?: string; name?: string; parentTeamId?: string | null; leadUserId?: string; servicePermissions?: string[]; logoUrl?: string | null };
   const company = authorizeForCompany(caller, companyId);
   if (!teamId) throw new HttpsError("invalid-argument", "teamId required.");
   const patch: Record<string, unknown> = {};
@@ -804,6 +805,7 @@ export const updateTeam = onCall(async (request) => {
   if (parentTeamId !== undefined) patch.parentTeamId = parentTeamId || null;
   if (leadUserId !== undefined) patch.leadUserId = leadUserId || null;
   if (servicePermissions !== undefined) patch.servicePermissions = Array.isArray(servicePermissions) ? servicePermissions : [];
+  if (logoUrl !== undefined) patch.logoUrl = logoUrl || null;
   await db.doc(`companies/${company}/teams/${teamId}`).set(patch, { merge: true });
   return { ok: true };
 });

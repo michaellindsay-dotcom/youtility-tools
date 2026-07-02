@@ -970,6 +970,13 @@
         <div class="field"><span>Team name *</span><input id="teamName" placeholder="e.g. West Region" /></div>
         <div class="field"><span>Parent team</span><select id="teamParent"><option value="">— none (top level) —</option></select></div>
       </div>
+      <div class="field">
+        <span>Team logo (optional)</span>
+        <div class="row" style="align-items:center;gap:10px;">
+          <img id="teamLogoPreview" style="display:none;width:40px;height:40px;border-radius:8px;object-fit:cover;border:1px solid var(--line-hi);" />
+          <input id="teamLogoFile" type="file" accept="image/*" />
+        </div>
+      </div>
       <div class="row" style="justify-content:flex-end;">
         <button id="teamCancel" class="btn ghost sm">Cancel</button>
         <button id="teamSave" class="btn primary sm">Create team</button>
@@ -3641,16 +3648,36 @@ async function loadRoles() {
 }
 
 // ── Teams ─────────────────────────────────────────────────────────────────
+let newTeamLogoUrl = "";
 $("newTeamBtn").addEventListener("click", () => $("teamForm").classList.toggle("hidden"));
-$("teamCancel").addEventListener("click", () => $("teamForm").classList.add("hidden"));
+$("teamCancel").addEventListener("click", () => {
+  $("teamForm").classList.add("hidden");
+  newTeamLogoUrl = "";
+  $("teamLogoPreview").style.display = "none";
+});
+$("teamLogoFile").addEventListener("change", async (e) => {
+  const cid = state.selectedCompany;
+  const file = e.target.files?.[0];
+  e.target.value = "";
+  if (!cid || !file) return;
+  try {
+    const r = sRef(storage, `teams/${cid}/${Date.now()}_${file.name.replace(/[^\w.-]/g,"_")}`);
+    await uploadBytes(r, file);
+    newTeamLogoUrl = await getDownloadURL(r);
+    $("teamLogoPreview").src = newTeamLogoUrl;
+    $("teamLogoPreview").style.display = "";
+  } catch (e) { banner($("banner"), e.message || "Logo upload failed (is Storage enabled?).", "error"); }
+});
 $("teamSave").addEventListener("click", async () => {
   const name = $("teamName").value.trim();
   if (!name) return;
   $("teamSave").disabled = true;
   try {
-    await createTeam({ companyId: state.selectedCompany, name, parentTeamId: $("teamParent").value || null });
+    await createTeam({ companyId: state.selectedCompany, name, parentTeamId: $("teamParent").value || null, logoUrl: newTeamLogoUrl || null });
     $("teamName").value = "";
     $("teamForm").classList.add("hidden");
+    newTeamLogoUrl = "";
+    $("teamLogoPreview").style.display = "none";
     banner($("banner"), "Team created.", "good");
     await loadTeams(); populateUserFormSelects();
   } catch (e) { banner($("banner"), e.message || "Failed to create team.", "error"); }
@@ -3675,7 +3702,12 @@ async function loadTeams() {
       const parentOpts = `<option value="">— none (top level) —</option>` +
         state.teams.filter((x) => x.id !== t.id).map((x) =>
           `<option value="${x.id}" ${t.parentTeamId===x.id?'selected':''}>${esc(x.name)}</option>`).join("");
-      tr.innerHTML = `<td><strong class="teamOpen" style="cursor:pointer;color:#0EA5E9;" title="Open team">${esc(t.name)}</strong></td>
+      tr.innerHTML = `<td>
+          <div class="row" style="align-items:center;gap:8px;">
+            ${t.logoUrl ? `<img src="${esc(t.logoUrl)}" style="width:24px;height:24px;border-radius:6px;object-fit:cover;flex-shrink:0;" />` : ""}
+            <strong class="teamOpen" style="cursor:pointer;color:#0EA5E9;" title="Open team">${esc(t.name)}</strong>
+          </div>
+        </td>
         <td><select class="teamParentSel">${parentOpts}</select></td>
         <td><button class="btn ghost sm teamOpenBtn">Open ▾</button></td>`;
       const detail = document.createElement("tr");
@@ -3778,13 +3810,82 @@ function renderTeamDetail(t, el) {
     : '<div class="muted small">No members on this team yet — assign people to this team in Accounts.</div>');
 
   el.innerHTML = `
-    <h4 style="margin:4px 0;font-size:13px;">Team services <span class="muted small">— locked baseline for everyone on the team</span></h4>
+    <h4 style="margin:4px 0;font-size:13px;">Team info</h4>
+    <div class="row" style="align-items:center;gap:14px;flex-wrap:wrap;">
+      <div class="row" style="align-items:center;gap:10px;">
+        <img class="teamEditLogoPreview" src="${esc(t.logoUrl || '')}" style="width:48px;height:48px;border-radius:10px;object-fit:cover;border:1px solid var(--line-hi);${t.logoUrl ? '' : 'display:none;'}" />
+        <input type="file" class="teamEditLogoFile" accept="image/*" title="Team logo" />
+        ${t.logoUrl ? `<button type="button" class="btn ghost sm teamEditLogoClear">Remove logo</button>` : ""}
+      </div>
+      <div class="field" style="flex:1;min-width:180px;margin:0;">
+        <span>Team name</span>
+        <input type="text" class="teamEditName" value="${esc(t.name || '')}" />
+      </div>
+      <button class="btn primary sm teamEditSave" style="align-self:flex-end;">Save team info</button>
+    </div>
+    <h4 style="margin:14px 0 4px;font-size:13px;">Team services <span class="muted small">— locked baseline for everyone on the team</span></h4>
     <div class="svc-grid">${svc}</div>
     <div class="row" style="justify-content:flex-end;margin:8px 0;"><button class="btn primary sm tsvcSave">Save team services</button></div>
     <h4 style="margin:10px 0 4px;font-size:13px;">Reporting lines <span class="muted small">— click a member to see their downline; drag one member onto another to reassign</span></h4>
     <div class="orgCrumbs" style="margin:4px 0 8px;">${crumbs}</div>
     <div class="orgNodes" data-uid="">${rows}</div>
     <div class="banner teamDetailBanner"></div>`;
+
+  let pendingLogoUrl = t.logoUrl || "";
+  let pendingLogoCleared = false;
+  el.querySelector(".teamEditLogoFile").addEventListener("change", async (ev) => {
+    const cid = state.selectedCompany;
+    const file = ev.target.files?.[0];
+    ev.target.value = "";
+    if (!cid || !file) return;
+    try {
+      const r = sRef(storage, `teams/${cid}/${Date.now()}_${file.name.replace(/[^\w.-]/g,"_")}`);
+      await uploadBytes(r, file);
+      pendingLogoUrl = await getDownloadURL(r);
+      pendingLogoCleared = false;
+      const preview = el.querySelector(".teamEditLogoPreview");
+      preview.src = pendingLogoUrl;
+      preview.style.display = "";
+      if (!el.querySelector(".teamEditLogoClear")) {
+        const clearBtn = document.createElement("button");
+        clearBtn.type = "button"; clearBtn.className = "btn ghost sm teamEditLogoClear"; clearBtn.textContent = "Remove logo";
+        clearBtn.addEventListener("click", () => { pendingLogoUrl = ""; pendingLogoCleared = true; preview.style.display = "none"; });
+        el.querySelector(".teamEditLogoFile").insertAdjacentElement("afterend", clearBtn);
+      }
+      banner(el.querySelector(".teamDetailBanner"), "Logo uploaded — click Save team info to apply.", "good");
+    } catch (e) { banner(el.querySelector(".teamDetailBanner"), e.message || "Logo upload failed (is Storage enabled?).", "error"); }
+  });
+  const logoClearBtn = el.querySelector(".teamEditLogoClear");
+  if (logoClearBtn) logoClearBtn.addEventListener("click", () => {
+    pendingLogoUrl = ""; pendingLogoCleared = true;
+    el.querySelector(".teamEditLogoPreview").style.display = "none";
+  });
+  el.querySelector(".teamEditSave").addEventListener("click", async () => {
+    const name = el.querySelector(".teamEditName").value.trim();
+    if (!name) { banner(el.querySelector(".teamDetailBanner"), "Team name can't be empty.", "error"); return; }
+    try {
+      await updateTeam({
+        companyId: state.selectedCompany, teamId: t.id, name,
+        ...(pendingLogoUrl || pendingLogoCleared ? { logoUrl: pendingLogoUrl || null } : {}),
+      });
+      t.name = name; t.logoUrl = pendingLogoUrl || null;
+      banner(el.querySelector(".teamDetailBanner"), "Team info saved.", "good");
+      // Patch the surrounding UI in place, rather than reloading the whole
+      // teams table, so this panel stays open after saving.
+      const rowTr = el.closest("tr").previousElementSibling;
+      if (rowTr) {
+        rowTr.querySelector(".teamOpen").textContent = t.name;
+        const logoImg = rowTr.querySelector("img");
+        if (t.logoUrl) {
+          if (logoImg) logoImg.src = t.logoUrl;
+          else rowTr.querySelector(".teamOpen").insertAdjacentHTML("beforebegin",
+            `<img src="${esc(t.logoUrl)}" style="width:24px;height:24px;border-radius:6px;object-fit:cover;flex-shrink:0;" />`);
+        } else if (logoImg) logoImg.remove();
+      }
+      document.querySelectorAll(`.teamParentSel option[value="${t.id}"], #teamParent option[value="${t.id}"]`)
+        .forEach((opt) => { opt.textContent = t.name; });
+    } catch (e) { banner(el.querySelector(".teamDetailBanner"), e.message || "Save failed.", "error"); }
+  });
 
   el.querySelector(".tsvcSave").addEventListener("click", async () => {
     const perms = [...el.querySelectorAll(".tsvc")].filter((x) => x.checked).map((x) => x.value);
