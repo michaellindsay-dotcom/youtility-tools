@@ -1,9 +1,11 @@
 import { useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 import { httpsCallable } from "firebase/functions";
 import { ref as storageRef, uploadBytes, getDownloadURL } from "firebase/storage";
 import QRCode from "qrcode";
 import { storage, functions } from "../firebase";
 import { useAuth } from "../auth/AuthContext";
+import { isRallyCardOnly } from "../lib/features";
 import BizCardHero from "../components/BizCardHero";
 import type { CardReview } from "../types";
 import { CARD_THEMES, CARD_THEME_KEYS, cardAccentVars, cardThemeBg } from "../lib/cardTheme";
@@ -11,8 +13,9 @@ import { CARD_THEMES, CARD_THEME_KEYS, cardAccentVars, cardThemeBg } from "../li
 // A rich-preview link (real og:title/description/image) that immediately
 // redirects into the app — see the `cardShare` function. Used for anything
 // people actually send (share sheet, text, email, QR) so link previews show
-// the rep's name/photo instead of the site's generic preview.
-const CARD_SHARE_BASE_URL = "https://youtilityknock.web.app/c";
+// the rep's name/photo instead of the site's generic preview. Exported for the
+// Dashboard's card hero, which shares the same link.
+export const CARD_SHARE_BASE_URL = "https://youtilityknock.web.app/c";
 
 export default function BusinessCard() {
   const { profile, company } = useAuth();
@@ -160,10 +163,16 @@ export default function BusinessCard() {
     a.click();
   }
 
+  // RallyCard-only companies have no Dashboard — this page is their home.
+  const hasDashboard = !isRallyCardOnly(company);
+
   return (
     <div className="page-body">
       <div className="page-head">
-        <h1>My RallyCard</h1>
+        <div className="row" style={{ justifyContent: "space-between", alignItems: "flex-start", gap: 10, flexWrap: "wrap" }}>
+          <h1>My RallyCard</h1>
+          {hasDashboard && <Link className="btn ghost sm" to="/">← Back to Dashboard</Link>}
+        </div>
         <p className="page-sub">
           A public, no-login page homeowners can visit — your photo, story, and reviews, with a
           one-tap way to call, text, or leave you their info. Share the link or print the QR code

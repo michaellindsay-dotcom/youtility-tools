@@ -1,10 +1,13 @@
 import { useEffect, useMemo, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { collection, doc, getDoc, getDocs, query, where } from "firebase/firestore";
 import { db } from "../firebase";
 import { useAuth } from "../auth/AuthContext";
 import { hasFeature } from "../lib/features";
 import CalendarBanner from "../components/CalendarBanner";
+import BizCardHero from "../components/BizCardHero";
+import { cardAccentVars, cardThemeBg } from "../lib/cardTheme";
+import { CARD_SHARE_BASE_URL } from "./BusinessCard";
 import type { Lead, Shift, UserStats } from "../types";
 
 // Default targets (configurable later via a company `config` doc).
@@ -197,30 +200,11 @@ export default function Dashboard() {
     myStats && (myStats.appointments ?? 0) > 0
       ? `${Math.round(((myStats.sits ?? 0) / (myStats.appointments ?? 1)) * 100)}%`
       : null;
-  const first = profile?.displayName?.split(" ")[0] ?? "there";
-
   return (
     <div className="page-body dash">
-      <div className="dash-hero">
-        <div className="muted small">YoutilityKnock</div>
-        <h1>Welcome back, {first}!</h1>
-        <p className="page-sub">Track your progress, crush your goals, and climb the leaderboard.</p>
-      </div>
+      <RallyCardHero />
 
       <CalendarBanner />
-
-      {!profile?.cardEnabled && (
-        <div className="card row" style={{ justifyContent: "space-between", alignItems: "center" }}>
-          <div>
-            <strong>🪪 Set up your RallyCard</strong>
-            <p className="muted small" style={{ marginTop: 2 }}>
-              A shareable digital business card — photo, reviews, and a lead-capture form homeowners
-              can fill out right on the doorstep.
-            </p>
-          </div>
-          <Link className="btn primary sm" to="/card">Get started</Link>
-        </div>
-      )}
 
       <div className="dash-2col">
         {/* Success planner (optional service) */}
@@ -292,6 +276,103 @@ export default function Dashboard() {
       )}
 
       {loading && <p className="muted small" style={{ marginTop: 16 }}>Loading your numbers…</p>}
+    </div>
+  );
+}
+
+// The rep's live RallyCard, front and center where "Welcome back" used to be —
+// show it at the door, send it, or let the homeowner scan the QR on the card.
+// Tapping anywhere except a button/link opens the card settings.
+function RallyCardHero() {
+  const { profile, company } = useAuth();
+  const navigate = useNavigate();
+  const [msg, setMsg] = useState("");
+
+  const shareUrl = profile?.cardSlug ? `${CARD_SHARE_BASE_URL}/${profile.cardSlug}` : "";
+  const shareText = `Check out my digital business card${profile?.displayName ? ` — ${profile.displayName}` : ""}: ${shareUrl}`;
+
+  // No card yet — the hero becomes the setup prompt.
+  if (!profile || !profile.cardEnabled || !shareUrl) {
+    return (
+      <div className="card row" style={{ justifyContent: "space-between", alignItems: "center" }}>
+        <div>
+          <strong>🪪 Set up your RallyCard</strong>
+          <p className="muted small" style={{ marginTop: 2 }}>
+            A shareable digital business card — photo, reviews, and a lead-capture form homeowners
+            can fill out right on the doorstep. It'll live right here for easy access.
+          </p>
+        </div>
+        <Link className="btn primary sm" to="/card">Get started</Link>
+      </div>
+    );
+  }
+
+  const copyLink = () => {
+    navigator.clipboard?.writeText(shareUrl)
+      .then(() => setMsg("Link copied ✓"))
+      .catch(() => {});
+  };
+  const shareCard = async () => {
+    if (navigator.share) {
+      try {
+        await navigator.share({ title: "My RallyCard", text: shareText, url: shareUrl });
+      } catch {
+        // user cancelled the share sheet — nothing to do
+      }
+    } else {
+      copyLink();
+    }
+  };
+
+  const openSettings = (e: React.MouseEvent) => {
+    // The send buttons and the card's own tap-to-call/text/email links keep
+    // doing their thing; a tap anywhere else edits the card.
+    if ((e.target as HTMLElement).closest("a, button")) return;
+    navigate("/card");
+  };
+
+  return (
+    <div
+      className="card"
+      onClick={openSettings}
+      title="Tap to edit your RallyCard"
+      style={{
+        textAlign: "center",
+        cursor: "pointer",
+        background: cardThemeBg(profile.cardTheme || "default"),
+        ...cardAccentVars(profile.cardAccentColor || "#38bdf8"),
+      }}
+    >
+      <BizCardHero
+        displayName={profile.displayName || ""}
+        title={profile.cardTitle || profile.title}
+        companyName={company?.name}
+        logoUrl={profile.cardLogoUrl || company?.logoUrl || ""}
+        photoUrl={profile.cardPhotoUrl}
+        bgImageUrl={company?.bgImageUrl}
+        memberId={profile.cardMemberId ?? null}
+        idPrefix={company?.idPrefix}
+        phone={profile.phone}
+        email={profile.email}
+        website={company?.website}
+        companyPhone={company?.phone}
+        companyAddress={company?.address}
+        vcfUrl={profile.cardSlug ? `https://youtilityknock.web.app/vcf/${profile.cardSlug}` : undefined}
+      />
+      <div className="row" style={{ marginTop: 12, gap: 8, flexWrap: "wrap", justifyContent: "center" }}>
+        <button className="btn primary sm" onClick={shareCard}>📤 Share</button>
+        <a className="btn ghost sm" href={`sms:?&body=${encodeURIComponent(shareText)}`}>💬 Text it</a>
+        <a
+          className="btn ghost sm"
+          href={`mailto:?subject=${encodeURIComponent("My digital business card")}&body=${encodeURIComponent(shareText)}`}
+        >
+          ✉️ Email it
+        </a>
+        <button className="btn ghost sm" onClick={copyLink}>🔗 Copy link</button>
+      </div>
+      <div className="muted small" style={{ marginTop: 8 }}>
+        {msg || "Tap the card to edit it"}
+      </div>
     </div>
   );
 }

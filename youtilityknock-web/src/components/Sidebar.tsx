@@ -18,12 +18,16 @@ const PREVIEW_POSITIONS: { value: Position; label: string }[] = [
 // phone layout (Movers lives on the map; Leads/Team Chat are reachable from the
 // main flow), keeping the mobile nav lean while desktop keeps the full list.
 // `canvassOnly` hides the link entirely for a RallyCard-only company (no
-// canvassing map) — see `isRallyCardOnly` in lib/features.
-const links: { to: string; label: string; icon: string; end?: boolean; feat?: FeatureKey; anyFeat?: FeatureKey[]; roles?: Role[]; closer?: boolean; mobileHidden?: boolean; canvassOnly?: boolean }[] = [
+// canvassing map) — see `isRallyCardOnly` in lib/features. `rallyOnlyLink` is
+// the inverse: shown ONLY to RallyCard-only companies.
+const links: { to: string; label: string; icon: string; end?: boolean; feat?: FeatureKey; anyFeat?: FeatureKey[]; roles?: Role[]; closer?: boolean; mobileHidden?: boolean; canvassOnly?: boolean; rallyOnlyLink?: boolean }[] = [
   { to: "/", label: "Dashboard", icon: "▦", end: true, canvassOnly: true },
   { to: "/map", label: "Map", icon: "◉", canvassOnly: true },
   { to: "/movers", label: "Movers", icon: "🚚", feat: "movers", mobileHidden: true, canvassOnly: true },
-  { to: "/card", label: "RallyCard", icon: "🪪" },
+  // Full-platform companies reach the card from the Dashboard hero (tap the
+  // card to edit), so no nav item; RallyCard-only companies keep the link —
+  // the card IS their home page and they have no Dashboard.
+  { to: "/card", label: "RallyCard", icon: "🪪", rallyOnlyLink: true },
   { to: "/inbox", label: "Texts", icon: "📨" },
   { to: "/leads", label: "Leads", icon: "☰", feat: "leads", mobileHidden: true },
   { to: "/chat", label: "Team Chat", icon: "💬", feat: "chat", mobileHidden: true },
@@ -74,6 +78,7 @@ export default function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
 
   const visible = links.filter((l) => {
     if (l.canvassOnly && rallyOnly) return false;
+    if (l.rallyOnlyLink && !rallyOnly) return false;
     // Closer-only tools: gate on actually being a closer (closers, closer
     // managers and team managers all carry isCloser) or admin — NOT on the
     // generic manager tier, so a SETTER manager never sees closer information.
