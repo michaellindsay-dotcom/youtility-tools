@@ -64,19 +64,6 @@ export default function Shifts() {
             canvassing time. Door knocks count automatically while on shift.
           </p>
         </div>
-        {showAnalytics && (
-          <div className="filter-bar">
-            {METRICS.map((m) => (
-              <button
-                key={m.key}
-                className={"chip-btn" + (sortBy === m.key ? " active" : "")}
-                onClick={() => setSortBy(m.key)}
-              >
-                {m.label}
-              </button>
-            ))}
-          </div>
-        )}
       </div>
 
       {/* Top: goal planner + the data */}
@@ -94,8 +81,17 @@ export default function Shifts() {
                   <tr>
                     <th>#</th>
                     <th>Rep</th>
+                    {/* Column headers double as the sort control (replaces the
+                        old chip row up top, whose effect was easy to miss). */}
                     {METRICS.map((m) => (
-                      <th key={m.key}>{m.label}</th>
+                      <th
+                        key={m.key}
+                        onClick={() => setSortBy(m.key)}
+                        style={{ cursor: "pointer", whiteSpace: "nowrap" }}
+                        title={`Sort by ${m.label.toLowerCase()}`}
+                      >
+                        {m.label}{sortBy === m.key ? " ▾" : ""}
+                      </th>
                     ))}
                   </tr>
                 </thead>
