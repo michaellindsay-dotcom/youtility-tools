@@ -1191,8 +1191,8 @@
       <div id="inviteLinkBox" class="banner" style="word-break:break-all;"></div>
     </div>
     <table>
-      <thead><tr><th>Name</th><th>Email</th><th>Role / title</th><th>Position</th><th>Team</th><th>Reports to (setter / closer)</th><th>Status</th><th></th></tr></thead>
-      <tbody id="usersBody"><tr><td colspan="8" class="muted">Select a company…</td></tr></tbody>
+      <thead><tr><th>Name</th><th>Email</th><th>Role / position</th><th>Team</th><th>Reports to (setter / closer)</th><th>Status</th><th></th></tr></thead>
+      <tbody id="usersBody"><tr><td colspan="7" class="muted">Select a company…</td></tr></tbody>
     </table>
   </section>
 
@@ -3703,11 +3703,47 @@ async function loadTeams() {
   } catch (e) { body.innerHTML = `<tr><td colspan="3" class="banner error show">${esc(e.message)}</td></tr>`; }
 }
 
-// Open team view: locked-baseline service permissions + drag-drop reporting lines.
+// Open team view: locked-baseline service permissions + a drill-down org chart.
 // A team named "Corporate" is the umbrella/overview team: it shows every account
 // in the company (Company Admin sees all, per the platform's access model), while
 // every other team is scoped to its own roster and hides Company Admin accounts —
 // admins sit above the org chart, not inside a department's downline.
+// The chart opens at the top of the reporting chain; click a member to descend
+// into their direct reports, in downline order. Drag a member onto another to
+// reassign their manager; drag onto "Team top" to clear it (make them a root).
+function directReportsOf(members, uid) {
+  return members
+    .filter((u) => (u.managerId || null) === uid)
+    .sort((a, b) => (a.displayName || a.email || "").localeCompare(b.displayName || b.email || ""));
+}
+function teamRoots(members) {
+  const ids = new Set(members.map((u) => u.id));
+  return members
+    .filter((u) => !u.managerId || !ids.has(u.managerId))
+    .sort((a, b) => (a.displayName || a.email || "").localeCompare(b.displayName || b.email || ""));
+}
+function pathToMember(members, uid) {
+  const path = [];
+  const seen = new Set();
+  let cur = members.find((m) => m.id === uid);
+  while (cur && !seen.has(cur.id)) {
+    path.unshift(cur);
+    seen.add(cur.id);
+    cur = cur.managerId ? members.find((m) => m.id === cur.managerId) : null;
+  }
+  return path;
+}
+function isDescendantOf(members, ancestorUid, uid) {
+  let cur = members.find((m) => m.id === uid);
+  const seen = new Set();
+  while (cur && cur.managerId && !seen.has(cur.id)) {
+    if (cur.managerId === ancestorUid) return true;
+    seen.add(cur.id);
+    cur = members.find((m) => m.id === cur.managerId);
+  }
+  return false;
+}
+
 function renderTeamDetail(t, el) {
   const tsp = Array.isArray(t.servicePermissions) ? t.servicePermissions : [];
   const isCorporate = /^corporate$/i.test((t.name || "").trim());
@@ -3715,19 +3751,41 @@ function renderTeamDetail(t, el) {
     ? state.users.slice()
     : state.users.filter((u) => u.teamId === t.id && u.role !== "admin");
   const svc = SERVICES.map(([k, l]) => `<label class="day-chip"><input type="checkbox" class="tsvc" value="${k}" ${tsp.includes(k) ? 'checked' : ''}/> ${l}</label>`).join("");
-  const mlist = members.length ? members.map((u) => {
-    const mgr = u.managerId ? ((state.users.find((x) => x.id === u.managerId) || {}).displayName || "—") : "—";
-    return `<div class="teamMember" draggable="true" data-uid="${u.id}" style="padding:8px 10px;border:1px solid #21314a;border-radius:8px;margin:4px 0;cursor:grab;">
-      <strong>${esc(u.displayName || u.email)}</strong> <span class="muted small">${esc(POSITION_LABEL[u.position] || '')}</span>
-      <span class="muted small" style="float:right;">reports to: ${esc(mgr)}</span></div>`;
-  }).join("") : '<div class="muted small">No members on this team yet — assign people to this team in Accounts.</div>';
+
+  const focusUid = t._focusUid && members.some((m) => m.id === t._focusUid) ? t._focusUid : null;
+  const path = focusUid ? pathToMember(members, focusUid) : [];
+  const listing = focusUid ? directReportsOf(members, focusUid) : teamRoots(members);
+  const focusMember = focusUid ? members.find((m) => m.id === focusUid) : null;
+
+  const crumbs = [`<button type="button" class="orgCrumb" data-uid="">Team top</button>`]
+    .concat(path.map((p) => `<button type="button" class="orgCrumb" data-uid="${p.id}">${esc(p.displayName || p.email)}</button>`))
+    .join('<span class="muted small"> / </span>');
+
+  const rows = listing.length ? listing.map((u) => {
+    const reportCount = directReportsOf(members, u.id).length;
+    return `<div class="orgNode" draggable="true" data-uid="${u.id}" style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:9px 12px;border:1px solid #21314a;border-radius:8px;margin:5px 0;cursor:grab;">
+      <div>
+        <strong>${esc(u.displayName || u.email)}</strong>
+        <span class="muted small">${esc(POSITION_LABEL[u.position] || '')}</span>
+      </div>
+      <div class="row" style="gap:8px;align-items:center;">
+        ${reportCount ? `<span class="muted small">${reportCount} direct report${reportCount === 1 ? '' : 's'}</span>` : `<span class="muted small">No direct reports</span>`}
+        ${reportCount ? `<button type="button" class="btn ghost sm orgDrill" data-uid="${u.id}">Open ›</button>` : ''}
+      </div>
+    </div>`;
+  }).join("") : (focusUid
+    ? '<div class="muted small">No direct reports yet — drag a member here to have them report to this person.</div>'
+    : '<div class="muted small">No members on this team yet — assign people to this team in Accounts.</div>');
+
   el.innerHTML = `
     <h4 style="margin:4px 0;font-size:13px;">Team services <span class="muted small">— locked baseline for everyone on the team</span></h4>
     <div class="svc-grid">${svc}</div>
     <div class="row" style="justify-content:flex-end;margin:8px 0;"><button class="btn primary sm tsvcSave">Save team services</button></div>
-    <h4 style="margin:10px 0 4px;font-size:13px;">Reporting lines <span class="muted small">— drag a member onto their manager</span></h4>
-    <div class="teamMembers">${mlist}</div>
+    <h4 style="margin:10px 0 4px;font-size:13px;">Reporting lines <span class="muted small">— click a member to see their downline; drag one member onto another to reassign</span></h4>
+    <div class="orgCrumbs" style="margin:4px 0 8px;">${crumbs}</div>
+    <div class="orgNodes" data-uid="">${rows}</div>
     <div class="banner teamDetailBanner"></div>`;
+
   el.querySelector(".tsvcSave").addEventListener("click", async () => {
     const perms = [...el.querySelectorAll(".tsvc")].filter((x) => x.checked).map((x) => x.value);
     try {
@@ -3736,23 +3794,57 @@ function renderTeamDetail(t, el) {
       banner(el.querySelector(".teamDetailBanner"), "Team services saved.", "good");
     } catch (e) { banner(el.querySelector(".teamDetailBanner"), e.message || "Save failed.", "error"); }
   });
-  el.querySelectorAll(".teamMember").forEach((node) => {
-    node.addEventListener("dragstart", (e) => { e.dataTransfer.setData("text/uid", node.dataset.uid); node.style.opacity = "0.5"; });
-    node.addEventListener("dragend", () => { node.style.opacity = "1"; });
-    node.addEventListener("dragover", (e) => { e.preventDefault(); node.style.outline = "2px solid #0EA5E9"; });
-    node.addEventListener("dragleave", () => { node.style.outline = "none"; });
-    node.addEventListener("drop", async (e) => {
-      e.preventDefault(); node.style.outline = "none";
-      const dragUid = e.dataTransfer.getData("text/uid");
-      const targetUid = node.dataset.uid;
-      if (!dragUid || dragUid === targetUid) return;
-      try {
-        await assignUserHierarchy({ uid: dragUid, managerId: targetUid });
-        banner(el.querySelector(".teamDetailBanner"), "Reporting line updated.", "good");
-        await loadUsers(); renderTeamDetail(t, el);
-      } catch (err) { banner(el.querySelector(".teamDetailBanner"), err.message || "Update failed.", "error"); }
+
+  // Breadcrumbs: click to jump back up to that point in the chain (or "Team top").
+  el.querySelectorAll(".orgCrumb").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      t._focusUid = btn.dataset.uid || null;
+      renderTeamDetail(t, el);
     });
   });
+  // Drill in explicitly via the "Open ›" button, or by clicking anywhere else on the row.
+  el.querySelectorAll(".orgDrill").forEach((btn) => {
+    btn.addEventListener("click", (e) => { e.stopPropagation(); t._focusUid = btn.dataset.uid; renderTeamDetail(t, el); });
+  });
+  el.querySelectorAll(".orgNode").forEach((node) => {
+    node.addEventListener("click", () => {
+      if (directReportsOf(members, node.dataset.uid).length) { t._focusUid = node.dataset.uid; renderTeamDetail(t, el); }
+    });
+  });
+
+  async function reassign(dragUid, targetUid) {
+    if (!dragUid || dragUid === targetUid) return;
+    if (targetUid && isDescendantOf(members, dragUid, targetUid)) {
+      banner(el.querySelector(".teamDetailBanner"), "Can't move someone under their own downline.", "error");
+      return;
+    }
+    try {
+      await assignUserHierarchy({ uid: dragUid, managerId: targetUid || null });
+      banner(el.querySelector(".teamDetailBanner"), "Reporting line updated.", "good");
+      await loadUsers(); renderTeamDetail(t, el);
+    } catch (err) { banner(el.querySelector(".teamDetailBanner"), err.message || "Update failed.", "error"); }
+  }
+
+  el.querySelectorAll(".orgNode").forEach((node) => {
+    node.addEventListener("dragstart", (e) => { e.dataTransfer.setData("text/uid", node.dataset.uid); node.style.opacity = "0.5"; });
+    node.addEventListener("dragend", () => { node.style.opacity = "1"; });
+    node.addEventListener("dragover", (e) => { e.preventDefault(); e.stopPropagation(); node.style.outline = "2px solid #0EA5E9"; });
+    node.addEventListener("dragleave", () => { node.style.outline = "none"; });
+    node.addEventListener("drop", (e) => {
+      e.preventDefault(); e.stopPropagation(); node.style.outline = "none";
+      reassign(e.dataTransfer.getData("text/uid"), node.dataset.uid);
+    });
+  });
+  // Drop on "Team top" to clear a manager (promote to the root of the chain).
+  el.querySelectorAll('.orgCrumb[data-uid=""]').forEach((crumb) => {
+    crumb.addEventListener("dragover", (e) => { e.preventDefault(); crumb.style.outline = "2px solid #0EA5E9"; });
+    crumb.addEventListener("dragleave", () => { crumb.style.outline = "none"; });
+    crumb.addEventListener("drop", (e) => {
+      e.preventDefault(); crumb.style.outline = "none";
+      reassign(e.dataTransfer.getData("text/uid"), null);
+    });
+  });
+  void focusMember;
 }
 
 // ── Users / accounts ─────────────────────────────────────────────────────
@@ -3840,30 +3932,36 @@ $("userSave").addEventListener("click", async () => {
 
 async function loadUsers() {
   const body = $("usersBody");
-  if (!state.selectedCompany) { body.innerHTML = `<tr><td colspan="8" class="muted">Select a company…</td></tr>`; return; }
-  body.innerHTML = `<tr><td colspan="8" class="muted">Loading…</td></tr>`;
+  if (!state.selectedCompany) { body.innerHTML = `<tr><td colspan="7" class="muted">Select a company…</td></tr>`; return; }
+  body.innerHTML = `<tr><td colspan="7" class="muted">Loading…</td></tr>`;
   try {
     const snap = await getDocs(query(collection(db, "users"),
       where("companyId", "==", state.selectedCompany), orderBy("createdAt", "desc")));
     state.users = snap.docs.map((d) => ({ id:d.id, ...d.data() }));
-    if (!state.users.length) { body.innerHTML = `<tr><td colspan="8" class="muted">No accounts yet.</td></tr>`; return; }
+    if (!state.users.length) { body.innerHTML = `<tr><td colspan="7" class="muted">No accounts yet.</td></tr>`; return; }
     const nameOf = (uid) => { const u = state.users.find((x)=>x.id===uid); return u ? (u.displayName||u.email) : uid; };
     body.innerHTML = "";
     state.users.forEach((u) => {
       const tr = document.createElement("tr");
-      // role/title select: company roles + Admin
-      const roleOptions = state.roles.map((r)=>`<option value="role:${r.id}" ${u.roleId===r.id?'selected':''}>${esc(r.title)}</option>`).join("")
-        + `<option value="tier:admin" ${u.role==='admin'?'selected':''}>Company Admin</option>`;
+      // Custom-title override: plain list of company roles (no "Company Admin" —
+      // that's a Position, set via the primary select below).
+      const roleOptions = state.roles.map((r)=>`<option value="${r.id}" ${u.roleId===r.id?'selected':''}>${esc(r.title)}</option>`).join("");
       // setter-manager select (exclude self)
       const mgrOptions = `<option value="">— none —</option>` +
         state.users.filter((x)=>x.id!==u.id).map((x)=>`<option value="${x.id}" ${u.managerId===x.id?'selected':''}>${esc(x.displayName||x.email)}</option>`).join("");
       // closer-manager select: only other closers (the parallel chain)
       const closerMgrOptions = `<option value="">— none —</option>` +
         state.users.filter((x)=>x.id!==u.id && x.isCloser).map((x)=>`<option value="${x.id}" ${u.closerManagerId===x.id?'selected':''}>${esc(x.displayName||x.email)}</option>`).join("");
-      // Position select (drives tier + setter/closer function).
+      // Position (the structural source of truth: drives tier + setter/closer
+      // function). A matching Role/title is kept in sync automatically — see
+      // POSITION_ROLE_TIER's auto-seeding in loadRoles() — so day to day there's
+      // just one control to set. "Custom title" below is only for the rare case
+      // where a company wants a different permission bundle than the default.
       const curPos = u.position || (u.role === "admin" ? "admin" : (u.isCloser && u.isSetter !== false ? "" : (u.isCloser ? "closer" : "setter")));
       const posOptions = `<option value="">— set position —</option>` +
         POSITIONS.map(([p, l]) => `<option value="${p}" ${curPos === p ? 'selected' : ''}>${l}</option>`).join("");
+      const matchedRole = state.roles.find((r) => (r.title || "").trim().toLowerCase() === (POSITION_LABEL[curPos] || "").toLowerCase());
+      const usingCustomTitle = !!u.roleId && (!matchedRole || u.roleId !== matchedRole.id);
       const isCloserFn = u.isCloser || curPos === "closer" || curPos === "closer_manager";
       const teamOpts = state.teams.map((t) => `<option value="${t.id}" ${(u.managedTeamIds || []).includes(t.id) ? 'selected' : ''}>${esc(t.name)}</option>`).join("");
       const myTeamOptions = `<option value="">— none —</option>` +
@@ -3871,8 +3969,14 @@ async function loadUsers() {
       const mirrorBtn = state.isSuper ? `<button class="btn sm mirrorBtn">Mirror</button>` : "";
       tr.innerHTML = `<td>${esc(u.displayName||"—")}${u.role==='admin'?' <span class="badge admin">admin</span>':''}</td>
         <td class="muted">${esc(u.email||"")}</td>
-        <td><select class="roleSel">${roleOptions}</select></td>
-        <td><select class="posSel">${posOptions}</select></td>
+        <td>
+          <select class="posSel">${posOptions}</select>
+          <div class="roleCustomWrap" style="margin-top:4px;">
+            ${usingCustomTitle
+              ? `<select class="roleSel">${roleOptions}</select>`
+              : `<button type="button" class="roleCustomToggle" style="font:inherit;font-size:11px;color:var(--ink-dim);background:none;border:none;cursor:pointer;padding:0;text-decoration:underline;">Custom title…</button>`}
+          </div>
+        </td>
         <td><select class="myTeamSel">${myTeamOptions}</select></td>
         <td><div style="display:grid;gap:4px;">
           <select class="mgrSel" title="Setter manager">${mgrOptions}</select>
@@ -3898,13 +4002,21 @@ async function loadUsers() {
         finally { ev.target.disabled = false; }
       });
 
-      tr.querySelector(".roleSel").addEventListener("change", async (ev) => {
-        const v = ev.target.value;
+      async function saveCustomTitle(roleId) {
         try {
-          if (v.startsWith("role:")) await assignUserHierarchy({ uid:u.id, roleId:v.slice(5) });
-          else if (v === "tier:admin") await setUserRole({ uid:u.id, role:"admin" });
-          banner($("banner"),"Role updated.","good"); await loadUsers(); populateUserFormSelects();
-        } catch (e) { banner($("banner"), e.message, "error"); }
+          await assignUserHierarchy({ uid: u.id, roleId: roleId || null });
+          banner($("banner"), "Custom title updated.", "good"); await loadUsers(); populateUserFormSelects();
+        } catch (e) { banner($("banner"), e.message, "error"); loadUsers(); }
+      }
+      const existingRoleSel = tr.querySelector(".roleSel");
+      if (existingRoleSel) existingRoleSel.addEventListener("change", (ev) => saveCustomTitle(ev.target.value));
+      const roleCustomToggle = tr.querySelector(".roleCustomToggle");
+      if (roleCustomToggle) roleCustomToggle.addEventListener("click", () => {
+        const wrap = tr.querySelector(".roleCustomWrap");
+        wrap.innerHTML = `<select class="roleSel">${roleOptions}</select>`;
+        const sel = wrap.querySelector(".roleSel");
+        sel.addEventListener("change", (ev) => saveCustomTitle(ev.target.value));
+        sel.focus();
       });
       tr.querySelector(".mgrSel").addEventListener("change", async (ev) => {
         try { await assignUserHierarchy({ uid:u.id, managerId: ev.target.value || null });
@@ -3919,9 +4031,13 @@ async function loadUsers() {
       tr.querySelector(".posSel").addEventListener("change", async (ev) => {
         const v = ev.target.value; // position key
         if (!v) return;
-        try { await assignUserHierarchy({ uid:u.id, position: v });
-          banner($("banner"),"Position updated.","good"); await loadUsers(); populateUserFormSelects(); }
-        catch (e) { banner($("banner"), e.message, "error"); loadUsers(); }
+        // Unless this account already has a deliberately custom title, keep the
+        // Role/title in sync with the new Position (they're auto-seeded 1:1).
+        const nextRole = usingCustomTitle ? null : state.roles.find((r) => (r.title || "").trim().toLowerCase() === (POSITION_LABEL[v] || "").toLowerCase());
+        try {
+          await assignUserHierarchy({ uid: u.id, position: v, ...(nextRole ? { roleId: nextRole.id } : {}) });
+          banner($("banner"),"Position updated.","good"); await loadUsers(); populateUserFormSelects();
+        } catch (e) { banner($("banner"), e.message, "error"); loadUsers(); }
       });
       tr.querySelector(".myTeamSel").addEventListener("change", async (ev) => {
         try { await assignUserHierarchy({ uid:u.id, teamId: ev.target.value || null });
@@ -3968,7 +4084,7 @@ async function loadUsers() {
       body.appendChild(tr);
     });
     void nameOf;
-  } catch (e) { body.innerHTML = `<tr><td colspan="8" class="banner error show">${esc(e.message)}</td></tr>`; }
+  } catch (e) { body.innerHTML = `<tr><td colspan="7" class="banner error show">${esc(e.message)}</td></tr>`; }
 }
 
 // Permanently delete a user, first choosing who inherits their leads/appointments.
