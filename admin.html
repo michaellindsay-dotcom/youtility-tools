@@ -1191,8 +1191,8 @@
       <div id="inviteLinkBox" class="banner" style="word-break:break-all;"></div>
     </div>
     <table>
-      <thead><tr><th>Name</th><th>Email</th><th>Role / title</th><th>Position</th><th>Team</th><th>Reports to (setter / closer)</th><th>Status</th><th></th></tr></thead>
-      <tbody id="usersBody"><tr><td colspan="8" class="muted">Select a company…</td></tr></tbody>
+      <thead><tr><th>Name</th><th>Email</th><th>Role / position</th><th>Team</th><th>Reports to (setter / closer)</th><th>Status</th><th></th></tr></thead>
+      <tbody id="usersBody"><tr><td colspan="7" class="muted">Select a company…</td></tr></tbody>
     </table>
   </section>
 
@@ -3932,30 +3932,36 @@ $("userSave").addEventListener("click", async () => {
 
 async function loadUsers() {
   const body = $("usersBody");
-  if (!state.selectedCompany) { body.innerHTML = `<tr><td colspan="8" class="muted">Select a company…</td></tr>`; return; }
-  body.innerHTML = `<tr><td colspan="8" class="muted">Loading…</td></tr>`;
+  if (!state.selectedCompany) { body.innerHTML = `<tr><td colspan="7" class="muted">Select a company…</td></tr>`; return; }
+  body.innerHTML = `<tr><td colspan="7" class="muted">Loading…</td></tr>`;
   try {
     const snap = await getDocs(query(collection(db, "users"),
       where("companyId", "==", state.selectedCompany), orderBy("createdAt", "desc")));
     state.users = snap.docs.map((d) => ({ id:d.id, ...d.data() }));
-    if (!state.users.length) { body.innerHTML = `<tr><td colspan="8" class="muted">No accounts yet.</td></tr>`; return; }
+    if (!state.users.length) { body.innerHTML = `<tr><td colspan="7" class="muted">No accounts yet.</td></tr>`; return; }
     const nameOf = (uid) => { const u = state.users.find((x)=>x.id===uid); return u ? (u.displayName||u.email) : uid; };
     body.innerHTML = "";
     state.users.forEach((u) => {
       const tr = document.createElement("tr");
-      // role/title select: company roles + Admin
-      const roleOptions = state.roles.map((r)=>`<option value="role:${r.id}" ${u.roleId===r.id?'selected':''}>${esc(r.title)}</option>`).join("")
-        + `<option value="tier:admin" ${u.role==='admin'?'selected':''}>Company Admin</option>`;
+      // Custom-title override: plain list of company roles (no "Company Admin" —
+      // that's a Position, set via the primary select below).
+      const roleOptions = state.roles.map((r)=>`<option value="${r.id}" ${u.roleId===r.id?'selected':''}>${esc(r.title)}</option>`).join("");
       // setter-manager select (exclude self)
       const mgrOptions = `<option value="">— none —</option>` +
         state.users.filter((x)=>x.id!==u.id).map((x)=>`<option value="${x.id}" ${u.managerId===x.id?'selected':''}>${esc(x.displayName||x.email)}</option>`).join("");
       // closer-manager select: only other closers (the parallel chain)
       const closerMgrOptions = `<option value="">— none —</option>` +
         state.users.filter((x)=>x.id!==u.id && x.isCloser).map((x)=>`<option value="${x.id}" ${u.closerManagerId===x.id?'selected':''}>${esc(x.displayName||x.email)}</option>`).join("");
-      // Position select (drives tier + setter/closer function).
+      // Position (the structural source of truth: drives tier + setter/closer
+      // function). A matching Role/title is kept in sync automatically — see
+      // POSITION_ROLE_TIER's auto-seeding in loadRoles() — so day to day there's
+      // just one control to set. "Custom title" below is only for the rare case
+      // where a company wants a different permission bundle than the default.
       const curPos = u.position || (u.role === "admin" ? "admin" : (u.isCloser && u.isSetter !== false ? "" : (u.isCloser ? "closer" : "setter")));
       const posOptions = `<option value="">— set position —</option>` +
         POSITIONS.map(([p, l]) => `<option value="${p}" ${curPos === p ? 'selected' : ''}>${l}</option>`).join("");
+      const matchedRole = state.roles.find((r) => (r.title || "").trim().toLowerCase() === (POSITION_LABEL[curPos] || "").toLowerCase());
+      const usingCustomTitle = !!u.roleId && (!matchedRole || u.roleId !== matchedRole.id);
       const isCloserFn = u.isCloser || curPos === "closer" || curPos === "closer_manager";
       const teamOpts = state.teams.map((t) => `<option value="${t.id}" ${(u.managedTeamIds || []).includes(t.id) ? 'selected' : ''}>${esc(t.name)}</option>`).join("");
       const myTeamOptions = `<option value="">— none —</option>` +
@@ -3963,8 +3969,14 @@ async function loadUsers() {
       const mirrorBtn = state.isSuper ? `<button class="btn sm mirrorBtn">Mirror</button>` : "";
       tr.innerHTML = `<td>${esc(u.displayName||"—")}${u.role==='admin'?' <span class="badge admin">admin</span>':''}</td>
         <td class="muted">${esc(u.email||"")}</td>
-        <td><select class="roleSel">${roleOptions}</select></td>
-        <td><select class="posSel">${posOptions}</select></td>
+        <td>
+          <select class="posSel">${posOptions}</select>
+          <div class="roleCustomWrap" style="margin-top:4px;">
+            ${usingCustomTitle
+              ? `<select class="roleSel">${roleOptions}</select>`
+              : `<button type="button" class="roleCustomToggle" style="font:inherit;font-size:11px;color:var(--ink-dim);background:none;border:none;cursor:pointer;padding:0;text-decoration:underline;">Custom title…</button>`}
+          </div>
+        </td>
         <td><select class="myTeamSel">${myTeamOptions}</select></td>
         <td><div style="display:grid;gap:4px;">
           <select class="mgrSel" title="Setter manager">${mgrOptions}</select>
@@ -3990,13 +4002,21 @@ async function loadUsers() {
         finally { ev.target.disabled = false; }
       });
 
-      tr.querySelector(".roleSel").addEventListener("change", async (ev) => {
-        const v = ev.target.value;
+      async function saveCustomTitle(roleId) {
         try {
-          if (v.startsWith("role:")) await assignUserHierarchy({ uid:u.id, roleId:v.slice(5) });
-          else if (v === "tier:admin") await setUserRole({ uid:u.id, role:"admin" });
-          banner($("banner"),"Role updated.","good"); await loadUsers(); populateUserFormSelects();
-        } catch (e) { banner($("banner"), e.message, "error"); }
+          await assignUserHierarchy({ uid: u.id, roleId: roleId || null });
+          banner($("banner"), "Custom title updated.", "good"); await loadUsers(); populateUserFormSelects();
+        } catch (e) { banner($("banner"), e.message, "error"); loadUsers(); }
+      }
+      const existingRoleSel = tr.querySelector(".roleSel");
+      if (existingRoleSel) existingRoleSel.addEventListener("change", (ev) => saveCustomTitle(ev.target.value));
+      const roleCustomToggle = tr.querySelector(".roleCustomToggle");
+      if (roleCustomToggle) roleCustomToggle.addEventListener("click", () => {
+        const wrap = tr.querySelector(".roleCustomWrap");
+        wrap.innerHTML = `<select class="roleSel">${roleOptions}</select>`;
+        const sel = wrap.querySelector(".roleSel");
+        sel.addEventListener("change", (ev) => saveCustomTitle(ev.target.value));
+        sel.focus();
       });
       tr.querySelector(".mgrSel").addEventListener("change", async (ev) => {
         try { await assignUserHierarchy({ uid:u.id, managerId: ev.target.value || null });
@@ -4011,9 +4031,13 @@ async function loadUsers() {
       tr.querySelector(".posSel").addEventListener("change", async (ev) => {
         const v = ev.target.value; // position key
         if (!v) return;
-        try { await assignUserHierarchy({ uid:u.id, position: v });
-          banner($("banner"),"Position updated.","good"); await loadUsers(); populateUserFormSelects(); }
-        catch (e) { banner($("banner"), e.message, "error"); loadUsers(); }
+        // Unless this account already has a deliberately custom title, keep the
+        // Role/title in sync with the new Position (they're auto-seeded 1:1).
+        const nextRole = usingCustomTitle ? null : state.roles.find((r) => (r.title || "").trim().toLowerCase() === (POSITION_LABEL[v] || "").toLowerCase());
+        try {
+          await assignUserHierarchy({ uid: u.id, position: v, ...(nextRole ? { roleId: nextRole.id } : {}) });
+          banner($("banner"),"Position updated.","good"); await loadUsers(); populateUserFormSelects();
+        } catch (e) { banner($("banner"), e.message, "error"); loadUsers(); }
       });
       tr.querySelector(".myTeamSel").addEventListener("change", async (ev) => {
         try { await assignUserHierarchy({ uid:u.id, teamId: ev.target.value || null });
@@ -4060,7 +4084,7 @@ async function loadUsers() {
       body.appendChild(tr);
     });
     void nameOf;
-  } catch (e) { body.innerHTML = `<tr><td colspan="8" class="banner error show">${esc(e.message)}</td></tr>`; }
+  } catch (e) { body.innerHTML = `<tr><td colspan="7" class="banner error show">${esc(e.message)}</td></tr>`; }
 }
 
 // Permanently delete a user, first choosing who inherits their leads/appointments.
