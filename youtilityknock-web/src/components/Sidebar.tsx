@@ -32,7 +32,7 @@ const links: { to: string; label: string; icon: string; end?: boolean; feat?: Fe
   { to: "/leads", label: "Leads", icon: "☰", feat: "leads", mobileHidden: true },
   { to: "/chat", label: "Team Chat", icon: "💬", feat: "chat", mobileHidden: true },
   { to: "/schedule", label: "Schedule", icon: "📅", feat: "scheduling" },
-  { to: "/shifts", label: "Success Planner", icon: "◎", anyFeat: ["planner", "analytics"], canvassOnly: true },
+  // Success Planner is reached from its Dashboard card (tap it to open).
   // Team members show up in Team Chat; managers/admins get team ratings on the
   // Leaderboard, which also links to the org chart & accounts page.
   { to: "/team", label: "Team", icon: "⛩", feat: "team", rallyOnlyLink: true },

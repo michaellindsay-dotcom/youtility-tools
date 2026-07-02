@@ -207,11 +207,11 @@ export default function Dashboard() {
       <CalendarBanner />
 
       <div className="dash-2col">
-        {/* Success planner (optional service) */}
+        {/* Success planner (optional service) — whole card opens the full planner */}
         {showPlanner && (
-          <div className="card planner">
+          <Link to="/shifts" className="card planner link-card">
             <div className="planner-top">
-              <h2 className="planner-h">◎ Success Planner</h2>
+              <h2 className="planner-h">◎ Success Planner <span className="muted small" style={{ fontWeight: 400 }}>→</span></h2>
               <div className="planner-ring">
                 <div className="ring-pct">{plan.monthlyPct}%</div>
                 <div className="muted small">monthly</div>
@@ -223,7 +223,8 @@ export default function Dashboard() {
               <li><strong>This week:</strong> {plan.weekPerDay} doors/day <span className="muted">({f.week.doors}/{GOALS.doorsWeek} done)</span></li>
               <li><strong>This month:</strong> {plan.monthPerDay} doors/day <span className="muted">({f.month.doors}/{GOALS.doorsMonth} done)</span></li>
             </ul>
-          </div>
+            <span className="muted small">Open full planner →</span>
+          </Link>
         )}
 
         {/* Top performers — whole card links to the leaderboard */}
