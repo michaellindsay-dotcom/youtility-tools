@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { collection, doc, getDoc, getDocs, query, where } from "firebase/firestore";
+import { collection, doc, getDoc, getDocs, limit, orderBy, query, where } from "firebase/firestore";
 import { db } from "../firebase";
 import { useAuth } from "../auth/AuthContext";
 import { hasFeature } from "../lib/features";
+import { DISPOSITIONS } from "../lib/dispositions";
 import CalendarBanner from "../components/CalendarBanner";
 import BizCardHero from "../components/BizCardHero";
 import { cardAccentVars, cardThemeBg } from "../lib/cardTheme";
@@ -243,6 +244,20 @@ export default function Dashboard() {
           )}
           <span className="muted small">View full leaderboard →</span>
         </Link>
+
+        {/* Admin/manager tools — replace the old Leads & Team sidebar links.
+            Reps work their own leads on the Map while knocking; team members
+            show up in Team Chat. */}
+        {(role === "admin" || role === "manager") && <RecentLeadsCard />}
+        {(role === "admin" || role === "manager") && (
+          <Link to="/team" className="card link-card">
+            <h2>⛩ Team <span className="muted small" style={{ fontWeight: 400 }}>→</span></h2>
+            <p className="muted small">
+              Org chart, teams &amp; accounts. Everyone can also see team members in Team Chat.
+            </p>
+            <span className="muted small">Manage your team →</span>
+          </Link>
+        )}
       </div>
 
       {/* Today's funnel */}
@@ -277,6 +292,52 @@ export default function Dashboard() {
 
       {loading && <p className="muted small" style={{ marginTop: 16 }}>Loading your numbers…</p>}
     </div>
+  );
+}
+
+// The company's lead list, surfaced on the admin/manager dashboard now that
+// the Leads sidebar link is gone (reps see their leads on the Map while
+// knocking). Shows the latest few; the whole card opens the full list.
+function RecentLeadsCard() {
+  const { profile, role } = useAuth();
+  const [recent, setRecent] = useState<Lead[]>([]);
+
+  useEffect(() => {
+    if (!profile?.companyId) return;
+    let cancelled = false;
+    // Mirrors the Leads page queries (same composite indexes): admins see the
+    // whole company, managers their downstream.
+    const filters = [where("companyId", "==", profile.companyId)];
+    if (role !== "admin") filters.push(where("visibilityPath", "array-contains", profile.uid));
+    getDocs(query(collection(db, "leads"), ...filters, orderBy("updatedAt", "desc"), limit(4)))
+      .then((snap) => {
+        if (!cancelled) setRecent(snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<Lead, "id">) })));
+      })
+      .catch((err) => console.warn("recent leads fetch failed", err));
+    return () => {
+      cancelled = true;
+    };
+  }, [profile, role]);
+
+  const statusLabel = (s: string) => DISPOSITIONS.find((d) => d.value === s)?.label ?? s;
+
+  return (
+    <Link to="/leads" className="card link-card">
+      <h2>☰ Leads <span className="muted small" style={{ fontWeight: 400 }}>→</span></h2>
+      {recent.length === 0 ? (
+        <p className="muted small">No leads yet — new leads land here as your team knocks.</p>
+      ) : (
+        <ol className="top-list">
+          {recent.map((l) => (
+            <li key={l.id}>
+              <span>{l.address}</span>
+              <span className="muted">{statusLabel(l.status)}</span>
+            </li>
+          ))}
+        </ol>
+      )}
+      <span className="muted small">View all leads →</span>
+    </Link>
   );
 }
 

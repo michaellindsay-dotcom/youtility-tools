@@ -1,7 +1,9 @@
 import { useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 import { collection, getDocs, query, where } from "firebase/firestore";
 import { db } from "../firebase";
 import { useAuth } from "../auth/AuthContext";
+import { isRallyCardOnly } from "../lib/features";
 import type { UserProfile } from "../types";
 
 const TIER_BADGE: Record<string, string> = {
@@ -57,7 +59,7 @@ function Node({
 }
 
 export default function Team() {
-  const { profile, role, companyId } = useAuth();
+  const { profile, role, companyId, company } = useAuth();
   const [users, setUsers] = useState<UserProfile[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -104,7 +106,13 @@ export default function Team() {
   return (
     <div className="page-body">
       <div className="page-head">
-        <h1>Team</h1>
+        <div className="row" style={{ justifyContent: "space-between", alignItems: "flex-start", gap: 10, flexWrap: "wrap" }}>
+          <h1>Team</h1>
+          {/* RallyCard-only companies have no Dashboard to go back to. */}
+          {!isRallyCardOnly(company) && (
+            <Link className="btn ghost sm" to="/">← Back to Dashboard</Link>
+          )}
+        </div>
         <p className="page-sub">
           {role === "admin" ? "Your company" : "Your downstream"} org chart.
         </p>
