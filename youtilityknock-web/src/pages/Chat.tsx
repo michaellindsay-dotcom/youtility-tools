@@ -14,6 +14,7 @@ import {
 import { ref as storageRef, uploadBytes, getDownloadURL } from "firebase/storage";
 import { db, storage } from "../firebase";
 import { useAuth } from "../auth/AuthContext";
+import WhosWorkingPanel from "../components/WhosWorkingPanel";
 import type { ChatMessage, UserProfile } from "../types";
 
 // Deterministic DM channel id for a pair of uids (order-independent).
@@ -21,7 +22,7 @@ function dmId(a: string, b: string): string {
   return [a, b].sort().join("__");
 }
 
-type Conversation = { kind: "channel" } | { kind: "dm"; other: UserProfile };
+type Conversation = { kind: "channel" } | { kind: "working" } | { kind: "dm"; other: UserProfile };
 
 export default function Chat() {
   const { profile, role, companyId } = useAuth();
@@ -56,6 +57,11 @@ export default function Chat() {
   // Subscribe to the active conversation's messages.
   useEffect(() => {
     if (!profile || !companyId) return;
+    // The "Who's Working" view has no message stream of its own.
+    if (conv.kind === "working") {
+      setMessages([]);
+      return;
+    }
     if (conv.kind === "channel") {
       const q = query(
         collection(db, "chat"),
@@ -79,7 +85,12 @@ export default function Chat() {
   }, [messages]);
 
   const title = useMemo(
-    () => (conv.kind === "channel" ? "Team Chat" : conv.other.displayName),
+    () =>
+      conv.kind === "channel"
+        ? "Team Chat"
+        : conv.kind === "working"
+        ? "Who's Working"
+        : conv.other.displayName,
     [conv]
   );
 
@@ -96,7 +107,9 @@ export default function Chat() {
         ...(imageUrl ? { imageUrl } : {}),
         createdAt: Date.now(),
       };
-      if (conv.kind === "channel") {
+      if (conv.kind === "working") {
+        return; // no message stream — the compose bar isn't shown here anyway
+      } else if (conv.kind === "channel") {
         await addDoc(collection(db, "chat"), { companyId, ...base });
       } else {
         const cid = dmId(profile.uid, conv.other.uid);
@@ -156,6 +169,16 @@ export default function Chat() {
               <div className="muted small">Everyone in your company</div>
             </div>
           </button>
+          <button
+            className={"chat-conv" + (conv.kind === "working" ? " active" : "")}
+            onClick={() => setConv({ kind: "working" })}
+          >
+            <span className="chat-conv-ico">🔥</span>
+            <div>
+              <div className="chat-conv-name">Who's Working</div>
+              <div className="muted small">Live shifts &amp; shout-outs</div>
+            </div>
+          </button>
           <div className="chat-rail-label muted small">Direct messages</div>
           {teammates.length === 0 && <div className="muted small" style={{ padding: "8px 12px" }}>No teammates yet.</div>}
           {teammates.map((u) => (
@@ -174,6 +197,12 @@ export default function Chat() {
         </aside>
 
         <section className="chat-main">
+          {conv.kind === "working" ? (
+            <div className="chat-working">
+              <WhosWorkingPanel />
+            </div>
+          ) : (
+          <>
           <div className="chat-head">
             <h2>{title}</h2>
           </div>
@@ -235,6 +264,8 @@ export default function Chat() {
               Send
             </button>
           </form>
+          </>
+          )}
         </section>
       </div>
     </div>
