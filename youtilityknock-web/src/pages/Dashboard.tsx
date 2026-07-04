@@ -236,37 +236,9 @@ export default function Dashboard() {
           </Link>
         )}
 
-        {/* Top performers — whole card links to the leaderboard */}
-        <Link to="/leaderboard" className="card link-card top-performers">
-          <h2>🏆 Top Performers <span className="muted small" style={{ fontWeight: 400 }}>→</span></h2>
-          {top.length === 0 ? (
-            <p className="muted small">No team production logged yet — sold deals and appointments show up here.</p>
-          ) : (
-            <ol className="top-list">
-              {top.slice(0, 3).map((t) => (
-                <li key={t.uid}>
-                  <span>{t.userName || t.uid}</span>
-                  <span className="muted">{t.sales ?? 0} sold · {t.appointments ?? 0} appts</span>
-                </li>
-              ))}
-            </ol>
-          )}
-          <span className="muted small">View full leaderboard →</span>
-        </Link>
-
         {/* Today's agenda — whole card links to the full schedule */}
         <TodayScheduleCard />
       </div>
-
-      {/* Top-3 podium — a preview of the leaderboard; tap through to the team
-          breakdown (Team Ratings live on the Leaderboard). */}
-      {podiumTop.length > 0 && (
-        <Link to="/leaderboard" className="card link-card dash-podium">
-          <h2>🏆 Top 3 <span className="muted small" style={{ fontWeight: 400 }}>→</span></h2>
-          <Podium entries={podiumTop} youUid={profile?.uid} />
-          <span className="muted small">Tap for the full team breakdown →</span>
-        </Link>
-      )}
 
       {/* Today's funnel */}
       <div className="row" style={{ alignItems: "baseline", gap: 12, flexWrap: "wrap" }}>
@@ -297,6 +269,19 @@ export default function Dashboard() {
           </div>
         </>
       )}
+
+      {/* Top performers — the leaderboard Top 3 podium, moved to the bottom so
+          the planner, today's numbers and weekly progress lead the dashboard.
+          Whole card links to the full leaderboard. */}
+      <Link to="/leaderboard" className="card link-card top-performers dash-podium">
+        <h2>🏆 Top Performers <span className="muted small" style={{ fontWeight: 400 }}>→</span></h2>
+        {podiumTop.length === 0 ? (
+          <p className="muted small">No team production logged yet — sold deals and appointments show up here.</p>
+        ) : (
+          <Podium entries={podiumTop} youUid={profile?.uid} />
+        )}
+        <span className="muted small">View full leaderboard →</span>
+      </Link>
 
       {loading && <p className="muted small" style={{ marginTop: 16 }}>Loading your numbers…</p>}
     </div>
