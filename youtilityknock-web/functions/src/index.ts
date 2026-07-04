@@ -2110,6 +2110,46 @@ function normalizeCardSlug(input: string): string {
     .slice(0, 32);
 }
 
+// Reps don't pick their own card link — it's assigned from their name so it's
+// predictable and there are never collisions across the (globally shared) URL
+// space. Start with first-initial + last name ("mlindsay"), fall back to the
+// full first name ("mikelindsay") if that's taken, then a numeric suffix so a
+// unique link is always produced. `selfUid` is treated as free (re-runs are
+// idempotent).
+async function generateUniqueCardSlug(displayName: string, selfUid: string): Promise<string> {
+  const parts = String(displayName || "").trim().split(/\s+/).filter(Boolean);
+  const first = parts[0] || "";
+  const last = parts.length > 1 ? parts[parts.length - 1] : "";
+
+  const candidates: string[] = [];
+  if (first && last) {
+    candidates.push(normalizeCardSlug(first.slice(0, 1) + last)); // mlindsay
+    candidates.push(normalizeCardSlug(first + last));             // mikelindsay
+  } else if (first) {
+    candidates.push(normalizeCardSlug(first));
+  }
+
+  const isFree = async (slug: string): Promise<boolean> => {
+    if (!CARD_SLUG_RE.test(slug)) return false;
+    const snap = await db.collection("users").where("cardSlug", "==", slug).limit(1).get();
+    return snap.empty || snap.docs[0].id === selfUid;
+  };
+
+  for (const c of candidates) {
+    if (await isFree(c)) return c;
+  }
+
+  // Everything above was taken (or the name was unusable) — append a number to
+  // the fullest name-based stem we have so the result is still unique.
+  const stem = (normalizeCardSlug(candidates[candidates.length - 1] || "") || "member").slice(0, 28);
+  for (let n = 2; n < 1000; n++) {
+    const c = `${stem}-${n}`;
+    if (await isFree(c)) return c;
+  }
+  // Astronomically unlikely fallback.
+  return normalizeCardSlug(`${stem}-${100000 + crypto.randomInt(900000)}`);
+}
+
 // A website saved without "http(s)://" (e.g. "youtility.us") renders as a
 // broken relative link (`https://youtilityknock.web.app/youtility.us`)
 // instead of opening the real site — assume https when no scheme is given.
@@ -2131,47 +2171,68 @@ function sanitizeCardReviews(input: unknown): { name: string; text: string; rati
     .filter((r) => r.text);
 }
 
-// A rep edits their own card. `slug` must be unique across the whole platform
-// (every company shares one hosting domain, so the card URL space is global).
+// A rep edits their own card. Reps may only change their photo, title and bio —
+// the link, colors, logo override, service area and reviews are admin-managed
+// (company branding / defaults), so those inputs are ignored unless the caller
+// is an admin editing their own card. The card link is assigned automatically
+// from the rep's name (see generateUniqueCardSlug); slugs are unique across the
+// whole platform (every company shares one hosting domain, so the URL space is
+// global).
 export const setMyCard = onCall(async (request) => {
   const caller = await getCaller(request);
+  const isAdmin = caller.isSuper || caller.role === "admin";
   const d = (request.data || {}) as {
     slug?: string; enabled?: boolean; title?: string; bio?: string; serviceArea?: string;
     photoUrl?: string; logoUrl?: string; reviews?: unknown; accentColor?: string; theme?: string;
   };
   const update: Record<string, unknown> = {};
-  if (typeof d.slug === "string") {
-    const slug = normalizeCardSlug(d.slug);
-    if (!CARD_SLUG_RE.test(slug)) {
-      throw new HttpsError("invalid-argument", "Link must be 3-32 lowercase letters, numbers, or hyphens.");
-    }
-    const existing = await db.collection("users").where("cardSlug", "==", slug).limit(1).get();
-    if (!existing.empty && existing.docs[0].id !== caller.uid) {
-      throw new HttpsError("already-exists", "That link is already taken — try another.");
-    }
-    update.cardSlug = slug;
-  }
-  if (typeof d.enabled === "boolean") update.cardEnabled = d.enabled;
-  if (typeof d.title === "string") update.cardTitle = d.title.trim().slice(0, 80);
-  if (typeof d.bio === "string") update.cardBio = d.bio.trim().slice(0, 1000);
-  if (typeof d.serviceArea === "string") update.cardServiceArea = d.serviceArea.trim().slice(0, 200);
-  if (typeof d.photoUrl === "string") update.cardPhotoUrl = d.photoUrl.trim().slice(0, 1000);
-  if (typeof d.logoUrl === "string") update.cardLogoUrl = d.logoUrl.trim().slice(0, 1000);
-  if (d.reviews !== undefined) update.cardReviews = sanitizeCardReviews(d.reviews);
-  if (typeof d.accentColor === "string") {
-    const c = d.accentColor.trim();
-    if (c && !CARD_HEX_COLOR_RE.test(c)) throw new HttpsError("invalid-argument", "Accent color must be a hex value like #2563eb.");
-    update.cardAccentColor = c;
-  }
-  if (typeof d.theme === "string") {
-    const t = d.theme.trim();
-    if (t && !CARD_THEME_KEYS.has(t)) throw new HttpsError("invalid-argument", "Unknown card theme.");
-    update.cardTheme = t;
-  }
-  if (Object.keys(update).length === 0) throw new HttpsError("invalid-argument", "Nothing to update.");
 
   const me = await db.doc(`users/${caller.uid}`).get();
   const meData = (me.data() || {}) as any;
+
+  // Fields every rep controls.
+  if (typeof d.title === "string") update.cardTitle = d.title.trim().slice(0, 80);
+  if (typeof d.bio === "string") update.cardBio = d.bio.trim().slice(0, 1000);
+  if (typeof d.photoUrl === "string") update.cardPhotoUrl = d.photoUrl.trim().slice(0, 1000);
+
+  if (isAdmin) {
+    // Admin-only fields (an admin still has full control of their own card).
+    if (typeof d.slug === "string") {
+      const slug = normalizeCardSlug(d.slug);
+      if (!CARD_SLUG_RE.test(slug)) {
+        throw new HttpsError("invalid-argument", "Link must be 3-32 lowercase letters, numbers, or hyphens.");
+      }
+      const existing = await db.collection("users").where("cardSlug", "==", slug).limit(1).get();
+      if (!existing.empty && existing.docs[0].id !== caller.uid) {
+        throw new HttpsError("already-exists", "That link is already taken — try another.");
+      }
+      update.cardSlug = slug;
+    }
+    if (typeof d.enabled === "boolean") update.cardEnabled = d.enabled;
+    if (typeof d.serviceArea === "string") update.cardServiceArea = d.serviceArea.trim().slice(0, 200);
+    if (typeof d.logoUrl === "string") update.cardLogoUrl = d.logoUrl.trim().slice(0, 1000);
+    if (d.reviews !== undefined) update.cardReviews = sanitizeCardReviews(d.reviews);
+    if (typeof d.accentColor === "string") {
+      const c = d.accentColor.trim();
+      if (c && !CARD_HEX_COLOR_RE.test(c)) throw new HttpsError("invalid-argument", "Accent color must be a hex value like #2563eb.");
+      update.cardAccentColor = c;
+    }
+    if (typeof d.theme === "string") {
+      const t = d.theme.trim();
+      if (t && !CARD_THEME_KEYS.has(t)) throw new HttpsError("invalid-argument", "Unknown card theme.");
+      update.cardTheme = t;
+    }
+  } else {
+    // Reps never pick their own link — auto-assign one from their name on first
+    // save, and take the card live automatically (they have no live toggle).
+    if (!meData.cardSlug) {
+      update.cardSlug = await generateUniqueCardSlug(meData.displayName || "", caller.uid);
+    }
+    if (!meData.cardEnabled) update.cardEnabled = true;
+  }
+
+  if (Object.keys(update).length === 0) throw new HttpsError("invalid-argument", "Nothing to update.");
+
   if (update.cardEnabled === true && !update.cardSlug && !meData.cardSlug) {
     throw new HttpsError("failed-precondition", "Choose a card link before turning your card on.");
   }
