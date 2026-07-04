@@ -18,7 +18,11 @@ import { CARD_THEMES, CARD_THEME_KEYS, cardAccentVars, cardThemeBg } from "../li
 export const CARD_SHARE_BASE_URL = "https://youtilityknock.web.app/c";
 
 export default function BusinessCard() {
-  const { profile, company } = useAuth();
+  const { profile, company, role } = useAuth();
+  // Reps only manage their photo, title and bio. The link (auto-assigned),
+  // colors, logo override, service area and reviews are admin-managed, so those
+  // controls are shown only to admins editing their own card.
+  const isAdmin = role === "admin" || role === "superadmin";
   const [slug, setSlug] = useState(profile?.cardSlug || "");
   const [enabled, setEnabled] = useState(!!profile?.cardEnabled);
   const [title, setTitle] = useState(profile?.cardTitle || profile?.title || "");
@@ -206,6 +210,7 @@ export default function BusinessCard() {
         )}
       </div>
 
+      {isAdmin && (
       <div className="card">
         <h3 style={{ marginBottom: 4 }}>Colors &amp; style</h3>
         <p className="muted small" style={{ marginBottom: 12 }}>
@@ -244,7 +249,9 @@ export default function BusinessCard() {
           ))}
         </div>
       </div>
+      )}
 
+      {isAdmin && (
       <div className="card">
         <h3 style={{ marginBottom: 4 }}>Company logo</h3>
         <p className="muted small" style={{ marginBottom: 12 }}>
@@ -267,22 +274,33 @@ export default function BusinessCard() {
           )}
         </div>
       </div>
+      )}
 
       <div className="card">
         <h3 style={{ marginBottom: 4 }}>Card link</h3>
-        <p className="muted small" style={{ marginBottom: 12 }}>
-          Pick something short and memorable — this is what people type or scan.
-        </p>
-        <div className="row" style={{ alignItems: "center" }}>
-          <span className="muted small">{CARD_SHARE_BASE_URL}/</span>
-          <input
-            className="input"
-            style={{ maxWidth: 220 }}
-            placeholder="jane-solar"
-            value={slug}
-            onChange={(e) => setSlug(e.target.value)}
-          />
-        </div>
+        {isAdmin ? (
+          <>
+            <p className="muted small" style={{ marginBottom: 12 }}>
+              Pick something short and memorable — this is what people type or scan.
+            </p>
+            <div className="row" style={{ alignItems: "center" }}>
+              <span className="muted small">{CARD_SHARE_BASE_URL}/</span>
+              <input
+                className="input"
+                style={{ maxWidth: 220 }}
+                placeholder="jane-solar"
+                value={slug}
+                onChange={(e) => setSlug(e.target.value)}
+              />
+            </div>
+          </>
+        ) : (
+          <p className="muted small" style={{ marginBottom: 12 }}>
+            {shareUrl
+              ? "Your card link is assigned for you — share it below."
+              : "Your card link is assigned automatically the first time you save."}
+          </p>
+        )}
         {shareUrl && (
           <>
             <div className="row" style={{ marginTop: 10, alignItems: "center" }}>
@@ -305,12 +323,14 @@ export default function BusinessCard() {
             </p>
           </>
         )}
-        <div className="row" style={{ marginTop: 14, alignItems: "center" }}>
-          <label className="row small" style={{ alignItems: "center", gap: 6 }}>
-            <input type="checkbox" checked={enabled} onChange={(e) => setEnabled(e.target.checked)} />
-            Card is live
-          </label>
-        </div>
+        {isAdmin && (
+          <div className="row" style={{ marginTop: 14, alignItems: "center" }}>
+            <label className="row small" style={{ alignItems: "center", gap: 6 }}>
+              <input type="checkbox" checked={enabled} onChange={(e) => setEnabled(e.target.checked)} />
+              Card is live
+            </label>
+          </div>
+        )}
       </div>
 
       <div className="card">
@@ -342,17 +362,20 @@ export default function BusinessCard() {
               value={bio}
               onChange={(e) => setBio(e.target.value)}
             />
-            <input
-              className="input"
-              style={{ marginTop: 8, width: "100%" }}
-              placeholder="Service area (e.g. Salt Lake &amp; Utah counties)"
-              value={serviceArea}
-              onChange={(e) => setServiceArea(e.target.value)}
-            />
+            {isAdmin && (
+              <input
+                className="input"
+                style={{ marginTop: 8, width: "100%" }}
+                placeholder="Service area (e.g. Salt Lake &amp; Utah counties)"
+                value={serviceArea}
+                onChange={(e) => setServiceArea(e.target.value)}
+              />
+            )}
           </div>
         </div>
       </div>
 
+      {isAdmin && (
       <div className="card">
         <h3 style={{ marginBottom: 4 }}>Reviews</h3>
         <p className="muted small" style={{ marginBottom: 12 }}>
@@ -379,6 +402,7 @@ export default function BusinessCard() {
         ))}
         <button className="btn ghost sm" onClick={addReview}>+ Add a review</button>
       </div>
+      )}
 
       {qrDataUrl && (
         <div className="card" style={{ textAlign: "center" }}>
