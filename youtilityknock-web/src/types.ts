@@ -255,6 +255,13 @@ export interface Lead {
   territoryId?: string;
   knockCount?: number; // doors knocked at this home (drives territory completion)
   history?: LeadHistoryEntry[]; // every knock/disposition, oldest first
+  // Soft-delete (company admin only). Leads are never hard-deleted; a deleted
+  // lead is hidden everywhere and only visible in the admin's Deleted list.
+  deleted?: boolean;
+  deletedAt?: number;
+  deletedBy?: string;
+  deletedByName?: string;
+  deleteReason?: string;
   // Area energy incentives captured at set time, so they travel to the closer.
   incentives?: AreaIncentive[];
   incentivesUtility?: { name: string; rate: number | null } | null;

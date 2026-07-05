@@ -150,10 +150,15 @@ service cloud.firestore {
                     && request.auth.uid in request.resource.data.visibilityPath;
       allow update: if inMyCompany(resource.data.companyId)
                     && (isSuper() || isCompanyAdmin() || inPath(resource.data.visibilityPath))
-                    && request.resource.data.companyId == resource.data.companyId;
-      allow delete: if inMyCompany(resource.data.companyId)
-                    && (isSuper() || isCompanyAdmin()
-                        || (isManagerOrAdmin() && inPath(resource.data.visibilityPath)));
+                    && request.resource.data.companyId == resource.data.companyId
+                    // Only company admins (or super) may archive/restore a lead
+                    // (toggle the `deleted` flag). Everyone else's updates must
+                    // leave it unchanged.
+                    && (request.resource.data.get('deleted', false) == resource.data.get('deleted', false)
+                        || isSuper() || isCompanyAdmin());
+      // Leads are never hard-deleted — deletion is a soft archive (an update
+      // that sets `deleted`, gated to admins above).
+      allow delete: if false;
     }
 
     // ── shifts (downstream-scoped, same visibilityPath pattern) ──────────

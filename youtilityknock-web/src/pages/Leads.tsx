@@ -2,7 +2,6 @@ import { useEffect, useState, type FormEvent } from "react";
 import {
   addDoc,
   collection,
-  deleteDoc,
   doc,
   onSnapshot,
   orderBy,
@@ -10,31 +9,28 @@ import {
   updateDoc,
   where,
 } from "firebase/firestore";
+import { EmailAuthProvider, reauthenticateWithCredential } from "firebase/auth";
 import { Link, useNavigate } from "react-router-dom";
-import { db } from "../firebase";
+import { auth, db } from "../firebase";
 import { useAuth } from "../auth/AuthContext";
 import { isRallyCardOnly } from "../lib/features";
 import { bumpStats } from "../lib/stats";
-import { DISPOSITIONS } from "../lib/dispositions";
-import DispositionModal, { type DispoInput } from "../components/DispositionModal";
+import { DISPOSITIONS, DISP_LABEL, DISP_COLOR } from "../lib/dispositions";
 import type { Lead, LeadStatus } from "../types";
 
 const STATUSES = DISPOSITIONS;
+const fmt = (ms?: number) => (ms ? new Date(ms).toLocaleString([], { month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit" }) : "");
 
 export default function Leads() {
   const { profile, role, companyId, company } = useAuth();
   const navigate = useNavigate();
+  const isAdmin = role === "admin" || role === "superadmin";
   const [leads, setLeads] = useState<Lead[]>([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<LeadStatus | "all">("all");
   const [showAdd, setShowAdd] = useState(false);
-  const [dispoTarget, setDispoTarget] = useState<DispoInput | null>(null);
-
-  const dispoInputFor = (lead: Lead): DispoInput => ({
-    leadId: lead.id, address: lead.address, lat: lead.lat, lng: lead.lng, status: lead.status,
-    name: lead.ownerName || "", phone: lead.phone || "", email: lead.email || "", notes: lead.notes || "",
-    enrichment: lead.enrichment, photoHomeUrl: lead.photoHomeUrl, photoBillUrl: lead.photoBillUrl,
-  });
+  const [showDeleted, setShowDeleted] = useState(false); // admin-only archive view
+  const [deleteTarget, setDeleteTarget] = useState<Lead | null>(null);
 
   useEffect(() => {
     if (!profile || !companyId) return;
@@ -65,78 +61,58 @@ export default function Leads() {
     return unsub;
   }, [profile, role, companyId]);
 
-  const shown = filter === "all" ? leads : leads.filter((l) => l.status === filter);
+  // Deleted leads are hidden everywhere except the admin's archive view.
+  const active = leads.filter((l) => !l.deleted);
+  const deleted = leads.filter((l) => l.deleted);
+  const shown = showDeleted ? deleted : (filter === "all" ? active : active.filter((l) => l.status === filter));
 
-  const setStatus = async (id: string, status: LeadStatus) => {
-    // Stamp the close date when a deal is marked sold, so "closed today" tracks
-    // the close (not the original knock). We deliberately don't touch knockedAt
-    // here — closing an old lead shouldn't count as a door knocked today.
-    const now = Date.now();
-    await updateDoc(doc(db, "leads", id), { status, updatedAt: now, ...(status === "sold" ? { soldAt: now } : {}) });
-    if (profile) {
-      if (status === "appointment") void bumpStats(profile, { appointments: 1 });
-      else if (status === "sold") void bumpStats(profile, { sales: 1 });
-    }
-  };
-
-  const remove = async (id: string) => {
-    if (confirm("Delete this lead?")) await deleteDoc(doc(db, "leads", id));
-  };
-
-  const clearAll = async () => {
-    if (!confirm(`Delete ALL ${leads.length} leads? This cannot be undone.`)) return;
-    for (const lead of leads) {
-      await deleteDoc(doc(db, "leads", lead.id)).catch(() => {});
-    }
+  // Restore a soft-deleted lead (admin only).
+  const restore = async (lead: Lead) => {
+    await updateDoc(doc(db, "leads", lead.id), { deleted: false, updatedAt: Date.now() });
   };
 
   return (
     <div className="page-body">
       <div className="page-head row">
         <div>
-          <h1>Leads</h1>
-          <p className="page-sub">{shown.length} shown</p>
+          <h1>{showDeleted ? "Deleted leads" : "Leads"}</h1>
+          <p className="page-sub">{shown.length} {showDeleted ? "deleted" : "shown"}</p>
         </div>
         <div className="row">
           {/* RallyCard-only companies have no Dashboard to go back to. */}
           {!isRallyCardOnly(company) && (
             <Link className="btn ghost sm" to="/">← Back to Dashboard</Link>
           )}
-          {(role === "admin" || role === "manager") && leads.length > 0 && (
-            <button className="btn ghost sm danger" onClick={clearAll}>
-              Clear all ({leads.length})
+          {isAdmin && (
+            <button className="btn ghost sm" onClick={() => setShowDeleted((s) => !s)}>
+              {showDeleted ? "← Active leads" : `🗑 Deleted (${deleted.length})`}
             </button>
           )}
-          <button className="btn primary" onClick={() => setShowAdd((s) => !s)}>
-            {showAdd ? "Close" : "+ New lead"}
-          </button>
+          {!showDeleted && (
+            <button className="btn primary" onClick={() => setShowAdd((s) => !s)}>
+              {showAdd ? "Close" : "+ New lead"}
+            </button>
+          )}
         </div>
       </div>
 
-      {showAdd && <AddLead onDone={() => setShowAdd(false)} />}
+      {showAdd && !showDeleted && <AddLead onDone={() => setShowAdd(false)} />}
 
-      <div className="filter-bar">
-        <button
-          className={"chip-btn" + (filter === "all" ? " active" : "")}
-          onClick={() => setFilter("all")}
-        >
-          All
-        </button>
-        {STATUSES.map((s) => (
-          <button
-            key={s.value}
-            className={"chip-btn" + (filter === s.value ? " active" : "")}
-            onClick={() => setFilter(s.value)}
-          >
-            {s.label}
-          </button>
-        ))}
-      </div>
+      {!showDeleted && (
+        <div className="filter-bar">
+          <button className={"chip-btn" + (filter === "all" ? " active" : "")} onClick={() => setFilter("all")}>All</button>
+          {STATUSES.map((s) => (
+            <button key={s.value} className={"chip-btn" + (filter === s.value ? " active" : "")} onClick={() => setFilter(s.value)}>
+              {s.label}
+            </button>
+          ))}
+        </div>
+      )}
 
       {loading ? (
         <div className="muted">Loading leads…</div>
       ) : shown.length === 0 ? (
-        <div className="empty">No leads yet. Add one or run an address lookup.</div>
+        <div className="empty">{showDeleted ? "No deleted leads." : "No leads yet. Add one or run an address lookup."}</div>
       ) : (
         <div className="lead-list">
           {shown.map((lead) => (
@@ -153,33 +129,112 @@ export default function Leads() {
                   {lead.ownerName ? ` · ${lead.ownerName}` : ""}
                 </div>
                 {lead.notes && <div className="lead-notes">{lead.notes}</div>}
+                {showDeleted && (
+                  <div className="muted small" style={{ marginTop: 4 }}>
+                    🗑 Deleted {fmt(lead.deletedAt)}{lead.deletedByName ? ` by ${lead.deletedByName}` : ""}
+                    {lead.deleteReason ? ` · "${lead.deleteReason}"` : ""}
+                  </div>
+                )}
               </div>
               <div className="lead-actions">
-                <button className="btn ghost sm" title="Log a disposition" onClick={() => setDispoTarget(dispoInputFor(lead))}>✍️</button>
+                {/* Status is display-only here — dispositioning happens at the
+                    door (Map) or via the closer close-out on the customer screen. */}
+                <span className="badge" style={{ background: DISP_COLOR[lead.status] || "#888", color: "#06121f", fontWeight: 700 }}>
+                  {DISP_LABEL[lead.status] || lead.status}
+                </span>
                 <button className="btn ghost sm" title="Open customer history" onClick={() => navigate(`/lead/${lead.id}`)}>👁</button>
-                <select
-                  value={lead.status}
-                  onChange={(e) => setStatus(lead.id, e.target.value as LeadStatus)}
-                  className={`status-select status-${lead.status}`}
-                >
-                  {STATUSES.map((s) => (
-                    <option key={s.value} value={s.value}>
-                      {s.label}
-                    </option>
-                  ))}
-                </select>
-                {(role === "admin" || role === "manager") && (
-                  <button className="btn ghost sm" onClick={() => remove(lead.id)}>
-                    Delete
-                  </button>
-                )}
+                {isAdmin && (showDeleted ? (
+                  <button className="btn ghost sm" onClick={() => restore(lead)}>Restore</button>
+                ) : (
+                  <button className="btn ghost sm danger" onClick={() => setDeleteTarget(lead)}>Delete</button>
+                ))}
               </div>
             </div>
           ))}
         </div>
       )}
 
-      <DispositionModal target={dispoTarget} onClose={() => setDispoTarget(null)} />
+      {deleteTarget && (
+        <DeleteLeadModal
+          lead={deleteTarget}
+          adminName={profile?.displayName || ""}
+          adminUid={profile?.uid || ""}
+          onClose={() => setDeleteTarget(null)}
+        />
+      )}
+    </div>
+  );
+}
+
+// Soft-delete a lead — admins only. Requires a reason and the admin's password
+// (re-auth), and never hard-deletes: the lead is archived to the Deleted list.
+function DeleteLeadModal({ lead, adminName, adminUid, onClose }: { lead: Lead; adminName: string; adminUid: string; onClose: () => void }) {
+  const [reason, setReason] = useState("");
+  const [password, setPassword] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+  const hasPassword = auth.currentUser?.providerData.some((p) => p.providerId === "password") ?? false;
+
+  async function confirm() {
+    setErr("");
+    if (!reason.trim()) { setErr("A reason is required to delete a lead."); return; }
+    const user = auth.currentUser;
+    if (!user?.email) { setErr("No account loaded."); return; }
+    if (!hasPassword) { setErr("Your account has no password to confirm with (Google sign-in). Contact support."); return; }
+    setBusy(true);
+    try {
+      await reauthenticateWithCredential(user, EmailAuthProvider.credential(user.email, password));
+      await updateDoc(doc(db, "leads", lead.id), {
+        deleted: true,
+        deletedAt: Date.now(),
+        deletedBy: adminUid,
+        deletedByName: adminName,
+        deleteReason: reason.trim(),
+        updatedAt: Date.now(),
+      });
+      onClose();
+    } catch (e: unknown) {
+      const code = (e as { code?: string })?.code;
+      setErr(code === "auth/wrong-password" || code === "auth/invalid-credential"
+        ? "That password is incorrect."
+        : (e as Error)?.message || "Couldn't delete the lead.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="dispo-card" onClick={(e) => e.stopPropagation()}>
+        <div className="dispo-head">
+          <div>
+            <h3>Delete lead</h3>
+            <div className="muted small">{lead.address}{lead.ownerName ? ` · ${lead.ownerName}` : ""}</div>
+          </div>
+          <button className="dispo-x" onClick={onClose}>✕</button>
+        </div>
+        <div className="banner warn show" style={{ marginBottom: 10 }}>
+          Leads are never truly deleted — this archives it to the admin-only Deleted list. Confirm with a reason and your password.
+        </div>
+        <label className="field">
+          <span>Reason (required)</span>
+          <textarea rows={2} value={reason} placeholder="Why is this lead being deleted?" onChange={(e) => setReason(e.target.value)} />
+        </label>
+        <label className="field">
+          <span>Your password</span>
+          <input type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} />
+        </label>
+        {err && <div className="banner warn show" style={{ marginBottom: 10 }}>{err}</div>}
+        <div className="dispo-foot">
+          <span />
+          <div className="row">
+            <button className="btn ghost sm" onClick={onClose}>Cancel</button>
+            <button className="btn primary sm danger" onClick={confirm} disabled={busy}>
+              {busy ? "Deleting…" : "Delete lead"}
+            </button>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }

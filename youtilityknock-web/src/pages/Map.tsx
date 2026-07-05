@@ -130,7 +130,8 @@ export default function MapPage() {
 
   async function buildPins() {
     leadLayer.current.clearLayers();
-    const leads = await fetchLeads();
+    // Deleted (archived) leads are hidden everywhere except the admin's list.
+    const leads = (await fetchLeads()).filter((lead) => !lead.deleted);
     leadsRef.current = leads;
     leads.forEach((lead) => {
       const c = validCoord(lead.lat, lead.lng);
