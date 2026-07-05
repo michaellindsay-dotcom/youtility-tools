@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { collection, onSnapshot, orderBy, query, where } from "firebase/firestore";
-import { db } from "../firebase";
+import { httpsCallable } from "firebase/functions";
+import { db, functions } from "../firebase";
 import { useAuth } from "../auth/AuthContext";
 import { Link } from "react-router-dom";
 import { isRallyCardOnly } from "../lib/features";
@@ -24,6 +25,17 @@ export default function Schedule() {
   const [filter, setFilter] = useState<"all" | EventType>("all");
   const [range, setRange] = useState<"day" | "week" | "month">("week");
   const [assignee, setAssignee] = useState<string>("all");
+  // Two-way sync (inbound): the viewer's own external-calendar busy blocks,
+  // so anything blocked in Google/Outlook shows as busy here too.
+  const [busy, setBusy] = useState<{ start: number; end: number }[]>([]);
+
+  useEffect(() => {
+    if (!profile) return;
+    const now = Date.now();
+    httpsCallable(functions, "myExternalBusy")({ startMs: now - 7 * 86400000, endMs: now + 45 * 86400000 })
+      .then((r) => setBusy((((r.data as { busy?: { start: number; end: number }[] })?.busy) || []).filter((b) => b.start && b.end)))
+      .catch(() => setBusy([]));
+  }, [profile]);
 
   useEffect(() => {
     if (!profile || !companyId) return;
@@ -151,6 +163,7 @@ export default function Schedule() {
       ) : (
         <CalendarView
           events={visible}
+          busy={busy}
           view={range}
           canHearRecording={isMgr}
           me={profile ? { uid: profile.uid, displayName: profile.displayName || "" } : null}
