@@ -1,12 +1,13 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import { collection, doc, onSnapshot, query, where } from "firebase/firestore";
+import { addDoc, collection, doc, onSnapshot, query, setDoc, where } from "firebase/firestore";
 import { getDownloadURL, ref as storageRef } from "firebase/storage";
 import { db, storage } from "../firebase";
 import { useAuth } from "../auth/AuthContext";
 import { DISP_LABEL, DISP_COLOR } from "../lib/dispositions";
-import { APPT_LABEL, APPT_COLOR } from "../lib/closerDispositions";
+import { APPT_LABEL, APPT_COLOR, isDispositioned } from "../lib/closerDispositions";
 import DispositionModal, { type DispoInput } from "../components/DispositionModal";
+import CloserDispositionModal from "../components/CloserDispositionModal";
 import type { Lead, LeadHistoryEntry, ScheduleEvent } from "../types";
 
 interface PitchRow { id: string; createdAt: number; status: string; score: number | null; feedback: string; audioPath?: string; address?: string }
@@ -29,8 +30,31 @@ export default function CustomerLead() {
   const [proposals, setProposals] = useState<ProposalRow[]>([]);
   const [audio, setAudio] = useState<Record<string, string>>({});
   const [dispoOpen, setDispoOpen] = useState(false);
+  const [closeoutTarget, setCloseoutTarget] = useState<ScheduleEvent | null>(null);
+  const [nudgeState, setNudgeState] = useState<"idle" | "sending" | "sent" | "error">("idle");
   const [loading, setLoading] = useState(true);
   const isMgr = role === "admin" || role === "manager";
+
+  // Not the closer? Nudge the assigned closer in a DM to close out the appt.
+  async function nudgeCloser(e: ScheduleEvent) {
+    if (!profile || !e.closerUid) return;
+    setNudgeState("sending");
+    try {
+      const cid = [profile.uid, e.closerUid].sort().join("__");
+      const when = new Date(e.startAt).toLocaleDateString([], { month: "short", day: "numeric" });
+      const body = `Hey ${e.closerName || "there"}, the ${when} appointment for ${lead?.ownerName || e.address || "this home"} still needs a disposition — can you close it out?`;
+      await setDoc(doc(db, "dms", cid), {
+        members: [profile.uid, e.closerUid],
+        memberNames: { [profile.uid]: profile.displayName || "", [e.closerUid]: e.closerName || "" },
+        companyId: lead?.companyId || "",
+        lastMessage: body, lastAt: Date.now(),
+      }, { merge: true });
+      await addDoc(collection(db, "dms", cid, "messages"), {
+        channelId: cid, userId: profile.uid, userName: profile.displayName || "", text: body, createdAt: Date.now(),
+      });
+      setNudgeState("sent");
+    } catch { setNudgeState("error"); }
+  }
 
   // Live lead doc.
   useEffect(() => {
@@ -83,6 +107,9 @@ export default function CustomerLead() {
 
   const appts = useMemo(() => [...events].filter((e) => e.type === "appointment").sort((a, b) => b.startAt - a.startAt), [events]);
   const otherEvents = useMemo(() => [...events].filter((e) => e.type !== "appointment").sort((a, b) => b.startAt - a.startAt), [events]);
+  // A closer appointment still awaiting a close-out — if present, the header
+  // action becomes a close-out (for the closer) or a red "No Disposition" nag.
+  const openAppt = useMemo(() => appts.find((e) => e.closerUid && !isDispositioned(e)), [appts]);
   const photos = useMemo(() => {
     const urls = new Set<string>();
     if (lead?.photoHomeUrl) urls.add(lead.photoHomeUrl);
@@ -126,7 +153,25 @@ export default function CustomerLead() {
           {lead.phone && <a className="btn ghost sm" href={`sms:${lead.phone}`}>💬 Text</a>}
           {lead.email && <a className="btn ghost sm" href={`mailto:${lead.email}`}>✉️ Email</a>}
           {lead.address && <a className="btn ghost sm" href={`https://maps.google.com/?q=${encodeURIComponent(lead.address)}`} target="_blank" rel="noreferrer">🗺️ Map</a>}
-          {canManage && <button className="btn primary sm" onClick={() => setDispoOpen(true)}>✍️ Log disposition</button>}
+          {openAppt ? (
+            profile?.uid === openAppt.closerUid ? (
+              // The assigned closer closes out the appointment (close status).
+              <button className="btn primary sm" onClick={() => setCloseoutTarget(openAppt)}>✍️ Log disposition</button>
+            ) : canManage ? (
+              // Setter / managers / admins can't disposition it — they see the
+              // red nag, which pings the closer to close it out.
+              <button
+                className="btn sm dispo-owed-alert"
+                title={`Awaiting ${openAppt.closerName || "the closer"}'s close-out — tap to nudge them`}
+                disabled={nudgeState === "sending" || nudgeState === "sent"}
+                onClick={() => nudgeCloser(openAppt)}
+              >
+                {nudgeState === "sent" ? "✓ Closer nudged" : `⚠ No Disposition${openAppt.closerName ? ` — ${openAppt.closerName}` : ""}`}
+              </button>
+            ) : null
+          ) : (
+            canManage && <button className="btn primary sm" onClick={() => setDispoOpen(true)}>✍️ Log disposition</button>
+          )}
         </div>
         {lead.incentives && lead.incentives.length > 0 && (
           <div className="muted small" style={{ marginTop: 10 }}>
@@ -277,6 +322,13 @@ export default function CustomerLead() {
         target={dispoOpen ? dispoTarget : null}
         autoEnrich={false}
         onClose={() => setDispoOpen(false)}
+      />
+
+      {/* Closer close-out for an open appointment (after the fact, from here). */}
+      <CloserDispositionModal
+        event={closeoutTarget}
+        afterTheFact
+        onClose={() => setCloseoutTarget(null)}
       />
     </div>
   );
