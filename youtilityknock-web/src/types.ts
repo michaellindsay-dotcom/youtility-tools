@@ -425,6 +425,9 @@ export interface ScheduleEvent {
   dispositionedAt?: number;
   dispositionDistanceFt?: number | null;
   dispositionVerified?: boolean; // was the closer on-site (≤100 ft) when dispositioning
+  // Was it closed out AT the appointment (on-site, right then) vs entered later
+  // from the calendar? Drives the "not dispositioned on the spot" report.
+  dispositionedOnSpot?: boolean;
   followUpForEventId?: string; // set on a follow-up appt created from a pitched_pending
   // Area energy incentives carried from the lead so the closer has them at the door.
   incentives?: AreaIncentive[];

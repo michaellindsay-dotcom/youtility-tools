@@ -2928,3 +2928,15 @@ body.modal-open .chat-fab-global { display: none; }
 /* ── Dashboard top-3 podium card ─────────────────────────── */
 .dash-podium { display: block; }
 .dash-podium .podium { margin: 14px 0 6px; }
+
+/* ── Closer "you owe a disposition" alert (Today's Schedule card) ────────── */
+.dispo-owed-alert {
+  background: #ef4444; color: #fff; border: none; font-weight: 700;
+  white-space: nowrap; box-shadow: 0 2px 10px rgba(239, 68, 68, 0.4);
+  animation: dispo-pulse 1.8s ease-in-out infinite;
+}
+.dispo-owed-alert:hover { background: #dc2626; }
+@keyframes dispo-pulse {
+  0%, 100% { box-shadow: 0 2px 10px rgba(239, 68, 68, 0.35); }
+  50% { box-shadow: 0 2px 16px rgba(239, 68, 68, 0.75); }
+}

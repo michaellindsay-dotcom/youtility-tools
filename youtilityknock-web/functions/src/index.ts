@@ -3120,6 +3120,7 @@ export const closerDisposition = onCall(async (request) => {
   const d = (request.data || {}) as {
     eventId?: string; status?: string; notes?: string;
     distanceFt?: number | null; verified?: boolean; followUpAt?: number;
+    afterTheFact?: boolean;
   };
   if (!d.eventId) throw new HttpsError("invalid-argument", "eventId required.");
   if (!d.status || !APPT_STATUS_LABEL[d.status] || d.status === "scheduled" || d.status === "closer_no_show") {
@@ -3138,10 +3139,17 @@ export const closerDisposition = onCall(async (request) => {
   const isMgr = caller.isSuper || (caller.companyId === ev.companyId && (caller.role === "admin" || caller.role === "manager"));
   if (!isAssignedCloser && !isMgr) throw new HttpsError("permission-denied", "Not your appointment to disposition.");
 
-  // Geofence: a disposition only counts at the home. Off-site → closer no show.
+  // After-the-fact: the closer is closing out a past appointment from their
+  // calendar, not standing at the door — so we skip the geofence penalty and
+  // record the real outcome, but flag it as NOT dispositioned on the spot.
+  const afterTheFact = d.afterTheFact === true;
+  // Geofence (on-the-spot flow only): a disposition only counts at the home.
+  // Off-site there → closer no show.
   const onSite = d.verified !== false;
-  const finalStatus = onSite ? d.status : "closer_no_show";
-  if (onSite && finalStatus === "pitched_pending" && !d.followUpAt) {
+  // "On the spot" = at the door, on-site, right then.
+  const onSpot = !afterTheFact && onSite;
+  const finalStatus = (!afterTheFact && !onSite) ? "closer_no_show" : (d.status as string);
+  if (finalStatus === "pitched_pending" && !d.followUpAt) {
     throw new HttpsError("invalid-argument", "Pick a follow-up date to schedule the next appointment.");
   }
   const now = Date.now();
@@ -3150,8 +3158,9 @@ export const closerDisposition = onCall(async (request) => {
     apptStatus: finalStatus,
     apptNotes: d.notes.trim(),
     dispositionedAt: now,
-    dispositionDistanceFt: d.distanceFt ?? null,
-    dispositionVerified: onSite,
+    dispositionDistanceFt: afterTheFact ? null : (d.distanceFt ?? null),
+    dispositionVerified: afterTheFact ? false : onSite,
+    dispositionedOnSpot: onSpot,
     updatedAt: now,
   }, { merge: true });
 
@@ -3179,7 +3188,7 @@ export const closerDisposition = onCall(async (request) => {
 
   // pitched_pending / reschedule → schedule a follow-up appointment (same closer).
   let followUpId: string | null = null;
-  if (onSite && (finalStatus === "pitched_pending" || finalStatus === "reschedule") && d.followUpAt) {
+  if ((onSite || afterTheFact) && (finalStatus === "pitched_pending" || finalStatus === "reschedule") && d.followUpAt) {
     const dur = (ev.durationMin || 60) * 60 * 1000;
     const fu = { ...ev };
     delete fu.id;
