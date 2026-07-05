@@ -9,6 +9,7 @@ import type { ScheduleEvent } from "../types";
 
 type View = "day" | "week" | "month";
 type Me = { uid: string; displayName: string } | null;
+type Busy = { start: number; end: number };
 const DAY = 86_400_000;
 const HOUR_START = 6;   // 6 AM
 const HOUR_END = 21;    // 9 PM (inclusive row)
@@ -50,10 +51,32 @@ function useNarrow(): boolean {
   return n;
 }
 
+// Does an external busy block overlap the [dayStart+h, +1h] cell?
+function hourBusy(busy: Busy[], dayStart: number, h: number): boolean {
+  const s = dayStart + h * 3_600_000;
+  const e = s + 3_600_000;
+  return busy.some((b) => b.start < e && s < b.end);
+}
+// Any busy block on this calendar day?
+function dayBusy(busy: Busy[], dayStart: number): boolean {
+  const e = dayStart + DAY;
+  return busy.some((b) => b.start < e && dayStart < b.end);
+}
+// A translucent "external busy" band shown inside an hour cell.
+function BusyBlock() {
+  return (
+    <div title="Busy — blocked on your external calendar"
+      style={{ background: "repeating-linear-gradient(45deg,rgba(148,163,184,.28),rgba(148,163,184,.28) 6px,rgba(148,163,184,.12) 6px,rgba(148,163,184,.12) 12px)", border: "1px solid rgba(148,163,184,.5)", borderRadius: 5, padding: "2px 6px", marginBottom: 3, fontSize: 10, color: "#cbd5e1", lineHeight: 1.2 }}>
+      🔒 Busy
+    </div>
+  );
+}
+
 export default function CalendarView({
-  events, view, canHearRecording, me, companyId,
+  events, busy = [], view, canHearRecording, me, companyId,
 }: {
   events: ScheduleEvent[];
+  busy?: Busy[];
   view: View;
   canHearRecording: boolean;
   me: Me;
@@ -96,11 +119,11 @@ export default function CalendarView({
         <button type="button" className="btn ghost sm" onClick={() => step(1)}>›</button>
       </div>
 
-      {view === "day" && <DayGrid dayMs={anchor} events={events} onPick={setSelected} />}
+      {view === "day" && <DayGrid dayMs={anchor} events={events} busy={busy} onPick={setSelected} />}
       {view === "week" && (narrow
-        ? <WeekAgenda weekMs={startOfWeek(anchor)} events={events} onPick={setSelected} />
-        : <WeekGrid weekMs={startOfWeek(anchor)} events={events} onPick={setSelected} onOpenDay={openDay} />)}
-      {view === "month" && <MonthGrid monthMs={startOfMonth(anchor)} events={events} onPick={setSelected} onOpenDay={openDay} narrow={narrow} />}
+        ? <WeekAgenda weekMs={startOfWeek(anchor)} events={events} busy={busy} onPick={setSelected} />
+        : <WeekGrid weekMs={startOfWeek(anchor)} events={events} busy={busy} onPick={setSelected} onOpenDay={openDay} />)}
+      {view === "month" && <MonthGrid monthMs={startOfMonth(anchor)} events={events} busy={busy} onPick={setSelected} onOpenDay={openDay} narrow={narrow} />}
 
       {selected && (
         <EventPopout
@@ -148,7 +171,7 @@ function Block({ e, onPick }: { e: ScheduleEvent; onPick: (e: ScheduleEvent) => 
   );
 }
 
-function DayGrid({ dayMs, events, onPick }: { dayMs: number; events: ScheduleEvent[]; onPick: (e: ScheduleEvent) => void }) {
+function DayGrid({ dayMs, events, busy, onPick }: { dayMs: number; events: ScheduleEvent[]; busy: Busy[]; onPick: (e: ScheduleEvent) => void }) {
   const dayEvents = events.filter((e) => sameDay(e.startAt, dayMs)).sort((a, b) => a.startAt - b.startAt);
   return (
     <div style={{ display: "grid", gridTemplateColumns: "64px 1fr", border: "1px solid #21314a", borderRadius: 8, overflow: "hidden" }}>
@@ -156,6 +179,7 @@ function DayGrid({ dayMs, events, onPick }: { dayMs: number; events: ScheduleEve
         <div key={h} style={{ display: "contents" }}>
           <div style={{ borderTop: "1px solid #21314a", padding: "4px 6px", fontSize: 11, color: "#8aa0b8", textAlign: "right" }}>{hourLabel(h)}</div>
           <div style={{ borderTop: "1px solid #21314a", borderLeft: "1px solid #21314a", padding: 4, minHeight: 34 }}>
+            {hourBusy(busy, dayMs, h) && <BusyBlock />}
             {dayEvents.filter((e) => new Date(e.startAt).getHours() === h).map((e) => <Block key={e.id} e={e} onPick={onPick} />)}
           </div>
         </div>
@@ -164,7 +188,7 @@ function DayGrid({ dayMs, events, onPick }: { dayMs: number; events: ScheduleEve
   );
 }
 
-function WeekGrid({ weekMs, events, onPick, onOpenDay }: { weekMs: number; events: ScheduleEvent[]; onPick: (e: ScheduleEvent) => void; onOpenDay: (ms: number) => void }) {
+function WeekGrid({ weekMs, events, busy, onPick, onOpenDay }: { weekMs: number; events: ScheduleEvent[]; busy: Busy[]; onPick: (e: ScheduleEvent) => void; onOpenDay: (ms: number) => void }) {
   const days = Array.from({ length: 7 }, (_, i) => weekMs + i * DAY);
   return (
     <div style={{ overflowX: "auto" }}>
@@ -182,6 +206,7 @@ function WeekGrid({ weekMs, events, onPick, onOpenDay }: { weekMs: number; event
             <div style={{ borderTop: "1px solid #21314a", padding: "4px 4px", fontSize: 10, color: "#8aa0b8", textAlign: "right" }}>{hourLabel(h)}</div>
             {days.map((d) => (
               <div key={d} style={{ borderTop: "1px solid #21314a", borderLeft: "1px solid #21314a", padding: 3, minHeight: 30 }}>
+                {hourBusy(busy, d, h) && <BusyBlock />}
                 {events.filter((e) => sameDay(e.startAt, d) && new Date(e.startAt).getHours() === h).sort((a, b) => a.startAt - b.startAt).map((e) => <Block key={e.id} e={e} onPick={onPick} />)}
               </div>
             ))}
@@ -193,18 +218,22 @@ function WeekGrid({ weekMs, events, onPick, onOpenDay }: { weekMs: number; event
 }
 
 // Phone week view: a readable day-by-day agenda instead of the wide hourly grid.
-function WeekAgenda({ weekMs, events, onPick }: { weekMs: number; events: ScheduleEvent[]; onPick: (e: ScheduleEvent) => void }) {
+function WeekAgenda({ weekMs, events, busy, onPick }: { weekMs: number; events: ScheduleEvent[]; busy: Busy[]; onPick: (e: ScheduleEvent) => void }) {
   const days = Array.from({ length: 7 }, (_, i) => weekMs + i * DAY);
   return (
     <div style={{ display: "grid", gap: 10 }}>
       {days.map((d) => {
         const dayEvents = events.filter((e) => sameDay(e.startAt, d)).sort((a, b) => a.startAt - b.startAt);
         const isToday = sameDay(d, Date.now());
+        const hasBusy = dayBusy(busy, d);
         return (
           <div key={d} style={{ border: "1px solid #21314a", borderRadius: 10, overflow: "hidden", opacity: dayEvents.length ? 1 : 0.7 }}>
             <div style={{ padding: "7px 10px", background: isToday ? "rgba(14,165,233,.16)" : "rgba(255,255,255,.03)", fontSize: 13, fontWeight: 700, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
               <span>{new Date(d).toLocaleDateString([], { weekday: "long", month: "short", day: "numeric" })}{isToday ? " · Today" : ""}</span>
-              {dayEvents.length > 0 && <span style={{ color: "#8aa0b8", fontSize: 12, fontWeight: 600 }}>{dayEvents.length}</span>}
+              <span style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                {hasBusy && <span title="Busy on your external calendar" style={{ fontSize: 11 }}>🔒</span>}
+                {dayEvents.length > 0 && <span style={{ color: "#8aa0b8", fontSize: 12, fontWeight: 600 }}>{dayEvents.length}</span>}
+              </span>
             </div>
             {dayEvents.length > 0 && (
               <div style={{ padding: 8, display: "grid", gap: 4 }}>
@@ -218,7 +247,7 @@ function WeekAgenda({ weekMs, events, onPick }: { weekMs: number; events: Schedu
   );
 }
 
-function MonthGrid({ monthMs, events, onPick, onOpenDay, narrow }: { monthMs: number; events: ScheduleEvent[]; onPick: (e: ScheduleEvent) => void; onOpenDay: (ms: number) => void; narrow?: boolean }) {
+function MonthGrid({ monthMs, events, busy, onPick, onOpenDay, narrow }: { monthMs: number; events: ScheduleEvent[]; busy: Busy[]; onPick: (e: ScheduleEvent) => void; onOpenDay: (ms: number) => void; narrow?: boolean }) {
   const gridStart = startOfWeek(monthMs);
   const month = new Date(monthMs).getMonth();
   const cells = Array.from({ length: 42 }, (_, i) => gridStart + i * DAY);
@@ -233,10 +262,14 @@ function MonthGrid({ monthMs, events, onPick, onOpenDay, narrow }: { monthMs: nu
         {cells.map((d) => {
           const dayEvents = events.filter((e) => sameDay(e.startAt, d)).sort((a, b) => a.startAt - b.startAt);
           const inMonth = new Date(d).getMonth() === month;
+          const busyDay = dayBusy(busy, d);
           return (
             <div key={d} onDoubleClick={() => onOpenDay(d)} title="Double-click to open this day"
               style={{ minHeight: narrow ? 54 : 84, minWidth: 0, borderTop: "1px solid #21314a", borderLeft: "1px solid #21314a", padding: narrow ? 3 : 4, cursor: "pointer", opacity: inMonth ? 1 : 0.4, background: sameDay(d, Date.now()) ? "rgba(14,165,233,.10)" : undefined }}>
-              <div style={{ fontSize: 11, fontWeight: 700, color: sameDay(d, Date.now()) ? "#38bdf8" : "#8aa0b8", marginBottom: 2 }}>{new Date(d).getDate()}</div>
+              <div style={{ fontSize: 11, fontWeight: 700, color: sameDay(d, Date.now()) ? "#38bdf8" : "#8aa0b8", marginBottom: 2, display: "flex", justifyContent: "space-between" }}>
+                <span>{new Date(d).getDate()}</span>
+                {busyDay && <span title="Busy on your external calendar">🔒</span>}
+              </div>
               {narrow ? (
                 <div style={{ display: "flex", flexWrap: "wrap", gap: 3, alignContent: "flex-start" }}>
                   {dayEvents.slice(0, 4).map((e) => (

@@ -2719,6 +2719,19 @@ async function externalBusy(uid: string, startMs: number, endMs: number): Promis
 
 const overlaps = (a: Interval, b: Interval) => a.start < b.end && b.start < a.end;
 
+// Two-way calendar sync (inbound): the caller's external-calendar busy blocks
+// over a window, so anything they block outside the app (Google/Outlook) shows
+// as "busy" on their in-app calendar. Range is clamped to 62 days.
+export const myExternalBusy = onCall(async (request) => {
+  const caller = await getCaller(request);
+  const d = (request.data || {}) as { startMs?: number; endMs?: number };
+  const start = Number(d.startMs) || Date.now();
+  const end = Math.min(Number(d.endMs) || (start + 31 * 86400000), start + 62 * 86400000);
+  if (!(end > start)) return { busy: [] };
+  const busy = await externalBusy(caller.uid, start, end);
+  return { busy };
+});
+
 // Is a rep free for [startMs,endMs] (± buffer): no app appointment and no
 // external busy block overlaps.
 async function isUserFree(uid: string, startMs: number, endMs: number, bufferMin: number): Promise<boolean> {
