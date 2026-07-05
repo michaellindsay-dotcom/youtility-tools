@@ -5,6 +5,7 @@ import { db } from "../firebase";
 import { useAuth } from "../auth/AuthContext";
 import { hasFeature } from "../lib/features";
 import { computePoints } from "../lib/points";
+import { isUndispositionedPast } from "../lib/closerDispositions";
 import CalendarBanner from "../components/CalendarBanner";
 import BizCardHero from "../components/BizCardHero";
 import Podium from "../components/Podium";
@@ -302,7 +303,24 @@ const fmtTime = (ms: number) =>
 // a closer (mirrors the Schedule page's feed). Whole card opens the Schedule.
 function TodayScheduleCard() {
   const { profile } = useAuth();
+  const navigate = useNavigate();
   const [events, setEvents] = useState<ScheduleEvent[]>([]);
+  // Closers: how many of their appointments are past due and still not
+  // dispositioned — surfaced as a red nag on this card.
+  const [owedDispos, setOwedDispos] = useState(0);
+
+  useEffect(() => {
+    if (!profile?.isCloser) { setOwedDispos(0); return; }
+    let cancelled = false;
+    getDocs(query(collection(db, "events"), where("closerUid", "==", profile.uid)))
+      .then((snap) => {
+        if (cancelled) return;
+        const n = snap.docs.filter((d) => isUndispositionedPast(d.data() as ScheduleEvent)).length;
+        setOwedDispos(n);
+      })
+      .catch((err) => console.warn("owed dispositions fetch failed", err));
+    return () => { cancelled = true; };
+  }, [profile]);
 
   useEffect(() => {
     if (!profile) return;
@@ -348,7 +366,19 @@ function TodayScheduleCard() {
 
   return (
     <Link to="/schedule" className="card link-card">
-      <h2>📅 Today's Schedule <span className="muted small" style={{ fontWeight: 400 }}>→</span></h2>
+      <div className="row between" style={{ alignItems: "center", gap: 10 }}>
+        <h2 style={{ margin: 0 }}>📅 Today's Schedule <span className="muted small" style={{ fontWeight: 400 }}>→</span></h2>
+        {owedDispos > 0 && (
+          <button
+            type="button"
+            className="btn sm dispo-owed-alert"
+            title={`${owedDispos} past appointment${owedDispos === 1 ? "" : "s"} you haven't dispositioned — tap to close them out`}
+            onClick={(e) => { e.preventDefault(); e.stopPropagation(); navigate("/closer"); }}
+          >
+            ⚠ {owedDispos} to disposition
+          </button>
+        )}
+      </div>
       <p className="muted small" style={{ marginTop: 2 }}>
         {new Date().toLocaleDateString([], { weekday: "long", month: "long", day: "numeric" })}
       </p>

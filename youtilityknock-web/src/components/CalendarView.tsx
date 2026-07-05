@@ -3,6 +3,7 @@ import { addDoc, collection, doc, getDocs, limit, orderBy, query, setDoc, where 
 import { getDownloadURL, ref as storageRef } from "firebase/storage";
 import { db, storage } from "../firebase";
 import { APPT_LABEL } from "../lib/closerDispositions";
+import CloserDispositionModal from "./CloserDispositionModal";
 import type { ScheduleEvent } from "../types";
 
 type View = "day" | "week" | "month";
@@ -59,6 +60,8 @@ export default function CalendarView({
 }) {
   const [anchor, setAnchor] = useState(() => startOfDay(Date.now()));
   const [selected, setSelected] = useState<ScheduleEvent | null>(null);
+  // The closer can close out a past appointment straight from the calendar.
+  const [dispoTarget, setDispoTarget] = useState<ScheduleEvent | null>(null);
   const narrow = useNarrow();
 
   // Reset the anchor to today whenever the view mode changes.
@@ -99,8 +102,22 @@ export default function CalendarView({
       {view === "month" && <MonthGrid monthMs={startOfMonth(anchor)} events={events} onPick={setSelected} onOpenDay={openDay} narrow={narrow} />}
 
       {selected && (
-        <EventPopout ev={selected} canHearRecording={canHearRecording} me={me} companyId={companyId} onClose={() => setSelected(null)} />
+        <EventPopout
+          ev={selected}
+          canHearRecording={canHearRecording}
+          me={me}
+          companyId={companyId}
+          onClose={() => setSelected(null)}
+          onDisposition={(e) => { setSelected(null); setDispoTarget(e); }}
+        />
       )}
+
+      {/* After-the-fact close-out, opened from the popout by the assigned closer. */}
+      <CloserDispositionModal
+        event={dispoTarget}
+        afterTheFact
+        onClose={() => setDispoTarget(null)}
+      />
     </div>
   );
 }
@@ -248,11 +265,14 @@ function MonthGrid({ monthMs, events, onPick, onOpenDay, narrow }: { monthMs: nu
 // recording so they can hear the door when there aren't written notes. When the
 // appointment is routed to a different closer, the viewer can DM that closer to
 // chase the outcome — handy when it's overdue and still undispositioned.
-function EventPopout({ ev, canHearRecording, me, companyId, onClose }: { ev: ScheduleEvent; canHearRecording: boolean; me: Me; companyId: string | null; onClose: () => void }) {
+function EventPopout({ ev, canHearRecording, me, companyId, onClose, onDisposition }: { ev: ScheduleEvent; canHearRecording: boolean; me: Me; companyId: string | null; onClose: () => void; onDisposition: (e: ScheduleEvent) => void }) {
   const [audioUrl, setAudioUrl] = useState<string | null>(null);
   const [recState, setRecState] = useState<"idle" | "loading" | "none">(canHearRecording && ev.leadId ? "loading" : "none");
   const undisp = isUndispositioned(ev);
   const overdue = isOverdue(ev);
+  // The assigned closer can close out their own still-open appointment right
+  // here — from the calendar, after the fact.
+  const canDisposition = !!(me && ev.closerUid === me.uid && undisp);
   // The viewer can message the closer when there IS a closer and it isn't them.
   const canMessageCloser = !!(me && ev.closerUid && ev.closerName && ev.closerUid !== me.uid);
   const [dmText, setDmText] = useState(
@@ -317,6 +337,12 @@ function EventPopout({ ev, canHearRecording, me, companyId, onClose }: { ev: Sch
           <div style={{ marginTop: 10, borderRadius: 8, padding: "8px 10px", background: "rgba(239,68,68,.12)", border: "1px solid rgba(239,68,68,.5)", color: "#fecaca", fontSize: 13 }}>
             ⚠ {overdue ? "This appointment is past due and the closer hasn't dispositioned it yet." : "Not dispositioned by the closer yet."}
           </div>
+        )}
+
+        {canDisposition && (
+          <button className="btn primary" style={{ width: "100%", marginTop: 12 }} onClick={() => onDisposition(ev)}>
+            ✍️ Disposition this appointment
+          </button>
         )}
 
         <dl className="fields" style={{ marginTop: 10 }}>

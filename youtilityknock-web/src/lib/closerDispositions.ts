@@ -2,7 +2,7 @@
 // a closer can record on an assigned appointment, mirrored server-side in
 // functions. A "sit" (a real pitch happened) drives both the setter's sit % and
 // the closer's close %; closed_won additionally counts as a close.
-import type { ApptStatus } from "../types";
+import type { ApptStatus, ScheduleEvent } from "../types";
 
 export interface ApptDispo {
   value: ApptStatus;
@@ -43,4 +43,38 @@ export const SIT_STATUSES: ReadonlySet<ApptStatus> = new Set<ApptStatus>(
 
 export function isSit(status?: ApptStatus | string | null): boolean {
   return !!status && SIT_STATUSES.has(status as ApptStatus);
+}
+
+// An appointment routed to a closer (the source rows for closer metrics).
+export function isCloserAppt(e: Pick<ScheduleEvent, "type" | "closerUid">): boolean {
+  return e.type === "appointment" && !!e.closerUid;
+}
+
+// "Dispositioned" = the closer recorded a real outcome (past the initial
+// "scheduled" / blank state).
+export function isDispositioned(e: Pick<ScheduleEvent, "apptStatus">): boolean {
+  return !!e.apptStatus && e.apptStatus !== "scheduled";
+}
+
+// A closer appointment whose time has passed but still has no outcome — the
+// actionable "you owe a disposition" set (drives the dashboard alert).
+export function isUndispositionedPast(
+  e: Pick<ScheduleEvent, "type" | "closerUid" | "apptStatus" | "startAt">,
+  now = Date.now()
+): boolean {
+  return isCloserAppt(e) && !isDispositioned(e) && e.startAt < now;
+}
+
+// "On the spot" = closed out AT the appointment (on-site, right then), not later
+// from the calendar. New dispositions store the flag; for legacy events we infer
+// it — on-site AND recorded the same calendar day as the appointment.
+export function wasOnSpot(
+  e: Pick<ScheduleEvent, "apptStatus" | "dispositionedOnSpot" | "dispositionVerified" | "dispositionedAt" | "startAt">
+): boolean {
+  if (!isDispositioned(e)) return false;
+  if (typeof e.dispositionedOnSpot === "boolean") return e.dispositionedOnSpot;
+  const sameDay =
+    e.dispositionedAt != null &&
+    new Date(e.dispositionedAt).toDateString() === new Date(e.startAt).toDateString();
+  return e.dispositionVerified !== false && sameDay;
 }

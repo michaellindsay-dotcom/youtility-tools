@@ -26,7 +26,7 @@ function toLocalInput(ms: number): string {
 }
 
 const closerDispositionFn = httpsCallable<
-  { eventId: string; status: ApptStatus; notes: string; distanceFt: number | null; verified: boolean; followUpAt?: number },
+  { eventId: string; status: ApptStatus; notes: string; distanceFt: number | null; verified: boolean; followUpAt?: number; afterTheFact?: boolean },
   { ok: boolean; status: ApptStatus; onSite: boolean; followUpId: string | null }
 >(functions, "closerDisposition");
 
@@ -34,10 +34,14 @@ export default function CloserDispositionModal({
   event,
   onClose,
   onDone,
+  // After-the-fact: closing out a past appointment from the calendar rather than
+  // at the door. Skips the geofence entirely and records it as not-on-the-spot.
+  afterTheFact = false,
 }: {
   event: ScheduleEvent | null;
   onClose: () => void;
   onDone?: () => void;
+  afterTheFact?: boolean;
 }) {
   const [status, setStatus] = useState<ApptStatus | null>(null);
   const [notes, setNotes] = useState("");
@@ -55,8 +59,13 @@ export default function CloserDispositionModal({
     setNotes("");
     setFollowUpAt("");
     setErr(null);
-    setGeo({ ft: null, accFt: 0, verified: true, locating: true, hasHome: false });
-    void locate(event);
+    // After-the-fact entries aren't geofenced — go straight to a neutral state.
+    if (afterTheFact) {
+      setGeo({ ft: null, accFt: 0, verified: true, locating: false, hasHome: false });
+    } else {
+      setGeo({ ft: null, accFt: 0, verified: true, locating: true, hasHome: false });
+      void locate(event);
+    }
     document.body.classList.add("modal-open");
     return () => document.body.classList.remove("modal-open");
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -127,9 +136,10 @@ export default function CloserDispositionModal({
         eventId: event.id,
         status,
         notes: notes.trim(),
-        distanceFt: geo.ft,
+        distanceFt: afterTheFact ? null : geo.ft,
         verified: geo.verified,
         followUpAt: showFollowUp && followUpAt ? new Date(followUpAt).getTime() : undefined,
+        afterTheFact,
       });
       onDone?.();
       onClose();
@@ -149,11 +159,18 @@ export default function CloserDispositionModal({
       <div className="dispo-card" onClick={(e) => e.stopPropagation()}>
         <div className="dispo-head">
           <div>
-            <h3>Close-out</h3>
+            <h3>{afterTheFact ? "Close-out (after the fact)" : "Close-out"}</h3>
             <div className="muted small">{event.title || event.address}</div>
           </div>
           <button className="dispo-x" onClick={onClose}>✕</button>
         </div>
+
+        {afterTheFact && (
+          <div className="banner info show" style={{ marginBottom: 10 }}>
+            📆 Logging this after the fact. It records the real outcome, but counts as
+            <strong> not dispositioned on the spot</strong> in your manager's report.
+          </div>
+        )}
 
         {geo.locating && <div className="muted small dispo-summary">📍 Getting a precise location…</div>}
 
