@@ -333,6 +333,7 @@ a {
 .sidebar { padding: 16px 8px; align-items: center; }
 .sidebar .brand { padding: 4px 0 12px; justify-content: center; }
 .sidebar .brand > div:not(.brand-mark) { display: none; } /* name + tagline */
+.sidebar .nav-preview { display: none; }                  /* admin "preview as" */
 .nav { width: 100%; }
 .nav-link { justify-content: center; gap: 0; padding: 11px 0; }
 .nav-link .nav-label { display: none; }
@@ -1777,6 +1778,7 @@ body.modal-open .chat-fab-global { display: none; }
   .sidebar { width: var(--sidebar-w-open); padding: 20px 14px; align-items: stretch; }
   .sidebar .brand { padding: 4px 8px 16px; justify-content: flex-start; }
   .sidebar .brand > div:not(.brand-mark) { display: block; }
+  .sidebar .nav-preview { display: block; }
   .nav-link { justify-content: flex-start; gap: 12px; padding: 11px 12px; }
   .nav-link .nav-label { display: inline; }
   .sidebar-foot { padding: 8px; }

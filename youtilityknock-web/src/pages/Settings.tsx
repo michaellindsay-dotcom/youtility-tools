@@ -4,12 +4,9 @@ import { EmailAuthProvider, reauthenticateWithCredential, updatePassword } from 
 import { auth, functions } from "../firebase";
 import { useAuth } from "../auth/AuthContext";
 import { useCalendarConnect } from "../lib/calendar";
-import { useNav, PREVIEW_POSITIONS, type PreviewPos } from "../components/NavContext";
 
 export default function Settings() {
   const { profile, role } = useAuth();
-  const { previewPos, setPreviewPos } = useNav();
-  const canPreview = role === "admin" || role === "superadmin";
   const [phone, setPhone] = useState(profile?.phone || "");
   const [savingPhone, setSavingPhone] = useState(false);
   const [phoneMsg, setPhoneMsg] = useState("");
@@ -124,30 +121,6 @@ export default function Settings() {
           </div>
         </dl>
       </div>
-
-      {canPreview && (
-        <div className="card">
-          <h3 style={{ marginBottom: 4 }}>Preview menu as</h3>
-          <p className="muted small" style={{ marginBottom: 12 }}>
-            See the decluttered sidebar a given role gets. Display-only — your own access is unchanged.
-          </p>
-          <select
-            value={previewPos}
-            onChange={(e) => setPreviewPos(e.target.value as PreviewPos)}
-            style={{ maxWidth: 280, width: "100%", background: "rgba(255,255,255,0.05)", color: "var(--ink)", border: "1px solid var(--line)", borderRadius: 8, padding: "8px 10px", fontSize: 14 }}
-          >
-            <option value="">My menu (admin — all)</option>
-            {PREVIEW_POSITIONS.map((p) => (
-              <option key={p.value} value={p.value}>{p.label}</option>
-            ))}
-          </select>
-          {previewPos && (
-            <div className="muted small" style={{ marginTop: 8, color: "#fbbf24" }}>
-              Previewing the sidebar as a {PREVIEW_POSITIONS.find((p) => p.value === previewPos)?.label}. Your own access is unchanged.
-            </div>
-          )}
-        </div>
-      )}
 
       <div className="card">
         <h3 style={{ marginBottom: 4 }}>Mobile number</h3>
