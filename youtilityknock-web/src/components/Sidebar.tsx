@@ -1,17 +1,9 @@
-import { useMemo, useState } from "react";
+import { useMemo } from "react";
 import { NavLink, useNavigate } from "react-router-dom";
 import { useAuth } from "../auth/AuthContext";
+import { useNav } from "./NavContext";
 import { userHasService, isRallyCardOnly, type FeatureKey } from "../lib/features";
-import type { Role, Position } from "../types";
-
-// Roles an admin can preview the menu as (admin themselves sees everything).
-const PREVIEW_POSITIONS: { value: Position; label: string }[] = [
-  { value: "team_manager", label: "Team Manager" },
-  { value: "closer_manager", label: "Closer Manager" },
-  { value: "setter_manager", label: "Setter Manager" },
-  { value: "closer", label: "Closer" },
-  { value: "setter", label: "Setter" },
-];
+import type { Role } from "../types";
 
 // `feat` shows the link only when the plan has that feature; `anyFeat` shows it
 // when the plan has any one of several. `mobileHidden` hides the link on the
@@ -60,7 +52,8 @@ const links: { to: string; label: string; icon: string; end?: boolean; feat?: Fe
 export default function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
   const { company, role, profile, team, logout } = useAuth();
   const navigate = useNavigate();
-  const [previewPos, setPreviewPos] = useState<Position | "">("");
+  // The "preview menu as" role now lives on the Settings page; we just read it.
+  const { previewPos } = useNav();
   const canPreview = role === "admin" || role === "superadmin";
 
   const onSignOut = async () => {
@@ -105,26 +98,6 @@ export default function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
         </div>
       </div>
 
-      {canPreview && (
-        <div className="nav-preview" style={{ padding: "0 8px 12px" }}>
-          <label className="brand-sub" style={{ display: "block", marginBottom: 4 }}>Preview menu as</label>
-          <select
-            value={previewPos}
-            onChange={(e) => setPreviewPos(e.target.value as Position | "")}
-            style={{ width: "100%", background: "rgba(255,255,255,0.05)", color: "var(--ink)", border: "1px solid var(--line)", borderRadius: 8, padding: "7px 8px", fontSize: 13 }}
-          >
-            <option value="">My menu (admin — all)</option>
-            {PREVIEW_POSITIONS.map((p) => (
-              <option key={p.value} value={p.value}>{p.label}</option>
-            ))}
-          </select>
-          {previewPos && (
-            <div className="brand-sub" style={{ marginTop: 5, color: "#fbbf24" }}>
-              Previewing — your own access is unchanged.
-            </div>
-          )}
-        </div>
-      )}
 
       <nav className="nav">
         {visible.map((l) => (
