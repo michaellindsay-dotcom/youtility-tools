@@ -3219,6 +3219,30 @@ export const closerDisposition = onCall(async (request) => {
     });
   }
 
+  // No-show → open a direct chat back to the setter so they can help follow up.
+  // Covers both a "No Show" disposition and an off-site closer no-show.
+  if (setterUid && (finalStatus === "no_show" || finalStatus === "closer_no_show")) {
+    try {
+      const closerName = (closer as any).displayName || ev.closerName || "The closer";
+      const cid = [closerUid, setterUid].sort().join("__");
+      const body = `🚪 No-show on ${ev.address || "your appointment"}${ev.title ? ` (${ev.title})` : ""}. `
+        + `Can you help follow up / re-book?${d.notes.trim() ? ` Notes: ${d.notes.trim()}` : ""}`;
+      await db.doc(`dms/${cid}`).set({
+        members: [closerUid, setterUid],
+        memberNames: { [closerUid]: closerName, [setterUid]: (setter as any)?.displayName || "" },
+        companyId: ev.companyId,
+        lastMessage: body,
+        lastAt: now,
+      }, { merge: true });
+      await db.collection(`dms/${cid}/messages`).add({
+        channelId: cid, userId: closerUid, userName: closerName, text: body, createdAt: now,
+      });
+      await notifyUser({ userId: setterUid, type: "closer_update", title: `No-show — please follow up`, body: ev.address || "", link: "/app/chat" });
+    } catch (err) {
+      logger.warn("no-show setter DM failed", err);
+    }
+  }
+
   // A closer no-show (dispositioned off-site) flags up to the closer's manager.
   if (finalStatus === "closer_no_show") {
     await serverBumpStats(closer, { closerNoShows: 1 });

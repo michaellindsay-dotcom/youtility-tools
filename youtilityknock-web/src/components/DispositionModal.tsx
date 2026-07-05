@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
-import { addDoc, collection, doc, increment, updateDoc } from "firebase/firestore";
+import { addDoc, arrayUnion, collection, doc, increment, updateDoc } from "firebase/firestore";
 import { httpsCallable } from "firebase/functions";
 import { ref as storageRef, uploadBytes, getDownloadURL } from "firebase/storage";
 import { Geolocation } from "@capacitor/geolocation";
@@ -370,12 +370,26 @@ export default function DispositionModal({
         updatedAt: now,
       });
 
+      // Append this knock to the home's history timeline (drives the customer
+      // screen). One entry per disposition, oldest first.
+      const historyEntry = clean({
+        at: now,
+        status: d.status,
+        notes: d.notes || null,
+        byUid: profile.uid,
+        byName: profile.displayName || null,
+        verified: geo.verified,
+        distanceFt: geo.ft ?? null,
+        photoHomeUrl: homeUrl,
+        photoBillUrl: billUrl,
+      });
+
       // The lead is the core deliverable — save it first, on its own. Each
       // disposition is a knock, so bump knockCount (drives "3 knocks = a
       // not-home is complete" in territory completion).
       let leadId = d.leadId;
       if (leadId) {
-        await updateDoc(doc(db, "leads", leadId), { ...fields, knockCount: increment(1) });
+        await updateDoc(doc(db, "leads", leadId), { ...fields, knockCount: increment(1), history: arrayUnion(historyEntry) });
       } else {
         const refDoc = await addDoc(collection(db, "leads"), clean({
           ...fields,
@@ -383,6 +397,7 @@ export default function DispositionModal({
           lat: d.lat ?? null,
           lng: d.lng ?? null,
           knockCount: 1,
+          history: [historyEntry],
           companyId,
           assignedTo: profile.uid,
           visibilityPath: [profile.uid, ...(profile.managerPath ?? [])],

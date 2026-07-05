@@ -10,7 +10,7 @@ import {
   updateDoc,
   where,
 } from "firebase/firestore";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { db } from "../firebase";
 import { useAuth } from "../auth/AuthContext";
 import { isRallyCardOnly } from "../lib/features";
@@ -23,11 +23,18 @@ const STATUSES = DISPOSITIONS;
 
 export default function Leads() {
   const { profile, role, companyId, company } = useAuth();
+  const navigate = useNavigate();
   const [leads, setLeads] = useState<Lead[]>([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<LeadStatus | "all">("all");
   const [showAdd, setShowAdd] = useState(false);
   const [dispoTarget, setDispoTarget] = useState<DispoInput | null>(null);
+
+  const dispoInputFor = (lead: Lead): DispoInput => ({
+    leadId: lead.id, address: lead.address, lat: lead.lat, lng: lead.lng, status: lead.status,
+    name: lead.ownerName || "", phone: lead.phone || "", email: lead.email || "", notes: lead.notes || "",
+    enrichment: lead.enrichment, photoHomeUrl: lead.photoHomeUrl, photoBillUrl: lead.photoBillUrl,
+  });
 
   useEffect(() => {
     if (!profile || !companyId) return;
@@ -136,23 +143,9 @@ export default function Leads() {
             <div className="lead-row card" key={lead.id}>
               <div
                 className="lead-main"
-                title="Double-click to view home & owner details"
-                onDoubleClick={() =>
-                  setDispoTarget({
-                    leadId: lead.id,
-                    address: lead.address,
-                    lat: lead.lat,
-                    lng: lead.lng,
-                    status: lead.status,
-                    name: lead.ownerName || "",
-                    phone: lead.phone || "",
-                    email: lead.email || "",
-                    notes: lead.notes || "",
-                    enrichment: lead.enrichment,
-                    photoHomeUrl: lead.photoHomeUrl,
-                    photoBillUrl: lead.photoBillUrl,
-                  })
-                }
+                title="Double-click to open the full customer history"
+                style={{ cursor: "pointer" }}
+                onDoubleClick={() => navigate(`/lead/${lead.id}`)}
               >
                 <div className="lead-addr">{lead.address}</div>
                 <div className="lead-sub muted">
@@ -162,6 +155,8 @@ export default function Leads() {
                 {lead.notes && <div className="lead-notes">{lead.notes}</div>}
               </div>
               <div className="lead-actions">
+                <button className="btn ghost sm" title="Log a disposition" onClick={() => setDispoTarget(dispoInputFor(lead))}>✍️</button>
+                <button className="btn ghost sm" title="Open customer history" onClick={() => navigate(`/lead/${lead.id}`)}>👁</button>
                 <select
                   value={lead.status}
                   onChange={(e) => setStatus(lead.id, e.target.value as LeadStatus)}

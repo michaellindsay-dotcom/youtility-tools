@@ -213,6 +213,21 @@ export interface LeadEnrichment {
   [k: string]: unknown;
 }
 
+// One recorded knock/disposition on a home — appended to the lead's `history`
+// array each time it's dispositioned, so the customer screen shows the full
+// timeline (NH → NH1 → NI → Appointment → …) rather than just the latest.
+export interface LeadHistoryEntry {
+  at: number;
+  status: LeadStatus;
+  notes?: string | null;
+  byUid?: string;
+  byName?: string | null;
+  verified?: boolean;
+  distanceFt?: number | null;
+  photoHomeUrl?: string | null;
+  photoBillUrl?: string | null;
+}
+
 export interface Lead {
   id: string;
   address: string;
@@ -239,6 +254,7 @@ export interface Lead {
   companyId: string;
   territoryId?: string;
   knockCount?: number; // doors knocked at this home (drives territory completion)
+  history?: LeadHistoryEntry[]; // every knock/disposition, oldest first
   // Area energy incentives captured at set time, so they travel to the closer.
   incentives?: AreaIncentive[];
   incentivesUtility?: { name: string; rate: number | null } | null;
