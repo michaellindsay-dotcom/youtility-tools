@@ -27,6 +27,7 @@ import Chat from "./pages/Chat";
 import Schedule from "./pages/Schedule";
 import Settings from "./pages/Settings";
 import BusinessCard from "./pages/BusinessCard";
+import CustomerLead from "./pages/CustomerLead";
 import Inbox from "./pages/Inbox";
 
 // Blocks a route (by direct URL) when the company's plan doesn't include it.
@@ -94,6 +95,7 @@ export default function App() {
         <Route index element={<Home />} />
         <Route path="lookup" element={<CanvassGate><Lookup /></CanvassGate>} />
         <Route path="leads" element={<Leads />} />
+        <Route path="lead/:leadId" element={<CustomerLead />} />
         <Route path="map" element={<CanvassGate><MapPage /></CanvassGate>} />
         <Route path="movers" element={<CanvassGate><Movers /></CanvassGate>} />
         <Route path="team" element={<Team />} />

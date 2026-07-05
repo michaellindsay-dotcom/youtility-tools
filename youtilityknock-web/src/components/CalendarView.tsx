@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { addDoc, collection, doc, getDocs, limit, orderBy, query, setDoc, where } from "firebase/firestore";
 import { getDownloadURL, ref as storageRef } from "firebase/storage";
 import { db, storage } from "../firebase";
@@ -127,11 +128,13 @@ export default function CalendarView({
 // recorded an outcome yet.
 function Block({ e, onPick }: { e: ScheduleEvent; onPick: (e: ScheduleEvent) => void }) {
   const overdue = isOverdue(e);
+  const navigate = useNavigate();
   return (
     <button
       type="button"
       onClick={() => onPick(e)}
-      title={`${fmtTime(e.startAt)} · ${e.title} · ${assigneeName(e)}${overdue ? " · ⚠ not dispositioned" : ""}`}
+      onDoubleClick={() => { if (e.leadId) navigate(`/lead/${e.leadId}`); }}
+      title={`${fmtTime(e.startAt)} · ${e.title} · ${assigneeName(e)}${overdue ? " · ⚠ not dispositioned" : ""}${e.leadId ? " · double-click for full history" : ""}`}
       style={{
         display: "block", width: "100%", textAlign: "left", border: "none", borderRadius: 6,
         padding: "3px 6px", marginBottom: 3, cursor: "pointer", color: "#06121f",
@@ -279,6 +282,7 @@ function EventPopout({ ev, canHearRecording, me, companyId, onClose, onDispositi
     `Hey ${ev.closerName || "there"}, what's the status on the ${new Date(ev.startAt).toLocaleDateString([], { month: "short", day: "numeric" })} appointment${ev.title ? ` — ${ev.title}` : ""}?`
   );
   const [dmState, setDmState] = useState<"idle" | "sending" | "sent" | "error">("idle");
+  const navigate = useNavigate();
 
   async function messageCloser() {
     if (!me || !ev.closerUid || !ev.closerName) return;
@@ -342,6 +346,12 @@ function EventPopout({ ev, canHearRecording, me, companyId, onClose, onDispositi
         {canDisposition && (
           <button className="btn primary" style={{ width: "100%", marginTop: 12 }} onClick={() => onDisposition(ev)}>
             ✍️ Disposition this appointment
+          </button>
+        )}
+
+        {ev.leadId && (
+          <button className="btn ghost sm" style={{ width: "100%", marginTop: 8 }} onClick={() => { onClose(); navigate(`/lead/${ev.leadId}`); }}>
+            👁 Open full customer history →
           </button>
         )}
 

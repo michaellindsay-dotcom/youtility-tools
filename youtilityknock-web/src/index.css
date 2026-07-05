@@ -2940,3 +2940,12 @@ body.modal-open .chat-fab-global { display: none; }
   0%, 100% { box-shadow: 0 2px 10px rgba(239, 68, 68, 0.35); }
   50% { box-shadow: 0 2px 16px rgba(239, 68, 68, 0.75); }
 }
+
+/* ── Customer / lead history screen ──────────────────────── */
+.cust-timeline { display: grid; gap: 8px; margin-bottom: 8px; }
+.cust-tl-row { display: flex; gap: 10px; align-items: flex-start; padding: 10px 12px; }
+.cust-tl-dot { width: 10px; height: 10px; border-radius: 50%; margin-top: 5px; flex-shrink: 0; }
+.cust-notes { margin-top: 4px; font-size: 13px; color: var(--ink-mid); white-space: pre-wrap; }
+.cust-thumb { width: 56px; height: 56px; object-fit: cover; border-radius: 8px; border: 1px solid var(--line-hi); }
+.cust-photos { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 8px; }
+.cust-photo { width: 120px; height: 120px; object-fit: cover; border-radius: 10px; border: 1px solid var(--line-hi); }
