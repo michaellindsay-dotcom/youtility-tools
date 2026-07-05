@@ -16,7 +16,10 @@
   --bad: #f87171;
   --radius: 14px;
   --radius-sm: 10px;
-  --sidebar-w: 240px;
+  /* Desktop sidebar is an icon-only rail; the mobile drawer widens it back to
+     --sidebar-w-open (see the max-width: 860px block). */
+  --sidebar-w: 72px;
+  --sidebar-w-open: 240px;
 }
 
 *,
@@ -323,6 +326,20 @@ a {
   width: 18px;
   text-align: center;
 }
+
+/* ── Icon-only rail (desktop). The mobile drawer restores labels + width in
+   the max-width: 860px block below. ─────────────────────────────────────── */
+.nav-label { white-space: nowrap; }
+.sidebar { padding: 16px 8px; align-items: center; }
+.sidebar .brand { padding: 4px 0 12px; justify-content: center; }
+.sidebar .brand > div:not(.brand-mark) { display: none; } /* name + tagline */
+.nav { width: 100%; }
+.nav-link { justify-content: center; gap: 0; padding: 11px 0; }
+.nav-link .nav-label { display: none; }
+.nav-icon { width: 22px; font-size: 17px; }
+.sidebar-foot { width: 100%; padding: 8px 0; }
+.sidebar-signout .nav-label { display: none; }
+.sidebar-foot .brand-sub { display: none; }               /* build number */
 
 /* ── Mirror (impersonation) banner ───────────────────────── */
 .mirror-bar {
@@ -1755,6 +1772,16 @@ body.modal-open .chat-fab-global { display: none; }
   /* Trim the phone nav: these live elsewhere on mobile (Movers on the map,
      Leads/Team Chat in the main flow). Desktop keeps the full list. */
   .nav-link.mobile-hidden { display: none; }
+  /* The phone nav is a slide-in drawer, not a rail — restore full labels so
+     it's readable, undoing the desktop icon-only collapse above. */
+  .sidebar { width: var(--sidebar-w-open); padding: 20px 14px; align-items: stretch; }
+  .sidebar .brand { padding: 4px 8px 16px; justify-content: flex-start; }
+  .sidebar .brand > div:not(.brand-mark) { display: block; }
+  .nav-link { justify-content: flex-start; gap: 12px; padding: 11px 12px; }
+  .nav-link .nav-label { display: inline; }
+  .sidebar-foot { padding: 8px; }
+  .sidebar-signout .nav-label { display: inline; }
+  .sidebar-foot .brand-sub { display: block; }
   .sidebar {
     position: fixed;
     left: 0;
