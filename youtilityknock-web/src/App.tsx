@@ -65,6 +65,14 @@ function CloserGate({ children }: { children: React.ReactNode }) {
   return allowed ? <>{children}</> : <Navigate to="/" replace />;
 }
 
+// Movers is a team-manager / company-admin tool. Setters, closers and the
+// other manager tiers can't reach it by URL.
+function MoversGate({ children }: { children: React.ReactNode }) {
+  const { profile, role } = useAuth();
+  const allowed = role === "admin" || role === "superadmin" || profile?.position === "team_manager";
+  return allowed ? <>{children}</> : <Navigate to="/" replace />;
+}
+
 // Blocks the canvassing-only surface (map, movers, territories, closer tools,
 // shift tracking, reports, pitch practice) for a RallyCard-only company — one
 // whose plan has no "map" feature. Redirects to the card instead of the
@@ -97,7 +105,7 @@ export default function App() {
         <Route path="leads" element={<Leads />} />
         <Route path="lead/:leadId" element={<CustomerLead />} />
         <Route path="map" element={<CanvassGate><MapPage /></CanvassGate>} />
-        <Route path="movers" element={<CanvassGate><Movers /></CanvassGate>} />
+        <Route path="movers" element={<CanvassGate><MoversGate><Movers /></MoversGate></CanvassGate>} />
         <Route path="team" element={<Team />} />
         <Route path="reports" element={<CanvassGate><RoleGate allow={["admin", "manager"]}><Reports /></RoleGate></CanvassGate>} />
         <Route path="closer" element={<CanvassGate><CloserGate><Closer /></CloserGate></CanvassGate>} />

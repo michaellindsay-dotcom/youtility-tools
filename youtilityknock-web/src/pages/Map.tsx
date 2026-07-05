@@ -46,6 +46,12 @@ function validCoord(lat: unknown, lng: unknown): [number, number] | null {
   return [la, ln];
 }
 
+// Normalize a street address into a stable match key so a mover (from the sale
+// feed) can be snapped onto the exact home/lead pin at the same address.
+function normAddr(addr?: string): string {
+  return (addr || "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+}
+
 function inPolygon(pt: LatLng, poly: LatLng[]): boolean {
   let inside = false;
   for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
@@ -66,6 +72,9 @@ export default function MapPage() {
   const leadsRef = useRef<Lead[]>([]);
   const homeKeys = useRef<Set<string>>(new Set()); // dedupe accumulated home pins
   const moverKeys = useRef<Set<string>>(new Set()); // dedupe accumulated mover pins
+  // Precise coordinates for each rendered home/lead, keyed by normalized
+  // address — lets a mover snap onto the exact pin of the home it belongs to.
+  const homeCoordByAddr = useRef<Map<string, [number, number]>>(new Map());
   const lastLoadCenter = useRef<L.LatLng | null>(null);
   const loadingRef = useRef(false);
   const roamTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -131,11 +140,24 @@ export default function MapPage() {
   async function buildPins() {
     leadLayer.current.clearLayers();
     // Deleted (archived) leads are hidden everywhere except the admin's list.
-    const leads = (await fetchLeads()).filter((lead) => !lead.deleted);
+    let leads = (await fetchLeads()).filter((lead) => !lead.deleted);
+    // Non-managers (setters/closers) see only NEW (unworked) leads, and only
+    // inside their assigned areas — actionable doors in their zone, nothing
+    // else. Managers/admins see the full picture.
+    if (!canManageAreas) {
+      const areas = assigned.current.filter((t) => t.polygon && t.polygon.length >= 3);
+      leads = leads.filter((lead) => {
+        if (lead.status !== "new") return false;
+        const c = validCoord(lead.lat, lead.lng);
+        if (!c) return false;
+        return areas.some((t) => inPolygon({ lat: c[0], lng: c[1] }, t.polygon!));
+      });
+    }
     leadsRef.current = leads;
     leads.forEach((lead) => {
       const c = validCoord(lead.lat, lead.lng);
       if (!c) return;
+      if (lead.address) homeCoordByAddr.current.set(normAddr(lead.address), c);
       L.marker(c, {
         icon: homeIcon(DISP_COLOR[lead.status] || "#94A3B8", lead.verified === false),
         zIndexOffset: 1000, // always above generic home pins
@@ -222,6 +244,9 @@ export default function MapPage() {
   }
 
   function addHomeMarker(h: { address: string; lat: number; lng: number }): boolean {
+    // Index the precise coordinate by address first (even if we dedupe/skip the
+    // marker below) so movers can always snap onto it.
+    if (h.address) homeCoordByAddr.current.set(normAddr(h.address), [h.lat, h.lng]);
     const key = `${h.lat.toFixed(5)},${h.lng.toFixed(5)}`;
     if (homeKeys.current.has(key)) return false; // already on the map
     homeKeys.current.add(key);
@@ -260,11 +285,15 @@ export default function MapPage() {
   // recently the home sold. They load automatically for the rep's assigned area
   // (or around their live location) alongside the regular home pins.
   function addMoverMarker(m: MoverHome): boolean {
-    const c = validCoord(m.lat, m.lng);
-    if (!c) return false;
     const d = daysAgo(m.saleDate);
     const color = moverColor(d);
     if (!color) return false; // older than the widest window — not a mover
+    // The sale feed's coordinates can be coarse (they drift into a line when you
+    // zoom out). If we already have the exact home/lead pin at this address, snap
+    // the mover onto it so it sits on the real house.
+    const snapped = homeCoordByAddr.current.get(normAddr(m.address));
+    const c = snapped || validCoord(m.lat, m.lng);
+    if (!c) return false;
     const key = `${c[0].toFixed(5)},${c[1].toFixed(5)}`;
     if (moverKeys.current.has(key)) return false;
     moverKeys.current.add(key);
