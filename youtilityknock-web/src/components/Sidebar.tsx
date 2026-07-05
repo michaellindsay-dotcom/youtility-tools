@@ -133,15 +133,18 @@ export default function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
             to={l.to}
             end={l.end}
             onClick={onNavigate}
+            title={l.label}
             className={({ isActive }) => "nav-link" + (isActive ? " active" : "") + (l.mobileHidden ? " mobile-hidden" : "")}
           >
             <span className="nav-icon">{l.icon}</span>
-            {l.label}
+            <span className="nav-label">{l.label}</span>
           </NavLink>
         ))}
       </nav>
       <div className="sidebar-foot">
-        <button className="btn ghost sidebar-signout" onClick={onSignOut}>⏻ Sign out</button>
+        <button className="btn ghost sidebar-signout" onClick={onSignOut} title="Sign out">
+          <span className="nav-icon">⏻</span><span className="nav-label"> Sign out</span>
+        </button>
         <div className="brand-sub">build BUILD-48</div>
       </div>
     </aside>
