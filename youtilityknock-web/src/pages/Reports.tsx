@@ -3,7 +3,6 @@ import { collection, getDocs, query, where } from "firebase/firestore";
 import { httpsCallable } from "firebase/functions";
 import { db, functions } from "../firebase";
 import { useAuth } from "../auth/AuthContext";
-import { DISP_LABEL, DISP_COLOR } from "../lib/dispositions";
 import type { UserProfile } from "../types";
 
 interface Funnel { doors: number; conv: number; appt: number; closed: number }
@@ -45,7 +44,6 @@ export default function Reports() {
   const [sel, setSel] = useState<string>("");
   const [report, setReport] = useState<Report | null>(null);
   const [loading, setLoading] = useState(false);
-  const [busyLead, setBusyLead] = useState<string>("");
 
   // Roster: admins see the whole company; managers see their downstream.
   useEffect(() => {
@@ -75,19 +73,6 @@ export default function Reports() {
       console.error("getEmployeeReport", e);
     } finally {
       setLoading(false);
-    }
-  };
-
-  const markSold = async (leadId: string) => {
-    setBusyLead(leadId);
-    try {
-      await httpsCallable(functions, "setLeadStatusForRep")({ leadId, status: "sold" });
-      if (sel) await loadReport(sel);
-    } catch (e) {
-      console.error("setLeadStatusForRep", e);
-      alert((e as Error).message || "Could not set the close.");
-    } finally {
-      setBusyLead("");
     }
   };
 
@@ -167,34 +152,6 @@ export default function Reports() {
             </div>
           )}
 
-          <div className="card" style={{ marginTop: 16 }}>
-            <h3 className="section-h" style={{ marginTop: 0 }}>Leads <span className="muted small">({report.leads.length})</span></h3>
-            {report.leads.length === 0 ? (
-              <div className="muted">No leads yet.</div>
-            ) : (
-              <div style={{ overflowX: "auto" }}>
-                <table className="rep-leads">
-                  <thead><tr><th>Address</th><th>Status</th><th>Knocked</th><th></th></tr></thead>
-                  <tbody>
-                    {report.leads.map((l) => (
-                      <tr key={l.id}>
-                        <td>{l.address || "—"}</td>
-                        <td><span className="disp-dot" style={{ background: DISP_COLOR[l.status] || "#888" }} /> {DISP_LABEL[l.status] || l.status}</td>
-                        <td className="muted">{fmtDate(l.knockedAt)}</td>
-                        <td>
-                          {l.status !== "sold" && (
-                            <button className="btn sm" disabled={busyLead === l.id} onClick={() => markSold(l.id)}>
-                              {busyLead === l.id ? "…" : "Mark sold"}
-                            </button>
-                          )}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </div>
         </>
       )}
     </div>

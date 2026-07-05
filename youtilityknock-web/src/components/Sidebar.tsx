@@ -20,10 +20,11 @@ const PREVIEW_POSITIONS: { value: Position; label: string }[] = [
 // `canvassOnly` hides the link entirely for a RallyCard-only company (no
 // canvassing map) — see `isRallyCardOnly` in lib/features. `rallyOnlyLink` is
 // the inverse: shown ONLY to RallyCard-only companies.
-const links: { to: string; label: string; icon: string; end?: boolean; feat?: FeatureKey; anyFeat?: FeatureKey[]; roles?: Role[]; closer?: boolean; mobileHidden?: boolean; canvassOnly?: boolean; rallyOnlyLink?: boolean }[] = [
+const links: { to: string; label: string; icon: string; end?: boolean; feat?: FeatureKey; anyFeat?: FeatureKey[]; roles?: Role[]; positions?: Position[]; closer?: boolean; mobileHidden?: boolean; canvassOnly?: boolean; rallyOnlyLink?: boolean }[] = [
   { to: "/", label: "Dashboard", icon: "▦", end: true, canvassOnly: true },
   { to: "/map", label: "Map", icon: "◉", canvassOnly: true },
-  { to: "/movers", label: "Movers", icon: "🚚", feat: "movers", mobileHidden: true, canvassOnly: true },
+  // Movers is a team-manager / company-admin tool only.
+  { to: "/movers", label: "Movers", icon: "🚚", feat: "movers", mobileHidden: true, canvassOnly: true, positions: ["team_manager"] },
   // No RallyCard nav item for now (hidden until the tool is built out more).
   // The card stays reachable: full-platform companies tap the Dashboard hero,
   // and RallyCard-only companies land on it as their home page (/ → /card).
@@ -91,6 +92,9 @@ export default function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
     // managers and team managers all carry isCloser) or admin — NOT on the
     // generic manager tier, so a SETTER manager never sees closer information.
     if (l.closer && !(eff.profile?.isCloser || eff.role === "admin")) return false;
+    // Position-gated links (e.g. Movers) — company admins always see them;
+    // otherwise the user's position must be in the allow-list.
+    if (l.positions && !(eff.role === "admin" || (eff.profile?.position && l.positions.includes(eff.profile.position)))) return false;
     if (l.roles && !(eff.role && l.roles.includes(eff.role))) return false;
     if (l.anyFeat) return l.anyFeat.some((f) => userHasService(company, eff.profile, team, f));
     return !l.feat || userHasService(company, eff.profile, team, l.feat);
