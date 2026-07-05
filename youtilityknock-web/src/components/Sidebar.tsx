@@ -24,10 +24,9 @@ const links: { to: string; label: string; icon: string; end?: boolean; feat?: Fe
   { to: "/", label: "Dashboard", icon: "▦", end: true, canvassOnly: true },
   { to: "/map", label: "Map", icon: "◉", canvassOnly: true },
   { to: "/movers", label: "Movers", icon: "🚚", feat: "movers", mobileHidden: true, canvassOnly: true },
-  // Full-platform companies reach the card from the Dashboard hero (tap the
-  // card to edit), so no nav item; RallyCard-only companies keep the link —
-  // the card IS their home page and they have no Dashboard.
-  { to: "/card", label: "RallyCard", icon: "🪪", rallyOnlyLink: true },
+  // No RallyCard nav item for now (hidden until the tool is built out more).
+  // The card stays reachable: full-platform companies tap the Dashboard hero,
+  // and RallyCard-only companies land on it as their home page (/ → /card).
   { to: "/inbox", label: "Texts", icon: "📨" },
   { to: "/leads", label: "Leads", icon: "☰", feat: "leads", mobileHidden: true },
   // Team Chat has no nav item — the floating chat button (ChatFab) is on
