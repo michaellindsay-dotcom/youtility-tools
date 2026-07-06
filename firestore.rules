@@ -283,7 +283,11 @@ service cloud.firestore {
 
     // ── presence (online heartbeat) ──────────────────────────────────────
     match /presence/{uid} {
-      allow read: if isSignedIn();
+      // Presence now carries live location — scope reads to the same company
+      // (legacy docs without a companyId stay readable, they hold only lastSeen).
+      allow read: if isSignedIn()
+                  && (resource.data.get('companyId', null) == null
+                      || isSuper() || resource.data.get('companyId', null) == myCompany());
       allow write: if isSignedIn() && request.auth.uid == uid;
     }
 

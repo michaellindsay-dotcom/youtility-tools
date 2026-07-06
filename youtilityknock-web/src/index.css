@@ -1819,6 +1819,7 @@ body.modal-open .chat-fab-global { display: none; }
 .map-bl { bottom: calc(env(safe-area-inset-bottom) + 40px); left: max(12px, env(safe-area-inset-left)); }
 
 .map-fab {
+  position: relative;
   width: 44px;
   height: 44px;
   border-radius: 12px;
@@ -2949,3 +2950,22 @@ body.modal-open .chat-fab-global { display: none; }
 .cust-thumb { width: 56px; height: 56px; object-fit: cover; border-radius: 8px; border: 1px solid var(--line-hi); }
 .cust-photos { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 8px; }
 .cust-photo { width: 120px; height: 120px; object-fit: cover; border-radius: 10px; border: 1px solid var(--line-hi); }
+
+/* ── Live team location pins (map) ───────────────────────── */
+.team-pin { background: none; border: none; }
+.team-pin-dot {
+  display: flex; align-items: center; justify-content: center;
+  width: 34px; height: 34px; border-radius: 50%;
+  color: #fff; font-size: 12px; font-weight: 800; letter-spacing: .3px;
+  border: 2px solid #fff; box-shadow: 0 0 0 3px rgba(34,197,94,.5), 0 2px 8px rgba(0,0,0,.4);
+  animation: team-pulse 2s ease-in-out infinite;
+}
+@keyframes team-pulse {
+  0%, 100% { box-shadow: 0 0 0 3px rgba(34,197,94,.5), 0 2px 8px rgba(0,0,0,.4); }
+  50% { box-shadow: 0 0 0 6px rgba(34,197,94,.15), 0 2px 8px rgba(0,0,0,.4); }
+}
+.map-fab-badge {
+  position: absolute; top: -4px; right: -4px; min-width: 16px; height: 16px;
+  padding: 0 4px; border-radius: 8px; background: #22c55e; color: #06121f;
+  font-size: 10px; font-weight: 800; line-height: 16px; text-align: center;
+}
