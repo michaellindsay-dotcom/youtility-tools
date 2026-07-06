@@ -2845,6 +2845,33 @@ async function pushExternalEvent(uid: string, ev: { title: string; address?: str
   }
 }
 
+// Push EVERY newly-created calendar event to its owner's external calendar.
+// Centralizing here means every path that books an appointment / go-back /
+// follow-up reaches Google/Outlook — the door DispositionModal (client-side),
+// closer close-out follow-ups, and the assigned/closer appointment callables —
+// not just the two server callables that pushed inline before. Opt out per
+// event with `pushExternal: false` (e.g. a silent reassign).
+const CALENDAR_EVENT_TYPES = new Set(["appointment", "go_back", "follow_up"]);
+export const onEventCreatedPushCalendar = onDocumentCreated("events/{eventId}", async (event) => {
+  const ev = event.data?.data() as any;
+  if (!ev || !CALENDAR_EVENT_TYPES.has(ev.type) || ev.pushExternal === false) return;
+  const uid = ev.userId as string | undefined;
+  const startMs = Number(ev.startAt);
+  if (!uid || !Number.isFinite(startMs)) return;
+  const endMs = Number(ev.endAt) || startMs + (Number(ev.durationMin) || 60) * 60 * 1000;
+  try {
+    await pushExternalEvent(uid, {
+      title: ev.title || "Appointment",
+      address: ev.address,
+      notes: ev.notes || ev.apptNotes,
+      startMs,
+      endMs,
+    });
+  } catch (e) {
+    logger.warn("event→calendar push failed", e);
+  }
+});
+
 // ── availability + assignment ────────────────────────────────────────────────
 async function companyScheduling(companyId: string) {
   const snap = await db.doc(`companies/${companyId}`).get();
@@ -2966,11 +2993,10 @@ export const assignAppointment = onCall(async (request) => {
     reminded: false,
     createdAt: now,
   };
-  const ref = await db.collection("events").add(ev);
+  // The events→calendar trigger pushes this to the owner's external calendar;
+  // persist the opt-out so a silent reassign can suppress that push.
+  const ref = await db.collection("events").add(d.pushExternal === false ? { ...ev, pushExternal: false } : ev);
 
-  if (d.pushExternal !== false) {
-    await pushExternalEvent(chosen.uid, { title: ev.title, address: ev.address, notes: ev.notes, startMs: d.startAt, endMs: endAt });
-  }
   await notifyUser({
     userId: chosen.uid,
     type: "event",
@@ -3116,7 +3142,7 @@ export const createCloserAppointment = onCall(async (request) => {
   // here we only tally the closer's incoming queue.
   await serverBumpStats(closer, { closerAppts: 1 });
 
-  await pushExternalEvent(closer.uid, { title: ev.title, address: ev.address, notes: ev.notes, startMs: d.startAt, endMs: endAt });
+  // External-calendar push is handled by the events→calendar trigger.
   await notifyUser({
     userId: closer.uid, type: "event",
     title: "New appointment to close",
@@ -3205,6 +3231,8 @@ export const closerDisposition = onCall(async (request) => {
     const dur = (ev.durationMin || 60) * 60 * 1000;
     const fu = { ...ev };
     delete fu.id;
+    delete fu.dispositionedOnSpot;
+    delete fu.pushExternal; // a fresh follow-up should always reach the calendar
     Object.assign(fu, {
       startAt: d.followUpAt,
       endAt: d.followUpAt + dur,
@@ -3217,6 +3245,7 @@ export const closerDisposition = onCall(async (request) => {
       reminded: false,
       createdAt: now,
     });
+    // The events→calendar trigger picks this up and pushes it to Google/Outlook.
     const fuRef = await db.collection("events").add(fu);
     followUpId = fuRef.id;
     await notifyUser({ userId: closerUid, type: "event", title: "Follow-up scheduled", body: new Date(d.followUpAt).toLocaleString(), link: "/app/closer" });
