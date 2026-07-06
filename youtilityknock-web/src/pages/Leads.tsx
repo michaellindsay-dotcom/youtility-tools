@@ -31,6 +31,7 @@ export default function Leads() {
   const [showAdd, setShowAdd] = useState(false);
   const [showDeleted, setShowDeleted] = useState(false); // admin-only archive view
   const [deleteTarget, setDeleteTarget] = useState<Lead | null>(null);
+  const [search, setSearch] = useState("");
 
   useEffect(() => {
     if (!profile || !companyId) return;
@@ -64,7 +65,20 @@ export default function Leads() {
   // Deleted leads are hidden everywhere except the admin's archive view.
   const active = leads.filter((l) => !l.deleted);
   const deleted = leads.filter((l) => l.deleted);
-  const shown = showDeleted ? deleted : (filter === "all" ? active : active.filter((l) => l.status === filter));
+  const byStatus = showDeleted ? deleted : (filter === "all" ? active : active.filter((l) => l.status === filter));
+  // Live search across name, phone (digits only), and address.
+  const digits = (s: string) => s.replace(/\D/g, "");
+  const q = search.trim().toLowerCase();
+  const qDigits = digits(search);
+  const shown = !q ? byStatus : byStatus.filter((l) => {
+    const hay = [l.ownerName, l.address, l.city, l.state, l.zip].filter(Boolean).join(" ").toLowerCase();
+    if (hay.includes(q)) return true;
+    return qDigits.length >= 3 && !!l.phone && digits(l.phone).includes(qDigits);
+  });
+  // Autocomplete suggestions (names + addresses) from the current list.
+  const suggestions = Array.from(new Set(
+    byStatus.flatMap((l) => [l.ownerName, l.address].filter(Boolean) as string[])
+  )).slice(0, 50);
 
   // Restore a soft-deleted lead (admin only).
   const restore = async (lead: Lead) => {
@@ -98,6 +112,22 @@ export default function Leads() {
 
       {showAdd && !showDeleted && <AddLead onDone={() => setShowAdd(false)} />}
 
+      <div className="row" style={{ marginBottom: 10, alignItems: "center", gap: 8 }}>
+        <input
+          className="input"
+          type="search"
+          list="lead-search-suggestions"
+          placeholder="🔍 Search name, phone, or address…"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          style={{ flex: 1 }}
+        />
+        <datalist id="lead-search-suggestions">
+          {suggestions.map((s) => <option key={s} value={s} />)}
+        </datalist>
+        {search && <button className="btn ghost sm" onClick={() => setSearch("")}>Clear</button>}
+      </div>
+
       {!showDeleted && (
         <div className="filter-bar">
           <button className={"chip-btn" + (filter === "all" ? " active" : "")} onClick={() => setFilter("all")}>All</button>
@@ -112,7 +142,7 @@ export default function Leads() {
       {loading ? (
         <div className="muted">Loading leads…</div>
       ) : shown.length === 0 ? (
-        <div className="empty">{showDeleted ? "No deleted leads." : "No leads yet. Add one or run an address lookup."}</div>
+        <div className="empty">{q ? `No leads match "${search.trim()}".` : showDeleted ? "No deleted leads." : "No leads yet. Add one or run an address lookup."}</div>
       ) : (
         <div className="lead-list">
           {shown.map((lead) => (
