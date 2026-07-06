@@ -2,7 +2,8 @@ import { useEffect, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
-import { addDoc, collection, getDocs, query, where } from "firebase/firestore";
+import { initials, avatarColor } from "../lib/points";
+import { addDoc, collection, doc, getDocs, onSnapshot, query, setDoc, where } from "firebase/firestore";
 import { httpsCallable } from "firebase/functions";
 import { Geolocation } from "@capacitor/geolocation";
 import { db, auth, functions } from "../firebase";
@@ -32,6 +33,16 @@ function homeIcon(color: string, flagged = false): L.DivIcon {
     html: `<span style="background:${color}">${HOUSE_SVG}</span>${flagged ? '<i class="pin-x">✕</i>' : ""}`,
     iconSize: [30, 30],
     iconAnchor: [15, 15],
+  });
+}
+
+// A live teammate marker — an initials avatar with a pulsing "online" ring.
+function teamIcon(name: string, color: string): L.DivIcon {
+  return L.divIcon({
+    className: "team-pin",
+    html: `<span class="team-pin-dot" style="background:${color}">${initials(name)}</span>`,
+    iconSize: [34, 34],
+    iconAnchor: [17, 17],
   });
 }
 
@@ -80,6 +91,11 @@ export default function MapPage() {
   const roamTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const youMarker = useRef<L.CircleMarker | null>(null);
   const watchId = useRef<string | null>(null);
+  // Live team locations: one layer + a per-uid marker map so positions update
+  // in place as presence docs change. lastPub throttles our own location writes.
+  const teamLayer = useRef<L.LayerGroup>(L.layerGroup());
+  const teamMarkers = useRef<Map<string, L.Marker>>(new Map());
+  const lastPub = useRef(0);
   const territoryLayer = useRef<L.LayerGroup>(L.layerGroup());
   const solarLayer = useRef<L.LayerGroup>(L.layerGroup()); // ☀️/🔥 solar-scanner pins from the CRM
   const assigned = useRef<Territory[]>([]);
@@ -104,6 +120,10 @@ export default function MapPage() {
   const [moversOnly, setMoversOnly] = useState(false);
   const moversOnlyRef = useRef(false);
   moversOnlyRef.current = moversOnly;
+  // Live team locations (managers/admins) — everyone in the company who's
+  // online right now, shown at their last-published GPS position.
+  const [showTeam, setShowTeam] = useState(false);
+  const [teamCount, setTeamCount] = useState(0);
   // Solar Scanner pins (CRM add-on) — on by default; the ref lets async loads
   // read the current toggle without re-subscribing.
   const [showSolar, setShowSolar] = useState(true);
@@ -523,6 +543,19 @@ export default function MapPage() {
         radius: 7, color: "#fff", weight: 3, fillColor: "#0EA5E9", fillOpacity: 1,
       }).addTo(mapRef.current).bindTooltip("You");
     }
+    publishLocation(lat, lng);
+  }
+
+  // Publish our live location to presence so teammates can see where we are
+  // (throttled — one write per ~20s while we're moving).
+  function publishLocation(lat: number, lng: number) {
+    if (!profile || !companyId) return;
+    const now = Date.now();
+    if (now - lastPub.current < 20_000) return;
+    lastPub.current = now;
+    void setDoc(doc(db, "presence", profile.uid), {
+      lat, lng, locationAt: now, lastSeen: now, companyId, name: profile.displayName || "",
+    }, { merge: true }).catch(() => {});
   }
 
   // Watch the rep's GPS to keep the "You" marker current. The map only recenters
@@ -545,6 +578,47 @@ export default function MapPage() {
       /* location unavailable — map just won't follow */
     }
   }
+
+  // ── Live team locations ──────────────────────────────────────────────────────
+  // Subscribe to company presence and drop a marker per online teammate at their
+  // last-published GPS. Positions update live; stale/offline reps drop off.
+  useEffect(() => {
+    if (!showTeam || !companyId) return;
+    const ONLINE_MS = 5 * 60 * 1000; // "logged in / active" within the last 5 min
+    const clearAll = () => {
+      teamMarkers.current.forEach((m) => teamLayer.current.removeLayer(m));
+      teamMarkers.current.clear();
+    };
+    const unsub = onSnapshot(
+      query(collection(db, "presence"), where("companyId", "==", companyId)),
+      (snap) => {
+        const now = Date.now();
+        const online = new Set<string>();
+        snap.docs.forEach((d) => {
+          if (d.id === profile?.uid) return; // that's the "You" marker
+          const p = d.data() as { lat?: number; lng?: number; lastSeen?: number; name?: string };
+          if (!p.lastSeen || now - p.lastSeen > ONLINE_MS) return; // offline
+          const c = validCoord(p.lat, p.lng);
+          if (!c) return; // online but hasn't shared a location yet
+          online.add(d.id);
+          const existing = teamMarkers.current.get(d.id);
+          if (existing) existing.setLatLng(c);
+          else {
+            const m = L.marker(c, { icon: teamIcon(p.name || "?", avatarColor(d.id)), zIndexOffset: 3000 })
+              .bindTooltip(p.name || "Teammate", { direction: "top", offset: [0, -14] });
+            teamLayer.current.addLayer(m);
+            teamMarkers.current.set(d.id, m);
+          }
+        });
+        for (const [uid, m] of teamMarkers.current) {
+          if (!online.has(uid)) { teamLayer.current.removeLayer(m); teamMarkers.current.delete(uid); }
+        }
+        setTeamCount(online.size);
+      },
+      (e) => console.warn("team presence", e)
+    );
+    return () => { unsub(); clearAll(); setTeamCount(0); };
+  }, [showTeam, companyId, profile?.uid]);
 
   // ── Init ────────────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -582,6 +656,7 @@ export default function MapPage() {
     leadLayer.current.addTo(map);
     moverLayer.current.addTo(map); // always on; sits above the other pins
     solarLayer.current.addTo(map); // ☀️/🔥 solar pins; toggled via the FAB
+    teamLayer.current.addTo(map); // live teammate pins; populated when 👥 is on
     mapRef.current = map;
     // The map mounts inside a flex/fixed layout that settles over a few frames;
     // a single early invalidateSize can fire before the container reaches its
@@ -776,6 +851,17 @@ export default function MapPage() {
         >
           ☀️
         </button>
+        {/* Live team locations — managers/admins see everyone online right now. */}
+        {canManageAreas && (
+          <button
+            className={"map-fab" + (showTeam ? " active" : "")}
+            onClick={() => setShowTeam((s) => !s)}
+            aria-label="Show live team locations"
+            title={showTeam ? `Live team — ${teamCount} online` : "Show live team locations"}
+          >
+            👥{showTeam && teamCount > 0 ? <span className="map-fab-badge">{teamCount}</span> : null}
+          </button>
+        )}
       </div>
 
       {/* Top-center: status pill */}

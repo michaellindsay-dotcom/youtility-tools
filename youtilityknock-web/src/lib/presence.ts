@@ -9,13 +9,21 @@ import { useAuth } from "../auth/AuthContext";
 const HEARTBEAT_MS = 60 * 1000;
 
 export function usePresenceHeartbeat() {
-  const { user } = useAuth();
+  const { user, profile } = useAuth();
+  const companyId = profile?.companyId;
+  const name = profile?.displayName;
   useEffect(() => {
     if (!user) return;
     const ref = doc(db, "presence", user.uid);
     const beat = () => {
       if (document.visibilityState === "visible") {
-        void setDoc(ref, { lastSeen: Date.now() }, { merge: true }).catch(() => {});
+        // companyId + name let teammates see who's online (and scope reads to
+        // the same company); live location is published separately from the Map.
+        void setDoc(ref, {
+          lastSeen: Date.now(),
+          ...(companyId ? { companyId } : {}),
+          ...(name ? { name } : {}),
+        }, { merge: true }).catch(() => {});
       }
     };
     beat();
@@ -25,5 +33,5 @@ export function usePresenceHeartbeat() {
       clearInterval(t);
       document.removeEventListener("visibilitychange", beat);
     };
-  }, [user]);
+  }, [user, companyId, name]);
 }
