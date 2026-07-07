@@ -293,8 +293,32 @@ async function rebuildCompanyHierarchy(companyId: string) {
     for (const m of teamMgrsByTeam[t]) if (m !== uid) out.push(m, ...pathFor(m), ...closerPathFor(m));
     return out;
   };
-  const fullPathFor = (uid: string) => Array.from(new Set([...pathFor(uid), ...teamMgrChain(uid)]));
-  const fullCloserPathFor = (uid: string) => Array.from(new Set([...closerPathFor(uid), ...teamMgrChain(uid)]));
+
+  // Region managers see EVERYONE on every team in their region. A region is a
+  // team with kind === "region"; a team belongs to it via parentTeamId. Fold the
+  // region's manager (and their up-chains) into each region member's paths, just
+  // like team managers above — so the regional manager's downline/reports/leads
+  // roll up the whole region automatically.
+  const teamsSnap = await db.collection(`companies/${companyId}/teams`).get();
+  const regionMgr: Record<string, string | null> = {}; // regionTeamId → manager uid
+  teamsSnap.forEach((t) => {
+    if (t.data().kind === "region") regionMgr[t.id] = (t.data().regionalManagerUid as string) || null;
+  });
+  const regionMgrOfTeam: Record<string, string | null> = {}; // memberTeamId → region manager uid
+  teamsSnap.forEach((t) => {
+    if (t.data().kind === "region") return;
+    const parent = (t.data().parentTeamId as string) || null;
+    if (parent && regionMgr[parent]) regionMgrOfTeam[t.id] = regionMgr[parent];
+  });
+  const regionMgrChain = (uid: string): string[] => {
+    const t = teamIdOf[uid];
+    const mgr = t ? regionMgrOfTeam[t] : null;
+    if (!mgr || mgr === uid) return [];
+    return [mgr, ...pathFor(mgr), ...closerPathFor(mgr)];
+  };
+
+  const fullPathFor = (uid: string) => Array.from(new Set([...pathFor(uid), ...teamMgrChain(uid), ...regionMgrChain(uid)]));
+  const fullCloserPathFor = (uid: string) => Array.from(new Set([...closerPathFor(uid), ...teamMgrChain(uid), ...regionMgrChain(uid)]));
 
   let batch = db.batch();
   let ops = 0;
@@ -456,7 +480,7 @@ export const createCompany = onCall(async (request) => {
   const roles = ref.collection("roles");
   await roles.add({ companyId: ref.id, title: "Manager", baseTier: "manager", rank: 100, isDefault: true, createdAt: Date.now() });
   await roles.add({ companyId: ref.id, title: "User", baseTier: "user", rank: 10, isDefault: true, createdAt: Date.now() });
-  await ref.collection("teams").add({ companyId: ref.id, name: "Company", parentTeamId: null, createdAt: Date.now() });
+  await ref.collection("teams").add({ companyId: ref.id, name: "Company", parentTeamId: null, kind: "company", createdAt: Date.now() });
 
   logger.info(`Company ${ref.id} created by ${caller.uid}`);
   return { ok: true, companyId: ref.id };
@@ -779,25 +803,32 @@ export const deleteRole = onCall(async (request) => {
 // ───────────────────────────────────────────────────────────────────────────
 export const createTeam = onCall(async (request) => {
   const caller = await getCaller(request);
-  const { companyId, name, parentTeamId, leadUserId, servicePermissions, logoUrl } = request.data as
-    { companyId?: string; name?: string; parentTeamId?: string | null; leadUserId?: string; servicePermissions?: string[]; logoUrl?: string | null };
+  const { companyId, name, parentTeamId, leadUserId, servicePermissions, logoUrl, kind, regionalManagerUid } = request.data as
+    { companyId?: string; name?: string; parentTeamId?: string | null; leadUserId?: string; servicePermissions?: string[]; logoUrl?: string | null; kind?: string; regionalManagerUid?: string | null };
   const company = authorizeForCompany(caller, companyId);
   if (!name?.trim()) throw new HttpsError("invalid-argument", "Team name required.");
+  // kind: "company" (umbrella baseline) | "region" | "team" (default).
+  const teamKind = kind === "region" || kind === "company" ? kind : "team";
   const ref = await db.collection(`companies/${company}/teams`).add({
     companyId: company, name: name.trim(),
     parentTeamId: parentTeamId || null, leadUserId: leadUserId || null,
     logoUrl: logoUrl || null,
+    kind: teamKind,
+    // Only meaningful on regions: the manager the whole region rolls up to.
+    regionalManagerUid: teamKind === "region" ? (regionalManagerUid || null) : null,
     // Locked-baseline services granted to everyone on the team.
     servicePermissions: Array.isArray(servicePermissions) ? servicePermissions : [],
     createdAt: Date.now(),
   });
+  // A new region with a manager already set needs the org chart recomputed.
+  if (teamKind === "region" && regionalManagerUid) await rebuildCompanyHierarchy(company);
   return { ok: true, teamId: ref.id };
 });
 
 export const updateTeam = onCall(async (request) => {
   const caller = await getCaller(request);
-  const { companyId, teamId, name, parentTeamId, leadUserId, servicePermissions, logoUrl } = request.data as
-    { companyId?: string; teamId?: string; name?: string; parentTeamId?: string | null; leadUserId?: string; servicePermissions?: string[]; logoUrl?: string | null };
+  const { companyId, teamId, name, parentTeamId, leadUserId, servicePermissions, logoUrl, kind, regionalManagerUid } = request.data as
+    { companyId?: string; teamId?: string; name?: string; parentTeamId?: string | null; leadUserId?: string; servicePermissions?: string[]; logoUrl?: string | null; kind?: string; regionalManagerUid?: string | null };
   const company = authorizeForCompany(caller, companyId);
   if (!teamId) throw new HttpsError("invalid-argument", "teamId required.");
   const patch: Record<string, unknown> = {};
@@ -806,7 +837,14 @@ export const updateTeam = onCall(async (request) => {
   if (leadUserId !== undefined) patch.leadUserId = leadUserId || null;
   if (servicePermissions !== undefined) patch.servicePermissions = Array.isArray(servicePermissions) ? servicePermissions : [];
   if (logoUrl !== undefined) patch.logoUrl = logoUrl || null;
+  if (kind !== undefined && (kind === "region" || kind === "company" || kind === "team")) patch.kind = kind;
+  if (regionalManagerUid !== undefined) patch.regionalManagerUid = regionalManagerUid || null;
   await db.doc(`companies/${company}/teams/${teamId}`).set(patch, { merge: true });
+  // Region wiring (which region a team is in, or who manages a region) changes
+  // who rolls up to whom — recompute the org chart's paths + visibility.
+  if (parentTeamId !== undefined || regionalManagerUid !== undefined || kind !== undefined) {
+    await rebuildCompanyHierarchy(company);
+  }
   return { ok: true };
 });
 
@@ -6739,7 +6777,7 @@ export const crmApi = onRequest({ cors: true }, async (req, res) => {
         const roles = ref.collection("roles");
         await roles.add({ companyId, title: "Manager", baseTier: "manager", rank: 100, isDefault: true, createdAt: Date.now() });
         await roles.add({ companyId, title: "User", baseTier: "user", rank: 10, isDefault: true, createdAt: Date.now() });
-        await ref.collection("teams").add({ companyId, name: "Company", parentTeamId: null, createdAt: Date.now() });
+        await ref.collection("teams").add({ companyId, name: "Company", parentTeamId: null, kind: "company", createdAt: Date.now() });
       }
 
       // Establish this company's own CRM link. Use the secret the CRM sent, or
