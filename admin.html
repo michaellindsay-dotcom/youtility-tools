@@ -101,7 +101,9 @@
   .auth-card { width:100%; max-width:400px; }
   .hidden { display:none !important; }
   .pill { display:inline-flex; align-items:center; gap:6px; font-size:12px; padding:5px 10px; border-radius:999px;
-    border:1px solid var(--line-hi); background:rgba(255,255,255,.03); color:var(--ink-mid); }
+    border:1px solid var(--line-hi); background:rgba(255,255,255,.03); color:var(--ink-mid); cursor:pointer; }
+  .pill.active { background:var(--accent); border-color:var(--accent); color:#06121f; font-weight:600; }
+  .type-pills { display:flex; gap:8px; align-items:center; }
   .day-chip { display:inline-flex; align-items:center; gap:5px; font-size:13px; padding:7px 11px; border-radius:999px;
     border:1px solid var(--line-hi); background:rgba(255,255,255,.03); cursor:pointer; }
   .day-chip input { width:auto; }
@@ -235,15 +237,13 @@
     <p class="muted" style="margin:0 0 14px;font-size:13px;">Pick a section to manage it.</p>
     <div class="home-grid">
       <button class="home-btn" data-card="usersCard"><span class="hb-ico">👥</span><b>Accounts</b><small>Add people, set setter/closer function &amp; managers, reset passwords</small></button>
-      <button class="home-btn" data-card="schedulingCard"><span class="hb-ico">📅</span><b>Scheduling &amp; Closers</b><small>Booking window, business hours, appointment routing &amp; closers</small></button>
       <button class="home-btn" data-card="companySettingsCard"><span class="hb-ico">🛠️</span><b>Company settings</b><small>Max territories per rep &amp; other company options</small></button>
       <button class="home-btn" data-card="companyProfileCard"><span class="hb-ico">🏢</span><b>Company profile</b><small>Company name, phone, address &amp; email</small></button>
-      <button class="home-btn" data-card="companyBrandingCard"><span class="hb-ico">🏷</span><b>RallyCard branding</b><small>Company logo, website, phone &amp; address shown on every rep's card</small></button>
       <button class="home-btn" data-card="batteryPricingCard"><span class="hb-ico">🔋</span><b>Battery pricing</b><small>Per-product price &amp; install adder for proposals</small></button>
       <a class="home-btn" href="/pm" target="_blank" rel="noopener" style="text-decoration:none;color:inherit;"><span class="hb-ico">🏗️</span><b>Project Management</b><small>Signed deals, site surveys &amp; the install pipeline</small></a>
-      <button class="home-btn" data-card="rolesCard"><span class="hb-ico">🏷️</span><b>Roles &amp; titles</b><small>Custom titles and the access tier each grants</small></button>
       <button class="home-btn" data-card="teamsCard"><span class="hb-ico">🗂️</span><b>Teams</b><small>Group reps into teams</small></button>
       <button class="home-btn" data-card="rewardsCard"><span class="hb-ico">🎁</span><b>Rewards</b><small>Incentives, benchmarks &amp; the rewards store</small></button>
+      <button class="home-btn" data-card="milestonesCard"><span class="hb-ico">🎯</span><b>Gamify milestones</b><small>Custom company milestone ladders reps climb</small></button>
       <button class="home-btn" data-card="redemptionsCard"><span class="hb-ico">✅</span><b>Redemptions</b><small>Approve &amp; fulfill reward redemptions</small></button>
       <button class="home-btn" data-card="outreachCard"><span class="hb-ico">📨</span><b>Lead outreach</b><small>Automated texts/emails triggered by disposition changes</small></button>
       <button class="home-btn" data-card="companyBillingCard"><span class="hb-ico">💳</span><b>Billing &amp; invoices</b><small>Billing contact, card on file, contract &amp; invoices</small></button>
@@ -254,6 +254,9 @@
   <div id="settingBackBar" class="hidden" style="margin-bottom:12px;">
     <button id="settingBack" class="btn ghost sm">← All settings</button>
   </div>
+
+  <!-- Tab bar for the grouped Company Settings page (built in JS). -->
+  <div id="companySettingsTabs" class="type-pills hidden" style="margin-bottom:14px;flex-wrap:wrap;"></div>
 
   <!-- Town Hall: the company owner's at-a-glance overview (company admins). -->
   <section id="townHall" class="hidden">
@@ -372,17 +375,15 @@
     <p class="muted" style="margin:0 0 14px;font-size:13px;">Pick a section to manage it.</p>
     <div class="home-grid">
       <button class="home-btn" data-card="usersCard"><span class="hb-ico">👥</span><b>Accounts</b><small>Add people, set function &amp; managers, reset passwords</small></button>
-      <button class="home-btn" data-card="rolesCard"><span class="hb-ico">🏷️</span><b>Roles &amp; titles</b><small>Custom titles and the access tier each grants</small></button>
       <button class="home-btn" data-card="teamsCard"><span class="hb-ico">🗂️</span><b>Teams</b><small>Group reps into teams</small></button>
-      <button class="home-btn" data-card="schedulingCard"><span class="hb-ico">📅</span><b>Scheduling &amp; Closers</b><small>Booking window, business hours &amp; appointment routing</small></button>
       <button class="home-btn" data-card="companyServicesCard"><span class="hb-ico">🧩</span><b>Services</b><small>Turn tools on/off for this company &amp; set the price override</small></button>
       <button class="home-btn" data-card="companyProfileCard"><span class="hb-ico">🏢</span><b>Company profile</b><small>Company name, phone, address &amp; email</small></button>
-      <button class="home-btn" data-card="companyBrandingCard"><span class="hb-ico">🏷</span><b>RallyCard branding</b><small>Company logo, website, phone &amp; address shown on every rep's card</small></button>
       <button class="home-btn" data-card="roleServicesCard"><span class="hb-ico">🔐</span><b>Role services</b><small>What each role (position) sees at login &amp; in the app</small></button>
       <button class="home-btn" data-card="companySettingsCard"><span class="hb-ico">⚙️</span><b>Settings</b><small>Max territories per rep &amp; other company options</small></button>
       <button class="home-btn" data-card="batteryPricingCard"><span class="hb-ico">🔋</span><b>Battery pricing</b><small>Per-product price &amp; install adder for proposals</small></button>
       <button class="home-btn" data-card="crmCompanyCard"><span class="hb-ico">🔗</span><b>CRM link</b><small>Connect this company to YoutilityCRM</small></button>
       <button class="home-btn" data-card="rewardsCard"><span class="hb-ico">🎁</span><b>Rewards</b><small>Incentives, benchmarks &amp; the rewards store</small></button>
+      <button class="home-btn" data-card="milestonesCard"><span class="hb-ico">🎯</span><b>Gamify milestones</b><small>Custom company milestone ladders reps climb</small></button>
       <button class="home-btn" data-card="redemptionsCard"><span class="hb-ico">✅</span><b>Redemptions</b><small>Approve &amp; fulfill reward redemptions</small></button>
       <button class="home-btn" data-card="outreachCard"><span class="hb-ico">📨</span><b>Lead outreach</b><small>Automated texts/emails triggered by disposition changes</small></button>
       <button class="home-btn" data-card="companyBillingCard"><span class="hb-ico">💳</span><b>Billing &amp; invoices</b><small>Billing contact, card on file, contract &amp; invoices</small></button>
@@ -1269,6 +1270,39 @@
     </table>
   </section>
 
+  <!-- Gamify milestones (per company) — custom milestone ladders. -->
+  <section id="milestonesCard" class="card hidden">
+    <h2><span id="milestonesTitle">Gamify milestones</span>
+      <button id="newMilestoneBtn" class="btn primary sm">+ New ladder</button>
+    </h2>
+    <p class="muted" style="margin:-6px 0 14px;font-size:13px;">
+      Company milestone ladders reps climb in the app. Each step has its own reward, so you can celebrate every milestone toward the big goal — great for culture.
+    </p>
+    <div id="milestoneForm" class="hidden" style="margin-bottom:16px;">
+      <div class="grid-2">
+        <div class="field"><span>Ladder name *</span><input id="msName" placeholder="e.g. Appointment Road" /></div>
+        <div class="field"><span>Metric</span>
+          <select id="msMetric">
+            <option value="doors">Doors knocked</option>
+            <option value="appointments">Appointments</option>
+            <option value="sales">Sales / closes</option>
+            <option value="points">Points</option>
+          </select>
+        </div>
+      </div>
+      <div class="field"><span>Steps — threshold → reward</span>
+        <div id="msSteps"></div>
+        <button type="button" id="msAddStep" class="btn ghost sm" style="margin-top:6px;">+ Add step</button>
+      </div>
+      <div class="row" style="justify-content:flex-end;">
+        <button id="msCancel" class="btn ghost sm">Cancel</button>
+        <button id="msSave" class="btn primary sm">Save ladder</button>
+      </div>
+      <div id="milestoneBanner" class="banner"></div>
+    </div>
+    <div id="milestonesBody"><div class="muted small">Select a company…</div></div>
+  </section>
+
   <!-- Redemptions (per company) -->
   <section id="redemptionsCard" class="card hidden">
     <h2>Redemptions <span id="redeemPending" class="pill"></span></h2>
@@ -1473,7 +1507,7 @@ function showLogin() {
 }
 // ── Tabs (super-admin) ────────────────────────────────────────────────────
 const TAB_CARDS = {
-  companies: ["companiesCard","companyServicesCard","companyProfileCard","companyBrandingCard","roleServicesCard","schedulingCard","companySettingsCard","batteryPricingCard","crmCompanyCard","rolesCard","teamsCard","rewardsCard","redemptionsCard","outreachCard","companyBillingCard","usersCard"],
+  companies: ["companiesCard","companyServicesCard","companyProfileCard","companyBrandingCard","roleServicesCard","schedulingCard","companySettingsCard","batteryPricingCard","crmCompanyCard","rolesCard","teamsCard","rewardsCard","milestonesCard","redemptionsCard","outreachCard","companyBillingCard","usersCard"],
   orgs: ["orgsCard"],
   demos: ["demoRequestsCard"],
   payments: ["plansCard","billingCard"],
@@ -1482,7 +1516,7 @@ const TAB_CARDS = {
   apis: ["apiKeysCard","integrationsCard","crmCard"],
   account: ["myAccountCard"],
 };
-const COMPANY_ONLY = new Set(["companyServicesCard","companyProfileCard","companyBrandingCard","roleServicesCard","schedulingCard","companySettingsCard","batteryPricingCard","crmCompanyCard","rolesCard","teamsCard","rewardsCard","redemptionsCard","outreachCard","companyBillingCard","usersCard"]);
+const COMPANY_ONLY = new Set(["companyServicesCard","companyProfileCard","companyBrandingCard","roleServicesCard","schedulingCard","companySettingsCard","batteryPricingCard","crmCompanyCard","rolesCard","teamsCard","rewardsCard","milestonesCard","redemptionsCard","outreachCard","companyBillingCard","usersCard"]);
 const ALL_TAB_CARDS = Object.values(TAB_CARDS).flat();
 
 function renderTab() {
@@ -1575,9 +1609,35 @@ function enterConsole() {
 }
 
 // ── Company-admin view toggle: Town Hall ⇄ Settings ───────────────────────
-const COMPANY_SETTINGS_CARDS = ["schedulingCard","companySettingsCard","companyProfileCard","companyBrandingCard","batteryPricingCard","rolesCard","teamsCard","rewardsCard","redemptionsCard","outreachCard","companyBillingCard","usersCard"];
+const COMPANY_SETTINGS_CARDS = ["schedulingCard","companySettingsCard","companyProfileCard","companyBrandingCard","batteryPricingCard","rolesCard","teamsCard","rewardsCard","milestonesCard","redemptionsCard","outreachCard","companyBillingCard","usersCard"];
 function hideAllSettingCards() {
   COMPANY_SETTINGS_CARDS.forEach((id) => { const el = $(id); if (el) el.classList.add("hidden"); });
+  const tabs = $("companySettingsTabs"); if (tabs) tabs.classList.add("hidden");
+}
+
+// The Company Settings page groups several settings as tabs (rather than each
+// being its own hub tile). Order = tab order.
+const COMPANY_SETTINGS_TABS = [
+  ["companySettingsCard", "Company"],
+  ["companyBrandingCard", "RallyCard branding"],
+  ["rolesCard", "Roles & titles"],
+  ["schedulingCard", "Scheduling & Closers"],
+];
+const COMPANY_SETTINGS_TAB_IDS = new Set(COMPANY_SETTINGS_TABS.map((t) => t[0]));
+
+// Open the grouped Company Settings page on a given tab (defaults to the first).
+function openCompanySettings(tabId) {
+  const active = COMPANY_SETTINGS_TAB_IDS.has(tabId) ? tabId : COMPANY_SETTINGS_TABS[0][0];
+  $("townHall").classList.add("hidden");
+  $("settingsHub").classList.add("hidden");
+  $("settingBackBar").classList.remove("hidden");
+  // Show only the active tab's card; hide every other setting card.
+  COMPANY_SETTINGS_CARDS.forEach((id) => { const el = $(id); if (el) el.classList.toggle("hidden", id !== active); });
+  const bar = $("companySettingsTabs");
+  bar.innerHTML = COMPANY_SETTINGS_TABS.map(([id, label]) =>
+    `<button class="pill${id === active ? " active" : ""}" data-tab="${id}">${label}</button>`).join("");
+  bar.classList.remove("hidden");
+  window.scrollTo({ top: 0, behavior: "smooth" });
 }
 function showAdminView(view) {
   state.adminView = view;
@@ -1605,15 +1665,19 @@ function showSettingsHub() {
   window.scrollTo({ top: 0, behavior: "smooth" });
 }
 // Open one setting in its own page (hub hidden, just this card + a back bar).
+// The grouped Company Settings tabs route to the tabbed page instead.
 function openSetting(cardId) {
+  if (COMPANY_SETTINGS_TAB_IDS.has(cardId)) { openCompanySettings(cardId); return; }
   $("townHall").classList.add("hidden");
   $("settingsHub").classList.add("hidden");
+  const tabs = $("companySettingsTabs"); if (tabs) tabs.classList.add("hidden");
   COMPANY_SETTINGS_CARDS.forEach((id) => { const el = $(id); if (el) el.classList.toggle("hidden", id !== cardId); });
   $("settingBackBar").classList.remove("hidden");
   window.scrollTo({ top: 0, behavior: "smooth" });
 }
 $("adminViewToggle").addEventListener("click", (e) => { const t = e.target.closest(".tab"); if (t) showAdminView(t.dataset.view); });
 $("settingsHub").addEventListener("click", (e) => { const b = e.target.closest(".home-btn"); if (b) openSetting(b.dataset.card); });
+$("companySettingsTabs").addEventListener("click", (e) => { const b = e.target.closest("[data-tab]"); if (b) openCompanySettings(b.dataset.tab); });
 $("settingBack").addEventListener("click", showSettingsHub);
 $("thRefresh").addEventListener("click", () => loadTownHall(state.selectedCompany));
 
@@ -1627,6 +1691,7 @@ async function selectCompany(companyId, companyName) {
   $("schedulingTitle").textContent = "Scheduling" + suffix;
   $("crmCompanyTitle").textContent = "YoutilityCRM link" + suffix;
   $("rewardsTitle").textContent = "Rewards & Gamify" + suffix;
+  $("milestonesTitle").textContent = "Gamify milestones" + suffix;
   $("outreachTitle").textContent = "Lead outreach automation" + suffix;
   $("companyServicesTitle").textContent = "Services" + suffix;
   loadCompanyServices(companyId);
@@ -1646,7 +1711,7 @@ async function selectCompany(companyId, companyName) {
     // Company admins: card visibility is owned by showAdminView (Town Hall ⇄
     // Settings), so we don't reveal the settings cards here.
   }
-  await Promise.all([loadRoles(), loadTeams(), loadScheduling(companyId), loadCompanySettings(companyId), loadBatteryPricing(companyId), loadCompanyCrm(companyId), loadRewards(companyId), loadRedemptions(companyId)]);
+  await Promise.all([loadRoles(), loadTeams(), loadScheduling(companyId), loadCompanySettings(companyId), loadBatteryPricing(companyId), loadCompanyCrm(companyId), loadRewards(companyId), loadMilestones(companyId), loadRedemptions(companyId)]);
   await loadUsers();
   // Regions show a regional-manager picker + a roll-up org chart built from the
   // user roster, which only just loaded — re-render teams so those populate.
@@ -1959,6 +2024,105 @@ async function loadRewards(companyId) {
     });
   } catch (e) { body.innerHTML = `<tr><td colspan="6" class="banner error show">${esc(e.message)}</td></tr>`; }
 }
+
+// ── Gamify milestones (per company) — custom milestone ladders ───────────
+const MS_METRIC_LBL = { doors: "doors", appointments: "appointments", sales: "sales", points: "points" };
+let editMilestoneId = null;
+function addMsStepRow(threshold, reward) {
+  const wrap = document.createElement("div");
+  wrap.className = "row msStep";
+  wrap.style.cssText = "gap:6px;margin-bottom:6px;align-items:center;";
+  wrap.innerHTML = `<input type="number" class="msThresh" min="1" placeholder="e.g. 50" value="${threshold ?? ""}" style="max-width:110px;" />
+    <span class="muted">→</span>
+    <input type="text" class="msReward" placeholder="reward, e.g. team lunch" value="${esc(reward ?? "")}" style="flex:1;" />
+    <button type="button" class="btn ghost sm msDelStep">✕</button>`;
+  wrap.querySelector(".msDelStep").addEventListener("click", () => wrap.remove());
+  $("msSteps").appendChild(wrap);
+}
+function resetMilestoneForm() {
+  editMilestoneId = null;
+  $("msName").value = "";
+  $("msMetric").value = "doors";
+  $("msSteps").innerHTML = "";
+  addMsStepRow();
+  $("msSave").textContent = "Save ladder";
+}
+$("newMilestoneBtn").addEventListener("click", () => {
+  const f = $("milestoneForm");
+  if (f.classList.contains("hidden")) { resetMilestoneForm(); f.classList.remove("hidden"); }
+  else f.classList.add("hidden");
+});
+$("msCancel").addEventListener("click", () => $("milestoneForm").classList.add("hidden"));
+$("msAddStep").addEventListener("click", () => addMsStepRow());
+$("msSave").addEventListener("click", async () => {
+  const companyId = state.selectedCompany; if (!companyId) return;
+  const name = $("msName").value.trim();
+  if (!name) { banner($("milestoneBanner"), "Give the ladder a name.", "error"); return; }
+  const steps = [...$("msSteps").querySelectorAll(".msStep")]
+    .map((r) => ({ threshold: Number(r.querySelector(".msThresh").value), reward: r.querySelector(".msReward").value.trim() }))
+    .filter((s) => Number.isFinite(s.threshold) && s.threshold > 0 && s.reward)
+    .sort((a, b) => a.threshold - b.threshold);
+  if (!steps.length) { banner($("milestoneBanner"), "Add at least one step (threshold + reward).", "error"); return; }
+  $("msSave").disabled = true;
+  try {
+    const payload = { companyId, name, metric: $("msMetric").value, steps, active: true, updatedAt: Date.now() };
+    if (editMilestoneId) {
+      await updateDoc(doc(db, "companies", companyId, "milestones", editMilestoneId), payload);
+    } else {
+      await addDoc(collection(db, "companies", companyId, "milestones"), { ...payload, createdAt: Date.now() });
+    }
+    $("milestoneForm").classList.add("hidden");
+    banner($("banner"), "Milestone ladder saved.", "good");
+    await loadMilestones(companyId);
+  } catch (e) { banner($("milestoneBanner"), e.message || "Could not save ladder.", "error"); }
+  finally { $("msSave").disabled = false; }
+});
+async function loadMilestones(companyId) {
+  const body = $("milestonesBody");
+  body.innerHTML = `<div class="muted small">Loading…</div>`;
+  try {
+    const snap = await getDocs(collection(db, "companies", companyId, "milestones"));
+    const rows = snap.docs.map((d) => ({ id: d.id, ...d.data() })).sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0));
+    if (!rows.length) { body.innerHTML = `<div class="muted small">No milestone ladders yet. Add one with “+ New ladder”.</div>`; return; }
+    body.innerHTML = "";
+    rows.forEach((m) => {
+      const active = m.active !== false;
+      const steps = (m.steps || []).slice().sort((a, b) => a.threshold - b.threshold);
+      const card = document.createElement("div");
+      card.style.cssText = "border:1px solid #21314a;border-radius:10px;padding:12px;margin-bottom:10px;";
+      card.innerHTML = `
+        <div class="row between" style="align-items:center;gap:8px;flex-wrap:wrap;">
+          <div><strong>${esc(m.name)}</strong> <span class="muted small">· ${esc(MS_METRIC_LBL[m.metric] || m.metric)}</span>
+            ${active ? "" : ' <span class="badge disabled">inactive</span>'}</div>
+          <div class="row" style="gap:6px;">
+            <button class="btn ghost sm msEdit">Edit</button>
+            <button class="btn ghost sm msTgl">${active ? "Deactivate" : "Activate"}</button>
+            <button class="btn ghost sm danger msDel">Delete</button>
+          </div>
+        </div>
+        <div class="muted small" style="margin-top:6px;">${steps.map((s) => `${Number(s.threshold).toLocaleString()} → ${esc(s.reward)}`).join(" &nbsp;·&nbsp; ") || "no steps"}</div>`;
+      card.querySelector(".msTgl").addEventListener("click", async () => {
+        await updateDoc(doc(db, "companies", companyId, "milestones", m.id), { active: !active, updatedAt: Date.now() });
+        loadMilestones(companyId);
+      });
+      card.querySelector(".msDel").addEventListener("click", async () => {
+        if (confirm(`Delete the "${m.name}" ladder?`)) { await deleteDoc(doc(db, "companies", companyId, "milestones", m.id)); loadMilestones(companyId); }
+      });
+      card.querySelector(".msEdit").addEventListener("click", () => {
+        editMilestoneId = m.id;
+        $("msName").value = m.name || "";
+        $("msMetric").value = m.metric || "doors";
+        $("msSteps").innerHTML = "";
+        (steps.length ? steps : [{}]).forEach((s) => addMsStepRow(s.threshold, s.reward));
+        $("msSave").textContent = "Update ladder";
+        $("milestoneForm").classList.remove("hidden");
+        $("milestoneForm").scrollIntoView({ behavior: "smooth", block: "center" });
+      });
+      body.appendChild(card);
+    });
+  } catch (e) { body.innerHTML = `<div class="banner error show">${esc(e.message)}</div>`; }
+}
+
 // ── Lead outreach automation rules (per company) ─────────────────────────
 const DISPOSITION_LBL = {
   new: "New", not_home: "Not Home 1", not_home_2: "Not Home 2", go_back: "Go Back",

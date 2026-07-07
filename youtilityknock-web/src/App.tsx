@@ -22,6 +22,7 @@ import Shifts from "./pages/Shifts";
 import Leaderboard from "./pages/Leaderboard";
 import Gamify from "./pages/Gamify";
 import Rewards from "./pages/Rewards";
+import ThrowDowns from "./pages/ThrowDowns";
 import Working from "./pages/Working";
 import Chat from "./pages/Chat";
 import Schedule from "./pages/Schedule";
@@ -120,6 +121,7 @@ export default function App() {
         <Route path="leaderboard" element={<Gated feature="rewards"><Leaderboard /></Gated>} />
         <Route path="gamify" element={<Gated feature="rewards"><Gamify /></Gated>} />
         <Route path="rewards" element={<Gated feature="rewards"><Rewards /></Gated>} />
+        <Route path="throwdowns" element={<Gated feature="rewards"><ThrowDowns /></Gated>} />
         <Route path="working" element={<CanvassGate><Gated feature="chat"><Working /></Gated></CanvassGate>} />
         <Route path="chat" element={<Gated feature="chat"><Chat /></Gated>} />
         <Route path="schedule" element={<Gated feature="scheduling"><Schedule /></Gated>} />

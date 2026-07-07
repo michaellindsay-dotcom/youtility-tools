@@ -1,9 +1,30 @@
 import { useEffect, useState } from "react";
-import { doc, onSnapshot } from "firebase/firestore";
+import { collection, doc, onSnapshot, query, where } from "firebase/firestore";
 import { db } from "../firebase";
 import { useAuth } from "../auth/AuthContext";
 import { computePoints, levelInfo, tierFor, pointLines } from "../lib/points";
 import type { UserStats } from "../types";
+
+// A company-defined milestone ladder — reps climb the steps, each with a reward.
+type MilestoneMetric = "doors" | "appointments" | "sales" | "points";
+interface Milestone {
+  id: string;
+  name: string;
+  metric: MilestoneMetric;
+  steps: { threshold: number; reward: string }[];
+  active?: boolean;
+}
+const METRIC_META: Record<MilestoneMetric, { label: string; emoji: string }> = {
+  doors: { label: "doors", emoji: "🚪" },
+  appointments: { label: "appointments", emoji: "📅" },
+  sales: { label: "sales", emoji: "💰" },
+  points: { label: "points", emoji: "🎮" },
+};
+const metricValue = (s: UserStats, m: MilestoneMetric): number =>
+  m === "doors" ? (s.doorsKnocked ?? 0)
+    : m === "appointments" ? (s.appointments ?? 0)
+      : m === "sales" ? (s.sales ?? 0)
+        : computePoints(s);
 
 const BADGES = [
   { key: "first_blood", label: "First Knock", emoji: "👊", test: (s: UserStats) => (s.doorsKnocked ?? 0) >= 1 },
@@ -15,8 +36,9 @@ const BADGES = [
 ];
 
 export default function Gamify() {
-  const { profile } = useAuth();
+  const { profile, companyId } = useAuth();
   const [stats, setStats] = useState<UserStats | null>(null);
+  const [milestones, setMilestones] = useState<Milestone[]>([]);
 
   useEffect(() => {
     if (!profile) return;
@@ -24,6 +46,15 @@ export default function Gamify() {
       setStats(snap.exists() ? ({ uid: snap.id, ...(snap.data() as Omit<UserStats, "uid">) }) : null)
     );
   }, [profile]);
+
+  useEffect(() => {
+    if (!companyId) return;
+    return onSnapshot(
+      query(collection(db, "companies", companyId, "milestones"), where("active", "==", true)),
+      (snap) => setMilestones(snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<Milestone, "id">) }))),
+      (e) => console.error("milestones", e)
+    );
+  }, [companyId]);
 
   const s = stats || ({ uid: profile?.uid || "", companyId: profile?.companyId || "", managerPath: [] } as UserStats);
   const points = computePoints(s);
@@ -66,6 +97,49 @@ export default function Gamify() {
               <div className="badge-emoji">{b.emoji}</div>
               <div className="badge-label">{b.label}</div>
               <div className="muted small">{earned ? "Earned" : "Locked"}</div>
+            </div>
+          );
+        })}
+      </div>
+
+      {milestones.length > 0 && (
+        <>
+          <h2 className="section-h" style={{ marginTop: 18 }}>🎯 Company Milestones</h2>
+          <div style={{ display: "grid", gap: 12 }}>
+            {milestones.map((m) => <MilestoneLadder key={m.id} m={m} value={metricValue(s, m.metric)} />)}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+function MilestoneLadder({ m, value }: { m: Milestone; value: number }) {
+  const meta = METRIC_META[m.metric];
+  const steps = [...(m.steps || [])].sort((a, b) => a.threshold - b.threshold);
+  const nextIdx = steps.findIndex((st) => value < st.threshold);
+  const next = nextIdx >= 0 ? steps[nextIdx] : null;
+  const prevThresh = nextIdx > 0 ? steps[nextIdx - 1].threshold : 0;
+  const pct = next ? Math.round(((value - prevThresh) / (next.threshold - prevThresh)) * 100) : 100;
+
+  return (
+    <div className="card">
+      <div className="row between" style={{ alignItems: "baseline", flexWrap: "wrap", gap: 8 }}>
+        <strong>{m.name}</strong>
+        <span className="muted small">{meta.emoji} {value.toLocaleString()} {meta.label}</span>
+      </div>
+      <div className="goal-bar" style={{ marginTop: 8 }}><span style={{ width: `${Math.max(2, Math.min(100, pct))}%` }} /></div>
+      <div className="muted small" style={{ marginTop: 4 }}>
+        {next ? `${(next.threshold - value).toLocaleString()} ${meta.label} to “${next.reward}”` : "🎉 Ladder complete — every reward unlocked!"}
+      </div>
+      <div style={{ display: "grid", gap: 6, marginTop: 10 }}>
+        {steps.map((st, i) => {
+          const reached = value >= st.threshold;
+          return (
+            <div key={i} className="row" style={{ alignItems: "center", gap: 8, opacity: reached ? 1 : 0.7 }}>
+              <span style={{ fontSize: 15 }}>{reached ? "✅" : "⬜"}</span>
+              <span style={{ fontWeight: 700, minWidth: 64 }}>{st.threshold.toLocaleString()} {meta.emoji}</span>
+              <span className="muted small">→ {st.reward}</span>
             </div>
           );
         })}
