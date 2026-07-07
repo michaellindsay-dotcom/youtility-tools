@@ -397,6 +397,12 @@ export interface ChatMessage {
   text?: string;
   imageUrl?: string;
   createdAt: number;
+  // Optional appointment reference — set when a message is sent from the
+  // calendar popout, so the chat shows a clickable tag for that appointment.
+  apptEventId?: string;
+  apptTitle?: string;
+  apptAt?: number;
+  leadId?: string;
 }
 
 export interface DmChannel {

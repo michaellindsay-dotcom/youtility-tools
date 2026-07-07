@@ -240,7 +240,7 @@ function EditAppointmentModal({ event, onClose }: { event: ScheduleEvent; onClos
 
   return (
     <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(2,8,18,.6)", display: "grid", placeItems: "center", zIndex: 1100, padding: 16 }}>
-      <div onClick={(e) => e.stopPropagation()} className="card" style={{ maxWidth: 420, width: "100%" }}>
+      <div onClick={(e) => e.stopPropagation()} className="card" style={{ maxWidth: 420, width: "100%", background: "var(--bg-2)", border: "1px solid #2a3a55", boxShadow: "0 24px 60px rgba(0,0,0,.55)" }}>
         <div className="row between" style={{ alignItems: "flex-start" }}>
           <h3 style={{ margin: 0 }}>Edit appointment</h3>
           <button className="btn ghost sm" onClick={onClose}>✕</button>
@@ -466,26 +466,35 @@ function EventPopout({ ev, canHearRecording, me, companyId, edit, onClose, onDis
   // The assigned closer can close out their own still-open appointment right
   // here — from the calendar, after the fact.
   const canDisposition = !!(me && ev.closerUid === me.uid && undisp);
-  // The viewer can message the closer when there IS a closer and it isn't them.
-  const canMessageCloser = !!(me && ev.closerUid && ev.closerName && ev.closerUid !== me.uid);
+  // Direct-message counterpart: a closer messages the SETTER (questions about the
+  // appointment); a setter — or a manager/admin — messages the CLOSER (updates /
+  // chase the outcome). Whoever it is, the message tags this appointment.
+  const iAmCloser = !!(me && ev.closerUid && me.uid === ev.closerUid);
+  const dmTarget: { uid: string; name: string; role: "setter" | "closer" } | null =
+    iAmCloser
+      ? (ev.setterUid && ev.setterName ? { uid: ev.setterUid, name: ev.setterName, role: "setter" } : null)
+      : (ev.closerUid && ev.closerName && ev.closerUid !== me?.uid ? { uid: ev.closerUid, name: ev.closerName, role: "closer" } : null);
+  const dateLabel = new Date(ev.startAt).toLocaleDateString([], { month: "short", day: "numeric" });
   const [dmText, setDmText] = useState(
-    `Hey ${ev.closerName || "there"}, what's the status on the ${new Date(ev.startAt).toLocaleDateString([], { month: "short", day: "numeric" })} appointment${ev.title ? ` — ${ev.title}` : ""}?`
+    dmTarget?.role === "setter"
+      ? `Hey ${dmTarget.name}, quick question on the ${dateLabel} appointment${ev.title ? ` — ${ev.title}` : ""}: `
+      : `Hey ${dmTarget?.name || "there"}, update on the ${dateLabel} appointment${ev.title ? ` — ${ev.title}` : ""}: `
   );
   const [dmState, setDmState] = useState<"idle" | "sending" | "sent" | "error">("idle");
   const navigate = useNavigate();
 
-  async function messageCloser() {
-    if (!me || !ev.closerUid || !ev.closerName) return;
+  async function messageCounterpart() {
+    if (!me || !dmTarget) return;
     const body = dmText.trim();
     if (!body) return;
     setDmState("sending");
     try {
-      const cid = [me.uid, ev.closerUid].sort().join("__");
+      const cid = [me.uid, dmTarget.uid].sort().join("__");
       await setDoc(
         doc(db, "dms", cid),
         {
-          members: [me.uid, ev.closerUid],
-          memberNames: { [me.uid]: me.displayName, [ev.closerUid]: ev.closerName },
+          members: [me.uid, dmTarget.uid],
+          memberNames: { [me.uid]: me.displayName, [dmTarget.uid]: dmTarget.name },
           companyId: companyId || "",
           lastMessage: body,
           lastAt: Date.now(),
@@ -494,6 +503,9 @@ function EventPopout({ ev, canHearRecording, me, companyId, edit, onClose, onDis
       );
       await addDoc(collection(db, "dms", cid, "messages"), {
         channelId: cid, userId: me.uid, userName: me.displayName, text: body, createdAt: Date.now(),
+        // Tag the appointment so it shows as a clickable reference in chat.
+        apptEventId: ev.id, apptTitle: ev.title || "Appointment", apptAt: ev.startAt,
+        ...(ev.leadId ? { leadId: ev.leadId } : {}),
       });
       setDmState("sent");
     } catch {
@@ -520,7 +532,7 @@ function EventPopout({ ev, canHearRecording, me, companyId, edit, onClose, onDis
   const fmt = (ms: number) => new Date(ms).toLocaleString([], { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
   return (
     <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(2,8,18,.6)", display: "grid", placeItems: "center", zIndex: 1000, padding: 16 }}>
-      <div onClick={(e) => e.stopPropagation()} className="card" style={{ maxWidth: 440, width: "100%" }}>
+      <div onClick={(e) => e.stopPropagation()} className="card" style={{ maxWidth: 440, width: "100%", background: "var(--bg-2)", border: "1px solid #2a3a55", boxShadow: "0 24px 60px rgba(0,0,0,.55)", maxHeight: "90vh", overflowY: "auto" }}>
         <div className="row between" style={{ alignItems: "flex-start" }}>
           <h3 style={{ margin: 0 }}>{ev.title || "Appointment"}</h3>
           <button className="btn ghost sm" onClick={onClose}>✕</button>
@@ -556,17 +568,20 @@ function EventPopout({ ev, canHearRecording, me, companyId, edit, onClose, onDis
 
         <dl className="fields" style={{ marginTop: 10 }}>
           <div className="field-row"><dt>Assigned to</dt><dd>👤 {ev.userName || "—"}</dd></div>
-          {ev.closerName && <div className="field-row"><dt>Closer</dt><dd>{ev.closerName}</dd></div>}
+          {ev.setterName && <div className="field-row"><dt>Setter</dt><dd>📇 {ev.setterName}</dd></div>}
+          {ev.closerName && <div className="field-row"><dt>Closer</dt><dd>🤝 {ev.closerName}</dd></div>}
           {ev.address && <div className="field-row"><dt>Address</dt><dd>{ev.address}</dd></div>}
           <div className="field-row"><dt>Status</dt><dd>{ev.apptStatus ? (APPT_LABEL[ev.apptStatus] || ev.apptStatus) : "Scheduled — awaiting closer"}</dd></div>
         </dl>
         {(ev.notes || ev.apptNotes) && <div className="muted small" style={{ marginTop: 6 }}>📝 {ev.apptNotes || ev.notes}</div>}
 
-        {canMessageCloser && (
+        {dmTarget && (
           <div style={{ marginTop: 12, borderTop: "1px solid #21314a", paddingTop: 10 }}>
-            <div className="muted small" style={{ marginBottom: 6 }}>💬 Message {ev.closerName} for the status</div>
+            <div className="muted small" style={{ marginBottom: 6 }}>
+              💬 Message the {dmTarget.role} ({dmTarget.name}){dmTarget.role === "setter" ? " with any questions" : " with an update or question"}
+            </div>
             {dmState === "sent" ? (
-              <div className="muted small" style={{ color: "#86efac" }}>✓ Sent to {ev.closerName}. Reply lands in Team Chat → Direct messages.</div>
+              <div className="muted small" style={{ color: "#86efac" }}>✓ Sent to {dmTarget.name} — tagged to this appointment. Reply lands in Team Chat → Direct messages.</div>
             ) : (
               <>
                 <textarea
@@ -575,11 +590,14 @@ function EventPopout({ ev, canHearRecording, me, companyId, edit, onClose, onDis
                   rows={2}
                   style={{ width: "100%", resize: "vertical", borderRadius: 8, padding: 8, background: "#0b1727", color: "#e6eef8", border: "1px solid #21314a", fontSize: 13 }}
                 />
-                <div className="row" style={{ justifyContent: "flex-end", marginTop: 6, gap: 8 }}>
-                  {dmState === "error" && <span className="muted small" style={{ color: "#fca5a5" }}>Couldn't send — try again.</span>}
-                  <button className="btn primary sm" disabled={dmState === "sending" || !dmText.trim()} onClick={messageCloser}>
-                    {dmState === "sending" ? "Sending…" : "Send to closer"}
-                  </button>
+                <div className="row" style={{ justifyContent: "space-between", marginTop: 6, gap: 8, alignItems: "center" }}>
+                  <span className="muted small" style={{ display: "flex", alignItems: "center", gap: 4 }}>📅 Tagged: {ev.title || "Appointment"}</span>
+                  <div className="row" style={{ gap: 8, alignItems: "center" }}>
+                    {dmState === "error" && <span className="muted small" style={{ color: "#fca5a5" }}>Couldn't send — try again.</span>}
+                    <button className="btn primary sm" disabled={dmState === "sending" || !dmText.trim()} onClick={messageCounterpart}>
+                      {dmState === "sending" ? "Sending…" : `Send to ${dmTarget.role}`}
+                    </button>
+                  </div>
                 </div>
               </>
             )}
