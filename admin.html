@@ -1223,7 +1223,7 @@
       <div id="inviteLinkBox" class="banner" style="word-break:break-all;"></div>
     </div>
     <table>
-      <thead><tr><th>Name</th><th>Email</th><th>Role / position</th><th>Team</th><th>Reports to (setter / closer)</th><th>Status</th><th></th></tr></thead>
+      <thead><tr><th>Name</th><th>Email</th><th>Team / Region</th><th>Role</th><th>Reports to</th><th>Status</th><th></th></tr></thead>
       <tbody id="usersBody"><tr><td colspan="7" class="muted">Select a company…</td></tr></tbody>
     </table>
   </section>
@@ -1378,6 +1378,7 @@ const createTeam      = httpsCallable(fns, "createTeam");
 const updateTeam      = httpsCallable(fns, "updateTeam");
 const assignUserHierarchy = httpsCallable(fns, "assignUserHierarchy");
 const setUserPhoneRouting = httpsCallable(fns, "setUserPhoneRouting");
+const updateUserProfile = httpsCallable(fns, "updateUserProfile");
 const setPositionServices = httpsCallable(fns, "setPositionServices");
 const reassignAppointment = httpsCallable(fns, "reassignAppointment");
 const impersonate     = httpsCallable(fns, "impersonate");
@@ -4191,6 +4192,33 @@ $("userSave").addEventListener("click", async () => {
   finally { $("userSave").disabled = false; }
 });
 
+// ── Accounts: read-only summary rows; all editing happens in the profile modal.
+function curPositionOf(u) {
+  return u.position || (u.role === "admin" ? "admin" : (u.isCloser && u.isSetter !== false ? "" : (u.isCloser ? "closer" : "setter")));
+}
+function userNameOf(uid) { const x = state.users.find((y) => y.id === uid); return x ? (x.displayName || x.email || uid) : ""; }
+function roleLabelOf(u) {
+  if (u.role === "admin") return "Company Admin";
+  const pos = curPositionOf(u);
+  const matchedRole = state.roles.find((r) => (r.title || "").trim().toLowerCase() === (POSITION_LABEL[pos] || "").toLowerCase());
+  const usingCustom = !!u.roleId && (!matchedRole || u.roleId !== matchedRole.id);
+  if (usingCustom) { const rr = state.roles.find((r) => r.id === u.roleId); if (rr) return rr.title; }
+  return POSITION_LABEL[pos] || "—";
+}
+function teamRegionHtml(u) {
+  const t = state.teams.find((x) => x.id === u.teamId);
+  if (!t) return '<span class="muted">—</span>';
+  const region = t.parentTeamId ? state.teams.find((x) => x.id === t.parentTeamId && x.kind === "region") : null;
+  return region ? `${esc(t.name)} <span class="muted small">· ${esc(region.name)}</span>` : esc(t.name);
+}
+function reportsToHtml(u) {
+  const parts = [];
+  if (u.managerId) parts.push(esc(userNameOf(u.managerId)));
+  if ((u.isCloser || curPositionOf(u) === "closer" || curPositionOf(u) === "closer_manager") && u.closerManagerId && u.closerManagerId !== u.managerId)
+    parts.push(`${esc(userNameOf(u.closerManagerId))} <span class="muted small">(closer)</span>`);
+  return parts.length ? parts.join(" · ") : '<span class="muted">—</span>';
+}
+
 async function loadUsers() {
   const body = $("usersBody");
   if (!state.selectedCompany) { body.innerHTML = `<tr><td colspan="7" class="muted">Select a company…</td></tr>`; return; }
@@ -4200,152 +4228,205 @@ async function loadUsers() {
       where("companyId", "==", state.selectedCompany), orderBy("createdAt", "desc")));
     state.users = snap.docs.map((d) => ({ id:d.id, ...d.data() }));
     if (!state.users.length) { body.innerHTML = `<tr><td colspan="7" class="muted">No accounts yet.</td></tr>`; return; }
-    const nameOf = (uid) => { const u = state.users.find((x)=>x.id===uid); return u ? (u.displayName||u.email) : uid; };
     body.innerHTML = "";
     state.users.forEach((u) => {
       const tr = document.createElement("tr");
-      // Custom-title override: plain list of company roles (no "Company Admin" —
-      // that's a Position, set via the primary select below).
-      const roleOptions = state.roles.map((r)=>`<option value="${r.id}" ${u.roleId===r.id?'selected':''}>${esc(r.title)}</option>`).join("");
-      // setter-manager select (exclude self)
-      const mgrOptions = `<option value="">— none —</option>` +
-        state.users.filter((x)=>x.id!==u.id).map((x)=>`<option value="${x.id}" ${u.managerId===x.id?'selected':''}>${esc(x.displayName||x.email)}</option>`).join("");
-      // closer-manager select: only other closers (the parallel chain)
-      const closerMgrOptions = `<option value="">— none —</option>` +
-        state.users.filter((x)=>x.id!==u.id && x.isCloser).map((x)=>`<option value="${x.id}" ${u.closerManagerId===x.id?'selected':''}>${esc(x.displayName||x.email)}</option>`).join("");
-      // Position (the structural source of truth: drives tier + setter/closer
-      // function). A matching Role/title is kept in sync automatically — see
-      // POSITION_ROLE_TIER's auto-seeding in loadRoles() — so day to day there's
-      // just one control to set. "Custom title" below is only for the rare case
-      // where a company wants a different permission bundle than the default.
-      const curPos = u.position || (u.role === "admin" ? "admin" : (u.isCloser && u.isSetter !== false ? "" : (u.isCloser ? "closer" : "setter")));
-      const posOptions = `<option value="">— set position —</option>` +
-        POSITIONS.map(([p, l]) => `<option value="${p}" ${curPos === p ? 'selected' : ''}>${l}</option>`).join("");
-      const matchedRole = state.roles.find((r) => (r.title || "").trim().toLowerCase() === (POSITION_LABEL[curPos] || "").toLowerCase());
-      const usingCustomTitle = !!u.roleId && (!matchedRole || u.roleId !== matchedRole.id);
-      const isCloserFn = u.isCloser || curPos === "closer" || curPos === "closer_manager";
-      const teamOpts = assignableTeams().map((t) => `<option value="${t.id}" ${(u.managedTeamIds || []).includes(t.id) ? 'selected' : ''}>${esc(t.name)}</option>`).join("");
-      const myTeamOptions = `<option value="">— none —</option>` +
-        assignableTeams().map((t) => `<option value="${t.id}" ${u.teamId===t.id?'selected':''}>${esc(t.name)}</option>`).join("");
-      const mirrorBtn = state.isSuper ? `<button class="btn sm mirrorBtn">Mirror</button>` : "";
       tr.innerHTML = `<td>${esc(u.displayName||"—")}${u.role==='admin'?' <span class="badge admin">admin</span>':''}</td>
         <td class="muted">${esc(u.email||"")}</td>
-        <td>
-          <select class="posSel">${posOptions}</select>
-          <div class="roleCustomWrap" style="margin-top:4px;">
-            ${usingCustomTitle
-              ? `<select class="roleSel">${roleOptions}</select>`
-              : `<button type="button" class="roleCustomToggle" style="font:inherit;font-size:11px;color:var(--ink-dim);background:none;border:none;cursor:pointer;padding:0;text-decoration:underline;">Custom title…</button>`}
-          </div>
-        </td>
-        <td><select class="myTeamSel">${myTeamOptions}</select></td>
-        <td><div style="display:grid;gap:4px;">
-          <select class="mgrSel" title="Setter manager">${mgrOptions}</select>
-          <select class="closerMgrSel" title="Closer manager" ${isCloserFn?'':'disabled'}>${closerMgrOptions}</select>
-          <label class="day-chip reassignWrap" style="font-size:11px;${curPos==='closer_manager'?'':'display:none;'}"><input type="checkbox" class="reassignChk" ${u.canReassignAppointments?'checked':''}/> Can reassign appts</label>
-          <select class="mgdTeams" multiple size="2" title="Teams this manager oversees" style="font-size:11px;${curPos==='team_manager'?'':'display:none;'}">${teamOpts}</select>
-          <input type="text" class="smsNumInput" title="Ported texting/calling number (set once porting is done)" placeholder="Texting # +1…" value="${esc(u.smsNumber||'')}" style="font-size:11px;padding:3px 6px;" />
-          <input type="text" class="smsFwdInput" title="Where calls to that number forward" placeholder="Forward calls to" value="${esc(u.smsForwardTo||'')}" style="font-size:11px;padding:3px 6px;" />
-        </div></td>
+        <td>${teamRegionHtml(u)}</td>
+        <td>${esc(roleLabelOf(u))}</td>
+        <td>${reportsToHtml(u)}</td>
         <td>${u.disabled ? '<span class="badge disabled">disabled</span>' : '<span class="badge">active</span>'}</td>
-        <td><div class="row">${mirrorBtn}
-          <button class="btn sm resetBtn" title="Email a password-reset link">Reset PW</button>
-          <button class="btn sm ${u.disabled?'':'danger'} disBtn">${u.disabled ? "Enable" : "Disable"}</button>
-          <button class="btn sm danger delBtn" title="Permanently delete & reassign their leads">Delete</button></div></td>`;
-
-      tr.querySelector(".resetBtn").addEventListener("click", async (ev) => {
-        if (!u.email) return;
-        ev.target.disabled = true;
-        try {
-          await sendPasswordResetEmail(auth, u.email);
-          banner($("banner"), `Password-reset link sent to ${u.email}.`, "good");
-        } catch (e) { banner($("banner"), e.message || "Could not send reset.", "error"); }
-        finally { ev.target.disabled = false; }
-      });
-
-      async function saveCustomTitle(roleId) {
-        try {
-          await assignUserHierarchy({ uid: u.id, roleId: roleId || null });
-          banner($("banner"), "Custom title updated.", "good"); await loadUsers(); populateUserFormSelects();
-        } catch (e) { banner($("banner"), e.message, "error"); loadUsers(); }
-      }
-      const existingRoleSel = tr.querySelector(".roleSel");
-      if (existingRoleSel) existingRoleSel.addEventListener("change", (ev) => saveCustomTitle(ev.target.value));
-      const roleCustomToggle = tr.querySelector(".roleCustomToggle");
-      if (roleCustomToggle) roleCustomToggle.addEventListener("click", () => {
-        const wrap = tr.querySelector(".roleCustomWrap");
-        wrap.innerHTML = `<select class="roleSel">${roleOptions}</select>`;
-        const sel = wrap.querySelector(".roleSel");
-        sel.addEventListener("change", (ev) => saveCustomTitle(ev.target.value));
-        sel.focus();
-      });
-      tr.querySelector(".mgrSel").addEventListener("change", async (ev) => {
-        try { await assignUserHierarchy({ uid:u.id, managerId: ev.target.value || null });
-          banner($("banner"),"Setter manager updated.","good"); await loadUsers(); }
-        catch (e) { banner($("banner"), e.message, "error"); loadUsers(); }
-      });
-      tr.querySelector(".closerMgrSel").addEventListener("change", async (ev) => {
-        try { await assignUserHierarchy({ uid:u.id, closerManagerId: ev.target.value || null });
-          banner($("banner"),"Closer manager updated.","good"); await loadUsers(); }
-        catch (e) { banner($("banner"), e.message, "error"); loadUsers(); }
-      });
-      tr.querySelector(".posSel").addEventListener("change", async (ev) => {
-        const v = ev.target.value; // position key
-        if (!v) return;
-        // Unless this account already has a deliberately custom title, keep the
-        // Role/title in sync with the new Position (they're auto-seeded 1:1).
-        const nextRole = usingCustomTitle ? null : state.roles.find((r) => (r.title || "").trim().toLowerCase() === (POSITION_LABEL[v] || "").toLowerCase());
-        try {
-          await assignUserHierarchy({ uid: u.id, position: v, ...(nextRole ? { roleId: nextRole.id } : {}) });
-          banner($("banner"),"Position updated.","good"); await loadUsers(); populateUserFormSelects();
-        } catch (e) { banner($("banner"), e.message, "error"); loadUsers(); }
-      });
-      tr.querySelector(".myTeamSel").addEventListener("change", async (ev) => {
-        try { await assignUserHierarchy({ uid:u.id, teamId: ev.target.value || null });
-          banner($("banner"),"Team updated.","good"); await loadUsers(); }
-        catch (e) { banner($("banner"), e.message, "error"); loadUsers(); }
-      });
-      const reassignChk = tr.querySelector(".reassignChk");
-      if (reassignChk) reassignChk.addEventListener("change", async (ev) => {
-        try { await assignUserHierarchy({ uid:u.id, canReassignAppointments: ev.target.checked });
-          banner($("banner"), ev.target.checked ? "Can reassign appointments." : "Reassign permission removed.", "good"); }
-        catch (e) { banner($("banner"), e.message, "error"); loadUsers(); }
-      });
-      const mgdTeams = tr.querySelector(".mgdTeams");
-      if (mgdTeams) mgdTeams.addEventListener("change", async () => {
-        const ids = [...mgdTeams.selectedOptions].map((o) => o.value);
-        try { await assignUserHierarchy({ uid:u.id, managedTeamIds: ids });
-          banner($("banner"),"Managed teams updated.","good"); }
-        catch (e) { banner($("banner"), e.message, "error"); loadUsers(); }
-      });
-      const savePhoneRouting = async () => {
-        try {
-          await setUserPhoneRouting({ uid:u.id, smsNumber: tr.querySelector(".smsNumInput").value, smsForwardTo: tr.querySelector(".smsFwdInput").value });
-          banner($("banner"), "Texting number updated.", "good");
-        } catch (e) { banner($("banner"), e.message, "error"); }
-      };
-      tr.querySelector(".smsNumInput").addEventListener("change", savePhoneRouting);
-      tr.querySelector(".smsFwdInput").addEventListener("change", savePhoneRouting);
-      tr.querySelector(".disBtn").addEventListener("click", async () => {
-        try { await setUserDisabled({ uid:u.id, disabled: !u.disabled }); loadUsers(); }
-        catch (e) { banner($("banner"), e.message, "error"); }
-      });
-      tr.querySelector(".delBtn").addEventListener("click", () => openDeleteUserModal(u));
-      const mb = tr.querySelector(".mirrorBtn");
-      if (mb) mb.addEventListener("click", async () => {
-        mb.disabled = true; mb.textContent = "…";
-        try {
-          const res = await impersonate({ targetUid: u.id });
-          const token = res.data.token;
-          window.open(`/app/#imp=${encodeURIComponent(token)}`, "_blank");
-          banner($("banner"), `Mirroring ${u.email} in a new tab.`, "good");
-        } catch (e) { banner($("banner"), e.message || "Mirror failed.", "error"); }
-        finally { mb.disabled = false; mb.textContent = "Mirror"; }
-      });
+        <td><button class="btn sm editBtn">Edit</button></td>`;
+      tr.querySelector(".editBtn").addEventListener("click", () => openUserProfileModal(u.id));
       body.appendChild(tr);
     });
-    void nameOf;
   } catch (e) { body.innerHTML = `<tr><td colspan="7" class="banner error show">${esc(e.message)}</td></tr>`; }
+}
+
+// Full-profile editor. Everything that used to live inline on a row now lives
+// here: account/personal info, role & position, team, reporting lines, texting,
+// and the destructive actions (reset PW, disable, delete, mirror).
+function openUserProfileModal(uid) {
+  const ov = document.createElement("div");
+  ov.style.cssText = "position:fixed;inset:0;background:rgba(2,8,18,.6);display:grid;place-items:start center;z-index:3000;padding:24px 16px;overflow:auto;";
+  ov.innerHTML = `<div class="card" style="max-width:560px;width:100%;" onclick="event.stopPropagation()">
+    <div class="row between" style="align-items:flex-start;">
+      <h3 style="margin:0;" class="pfTitle"></h3>
+      <button class="btn ghost sm pfClose">✕</button>
+    </div>
+    <div class="pfBody"></div>
+    <div class="banner pfBanner" style="margin-top:10px;"></div>
+  </div>`;
+  ov.addEventListener("click", () => ov.remove());
+  ov.querySelector(".pfClose").addEventListener("click", () => ov.remove());
+  document.body.appendChild(ov);
+  renderProfileBody(uid, ov);
+}
+
+function renderProfileBody(uid, ov) {
+  const u = state.users.find((x) => x.id === uid);
+  if (!u) { ov.remove(); return; }
+  const pb = ov.querySelector(".pfBody");
+  const banEl = ov.querySelector(".pfBanner");
+  const pbanner = (msg, kind) => banner(banEl, msg, kind);
+  ov.querySelector(".pfTitle").innerHTML = `${esc(u.displayName || u.email || "Account")}${u.role === 'admin' ? ' <span class="badge admin">admin</span>' : ''}`;
+
+  const roleOptions = state.roles.map((r) => `<option value="${r.id}" ${u.roleId === r.id ? 'selected' : ''}>${esc(r.title)}</option>`).join("");
+  const mgrOptions = `<option value="">— none —</option>` +
+    state.users.filter((x) => x.id !== u.id).map((x) => `<option value="${x.id}" ${u.managerId === x.id ? 'selected' : ''}>${esc(x.displayName || x.email)}</option>`).join("");
+  const closerMgrOptions = `<option value="">— none —</option>` +
+    state.users.filter((x) => x.id !== u.id && x.isCloser).map((x) => `<option value="${x.id}" ${u.closerManagerId === x.id ? 'selected' : ''}>${esc(x.displayName || x.email)}</option>`).join("");
+  const curPos = curPositionOf(u);
+  const posOptions = `<option value="">— set position —</option>` +
+    POSITIONS.map(([p, l]) => `<option value="${p}" ${curPos === p ? 'selected' : ''}>${l}</option>`).join("");
+  const matchedRole = state.roles.find((r) => (r.title || "").trim().toLowerCase() === (POSITION_LABEL[curPos] || "").toLowerCase());
+  const usingCustomTitle = !!u.roleId && (!matchedRole || u.roleId !== matchedRole.id);
+  const isCloserFn = u.isCloser || curPos === "closer" || curPos === "closer_manager";
+  const teamOpts = assignableTeams().map((t) => `<option value="${t.id}" ${(u.managedTeamIds || []).includes(t.id) ? 'selected' : ''}>${esc(t.name)}</option>`).join("");
+  const myTeamOptions = `<option value="">— none —</option>` +
+    assignableTeams().map((t) => `<option value="${t.id}" ${u.teamId === t.id ? 'selected' : ''}>${esc(t.name)}</option>`).join("");
+
+  pb.innerHTML = `
+    <h4 style="margin:12px 0 6px;font-size:13px;">Account info</h4>
+    <div class="grid-2">
+      <div class="field"><span>Name</span><input class="pfName" value="${esc(u.displayName || '')}" /></div>
+      <div class="field"><span>Email</span><input value="${esc(u.email || '')}" disabled title="Sign-in email — contact support to change" /></div>
+      <div class="field"><span>Phone</span><input class="pfPhone" value="${esc(u.phone || '')}" placeholder="(555) 123-4567" /></div>
+      <div class="field"><span>Birthday</span><input class="pfBirthday" type="date" value="${esc(u.birthday || '')}" /></div>
+      <div class="field"><span>Shirt size</span><input class="pfShirt" value="${esc(u.shirtSize || '')}" placeholder="e.g. L" /></div>
+      <div class="field"><span>Hat size</span><input class="pfHat" value="${esc(u.hatSize || '')}" placeholder="e.g. 7 1/4" /></div>
+    </div>
+    <div class="field"><span>Mailing address</span><textarea class="pfAddress" rows="2" placeholder="Street, City, State ZIP">${esc(u.mailingAddress || '')}</textarea></div>
+    <div class="row" style="justify-content:flex-end;"><button class="btn primary sm pfInfoSave">Save account info</button></div>
+
+    <h4 style="margin:16px 0 6px;font-size:13px;border-top:1px solid #21314a;padding-top:14px;">Role &amp; position</h4>
+    <div class="field"><span>Position</span><select class="posSel">${posOptions}</select></div>
+    <div class="roleCustomWrap field"><span>Title</span>
+      ${usingCustomTitle
+        ? `<select class="roleSel">${roleOptions}</select>`
+        : `<div><button type="button" class="roleCustomToggle" style="font:inherit;font-size:12px;color:var(--ink-dim);background:none;border:none;cursor:pointer;padding:0;text-decoration:underline;">Set a custom title…</button></div>`}
+    </div>
+
+    <h4 style="margin:16px 0 6px;font-size:13px;border-top:1px solid #21314a;padding-top:14px;">Team</h4>
+    <div class="field"><span>Team</span><select class="myTeamSel">${myTeamOptions}</select></div>
+
+    <h4 style="margin:16px 0 6px;font-size:13px;border-top:1px solid #21314a;padding-top:14px;">Reporting lines</h4>
+    <div class="grid-2">
+      <div class="field"><span>Setter manager</span><select class="mgrSel">${mgrOptions}</select></div>
+      <div class="field" ${isCloserFn ? '' : 'style="display:none;"'}><span>Closer manager</span><select class="closerMgrSel">${closerMgrOptions}</select></div>
+    </div>
+    <label class="day-chip reassignWrap" style="${curPos === 'closer_manager' ? '' : 'display:none;'}"><input type="checkbox" class="reassignChk" ${u.canReassignAppointments ? 'checked' : ''}/> Can reassign appointments</label>
+    <div class="field mgdTeamsWrap" style="${curPos === 'team_manager' ? '' : 'display:none;'}"><span>Teams this manager oversees</span><select class="mgdTeams" multiple size="3">${teamOpts}</select></div>
+
+    <h4 style="margin:16px 0 6px;font-size:13px;border-top:1px solid #21314a;padding-top:14px;">Texting &amp; calls</h4>
+    <div class="grid-2">
+      <div class="field"><span>Ported texting/calling number</span><input class="smsNumInput" placeholder="+1…" value="${esc(u.smsNumber || '')}" /></div>
+      <div class="field"><span>Forward calls to</span><input class="smsFwdInput" placeholder="+1…" value="${esc(u.smsForwardTo || '')}" /></div>
+    </div>
+
+    <h4 style="margin:16px 0 6px;font-size:13px;border-top:1px solid #21314a;padding-top:14px;">Actions</h4>
+    <div class="row" style="gap:8px;flex-wrap:wrap;">
+      ${state.isSuper ? '<button class="btn sm mirrorBtn">Mirror</button>' : ''}
+      <button class="btn sm resetBtn">Reset password</button>
+      <button class="btn sm ${u.disabled ? '' : 'danger'} disBtn">${u.disabled ? 'Enable account' : 'Disable account'}</button>
+      <button class="btn sm danger delBtn">Delete account</button>
+    </div>`;
+
+  const refresh = async () => { await loadUsers(); populateUserFormSelects(); renderProfileBody(uid, ov); };
+
+  pb.querySelector(".pfInfoSave").addEventListener("click", async (ev) => {
+    const name = pb.querySelector(".pfName").value.trim();
+    if (!name) { pbanner("Name can't be empty.", "error"); return; }
+    ev.target.disabled = true;
+    try {
+      await updateUserProfile({
+        uid: u.id, displayName: name,
+        phone: pb.querySelector(".pfPhone").value,
+        mailingAddress: pb.querySelector(".pfAddress").value,
+        birthday: pb.querySelector(".pfBirthday").value,
+        shirtSize: pb.querySelector(".pfShirt").value,
+        hatSize: pb.querySelector(".pfHat").value,
+      });
+      pbanner("Account info saved.", "good");
+      await refresh();
+    } catch (e) { pbanner(e.message || "Save failed.", "error"); }
+    finally { ev.target.disabled = false; }
+  });
+
+  async function saveCustomTitle(roleId) {
+    try { await assignUserHierarchy({ uid: u.id, roleId: roleId || null }); pbanner("Custom title updated.", "good"); await refresh(); }
+    catch (e) { pbanner(e.message, "error"); }
+  }
+  const existingRoleSel = pb.querySelector(".roleSel");
+  if (existingRoleSel) existingRoleSel.addEventListener("change", (ev) => saveCustomTitle(ev.target.value));
+  const roleCustomToggle = pb.querySelector(".roleCustomToggle");
+  if (roleCustomToggle) roleCustomToggle.addEventListener("click", () => {
+    const wrap = pb.querySelector(".roleCustomWrap");
+    wrap.innerHTML = `<span>Title</span><select class="roleSel">${roleOptions}</select>`;
+    const sel = wrap.querySelector(".roleSel");
+    sel.addEventListener("change", (ev) => saveCustomTitle(ev.target.value));
+    sel.focus();
+  });
+  pb.querySelector(".posSel").addEventListener("change", async (ev) => {
+    const v = ev.target.value;
+    if (!v) return;
+    const nextRole = usingCustomTitle ? null : state.roles.find((r) => (r.title || "").trim().toLowerCase() === (POSITION_LABEL[v] || "").toLowerCase());
+    try { await assignUserHierarchy({ uid: u.id, position: v, ...(nextRole ? { roleId: nextRole.id } : {}) }); pbanner("Position updated.", "good"); await refresh(); }
+    catch (e) { pbanner(e.message, "error"); }
+  });
+  pb.querySelector(".myTeamSel").addEventListener("change", async (ev) => {
+    try { await assignUserHierarchy({ uid: u.id, teamId: ev.target.value || null }); pbanner("Team updated.", "good"); await refresh(); }
+    catch (e) { pbanner(e.message, "error"); }
+  });
+  pb.querySelector(".mgrSel").addEventListener("change", async (ev) => {
+    try { await assignUserHierarchy({ uid: u.id, managerId: ev.target.value || null }); pbanner("Setter manager updated.", "good"); await refresh(); }
+    catch (e) { pbanner(e.message, "error"); }
+  });
+  const closerMgrSel = pb.querySelector(".closerMgrSel");
+  if (closerMgrSel) closerMgrSel.addEventListener("change", async (ev) => {
+    try { await assignUserHierarchy({ uid: u.id, closerManagerId: ev.target.value || null }); pbanner("Closer manager updated.", "good"); await refresh(); }
+    catch (e) { pbanner(e.message, "error"); }
+  });
+  const reassignChk = pb.querySelector(".reassignChk");
+  if (reassignChk) reassignChk.addEventListener("change", async (ev) => {
+    try { await assignUserHierarchy({ uid: u.id, canReassignAppointments: ev.target.checked }); pbanner(ev.target.checked ? "Can reassign appointments." : "Reassign permission removed.", "good"); }
+    catch (e) { pbanner(e.message, "error"); }
+  });
+  const mgdTeams = pb.querySelector(".mgdTeams");
+  if (mgdTeams) mgdTeams.addEventListener("change", async () => {
+    const ids = [...mgdTeams.selectedOptions].map((o) => o.value);
+    try { await assignUserHierarchy({ uid: u.id, managedTeamIds: ids }); pbanner("Managed teams updated.", "good"); }
+    catch (e) { pbanner(e.message, "error"); }
+  });
+  const savePhoneRouting = async () => {
+    try { await setUserPhoneRouting({ uid: u.id, smsNumber: pb.querySelector(".smsNumInput").value, smsForwardTo: pb.querySelector(".smsFwdInput").value }); pbanner("Texting number updated.", "good"); }
+    catch (e) { pbanner(e.message, "error"); }
+  };
+  pb.querySelector(".smsNumInput").addEventListener("change", savePhoneRouting);
+  pb.querySelector(".smsFwdInput").addEventListener("change", savePhoneRouting);
+  pb.querySelector(".resetBtn").addEventListener("click", async (ev) => {
+    if (!u.email) return;
+    ev.target.disabled = true;
+    try { await sendPasswordResetEmail(auth, u.email); pbanner(`Password-reset link sent to ${u.email}.`, "good"); }
+    catch (e) { pbanner(e.message || "Could not send reset.", "error"); }
+    finally { ev.target.disabled = false; }
+  });
+  pb.querySelector(".disBtn").addEventListener("click", async () => {
+    try { await setUserDisabled({ uid: u.id, disabled: !u.disabled }); pbanner(u.disabled ? "Account enabled." : "Account disabled.", "good"); await refresh(); }
+    catch (e) { pbanner(e.message, "error"); }
+  });
+  pb.querySelector(".delBtn").addEventListener("click", () => { ov.remove(); openDeleteUserModal(u); });
+  const mb = pb.querySelector(".mirrorBtn");
+  if (mb) mb.addEventListener("click", async () => {
+    mb.disabled = true; mb.textContent = "…";
+    try {
+      const res = await impersonate({ targetUid: u.id });
+      window.open(`/app/#imp=${encodeURIComponent(res.data.token)}`, "_blank");
+      pbanner(`Mirroring ${u.email} in a new tab.`, "good");
+    } catch (e) { pbanner(e.message || "Mirror failed.", "error"); }
+    finally { mb.disabled = false; mb.textContent = "Mirror"; }
+  });
 }
 
 // Permanently delete a user, first choosing who inherits their leads/appointments.

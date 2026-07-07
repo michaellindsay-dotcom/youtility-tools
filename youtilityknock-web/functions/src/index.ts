@@ -1030,6 +1030,37 @@ export const setUserFunction = onCall(async (request) => {
   return { ok: true };
 });
 
+// Update a user's profile / personal info (company admin or super-admin). Covers
+// the human details the Accounts editor collects — name plus contact + sizing —
+// separate from the org-chart wiring in assignUserHierarchy.
+export const updateUserProfile = onCall(async (request) => {
+  const caller = await getCaller(request);
+  const { uid, displayName, phone, mailingAddress, birthday, shirtSize, hatSize } = (request.data || {}) as {
+    uid?: string; displayName?: string; phone?: string; mailingAddress?: string; birthday?: string; shirtSize?: string; hatSize?: string;
+  };
+  if (!uid) throw new HttpsError("invalid-argument", "uid required.");
+  const snap = await db.doc(`users/${uid}`).get();
+  if (!snap.exists) throw new HttpsError("not-found", "User not found.");
+  authorizeForCompany(caller, (snap.data() as any).companyId);
+  const patch: Record<string, unknown> = {};
+  const str = (v: unknown) => (typeof v === "string" ? v.trim() : "");
+  if (displayName !== undefined) {
+    const dn = str(displayName);
+    if (!dn) throw new HttpsError("invalid-argument", "Name can't be empty.");
+    patch.displayName = dn;
+  }
+  if (phone !== undefined) patch.phone = str(phone);
+  if (mailingAddress !== undefined) patch.mailingAddress = str(mailingAddress);
+  if (birthday !== undefined) patch.birthday = str(birthday); // "YYYY-MM-DD" or ""
+  if (shirtSize !== undefined) patch.shirtSize = str(shirtSize);
+  if (hatSize !== undefined) patch.hatSize = str(hatSize);
+  if (Object.keys(patch).length === 0) throw new HttpsError("invalid-argument", "Nothing to update.");
+  await db.doc(`users/${uid}`).set(patch, { merge: true });
+  // Keep the Auth displayName in sync so it shows the same everywhere.
+  if (patch.displayName) await getAuth().updateUser(uid, { displayName: patch.displayName as string }).catch(() => {});
+  return { ok: true, ...patch };
+});
+
 // Assigns a rep's ported number (Telnyx) + where their calls forward to. Set
 // once a number's porting has actually completed — company admin or super-admin.
 export const setUserPhoneRouting = onCall(async (request) => {
