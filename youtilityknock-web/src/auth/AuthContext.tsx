@@ -12,7 +12,7 @@ import {
   signOut,
   type User,
 } from "firebase/auth";
-import { doc, getDoc, onSnapshot } from "firebase/firestore";
+import { collection, doc, getDoc, onSnapshot, query, where } from "firebase/firestore";
 import { httpsCallable } from "firebase/functions";
 import { auth, db, functions, googleProvider } from "../firebase";
 import { isBillingLocked, PAYMENT_LOCK_MSG } from "../lib/billing";
@@ -24,6 +24,8 @@ interface AuthState {
   company: Company | null;
   /** The user's team (for team-level service permissions); null if none. */
   team: Team | null;
+  /** Company-wide "Company services" baseline (umbrella team); null if unset. */
+  companyServices: string[] | null;
   /** True once the company doc has resolved from the SERVER (not just cache). */
   companyLoaded: boolean;
   role: Role | null;
@@ -57,6 +59,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [company, setCompany] = useState<Company | null>(null);
   const [team, setTeam] = useState<Team | null>(null);
+  const [companyServices, setCompanyServices] = useState<string[] | null>(null);
   const [companyLoaded, setCompanyLoaded] = useState(false);
   const [noAccess, setNoAccess] = useState(false);
   const [blockedReason, setBlockedReason] = useState<string | null>(null);
@@ -92,6 +95,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setTeam(snap.exists() ? ({ id: snap.id, ...(snap.data() as Omit<Team, "id">) }) : null);
     }, () => setTeam(null));
   }, [profile?.companyId, profile?.teamId]);
+
+  // Keep the company-wide "Company services" baseline live (the umbrella team's
+  // servicePermissions). This is the company-wide service ceiling every rep —
+  // including admins — inherits, so unchecking a service there removes its tool
+  // from the whole company's app.
+  useEffect(() => {
+    const cid = profile?.companyId;
+    if (!cid) { setCompanyServices(null); return; }
+    return onSnapshot(
+      query(collection(db, "companies", cid, "teams"), where("kind", "==", "company")),
+      (snap) => {
+        const umb = snap.docs[0]?.data();
+        setCompanyServices(Array.isArray(umb?.servicePermissions) ? (umb!.servicePermissions as string[]) : null);
+      },
+      () => setCompanyServices(null)
+    );
+  }, [profile?.companyId]);
 
   // Refuse access to deactivated or removed accounts: sign them out and stash a
   // message the login screen shows. Disabled *users* are already blocked by
@@ -269,6 +289,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   const value: AuthState = {
+    companyServices,
     user,
     profile,
     company,

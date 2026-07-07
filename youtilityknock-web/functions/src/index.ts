@@ -3687,6 +3687,12 @@ function scoreForMetric(f: ChScore, metric: string): number {
   if (metric === "sales") return f.sale;
   return f.doors * 1 + f.conv * 3 + f.appt * 20 + f.sale * 100; // points
 }
+const METRIC_WORD: Record<string, string> = { doors: "doors", appointments: "appointments", sales: "sales", points: "points" };
+// Post a system message to a company's Team Chat (same channel as the weekly
+// recap). Used for Throw Down battles and reward shout-outs.
+async function postTeamChat(companyId: string, userName: string, text: string): Promise<void> {
+  await db.collection("chat").add({ companyId, userId: "system", userName, text, createdAt: Date.now() }).catch(() => {});
+}
 
 export const createChallenge = onCall(async (request) => {
   const caller = await getCaller(request);
@@ -3740,6 +3746,10 @@ export const respondChallenge = onCall(async (request) => {
     if (!isOpponent || c.status !== "pending") throw new HttpsError("failed-precondition", "Can't accept this challenge.");
     await ref.set({ status: "active", updatedAt: now }, { merge: true });
     await notifyUser({ userId: c.challengerUid, type: "challenge", title: `✅ ${c.opponentName} accepted your Throw Down`, body: `${c.metric} · game on!`, link: "/app/throwdowns" });
+    // Announce the battle in Team Chat to build competition + culture.
+    const when = c.period === "day" ? "TODAY" : "THIS WEEK";
+    await postTeamChat(c.companyId, "⚔️ Throw Down",
+      `⚔️ BATTLE ON! ${c.challengerName} 🆚 ${c.opponentName} — most ${METRIC_WORD[c.metric] || c.metric} ${when} wins. On the line: ${c.stakes}. Let's go! 🔥`);
   } else if (action === "decline") {
     if (!isOpponent || c.status !== "pending") throw new HttpsError("failed-precondition", "Can't decline this challenge.");
     await ref.set({ status: "declined", updatedAt: now }, { merge: true });
@@ -3766,21 +3776,114 @@ export const tickChallenges = onSchedule("every 15 minutes", async () => {
       const funnel = await challengeFunnel(c.companyId as string, startAt, windowEnd, [c.challengerUid, c.opponentUid]);
       const cs = scoreForMetric(funnel[c.challengerUid], c.metric as string);
       const os = scoreForMetric(funnel[c.opponentUid], c.metric as string);
+      const word = METRIC_WORD[c.metric as string] || c.metric;
       if (now >= endAt) {
         const winnerUid = cs === os ? null : (cs > os ? c.challengerUid : c.opponentUid);
         await d.ref.set({ status: "settled", challengerScore: cs, opponentScore: os, winnerUid, scoresUpdatedAt: now, updatedAt: now }, { merge: true });
         const loserUid = winnerUid ? (winnerUid === c.challengerUid ? c.opponentUid : c.challengerUid) : null;
         const winnerName = winnerUid === c.challengerUid ? c.challengerName : c.opponentName;
+        const loserName = winnerUid === c.challengerUid ? c.opponentName : c.challengerName;
         if (winnerUid) {
           await notifyUser({ userId: winnerUid, type: "challenge", title: "🏆 You won the Throw Down!", body: `Final: ${cs} vs ${os}. Collect: ${c.stakes}`, link: "/app/throwdowns" });
           if (loserUid) await notifyUser({ userId: loserUid, type: "challenge", title: `😤 ${winnerName} won the Throw Down`, body: `You owe: ${c.stakes}`, link: "/app/throwdowns" });
+          await postTeamChat(c.companyId, "⚔️ Throw Down", `🏆 FINAL — ${winnerName} beat ${loserName} ${Math.max(cs, os)}–${Math.min(cs, os)} (${word})! ${loserName} owes: ${c.stakes}. 👏`);
         } else {
           for (const u of [c.challengerUid, c.opponentUid]) await notifyUser({ userId: u, type: "challenge", title: "🤝 Throw Down tied", body: `Dead heat at ${cs}. Call it a draw?`, link: "/app/throwdowns" });
+          await postTeamChat(c.companyId, "⚔️ Throw Down", `🤝 FINAL — ${c.challengerName} and ${c.opponentName} tied at ${cs} (${word}). Run it back? 😤`);
         }
       } else {
         await d.ref.set({ challengerScore: cs, opponentScore: os, scoresUpdatedAt: now }, { merge: true });
+        // Periodic Team Chat score update, throttled so the chat isn't spammed:
+        // a daily challenge posts every 90 min; a multi-day/weekly one only at
+        // roughly the start & end of each day (~every 11h).
+        const interval = c.period === "day" ? 90 * 60 * 1000 : 11 * 60 * 60 * 1000;
+        const lastChatAt = Number(c.lastChatAt) || 0;
+        if (now - lastChatAt >= interval) {
+          const lead = cs === os ? `🔥 dead even at ${cs}` : `${cs > os ? c.challengerName : c.opponentName} leads ${Math.max(cs, os)}–${Math.min(cs, os)}`;
+          const leftMs = endAt - now;
+          const leftTxt = leftMs > 24 * 3600 * 1000 ? `${Math.round(leftMs / (24 * 3600 * 1000))}d left` : leftMs > 3600 * 1000 ? `${Math.round(leftMs / (3600 * 1000))}h left` : `${Math.max(1, Math.round(leftMs / 60000))}m left`;
+          await postTeamChat(c.companyId, "⚔️ Throw Down", `⚔️ ${c.challengerName} 🆚 ${c.opponentName} (${word}): ${lead} · ${leftTxt}. Who's got it?`);
+          await d.ref.set({ lastChatAt: now }, { merge: true });
+        }
       }
     } catch (e) { logger.warn("tickChallenges failed for", d.id, e); }
+  }
+});
+
+// ════════════════════════════════════════════════════════════════════════════
+// REWARD SHOUT-OUTS — once a day, motivate reps toward active rewards. Team
+// rewards post the team's progress to Team Chat; individual rewards send each
+// rep who hasn't hit it yet a private nudge with their own progress.
+// ════════════════════════════════════════════════════════════════════════════
+const REWARD_WORD: Record<string, string> = { doors: "doors", appointments: "appointments", sales: "sales", conversations: "conversations", points: "points" };
+export const rewardMotivation = onSchedule({ schedule: "0 9 * * *", timeZone: "America/Denver" }, async () => {
+  const now = Date.now();
+  const rewardsSnap = await db.collectionGroup("rewards").get().catch(() => null);
+  if (!rewardsSnap) return;
+  const byCompany: Record<string, any[]> = {};
+  for (const d of rewardsSnap.docs) {
+    const r = d.data();
+    if (r.active === false) continue;
+    if (r.kind === "store") continue; // store rewards are redeemed, not chased
+    if (r.startsAt && now < Number(r.startsAt)) continue;
+    if (r.expiresAt && now > Number(r.expiresAt)) continue;
+    const companyId = d.ref.parent.parent?.id;
+    if (!companyId || !(Number(r.target) > 0)) continue;
+    (byCompany[companyId] ||= []).push({ id: d.id, ...r });
+  }
+
+  const CONVO = new Set(["pipeline", "appointment", "not_interested", "sold"]);
+  const fromFunnel = (f: ChScore, m: string) =>
+    m === "doors" ? f.doors : m === "appointments" ? f.appt : m === "sales" ? f.sale : m === "conversations" ? f.conv : f.doors * STAT_PTS.door + f.conv * STAT_PTS.lead + f.appt * STAT_PTS.appointment + f.sale * STAT_PTS.sale;
+  const fromStats = (s: any, m: string) =>
+    !s ? 0 : m === "doors" ? (Number(s.doorsKnocked) || 0) : m === "appointments" ? (Number(s.appointments) || 0) : m === "sales" ? (Number(s.sales) || 0) : m === "conversations" ? (Number(s.leadsCreated) || 0) : pointsOf(s);
+
+  for (const [companyId, rewards] of Object.entries(byCompany)) {
+    try {
+      const [usersSnap, statsSnap] = await Promise.all([
+        db.collection("users").where("companyId", "==", companyId).get(),
+        db.collection("userStats").where("companyId", "==", companyId).get(),
+      ]);
+      const reps = usersSnap.docs.map((d) => ({ uid: d.id, ...(d.data() as any) })).filter((u) => u.disabled !== true);
+      const statsByUid: Record<string, any> = {};
+      statsSnap.forEach((d) => { statsByUid[d.id] = d.data(); });
+
+      // Windowed (week/month) per-rep funnel from leads.
+      const monthStart = rStartOfMonth(); const weekStart = rStartOfWeek();
+      const fw: Record<string, ChScore> = {}; const fm: Record<string, ChScore> = {};
+      reps.forEach((u) => { fw[u.uid] = { doors: 0, conv: 0, appt: 0, sale: 0 }; fm[u.uid] = { doors: 0, conv: 0, appt: 0, sale: 0 }; });
+      let leadDocs;
+      try { leadDocs = (await db.collection("leads").where("companyId", "==", companyId).where("createdAt", ">=", monthStart).get()).docs; }
+      catch { leadDocs = (await db.collection("leads").where("companyId", "==", companyId).get()).docs; }
+      for (const d of leadDocs) {
+        const l = d.data(); const uid = l.assignedTo as string;
+        if (!fm[uid]) continue;
+        const t = (l.knockedAt as number) || (l.createdAt as number) || 0;
+        if (t < monthStart) continue;
+        const bump = (f: ChScore) => { if (l.verified !== false) { f.doors++; if (CONVO.has(l.status)) f.conv++; } if (l.status === "appointment") f.appt++; if (l.status === "sold") f.sale++; };
+        bump(fm[uid]); if (t >= weekStart) bump(fw[uid]);
+      }
+      // Team all-time totals (team rewards are all-time in the app).
+      const teamAll: any = { doorsKnocked: 0, appointments: 0, sales: 0, leadsCreated: 0, shifts: 0 };
+      Object.values(statsByUid).forEach((s: any) => { teamAll.doorsKnocked += Number(s.doorsKnocked) || 0; teamAll.appointments += Number(s.appointments) || 0; teamAll.sales += Number(s.sales) || 0; teamAll.leadsCreated += Number(s.leadsCreated) || 0; teamAll.shifts += Number(s.shifts) || 0; });
+
+      for (const r of rewards) {
+        const target = Number(r.target) || 0;
+        const word = REWARD_WORD[r.metric] || r.metric;
+        if (r.audience === "team") {
+          const val = fromStats(teamAll, r.metric);
+          if (val >= target) continue; // already earned — no nagging
+          const pct = Math.round((val / target) * 100);
+          await postTeamChat(companyId, "🎁 Team Reward", `🎁 TEAM GOAL — "${r.name}": ${val}/${target} ${word} (${pct}%). ${target - val} to go — everybody push! 💪🔥`);
+        } else {
+          for (const u of reps) {
+            const val = r.period === "weekly" ? fromFunnel(fw[u.uid], r.metric) : r.period === "monthly" ? fromFunnel(fm[u.uid], r.metric) : fromStats(statsByUid[u.uid], r.metric);
+            if (val >= target) continue;
+            await notifyUser({ userId: u.uid, type: "reward", title: `🎁 ${r.name} — keep pushing!`, body: `You're at ${val}/${target} ${word}. Just ${target - val} more to earn it — you've got this! 💪`, link: "/app/rewards" });
+          }
+        }
+      }
+    } catch (e) { logger.warn("rewardMotivation failed for", companyId, e); }
   }
 });
 

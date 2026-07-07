@@ -432,6 +432,7 @@ export interface Challenge {
   challengerScore?: number;
   opponentScore?: number;
   scoresUpdatedAt?: number;
+  lastChatAt?: number; // last Team-Chat battle update (throttling)
   winnerUid?: string | null; // set on settle; null = tie
   createdAt: number;
   updatedAt: number;
