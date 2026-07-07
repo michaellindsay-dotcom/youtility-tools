@@ -168,6 +168,7 @@ export default function CalendarView({
           canHearRecording={canHearRecording}
           me={me}
           companyId={companyId}
+          edit={edit}
           onClose={() => setSelected(null)}
           onDisposition={(e) => { setSelected(null); setDispoTarget(e); }}
         />
@@ -295,7 +296,13 @@ function Block({ e, onPick, edit }: { e: ScheduleEvent; onPick: (e: ScheduleEven
     <button
       type="button"
       draggable={canEdit}
-      onDragStart={canEdit ? (ev) => { ev.stopPropagation(); edit?.onDragStart(e); } : undefined}
+      onDragStart={canEdit ? (ev) => {
+        ev.stopPropagation();
+        // Firefox (and some engines) won't start a drag unless dataTransfer is
+        // populated in dragstart.
+        try { ev.dataTransfer.setData("text/plain", e.id); ev.dataTransfer.effectAllowed = "move"; } catch { /* noop */ }
+        edit?.onDragStart(e);
+      } : undefined}
       onClick={() => onPick(e)}
       onDoubleClick={() => { if (canEdit) edit?.onEdit(e); else if (e.leadId) navigate(`/lead/${e.leadId}`); }}
       title={`${fmtTime(e.startAt)} · ${e.title} · ${assigneeName(e)}${overdue ? " · ⚠ not dispositioned" : ""}${canEdit ? " · double-click to edit · drag to reschedule" : e.leadId ? " · double-click for full history" : ""}`}
@@ -451,7 +458,7 @@ function MonthGrid({ monthMs, events, busy, onPick, onOpenDay, narrow, edit }: {
 // recording so they can hear the door when there aren't written notes. When the
 // appointment is routed to a different closer, the viewer can DM that closer to
 // chase the outcome — handy when it's overdue and still undispositioned.
-function EventPopout({ ev, canHearRecording, me, companyId, onClose, onDisposition }: { ev: ScheduleEvent; canHearRecording: boolean; me: Me; companyId: string | null; onClose: () => void; onDisposition: (e: ScheduleEvent) => void }) {
+function EventPopout({ ev, canHearRecording, me, companyId, edit, onClose, onDisposition }: { ev: ScheduleEvent; canHearRecording: boolean; me: Me; companyId: string | null; edit?: EditCtx; onClose: () => void; onDisposition: (e: ScheduleEvent) => void }) {
   const [audioUrl, setAudioUrl] = useState<string | null>(null);
   const [recState, setRecState] = useState<"idle" | "loading" | "none">(canHearRecording && ev.leadId ? "loading" : "none");
   const undisp = isUndispositioned(ev);
@@ -519,6 +526,15 @@ function EventPopout({ ev, canHearRecording, me, companyId, onClose, onDispositi
           <button className="btn ghost sm" onClick={onClose}>✕</button>
         </div>
         <div className="muted small" style={{ marginTop: 4 }}>{fmt(ev.startAt)}{ev.durationMin ? ` · ${ev.durationMin} min` : ""}</div>
+
+        {/* The setter / a manager / an admin can change the date-time or closer.
+            This button is the reliable path on touch devices where drag and
+            double-click aren't available. */}
+        {edit?.canEdit(ev) && (
+          <button className="btn ghost sm" style={{ width: "100%", marginTop: 10 }} onClick={() => { onClose(); edit.onEdit(ev); }}>
+            🗓 Reschedule / reassign closer
+          </button>
+        )}
 
         {undisp && (
           <div style={{ marginTop: 10, borderRadius: 8, padding: "8px 10px", background: "rgba(239,68,68,.12)", border: "1px solid rgba(239,68,68,.5)", color: "#fecaca", fontSize: 13 }}>
