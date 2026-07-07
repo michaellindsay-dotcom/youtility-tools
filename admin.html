@@ -3942,11 +3942,13 @@ function renderTeamDetail(t, el) {
   // A region's org chart is the union of every team in the region; a plain team
   // shows just its own roster; the umbrella shows the whole company.
   const regionTeamIds = t.kind === "region" ? state.teams.filter((x) => x.parentTeamId === t.id).map((x) => x.id) : null;
+  // Show everyone actually on the team — including a company admin who's been
+  // assigned to it (they were previously hidden and left holes in the chart).
   const members = isCorporate
     ? state.users.slice()
     : t.kind === "region"
-      ? state.users.filter((u) => regionTeamIds.includes(u.teamId) && u.role !== "admin")
-      : state.users.filter((u) => u.teamId === t.id && u.role !== "admin");
+      ? state.users.filter((u) => regionTeamIds.includes(u.teamId))
+      : state.users.filter((u) => u.teamId === t.id);
   const svc = SERVICES.map(([k, l]) => `<label class="day-chip"><input type="checkbox" class="tsvc" value="${k}" ${tsp.includes(k) ? 'checked' : ''}/> ${l}</label>`).join("");
 
   if (!t._expanded) t._expanded = new Set();
@@ -4251,7 +4253,7 @@ async function loadUsers() {
 function openUserProfileModal(uid) {
   const ov = document.createElement("div");
   ov.style.cssText = "position:fixed;inset:0;background:rgba(2,8,18,.6);display:grid;place-items:start center;z-index:3000;padding:24px 16px;overflow:auto;";
-  ov.innerHTML = `<div class="card" style="max-width:560px;width:100%;" onclick="event.stopPropagation()">
+  ov.innerHTML = `<div class="card" style="max-width:560px;width:100%;background:var(--bg-2);border-color:var(--line-hi);box-shadow:0 24px 60px rgba(0,0,0,.55);" onclick="event.stopPropagation()">
     <div class="row between" style="align-items:flex-start;">
       <h3 style="margin:0;" class="pfTitle"></h3>
       <button class="btn ghost sm pfClose">✕</button>
@@ -4268,6 +4270,7 @@ function openUserProfileModal(uid) {
 function renderProfileBody(uid, ov) {
   const u = state.users.find((x) => x.id === uid);
   if (!u) { ov.remove(); return; }
+  const isSelf = !!(auth.currentUser && auth.currentUser.uid === u.id);
   const pb = ov.querySelector(".pfBody");
   const banEl = ov.querySelector(".pfBanner");
   const pbanner = (msg, kind) => banner(banEl, msg, kind);
@@ -4333,11 +4336,12 @@ function renderProfileBody(uid, ov) {
 
     <h4 style="margin:16px 0 6px;font-size:13px;border-top:1px solid #21314a;padding-top:14px;">Actions</h4>
     <div class="row" style="gap:8px;flex-wrap:wrap;">
-      ${state.isSuper ? '<button class="btn sm mirrorBtn">Mirror</button>' : ''}
+      ${state.isSuper && !isSelf ? '<button class="btn sm mirrorBtn">Mirror</button>' : ''}
       <button class="btn sm resetBtn">Reset password</button>
-      <button class="btn sm ${u.disabled ? '' : 'danger'} disBtn">${u.disabled ? 'Enable account' : 'Disable account'}</button>
-      <button class="btn sm danger delBtn">Delete account</button>
-    </div>`;
+      ${(!isSelf || state.isSuper) ? `<button class="btn sm ${u.disabled ? '' : 'danger'} disBtn">${u.disabled ? 'Enable account' : 'Disable account'}</button>` : ''}
+      ${(!isSelf || state.isSuper) ? '<button class="btn sm danger delBtn">Delete account</button>' : ''}
+    </div>
+    ${isSelf && !state.isSuper ? '<div class="muted small" style="margin-top:6px;">To disable or delete your own account, ask another admin.</div>' : ''}`;
 
   const refresh = async () => { await loadUsers(); populateUserFormSelects(); renderProfileBody(uid, ov); };
 
@@ -4420,11 +4424,13 @@ function renderProfileBody(uid, ov) {
     catch (e) { pbanner(e.message || "Could not send reset.", "error"); }
     finally { ev.target.disabled = false; }
   });
-  pb.querySelector(".disBtn").addEventListener("click", async () => {
+  const disBtn = pb.querySelector(".disBtn");
+  if (disBtn) disBtn.addEventListener("click", async () => {
     try { await setUserDisabled({ uid: u.id, disabled: !u.disabled }); pbanner(u.disabled ? "Account enabled." : "Account disabled.", "good"); await refresh(); }
     catch (e) { pbanner(e.message, "error"); }
   });
-  pb.querySelector(".delBtn").addEventListener("click", () => { ov.remove(); openDeleteUserModal(u); });
+  const delBtn = pb.querySelector(".delBtn");
+  if (delBtn) delBtn.addEventListener("click", () => { ov.remove(); openDeleteUserModal(u); });
   const mb = pb.querySelector(".mirrorBtn");
   if (mb) mb.addEventListener("click", async () => {
     mb.disabled = true; mb.textContent = "…";
@@ -4442,7 +4448,7 @@ function renderProfileBody(uid, ov) {
 function openChangeEmailModal(u, parentOv) {
   const ov = document.createElement("div");
   ov.style.cssText = "position:fixed;inset:0;background:rgba(2,8,18,.72);display:grid;place-items:center;z-index:3200;padding:16px;";
-  ov.innerHTML = `<div class="card" style="max-width:440px;width:100%;" onclick="event.stopPropagation()">
+  ov.innerHTML = `<div class="card" style="max-width:440px;width:100%;background:var(--bg-2);border-color:var(--line-hi);box-shadow:0 24px 60px rgba(0,0,0,.55);" onclick="event.stopPropagation()">
     <h3 style="margin-top:0;">Change sign-in email</h3>
     <p class="muted small">${esc(u.displayName || u.email || "This user")} currently signs in as <strong>${esc(u.email || "")}</strong>. This changes how they log in (their password stays the same). Confirm with your password and a reason.</p>
     <label class="field"><span>New email</span><input id="ceEmail" type="email" value="${esc(u.email || '')}" /></label>
@@ -4490,7 +4496,7 @@ function openDeleteUserModal(u) {
     others.map((x) => `<option value="${x.id}">${esc(x.displayName || x.email || x.id)}</option>`).join("");
   const ov = document.createElement("div");
   ov.style.cssText = "position:fixed;inset:0;background:rgba(2,8,18,.6);display:grid;place-items:center;z-index:3000;padding:16px;";
-  ov.innerHTML = `<div class="card" style="max-width:460px;width:100%;" onclick="event.stopPropagation()">
+  ov.innerHTML = `<div class="card" style="max-width:460px;width:100%;background:var(--bg-2);border-color:var(--line-hi);box-shadow:0 24px 60px rgba(0,0,0,.55);" onclick="event.stopPropagation()">
       <h3 style="margin-top:0;">Delete ${esc(u.displayName || u.email || "user")}?</h3>
       <p class="muted small">This permanently removes the account and sign-in. Their open leads and appointments will be handed to the rep you pick below (or left unassigned). This can't be undone.</p>
       <label class="field"><span>Reassign their leads &amp; appointments to</span>
