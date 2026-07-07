@@ -326,6 +326,16 @@ export default function DispositionModal({
       setErr("Pick a closer for this appointment before saving.");
       return;
     }
+    // Validate the appointment time BEFORE any write or stat bump. Bailing after
+    // the bump (then letting the rep fix the time and re-save) would count the
+    // appointment twice.
+    if (d.status === "appointment" && schedule && scheduleAt && company?.scheduling) {
+      const v = validAppointmentTime(new Date(scheduleAt).getTime(), company.scheduling);
+      if (!v.ok) {
+        setErr(`The appointment time ${v.reason} — pick a valid time before saving.`);
+        return;
+      }
+    }
     setSaving(true);
     setErr(null);
     try {
@@ -409,8 +419,14 @@ export default function DispositionModal({
         leadId = refDoc.id;
       }
 
-      if (d.status === "appointment") void bumpStats(profile, { appointments: 1 });
-      else if (d.status === "sold") void bumpStats(profile, { sales: 1 });
+      // Only count the TRANSITION into a status, never a re-save of a lead that
+      // already carries it. Re-opening an appointment (or sold) lead to add a
+      // photo, tweak notes, confirm the closer, or fix the time would otherwise
+      // re-bump and double the rep's number — mirrors the server-side
+      // `prev !== status` guard in setLeadStatusForRep.
+      const prevStatus = target?.status;
+      if (d.status === "appointment" && prevStatus !== "appointment") void bumpStats(profile, { appointments: 1 });
+      else if (d.status === "sold" && prevStatus !== "sold") void bumpStats(profile, { sales: 1 });
       void recordKnock(geo.verified); // counts toward the active shift if on-site
 
       // Stop + upload the recorded pitch (best-effort; never blocks the save).
@@ -423,15 +439,8 @@ export default function DispositionModal({
       // scheduling failure surfaces a warning but doesn't lose the lead.
       const cfg = SCHEDULE_FOR[d.status];
       if (cfg && schedule && scheduleAt) {
-        // Appointments must fall inside the company's booking practices.
-        if (d.status === "appointment" && company?.scheduling) {
-          const v = validAppointmentTime(new Date(scheduleAt).getTime(), company.scheduling);
-          if (!v.ok) {
-            setErr(`Saved the lead, but the appointment time ${v.reason} — pick a valid time and save again.`);
-            onSaved?.();
-            return; // keep modal open so they can fix the time
-          }
-        }
+        // Appointment time is validated up front (before the write/bump above),
+        // so here we can go straight to routing the calendar event.
         try {
           // Appointments route to a closer when the company runs that workflow;
           // go-backs / follow-ups always stay on the setter's own calendar.
