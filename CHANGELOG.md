@@ -9,6 +9,11 @@ version. Bump `VERSION_NAME` for a new public milestone and add a section here.
 ## [Unreleased]
 
 ### Fixed
+- **Leaderboard Rep Rankings now match Reports.** The company Rep Rankings
+  windowed appointments/doors/convos by *lead creation date* while Reports
+  windowed by *knock date*, so a lead created earlier but re-knocked / set as an
+  appointment this week showed up in Reports but not on the leaderboard (e.g. 9
+  vs 7 appts). Both now window by knock date over the same lead set.
 - Appointment counts no longer **double** on the leaderboard. The on-the-door
   disposition modal counted an appointment on every save, so re-opening an
   already-booked lead (to add a photo, tweak notes, confirm the closer, or fix
@@ -17,6 +22,15 @@ version. Bump `VERSION_NAME` for a new public milestone and add a section here.
   the appointment time up front so a bail-and-retry can't count twice.
 
 ### Added
+- **Cancel / delete an appointment** from the Edit-appointment dialog (setter,
+  team manager, or company admin). Cancelling fully unwinds it: it reverses the
+  appointment credit in the exact period it was earned (so both the leaderboard
+  counters and the weekly/monthly boards drop it), reverts the lead out of
+  "appointment" so Reports and Rep Rankings stop counting it, removes the event
+  from the owner's Google/Outlook calendar, and deletes it. (A won deal can't be
+  cancelled this way — reverse the sale first.) Reschedules, go-backs, and
+  follow-ups have never counted as new appointments; only a setter setting one
+  does.
 - **Setter & Closer leaderboards** — the Leaderboard now splits by lane so a
   setter sees where they rank among other setters (doors / appts / sat / **sit
   %**) and a closer among other closers (assigned / sat / closed / **close %**).

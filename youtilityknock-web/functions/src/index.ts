@@ -1036,6 +1036,100 @@ export const rescheduleAppointment = onCall(async (request) => {
   return { ok: true, startAt: start, endAt };
 });
 
+// Cancel / delete an appointment and unwind everything it touched — so a
+// cancelled appointment never lingers in anyone's numbers. Permission mirrors
+// reschedule (the setter, a team manager, or a company admin). We:
+//   • fully reverse the stat credits, EACH in the period it was earned (the
+//     "set" credit at createdAt, any sit/close credit at dispositionedAt), so
+//     both the leaderboard counters and the season boards drop it;
+//   • revert the lead out of "appointment" so the lead-based funnel (Reports &
+//     Rep Rankings) stops counting it;
+//   • remove the event from the owner's external calendar and delete it.
+// A won deal can't be cancelled here — undo the sale first.
+export const cancelAppointment = onCall(async (request) => {
+  const caller = await getCaller(request);
+  const { eventId } = (request.data || {}) as { eventId?: string };
+  if (!eventId) throw new HttpsError("invalid-argument", "eventId required.");
+  const evRef = db.doc(`events/${eventId}`);
+  const ev = (await evRef.get()).data() as any;
+  if (!ev) throw new HttpsError("not-found", "Appointment not found.");
+  if (ev.type !== "appointment") throw new HttpsError("failed-precondition", "Only appointments can be cancelled here.");
+
+  const company = ev.companyId as string;
+  const inTeam = Array.isArray(ev.visibilityPath) && (ev.visibilityPath as string[]).includes(caller.uid);
+  // Only the setter who SET it, a team manager, or a company admin — never the
+  // closer. For a routed appointment the setter is setterUid (userId is the
+  // closer); for a self-gen appointment (no closer) the setter is userId.
+  const isSetter = ev.setterUid
+    ? ev.setterUid === caller.uid
+    : (!ev.closerUid && ev.userId === caller.uid);
+  const allowed = caller.isSuper
+    || (caller.companyId === company && caller.role === "admin")
+    || isSetter
+    || (caller.companyId === company && caller.role === "manager" && inTeam);
+  if (!allowed) throw new HttpsError("permission-denied", "Not allowed to cancel this appointment.");
+
+  const apptStatus = (ev.apptStatus as string) || "scheduled";
+  if (apptStatus === "closed_won") {
+    throw new HttpsError("failed-precondition", "This appointment already closed as a won deal — reverse the sale before cancelling.");
+  }
+
+  // The setter is whoever set it (self-gen events store only userId; routed
+  // appointments store setterUid + the closer as userId).
+  const setterUid = (ev.setterUid as string) || (ev.userId as string) || null;
+  const closerUid = (ev.closerUid as string) || null;
+  const [setterSnap, closerSnap] = await Promise.all([
+    setterUid ? db.doc(`users/${setterUid}`).get() : Promise.resolve(null as any),
+    closerUid ? db.doc(`users/${closerUid}`).get() : Promise.resolve(null as any),
+  ]);
+  const setter = setterSnap && setterSnap.exists ? { uid: setterSnap.id, ...(setterSnap.data() as any) } : null;
+  const closer = closerSnap && closerSnap.exists ? { uid: closerSnap.id, ...(closerSnap.data() as any) } : null;
+
+  const setAt = Number(ev.createdAt) || Number(ev.startAt) || Date.now();
+  const dispoAt = Number(ev.dispositionedAt) || setAt;
+  const isSit = CLOSER_SIT_STATUSES.has(apptStatus);
+
+  // Reverse the "appointment set" credit in the period it was set.
+  if (setter) await serverBumpStatsAt(setter, { appointments: -1 }, setAt);
+  if (closer) await serverBumpStatsAt(closer, { closerAppts: -1 }, setAt);
+  // Reverse any disposition credit in the period it was dispositioned.
+  if (isSit) {
+    if (closer) await serverBumpStatsAt(closer, { closerSits: -1 }, dispoAt);
+    if (setter) await serverBumpStatsAt(setter, { sits: -1, pitchedAppts: -1 }, dispoAt);
+  } else if (apptStatus === "no_show") {
+    if (setter) await serverBumpStatsAt(setter, { pitchedAppts: -1 }, dispoAt);
+  }
+  if (apptStatus === "turned_away" && closer) await serverBumpStatsAt(closer, { closerTurnedAways: -1 }, dispoAt);
+  if (apptStatus === "closer_no_show" && closer) await serverBumpStatsAt(closer, { closerNoShows: -1 }, dispoAt);
+
+  // Drop the lead out of "appointment" so the lead-based funnel stops counting
+  // it — keep it as a warm "pipeline" lead (it was still a real conversation).
+  if (ev.leadId) {
+    try {
+      const leadRef = db.doc(`leads/${ev.leadId}`);
+      const lead = (await leadRef.get()).data() as any;
+      if (lead && lead.status === "appointment") {
+        await leadRef.set({ status: "pipeline", updatedAt: Date.now() }, { merge: true });
+      }
+    } catch (e) { logger.warn("cancel: lead revert failed", e); }
+  }
+
+  // Remove it from the owner's external calendar, then delete the event.
+  if (ev.userId) {
+    await deleteExternalEvent(ev.userId as string, { googleEventId: ev.googleEventId, microsoftEventId: ev.microsoftEventId }).catch(() => {});
+  }
+  await evRef.delete();
+
+  // Let the closer know their queued appointment is gone (if someone else cancelled).
+  if (closerUid && closerUid !== caller.uid) {
+    await notifyUser({
+      userId: closerUid, type: "event", title: "Appointment cancelled",
+      body: [ev.title || "Appointment", ev.address].filter(Boolean).join(" — "), link: "/app/schedule",
+    }).catch(() => {});
+  }
+  return { ok: true };
+});
+
 // Set a user's function (setter / closer / both). Keeps isSetter + isCloser in
 // sync; rebuilds the org charts so both chains stay consistent.
 export const setUserFunction = onCall(async (request) => {
@@ -3083,6 +3177,31 @@ async function patchExternalEvent(
   return out;
 }
 
+// Remove an event from the owner's external calendar (used when an appointment
+// is cancelled). Best-effort — a provider failure never blocks the cancel.
+async function deleteExternalEvent(uid: string, ids: { googleEventId?: string; microsoftEventId?: string }): Promise<void> {
+  const tokSnap = await db.doc(`calendarTokens/${uid}`).get();
+  if (!tokSnap.exists) return;
+  const t = tokSnap.data() as { google?: { refreshToken?: string }; microsoft?: { refreshToken?: string } };
+  const cfg = await getIntegrationConfig();
+  if (t.google?.refreshToken && cfg.googleClientId && ids.googleEventId) {
+    try {
+      const at = await googleAccessToken(t.google.refreshToken, cfg);
+      if (at) await fetch(`https://www.googleapis.com/calendar/v3/calendars/primary/events/${ids.googleEventId}`, {
+        method: "DELETE", headers: { Authorization: `Bearer ${at}` },
+      });
+    } catch (e) { logger.warn("google event delete failed", e); }
+  }
+  if (t.microsoft?.refreshToken && cfg.microsoftClientId && ids.microsoftEventId) {
+    try {
+      const at = await microsoftAccessToken(t.microsoft.refreshToken, cfg);
+      if (at) await fetch(`https://graph.microsoft.com/v1.0/me/events/${ids.microsoftEventId}`, {
+        method: "DELETE", headers: { Authorization: `Bearer ${at}` },
+      });
+    } catch (e) { logger.warn("microsoft event delete failed", e); }
+  }
+}
+
 // Push EVERY newly-created calendar event to its owner's external calendar.
 // Centralizing here means every path that books an appointment / go-back /
 // follow-up reaches Google/Outlook — the door DispositionModal (client-side),
@@ -3597,16 +3716,12 @@ export const companyFunnelRankings = onCall(async (request) => {
   const closeAt = (l: any) => l.soldAt || l.updatedAt || l.knockedAt || l.createdAt || 0;
 
   const leadsCol = db.collection("leads");
-  let leadDocs;
-  try {
-    leadDocs = startMs > 0
-      ? (await leadsCol.where("companyId", "==", companyId).where("createdAt", ">=", startMs).get()).docs
-      : (await leadsCol.where("companyId", "==", companyId).get()).docs;
-  } catch {
-    // Composite index may be missing — fall back to the single-field query and
-    // window client-side below.
-    leadDocs = (await leadsCol.where("companyId", "==", companyId).get()).docs;
-  }
+  // Fetch the whole company lead set and window by knockAt in code — the SAME
+  // rule Reports uses (getEmployeeReport → rFunnel). A createdAt pre-filter would
+  // drop leads created before the window but re-knocked/set as an appointment
+  // inside it, making this board undercount vs. Reports (7 vs 9). Window parity
+  // matters more than the extra reads.
+  const leadDocs = (await leadsCol.where("companyId", "==", companyId).get()).docs;
   const soldDocs = (await leadsCol.where("companyId", "==", companyId).where("status", "==", "sold").get().catch(() => null))?.docs || [];
   const usersSnap = await db.collection("users").where("companyId", "==", companyId).get();
   const names: Record<string, string> = {};
@@ -4361,7 +4476,7 @@ function rPeriodKey(kind: string, d = new Date()): string {
   const wk = Math.ceil(((dt.getTime() - ys.getTime()) / 86400000 + 1) / 7);
   return `${dt.getUTCFullYear()}-W${String(wk).padStart(2, "0")}`;
 }
-const rSeasonDocId = (uid: string, kind: string) => `${uid}__${kind[0].toUpperCase()}${rPeriodKey(kind)}`;
+const rSeasonDocId = (uid: string, kind: string, d = new Date()) => `${uid}__${kind[0].toUpperCase()}${rPeriodKey(kind, d)}`;
 
 // Credit a rep's rolled-up stats (server-side bumpStats; Admin SDK bypasses the
 // "only the user writes their own stats" rule so a manager can set a close).
@@ -4378,6 +4493,27 @@ async function serverBumpStats(rep: any, deltas: Record<string, number>) {
     ...["week", "month", "year"].map((kind) =>
       db.doc(`seasonStats/${rSeasonDocId(rep.uid, kind)}`).set(
         { ...base, kind, period: rPeriodKey(kind), joinedAt: rep.createdAt ?? null }, { merge: true })),
+  ]);
+}
+
+// Adjust a rep's stats in the period a past event belongs to (by `atMs`), not
+// the current one — so cancelling an appointment set last week decrements last
+// week's bucket, leaving this week's board untouched. All-time (userStats) is
+// always adjusted.
+async function serverBumpStatsAt(rep: any, deltas: Record<string, number>, atMs: number) {
+  const when = new Date(Number(atMs) || Date.now());
+  const inc: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(deltas)) inc[k] = FieldValue.increment(v);
+  const base = {
+    uid: rep.uid, companyId: rep.companyId, userName: rep.displayName || rep.email || "Rep",
+    managerPath: rep.managerPath || [], closerManagerPath: rep.closerManagerPath || [],
+    ...inc, updatedAt: Date.now(),
+  };
+  await Promise.all([
+    db.doc(`userStats/${rep.uid}`).set(base, { merge: true }),
+    ...["week", "month", "year"].map((kind) =>
+      db.doc(`seasonStats/${rSeasonDocId(rep.uid, kind, when)}`).set(
+        { ...base, kind, period: rPeriodKey(kind, when), joinedAt: rep.createdAt ?? null }, { merge: true })),
   ]);
 }
 
