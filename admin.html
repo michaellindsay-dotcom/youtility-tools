@@ -962,13 +962,41 @@
 
   <!-- Teams -->
   <section id="teamsCard" class="card hidden">
-    <h2><span id="teamsTitle">Teams</span>
-      <button id="newTeamBtn" class="btn primary sm">+ New team</button>
-    </h2>
-    <div id="teamForm" class="hidden" style="margin-bottom:16px;">
+    <h2><span id="teamsTitle">Teams</span></h2>
+
+    <!-- Company header: the top of the org chart. Its "company services" are the
+         locked baseline every rep inherits, regardless of team. -->
+    <div id="teamsCompanyHead" style="border:1px solid #21314a;border-radius:12px;padding:14px 16px;margin-bottom:18px;background:rgba(14,165,233,.05);">
+      <div class="muted small">Select a company…</div>
+    </div>
+
+    <!-- Regions: optional layer between the company and its teams. -->
+    <div class="row between" style="align-items:center;margin:6px 0;">
+      <h3 style="margin:0;font-size:15px;">🌎 Regions</h3>
+      <button id="newRegionBtn" class="btn primary sm">+ New region</button>
+    </div>
+    <p class="muted small" style="margin:0 0 10px;">Optional. Group teams into a region and assign a regional manager — every team and rep in the region rolls up to them (downline, reports, leads, calendar).</p>
+    <div id="regionForm" class="hidden" style="margin-bottom:14px;border:1px solid #21314a;border-radius:10px;padding:12px;">
       <div class="grid-2">
-        <div class="field"><span>Team name *</span><input id="teamName" placeholder="e.g. West Region" /></div>
-        <div class="field"><span>Parent team</span><select id="teamParent"><option value="">— none (top level) —</option></select></div>
+        <div class="field"><span>Region name *</span><input id="regionName" placeholder="e.g. South Region" /></div>
+        <div class="field"><span>Regional manager</span><select id="regionMgr"><option value="">— none —</option></select></div>
+      </div>
+      <div class="row" style="justify-content:flex-end;">
+        <button id="regionCancel" class="btn ghost sm">Cancel</button>
+        <button id="regionSave" class="btn primary sm">Create region</button>
+      </div>
+    </div>
+    <div id="regionsBody"><div class="muted small">Select a company…</div></div>
+
+    <!-- Teams. -->
+    <div class="row between" style="align-items:center;margin:20px 0 6px;">
+      <h3 style="margin:0;font-size:15px;">🗂️ Teams</h3>
+      <button id="newTeamBtn" class="btn primary sm">+ New team</button>
+    </div>
+    <div id="teamForm" class="hidden" style="margin-bottom:16px;border:1px solid #21314a;border-radius:10px;padding:12px;">
+      <div class="grid-2">
+        <div class="field"><span>Team name *</span><input id="teamName" placeholder="e.g. South Carolina Blitz" /></div>
+        <div class="field"><span>Region</span><select id="teamParent"><option value="">— none (directly under company) —</option></select></div>
       </div>
       <div class="field">
         <span>Team logo (optional)</span>
@@ -982,10 +1010,7 @@
         <button id="teamSave" class="btn primary sm">Create team</button>
       </div>
     </div>
-    <table>
-      <thead><tr><th>Team</th><th>Parent</th><th></th></tr></thead>
-      <tbody id="teamsBody"><tr><td colspan="3" class="muted">Select a company…</td></tr></tbody>
-    </table>
+    <div id="teamsBody"><div class="muted small">Select a company…</div></div>
   </section>
 
   <!-- Scheduling settings (per company) -->
@@ -1621,6 +1646,9 @@ async function selectCompany(companyId, companyName) {
   }
   await Promise.all([loadRoles(), loadTeams(), loadScheduling(companyId), loadCompanySettings(companyId), loadBatteryPricing(companyId), loadCompanyCrm(companyId), loadRewards(companyId), loadRedemptions(companyId)]);
   await loadUsers();
+  // Regions show a regional-manager picker + a roll-up org chart built from the
+  // user roster, which only just loaded — re-render teams so those populate.
+  await loadTeams();
   populateUserFormSelects();
   loadBilling(companyId, companyName);
 }
@@ -3655,6 +3683,23 @@ $("teamCancel").addEventListener("click", () => {
   newTeamLogoUrl = "";
   $("teamLogoPreview").style.display = "none";
 });
+
+// ── Regions ───────────────────────────────────────────────────────────────
+$("newRegionBtn").addEventListener("click", () => $("regionForm").classList.toggle("hidden"));
+$("regionCancel").addEventListener("click", () => $("regionForm").classList.add("hidden"));
+$("regionSave").addEventListener("click", async () => {
+  const name = $("regionName").value.trim();
+  if (!name) return;
+  $("regionSave").disabled = true;
+  try {
+    await createTeam({ companyId: state.selectedCompany, name, kind: "region", regionalManagerUid: $("regionMgr").value || null });
+    $("regionName").value = "";
+    $("regionForm").classList.add("hidden");
+    banner($("banner"), "Region created.", "good");
+    await loadTeams();
+  } catch (e) { banner($("banner"), e.message || "Failed to create region.", "error"); }
+  finally { $("regionSave").disabled = false; }
+});
 $("teamLogoFile").addEventListener("change", async (e) => {
   const cid = state.selectedCompany;
   const file = e.target.files?.[0];
@@ -3673,7 +3718,7 @@ $("teamSave").addEventListener("click", async () => {
   if (!name) return;
   $("teamSave").disabled = true;
   try {
-    await createTeam({ companyId: state.selectedCompany, name, parentTeamId: $("teamParent").value || null, logoUrl: newTeamLogoUrl || null });
+    await createTeam({ companyId: state.selectedCompany, name, kind: "team", parentTeamId: $("teamParent").value || null, logoUrl: newTeamLogoUrl || null });
     $("teamName").value = "";
     $("teamForm").classList.add("hidden");
     newTeamLogoUrl = "";
@@ -3684,70 +3729,173 @@ $("teamSave").addEventListener("click", async () => {
   finally { $("teamSave").disabled = false; }
 });
 
-async function loadTeams() {
-  const body = $("teamsBody");
-  body.innerHTML = `<tr><td colspan="3" class="muted">Loading…</td></tr>`;
-  try {
-    let snap = await getDocs(query(collection(db, `companies/${state.selectedCompany}/teams`), orderBy("createdAt","asc")));
-    state.teams = snap.docs.map((d) => ({ id:d.id, ...d.data() }));
-    // Everyone hangs off "Corporate" by default — it's the umbrella at the top
-    // of the org chart. Any other team with no parent yet gets backfilled onto
-    // it, so a manager only needs to branch off a new team when their downline
-    // actually grows past what one team roster covers.
-    const corporate = state.teams.find((t) => /^corporate$/i.test((t.name || "").trim()));
-    if (corporate) {
-      const unparented = state.teams.filter((t) => t.id !== corporate.id && !t.parentTeamId);
-      if (unparented.length) {
-        await Promise.all(unparented.map((t) =>
-          updateTeam({ companyId: state.selectedCompany, teamId: t.id, parentTeamId: corporate.id }).catch(() => {})));
-        snap = await getDocs(query(collection(db, `companies/${state.selectedCompany}/teams`), orderBy("createdAt","asc")));
-        state.teams = snap.docs.map((d) => ({ id:d.id, ...d.data() }));
-      }
-    }
-    // parent-team dropdown in the team form — defaults to Corporate, since
-    // that's where a newly branched-off team should sit unless re-parented.
-    $("teamParent").innerHTML = `<option value="">— none (top level) —</option>` +
-      state.teams.map((t)=>`<option value="${t.id}" ${corporate && t.id===corporate.id ? 'selected' : ''}>${esc(t.name)}</option>`).join("");
-    if (!state.teams.length) { body.innerHTML = `<tr><td colspan="3" class="muted">No teams.</td></tr>`; return; }
-    body.innerHTML = "";
-    state.teams.forEach((t) => {
-      const tr = document.createElement("tr");
-      // Parent is editable here so an org chart can be re-parented after creation
-      // (e.g. moving a company/department team to sit under "Corporate").
-      const parentOpts = `<option value="">— none (top level) —</option>` +
-        state.teams.filter((x) => x.id !== t.id).map((x) =>
-          `<option value="${x.id}" ${t.parentTeamId===x.id?'selected':''}>${esc(x.name)}</option>`).join("");
-      tr.innerHTML = `<td>
-          <div class="row" style="align-items:center;gap:8px;">
-            ${t.logoUrl ? `<img src="${esc(t.logoUrl)}" style="width:24px;height:24px;border-radius:6px;object-fit:cover;flex-shrink:0;" />` : ""}
-            <strong class="teamOpen" style="cursor:pointer;color:#0EA5E9;" title="Open team">${esc(t.name)}</strong>
-          </div>
-        </td>
-        <td><select class="teamParentSel">${parentOpts}</select></td>
-        <td><button class="btn ghost sm teamOpenBtn">Open ▾</button></td>`;
-      const detail = document.createElement("tr");
-      detail.className = "hidden";
-      detail.innerHTML = `<td colspan="3"><div class="svc-panel"></div></td>`;
-      const panel = detail.querySelector(".svc-panel");
-      const toggle = () => {
-        if (detail.classList.contains("hidden")) { detail.classList.remove("hidden"); renderTeamDetail(t, panel); }
-        else detail.classList.add("hidden");
-      };
-      tr.querySelector(".teamOpen").addEventListener("dblclick", toggle);
-      tr.querySelector(".teamOpenBtn").addEventListener("click", toggle);
-      tr.querySelector(".teamParentSel").addEventListener("change", async (ev) => {
-        const newParent = ev.target.value || null;
-        if (newParent === t.id) return;
-        try {
-          await updateTeam({ companyId: state.selectedCompany, teamId: t.id, parentTeamId: newParent });
-          banner($("banner"), `${esc(t.name)}: parent team updated.`, "good");
-          await loadTeams();
-        } catch (e) { banner($("banner"), e.message || "Update failed.", "error"); loadTeams(); }
-      });
-      body.appendChild(tr);
-      body.appendChild(detail);
+// The umbrella "company" team sits at the top of the org chart — it holds the
+// company-wide service baseline and is shown as the header, not as a team row.
+function isUmbrellaTeam(t) {
+  return t.kind === "company" || (!t.kind && /^(company|corporate)$/i.test((t.name || "").trim()));
+}
+// Active users as manager candidates (managers listed the same as anyone —
+// assigning them is what confers the management).
+function teamMgrOptions(selectedUid) {
+  const users = state.users.filter((u) => !u.disabled)
+    .slice().sort((a, b) => (a.displayName || a.email || "").localeCompare(b.displayName || b.email || ""));
+  return `<option value="">— none —</option>` + users
+    .map((u) => `<option value="${u.id}" ${u.id === selectedUid ? "selected" : ""}>${esc(u.displayName || u.email)}</option>`).join("");
+}
+
+function renderCompanyHead(umbrella, companyName) {
+  const head = $("teamsCompanyHead");
+  const perms = Array.isArray(umbrella?.servicePermissions) ? umbrella.servicePermissions : [];
+  const svc = SERVICES.map(([k, l]) => `<label class="day-chip"><input type="checkbox" class="csvc" value="${k}" ${perms.includes(k) ? "checked" : ""}/> ${l}</label>`).join("");
+  head.innerHTML = `
+    <div class="row between" style="align-items:center;gap:10px;flex-wrap:wrap;">
+      <div>
+        <div class="muted small" style="letter-spacing:.05em;">COMPANY</div>
+        <div style="font-size:20px;font-weight:800;line-height:1.2;">${esc(companyName || "Company")}</div>
+        <div class="muted small" style="margin-top:2px;">Top of the org chart. Company-wide options live under Settings → Company settings.</div>
+      </div>
+    </div>
+    ${umbrella ? `
+    <h4 style="margin:14px 0 4px;font-size:13px;">Company services <span class="muted small">— locked baseline inherited by every rep</span></h4>
+    <div class="svc-grid">${svc}</div>
+    <div class="row" style="justify-content:flex-end;margin-top:8px;"><button class="btn primary sm csvcSave">Save company services</button></div>
+    <div class="banner companyHeadBanner"></div>` : ""}`;
+  if (umbrella) {
+    head.querySelector(".csvcSave").addEventListener("click", async () => {
+      const perms2 = [...head.querySelectorAll(".csvc")].filter((x) => x.checked).map((x) => x.value);
+      try {
+        await updateTeam({ companyId: state.selectedCompany, teamId: umbrella.id, servicePermissions: perms2 });
+        umbrella.servicePermissions = perms2;
+        banner(head.querySelector(".companyHeadBanner"), "Company services saved.", "good");
+      } catch (e) { banner(head.querySelector(".companyHeadBanner"), e.message || "Save failed.", "error"); }
     });
-  } catch (e) { body.innerHTML = `<tr><td colspan="3" class="banner error show">${esc(e.message)}</td></tr>`; }
+  }
+}
+
+function renderRegionCard(r, teamsInRegion) {
+  const card = document.createElement("div");
+  card.className = "team-card region-card";
+  card.style.cssText = "border:1px solid #21314a;border-radius:10px;padding:12px;margin-bottom:12px;";
+  const teamNames = teamsInRegion.map((x) => esc(x.name)).join(", ") || "— no teams yet —";
+  card.innerHTML = `
+    <div class="row between" style="align-items:center;gap:10px;flex-wrap:wrap;">
+      <div class="row" style="align-items:center;gap:8px;">
+        <strong class="teamCardName" style="color:#0EA5E9;cursor:pointer;" title="Open region">${esc(r.name)}</strong>
+        <span class="muted small">Region</span>
+      </div>
+      <div class="row" style="align-items:center;gap:8px;">
+        <label class="muted small" style="display:flex;align-items:center;gap:6px;">Regional manager
+          <select class="regionMgrSel">${teamMgrOptions(r.regionalManagerUid)}</select></label>
+        <button class="btn ghost sm regionOpenBtn">Open ▾</button>
+      </div>
+    </div>
+    <div class="muted small" style="margin-top:6px;">Teams: ${teamNames}</div>
+    <div class="regionDetail hidden" style="margin-top:10px;"></div>`;
+  const detail = card.querySelector(".regionDetail");
+  const toggle = () => {
+    if (detail.classList.contains("hidden")) { detail.classList.remove("hidden"); renderTeamDetail(r, detail); }
+    else detail.classList.add("hidden");
+  };
+  card.querySelector(".teamCardName").addEventListener("dblclick", toggle);
+  card.querySelector(".regionOpenBtn").addEventListener("click", toggle);
+  card.querySelector(".regionMgrSel").addEventListener("change", async (ev) => {
+    try {
+      await updateTeam({ companyId: state.selectedCompany, teamId: r.id, regionalManagerUid: ev.target.value || null });
+      r.regionalManagerUid = ev.target.value || null;
+      banner($("banner"), `${esc(r.name)}: regional manager updated.`, "good");
+    } catch (e) { banner($("banner"), e.message || "Update failed.", "error"); }
+  });
+  return card;
+}
+
+function renderTeamCard(t, regions) {
+  const card = document.createElement("div");
+  card.className = "team-card";
+  card.style.cssText = "border:1px solid #21314a;border-radius:10px;padding:12px;margin-bottom:10px;";
+  const regionOpts = `<option value="">— none (under company) —</option>` +
+    regions.map((r) => `<option value="${r.id}" ${t.parentTeamId === r.id ? "selected" : ""}>${esc(r.name)}</option>`).join("");
+  card.innerHTML = `
+    <div class="row between" style="align-items:center;gap:10px;flex-wrap:wrap;">
+      <div class="row" style="align-items:center;gap:8px;">
+        ${t.logoUrl ? `<img src="${esc(t.logoUrl)}" style="width:24px;height:24px;border-radius:6px;object-fit:cover;flex-shrink:0;" />` : ""}
+        <strong class="teamCardName" style="color:#0EA5E9;cursor:pointer;" title="Open team">${esc(t.name)}</strong>
+      </div>
+      <div class="row" style="align-items:center;gap:8px;">
+        <label class="muted small" style="display:flex;align-items:center;gap:6px;">Region
+          <select class="teamRegionSel">${regionOpts}</select></label>
+        <button class="btn ghost sm teamOpenBtn">Open ▾</button>
+      </div>
+    </div>
+    <div class="teamDetail hidden" style="margin-top:10px;"></div>`;
+  const detail = card.querySelector(".teamDetail");
+  const toggle = () => {
+    if (detail.classList.contains("hidden")) { detail.classList.remove("hidden"); renderTeamDetail(t, detail); }
+    else detail.classList.add("hidden");
+  };
+  card.querySelector(".teamCardName").addEventListener("dblclick", toggle);
+  card.querySelector(".teamOpenBtn").addEventListener("click", toggle);
+  card.querySelector(".teamRegionSel").addEventListener("change", async (ev) => {
+    try {
+      await updateTeam({ companyId: state.selectedCompany, teamId: t.id, parentTeamId: ev.target.value || null });
+      banner($("banner"), `${esc(t.name)}: region updated.`, "good");
+      await loadTeams();
+    } catch (e) { banner($("banner"), e.message || "Update failed.", "error"); loadTeams(); }
+  });
+  return card;
+}
+
+async function loadTeams() {
+  const regionsBody = $("regionsBody"), teamsBody = $("teamsBody");
+  regionsBody.innerHTML = `<div class="muted small">Loading…</div>`;
+  teamsBody.innerHTML = "";
+  try {
+    const path = `companies/${state.selectedCompany}/teams`;
+    let snap = await getDocs(query(collection(db, path), orderBy("createdAt", "asc")));
+    let teams = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+    let umbrella = teams.find(isUmbrellaTeam) || null;
+
+    // Self-heal legacy data: the umbrella becomes kind:"company" at top level,
+    // and any team that pointed at the umbrella as its "parent" becomes a
+    // top-level team (no region). This clears the old, confusing reciprocal
+    // Company↔Team parenting.
+    const fixes = [];
+    if (umbrella && (umbrella.kind !== "company" || umbrella.parentTeamId)) {
+      fixes.push(updateTeam({ companyId: state.selectedCompany, teamId: umbrella.id, kind: "company", parentTeamId: null }).catch(() => {}));
+    }
+    teams.forEach((t) => {
+      if (umbrella && !isUmbrellaTeam(t) && t.parentTeamId === umbrella.id) {
+        fixes.push(updateTeam({ companyId: state.selectedCompany, teamId: t.id, parentTeamId: null }).catch(() => {}));
+      }
+    });
+    if (fixes.length) {
+      await Promise.all(fixes);
+      snap = await getDocs(query(collection(db, path), orderBy("createdAt", "asc")));
+      teams = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+      umbrella = teams.find(isUmbrellaTeam) || null;
+    }
+    state.teams = teams;
+    const regions = teams.filter((t) => t.kind === "region");
+    const plainTeams = teams.filter((t) => !isUmbrellaTeam(t) && t.kind !== "region");
+
+    let companyName = "";
+    try { const c = await getDoc(doc(db, "companies", state.selectedCompany)); companyName = (c.exists() ? c.data().name : "") || ""; } catch (e) { /* header falls back to "Company" */ }
+    renderCompanyHead(umbrella, companyName);
+
+    // Form selects: which region a new team joins; who manages a new region.
+    $("teamParent").innerHTML = `<option value="">— none (directly under company) —</option>` +
+      regions.map((r) => `<option value="${r.id}">${esc(r.name)}</option>`).join("");
+    $("regionMgr").innerHTML = teamMgrOptions("");
+
+    regionsBody.innerHTML = "";
+    if (!regions.length) regionsBody.innerHTML = `<div class="muted small">No regions yet. Teams sit directly under the company until you add one.</div>`;
+    else regions.forEach((r) => regionsBody.appendChild(renderRegionCard(r, plainTeams.filter((t) => t.parentTeamId === r.id))));
+
+    teamsBody.innerHTML = "";
+    if (!plainTeams.length) teamsBody.innerHTML = `<div class="muted small">No teams yet. Add one with “+ New team”.</div>`;
+    else plainTeams.forEach((t) => teamsBody.appendChild(renderTeamCard(t, regions)));
+  } catch (e) {
+    regionsBody.innerHTML = `<div class="banner error show">${esc(e.message)}</div>`;
+  }
 }
 
 // Open team view: locked-baseline service permissions + an expand/collapse org
@@ -3788,10 +3936,15 @@ function isDescendantOf(members, ancestorUid, uid) {
 
 function renderTeamDetail(t, el) {
   const tsp = Array.isArray(t.servicePermissions) ? t.servicePermissions : [];
-  const isCorporate = /^corporate$/i.test((t.name || "").trim());
+  const isCorporate = isUmbrellaTeam(t);
+  // A region's org chart is the union of every team in the region; a plain team
+  // shows just its own roster; the umbrella shows the whole company.
+  const regionTeamIds = t.kind === "region" ? state.teams.filter((x) => x.parentTeamId === t.id).map((x) => x.id) : null;
   const members = isCorporate
     ? state.users.slice()
-    : state.users.filter((u) => u.teamId === t.id && u.role !== "admin");
+    : t.kind === "region"
+      ? state.users.filter((u) => regionTeamIds.includes(u.teamId) && u.role !== "admin")
+      : state.users.filter((u) => u.teamId === t.id && u.role !== "admin");
   const svc = SERVICES.map(([k, l]) => `<label class="day-chip"><input type="checkbox" class="tsvc" value="${k}" ${tsp.includes(k) ? 'checked' : ''}/> ${l}</label>`).join("");
 
   if (!t._expanded) t._expanded = new Set();
@@ -3883,20 +4036,18 @@ function renderTeamDetail(t, el) {
       });
       t.name = name; t.logoUrl = pendingLogoUrl || null;
       banner(el.querySelector(".teamDetailBanner"), "Team info saved.", "good");
-      // Patch the surrounding UI in place, rather than reloading the whole
-      // teams table, so this panel stays open after saving.
-      const rowTr = el.closest("tr").previousElementSibling;
-      if (rowTr) {
-        rowTr.querySelector(".teamOpen").textContent = t.name;
-        const logoImg = rowTr.querySelector("img");
+      // Patch the card header in place so the open panel stays open after saving.
+      const card = el.closest(".team-card");
+      if (card) {
+        const nameEl = card.querySelector(".teamCardName");
+        if (nameEl) nameEl.textContent = t.name;
+        const logoImg = card.querySelector("img");
         if (t.logoUrl) {
           if (logoImg) logoImg.src = t.logoUrl;
-          else rowTr.querySelector(".teamOpen").insertAdjacentHTML("beforebegin",
+          else if (nameEl) nameEl.insertAdjacentHTML("beforebegin",
             `<img src="${esc(t.logoUrl)}" style="width:24px;height:24px;border-radius:6px;object-fit:cover;flex-shrink:0;" />`);
         } else if (logoImg) logoImg.remove();
       }
-      document.querySelectorAll(`.teamParentSel option[value="${t.id}"], #teamParent option[value="${t.id}"]`)
-        .forEach((opt) => { opt.textContent = t.name; });
     } catch (e) { banner(el.querySelector(".teamDetailBanner"), e.message || "Save failed.", "error"); }
   });
 
@@ -3964,7 +4115,13 @@ function populateUserFormSelects() {
     state.users.filter((u)=>u.isCloser).map((u)=>`<option value="${u.id}">${esc(u.displayName||u.email)}</option>`).join("");
   $("userCloserManager").innerHTML = closerOpts;
   $("userTeam").innerHTML = `<option value="">— none —</option>` +
-    state.teams.map((t)=>`<option value="${t.id}">${esc(t.name)}</option>`).join("");
+    assignableTeams().map((t)=>`<option value="${t.id}">${esc(t.name)}</option>`).join("");
+}
+
+// Teams a rep can actually be assigned to / a manager can oversee — the real
+// teams, never a region or the company umbrella (those are org-chart layers).
+function assignableTeams() {
+  return state.teams.filter((t) => t.kind !== "region" && !isUmbrellaTeam(t));
 }
 
 // Show the setter / closer manager selects that match the chosen function.
@@ -4067,9 +4224,9 @@ async function loadUsers() {
       const matchedRole = state.roles.find((r) => (r.title || "").trim().toLowerCase() === (POSITION_LABEL[curPos] || "").toLowerCase());
       const usingCustomTitle = !!u.roleId && (!matchedRole || u.roleId !== matchedRole.id);
       const isCloserFn = u.isCloser || curPos === "closer" || curPos === "closer_manager";
-      const teamOpts = state.teams.map((t) => `<option value="${t.id}" ${(u.managedTeamIds || []).includes(t.id) ? 'selected' : ''}>${esc(t.name)}</option>`).join("");
+      const teamOpts = assignableTeams().map((t) => `<option value="${t.id}" ${(u.managedTeamIds || []).includes(t.id) ? 'selected' : ''}>${esc(t.name)}</option>`).join("");
       const myTeamOptions = `<option value="">— none —</option>` +
-        state.teams.map((t) => `<option value="${t.id}" ${u.teamId===t.id?'selected':''}>${esc(t.name)}</option>`).join("");
+        assignableTeams().map((t) => `<option value="${t.id}" ${u.teamId===t.id?'selected':''}>${esc(t.name)}</option>`).join("");
       const mirrorBtn = state.isSuper ? `<button class="btn sm mirrorBtn">Mirror</button>` : "";
       tr.innerHTML = `<td>${esc(u.displayName||"—")}${u.role==='admin'?' <span class="badge admin">admin</span>':''}</td>
         <td class="muted">${esc(u.email||"")}</td>
