@@ -211,6 +211,19 @@ function EditAppointmentModal({ event, onClose }: { event: ScheduleEvent; onClos
     return () => { cancelled = true; };
   }, []);
 
+  async function cancelAppt() {
+    setErr(null);
+    if (!confirm("Cancel this appointment? It's removed from the calendar and from everyone's appointment stats. This can't be undone.")) return;
+    setSaving(true);
+    try {
+      await httpsCallable(functions, "cancelAppointment")({ eventId: event.id });
+      onClose();
+    } catch (e) {
+      setErr((e as Error)?.message || "Couldn't cancel the appointment.");
+      setSaving(false);
+    }
+  }
+
   async function save() {
     setErr(null);
     const newStart = new Date(when).getTime();
@@ -267,9 +280,19 @@ function EditAppointmentModal({ event, onClose }: { event: ScheduleEvent; onClos
 
         {err && <div className="muted small" style={{ color: "#fca5a5", marginTop: 10 }}>{err}</div>}
 
-        <div className="row" style={{ justifyContent: "flex-end", gap: 8, marginTop: 16 }}>
-          <button className="btn ghost sm" onClick={onClose} disabled={saving}>Cancel</button>
-          <button className="btn primary sm" onClick={save} disabled={saving}>{saving ? "Saving…" : "Save changes"}</button>
+        <div className="row" style={{ justifyContent: "space-between", gap: 8, marginTop: 16, alignItems: "center" }}>
+          <button
+            className="btn ghost sm"
+            onClick={cancelAppt}
+            disabled={saving}
+            style={{ color: "#fca5a5", borderColor: "rgba(252,165,165,.4)" }}
+          >
+            🗑 Cancel appointment
+          </button>
+          <div className="row" style={{ gap: 8 }}>
+            <button className="btn ghost sm" onClick={onClose} disabled={saving}>Close</button>
+            <button className="btn primary sm" onClick={save} disabled={saving}>{saving ? "Saving…" : "Save changes"}</button>
+          </div>
         </div>
       </div>
     </div>
