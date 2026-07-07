@@ -20,3 +20,6 @@ serviceAccountKey.json
 *.log
 .vscode/
 .idea/
+
+# Root build output (assemble/vite scratch)
+/dist/

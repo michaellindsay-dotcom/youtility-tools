@@ -60,6 +60,13 @@ service cloud.firestore {
         allow write: if isSuper() || (isSignedIn() && companyId == myCompany() && isCompanyAdmin());
       }
 
+      // Gamify milestones: company-defined milestone ladders. Any member reads
+      // (to see + track progress); company admins (or super) create/edit/remove.
+      match /milestones/{milestoneId} {
+        allow read: if inMyCompany(companyId);
+        allow write: if isSuper() || (isSignedIn() && companyId == myCompany() && isCompanyAdmin());
+      }
+
       // Weekly-recap snapshot state — Cloud Functions only.
       match /recap/{docId} {
         allow read, write: if false;
