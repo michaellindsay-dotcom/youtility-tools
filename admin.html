@@ -237,7 +237,7 @@
     <p class="muted" style="margin:0 0 14px;font-size:13px;">Pick a section to manage it.</p>
     <div class="home-grid">
       <button class="home-btn" data-card="usersCard"><span class="hb-ico">👥</span><b>Accounts</b><small>Add people, set setter/closer function &amp; managers, reset passwords</small></button>
-      <button class="home-btn" data-card="companySettingsCard"><span class="hb-ico">🛠️</span><b>Company settings</b><small>Max territories per rep &amp; other company options</small></button>
+      <button class="home-btn" data-card="companySettingsCard"><span class="hb-ico">🛠️</span><b>Company settings</b><small>Company services baseline &amp; company options</small></button>
       <button class="home-btn" data-card="companyProfileCard"><span class="hb-ico">🏢</span><b>Company profile</b><small>Company name, phone, address &amp; email</small></button>
       <button class="home-btn" data-card="batteryPricingCard"><span class="hb-ico">🔋</span><b>Battery pricing</b><small>Per-product price &amp; install adder for proposals</small></button>
       <a class="home-btn" href="/pm" target="_blank" rel="noopener" style="text-decoration:none;color:inherit;"><span class="hb-ico">🏗️</span><b>Project Management</b><small>Signed deals, site surveys &amp; the install pipeline</small></a>
@@ -379,7 +379,7 @@
       <button class="home-btn" data-card="companyServicesCard"><span class="hb-ico">🧩</span><b>Services</b><small>Turn tools on/off for this company &amp; set the price override</small></button>
       <button class="home-btn" data-card="companyProfileCard"><span class="hb-ico">🏢</span><b>Company profile</b><small>Company name, phone, address &amp; email</small></button>
       <button class="home-btn" data-card="roleServicesCard"><span class="hb-ico">🔐</span><b>Role services</b><small>What each role (position) sees at login &amp; in the app</small></button>
-      <button class="home-btn" data-card="companySettingsCard"><span class="hb-ico">⚙️</span><b>Settings</b><small>Max territories per rep &amp; other company options</small></button>
+      <button class="home-btn" data-card="companySettingsCard"><span class="hb-ico">⚙️</span><b>Settings</b><small>Company services baseline &amp; company options</small></button>
       <button class="home-btn" data-card="batteryPricingCard"><span class="hb-ico">🔋</span><b>Battery pricing</b><small>Per-product price &amp; install adder for proposals</small></button>
       <button class="home-btn" data-card="crmCompanyCard"><span class="hb-ico">🔗</span><b>CRM link</b><small>Connect this company to YoutilityCRM</small></button>
       <button class="home-btn" data-card="rewardsCard"><span class="hb-ico">🎁</span><b>Rewards</b><small>Incentives, benchmarks &amp; the rewards store</small></button>
@@ -1087,6 +1087,13 @@
     </div>
     <p class="muted" style="font-size:12px;margin:8px 0 0;">Mark who's a closer in the Accounts list below. A closer dispositions each appointment on-site; off-site dispositions are logged as a closer no-show.</p>
 
+    <h3 style="font-size:13px;color:var(--ink-mid);text-transform:uppercase;letter-spacing:.5px;margin:18px 0 10px;">Territories</h3>
+    <div class="field" style="max-width:420px;">
+      <span>Max territories a rep can be assigned at once</span>
+      <input id="maxTerritories" type="number" min="0" step="1" placeholder="0 = unlimited" />
+    </div>
+    <p class="muted small" style="margin:6px 0 0;">0 means unlimited. The app blocks assigning a rep beyond this many territories.</p>
+
     <div class="row" style="justify-content:flex-end;margin-top:14px;">
       <button id="schSave" class="btn primary sm">Save scheduling</button>
     </div>
@@ -1097,13 +1104,11 @@
   <section id="companySettingsCard" class="card hidden">
     <h2><span id="companySettingsTitle">Company settings</span></h2>
     <p class="muted" style="margin:-6px 0 14px;font-size:13px;">General options for how this company operates.</p>
-    <div class="field" style="max-width:420px;">
-      <span>Max territories a rep can be assigned at once</span>
-      <input id="maxTerritories" type="number" min="0" step="1" placeholder="0 = unlimited" />
-    </div>
-    <p class="muted small" style="margin:6px 0 0;">0 means unlimited. The app blocks assigning a rep beyond this many territories.</p>
-    <div class="row" style="justify-content:flex-end;margin-top:14px;">
-      <button id="companySettingsSave" class="btn primary sm">Save settings</button>
+
+    <h3 style="font-size:13px;color:var(--ink-mid);text-transform:uppercase;letter-spacing:.5px;margin:6px 0 8px;">Company services <span class="muted small" style="text-transform:none;letter-spacing:normal;">— locked baseline inherited by every rep</span></h3>
+    <div class="svc-grid" id="csBaselineGrid"><div class="muted small">Select a company…</div></div>
+    <div class="row" style="justify-content:flex-end;margin-top:10px;">
+      <button id="csBaselineSave" class="btn primary sm">Save company services</button>
     </div>
     <div id="companySettingsBanner" class="banner"></div>
   </section>
@@ -2215,6 +2220,8 @@ async function loadScheduling(companyId) {
     $("schAssignment").value = s.assignment || "self_gen";
     $("schClosersEnabled").checked = !!s.closersEnabled;
     $("schCloserAssignment").value = s.closerAssignment || "round_robin";
+    // Territories setting lives on this tab now.
+    $("maxTerritories").value = (snap.exists() ? snap.data().maxTerritoriesPerUser : 0) ?? 0;
   } catch (e) {
     banner($("schBanner"), e.message || "Could not load scheduling.", "error");
   }
@@ -2241,27 +2248,45 @@ $("schSave").addEventListener("click", async () => {
         closerAssignment: $("schCloserAssignment").value,
       },
     });
+    await setCompanyOptions({ companyId: state.selectedCompany, maxTerritoriesPerUser: Number($("maxTerritories").value) || 0 });
     banner($("schBanner"), "Scheduling saved.", "good");
   } catch (e) { banner($("schBanner"), e.message || "Save failed.", "error"); }
   finally { $("schSave").disabled = false; }
 });
 
-// ── Company settings (per company) ───────────────────────────────────────
+// ── Company settings (per company) — the company-wide services baseline (the
+// umbrella team's servicePermissions), shown under Settings → Company. ────────
 async function loadCompanySettings(companyId) {
+  const grid = $("csBaselineGrid");
+  grid.innerHTML = `<div class="muted small">Loading…</div>`;
   try {
-    const snap = await getDoc(doc(db, "companies", companyId));
-    const c = snap.exists() ? snap.data() : {};
-    $("maxTerritories").value = c.maxTerritoriesPerUser ?? 0;
-  } catch (e) { /* leave default */ }
+    // Find the umbrella "company" team (kind:"company", or legacy name).
+    let umb = null;
+    const kindSnap = await getDocs(query(collection(db, "companies", companyId, "teams"), where("kind", "==", "company")));
+    if (kindSnap.docs[0]) umb = { id: kindSnap.docs[0].id, ...kindSnap.docs[0].data() };
+    else {
+      const all = await getDocs(collection(db, "companies", companyId, "teams"));
+      const d = all.docs.find((x) => /^(company|corporate)$/i.test((x.data().name || "").trim()));
+      if (d) umb = { id: d.id, ...d.data() };
+    }
+    state.companyUmbrella = umb;
+    const perms = Array.isArray(umb?.servicePermissions) ? umb.servicePermissions : [];
+    grid.innerHTML = umb
+      ? SERVICES.map(([k, l]) => `<label class="day-chip"><input type="checkbox" class="csvcBaseline" value="${k}" ${perms.includes(k) ? "checked" : ""}/> ${l}</label>`).join("")
+      : `<div class="muted small">No company baseline team yet — open the Teams page once to create it.</div>`;
+  } catch (e) { grid.innerHTML = `<div class="muted small">Couldn't load company services.</div>`; }
 }
-$("companySettingsSave").addEventListener("click", async () => {
-  if (!state.selectedCompany) return;
-  $("companySettingsSave").disabled = true;
+$("csBaselineSave").addEventListener("click", async () => {
+  const umb = state.companyUmbrella;
+  if (!umb) { banner($("companySettingsBanner"), "No company baseline team found.", "error"); return; }
+  const perms = [...$("csBaselineGrid").querySelectorAll(".csvcBaseline")].filter((x) => x.checked).map((x) => x.value);
+  $("csBaselineSave").disabled = true;
   try {
-    await setCompanyOptions({ companyId: state.selectedCompany, maxTerritoriesPerUser: Number($("maxTerritories").value) || 0 });
-    banner($("companySettingsBanner"), "Settings saved.", "good");
+    await updateTeam({ companyId: state.selectedCompany, teamId: umb.id, servicePermissions: perms });
+    umb.servicePermissions = perms;
+    banner($("companySettingsBanner"), "Company services saved.", "good");
   } catch (e) { banner($("companySettingsBanner"), e.message || "Save failed.", "error"); }
-  finally { $("companySettingsSave").disabled = false; }
+  finally { $("csBaselineSave").disabled = false; }
 });
 
 // ── Battery pricing (per-product price + install adder) ───────────────────────
@@ -3910,32 +3935,15 @@ function teamMgrOptions(selectedUid) {
 }
 
 function renderCompanyHead(umbrella, companyName) {
-  const head = $("teamsCompanyHead");
-  const perms = Array.isArray(umbrella?.servicePermissions) ? umbrella.servicePermissions : [];
-  const svc = SERVICES.map(([k, l]) => `<label class="day-chip"><input type="checkbox" class="csvc" value="${k}" ${perms.includes(k) ? "checked" : ""}/> ${l}</label>`).join("");
-  head.innerHTML = `
-    <div class="row between" style="align-items:center;gap:10px;flex-wrap:wrap;">
-      <div>
-        <div class="muted small" style="letter-spacing:.05em;">COMPANY</div>
-        <div style="font-size:20px;font-weight:800;line-height:1.2;">${esc(companyName || "Company")}</div>
-        <div class="muted small" style="margin-top:2px;">Top of the org chart. Company-wide options live under Settings → Company settings.</div>
-      </div>
-    </div>
-    ${umbrella ? `
-    <h4 style="margin:14px 0 4px;font-size:13px;">Company services <span class="muted small">— locked baseline inherited by every rep</span></h4>
-    <div class="svc-grid">${svc}</div>
-    <div class="row" style="justify-content:flex-end;margin-top:8px;"><button class="btn primary sm csvcSave">Save company services</button></div>
-    <div class="banner companyHeadBanner"></div>` : ""}`;
-  if (umbrella) {
-    head.querySelector(".csvcSave").addEventListener("click", async () => {
-      const perms2 = [...head.querySelectorAll(".csvc")].filter((x) => x.checked).map((x) => x.value);
-      try {
-        await updateTeam({ companyId: state.selectedCompany, teamId: umbrella.id, servicePermissions: perms2 });
-        umbrella.servicePermissions = perms2;
-        banner(head.querySelector(".companyHeadBanner"), "Company services saved.", "good");
-      } catch (e) { banner(head.querySelector(".companyHeadBanner"), e.message || "Save failed.", "error"); }
-    });
-  }
+  // Company services now live under Settings → Company; the Teams page just
+  // shows the company as the top of the org chart.
+  void umbrella;
+  $("teamsCompanyHead").innerHTML = `
+    <div>
+      <div class="muted small" style="letter-spacing:.05em;">COMPANY</div>
+      <div style="font-size:20px;font-weight:800;line-height:1.2;">${esc(companyName || "Company")}</div>
+      <div class="muted small" style="margin-top:2px;">Top of the org chart. Company-wide services live under Settings → Company.</div>
+    </div>`;
 }
 
 function renderRegionCard(r, teamsInRegion) {
