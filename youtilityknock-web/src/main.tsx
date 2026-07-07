@@ -20,6 +20,13 @@ if (Capacitor.isNativePlatform()) {
     StatusBar.setStyle({ style: Style.Dark }).catch(() => {}); // light text on the dark bar
     StatusBar.setBackgroundColor({ color: "#0a0f1a" }).catch(() => {}); // Android; no-op on iOS
   }).catch(() => {});
+
+  // Lock zoom in the native app so a pinch can't leave it stuck oversized (you'd
+  // have to quit and reopen). The viewport meta handles most WKWebView versions;
+  // this backstops the pinch gesture. Native only — the browser keeps zoom for
+  // accessibility. gesture* events fire only on multi-touch pinch in WebKit.
+  (["gesturestart", "gesturechange", "gestureend"] as const).forEach((ev) =>
+    document.addEventListener(ev, (e) => e.preventDefault(), { passive: false }));
 }
 
 // Native (Capacitor) builds run from the bundle root; the web build is served

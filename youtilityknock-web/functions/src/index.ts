@@ -889,6 +889,7 @@ export const assignUserHierarchy = onCall(async (request) => {
   if (closerManagerId === uid) throw new HttpsError("invalid-argument", "A user can't report to themselves.");
 
   const patch: Record<string, unknown> = {};
+  let claimsChanged = false;
   if (roleId !== undefined) {
     if (roleId) {
       const roleSnap = await db.doc(`companies/${company}/roles/${roleId}`).get();
@@ -901,6 +902,7 @@ export const assignUserHierarchy = onCall(async (request) => {
         ...(await getAuth().getUser(uid)).customClaims,
         role: r.baseTier,
       });
+      claimsChanged = true;
     } else {
       patch.roleId = null;
     }
@@ -917,7 +919,11 @@ export const assignUserHierarchy = onCall(async (request) => {
       ...(await getAuth().getUser(uid)).customClaims,
       role: t,
     });
+    claimsChanged = true;
   }
+  // Bump a marker the app watches so it force-refreshes the ID token (picking up
+  // the new claims) without waiting ~1h or making the rep log in again.
+  if (claimsChanged) patch.claimsUpdatedAt = Date.now();
   if (teamId !== undefined) patch.teamId = teamId || null;
   if (managerId !== undefined) patch.managerId = managerId || null;
   if (closerManagerId !== undefined) patch.closerManagerId = closerManagerId || null;
@@ -1138,7 +1144,7 @@ export const setUserRole = onCall(async (request) => {
   }
   const existing = (await getAuth().getUser(uid)).customClaims || {};
   await getAuth().setCustomUserClaims(uid, { ...existing, role });
-  await db.doc(`users/${uid}`).set({ role }, { merge: true });
+  await db.doc(`users/${uid}`).set({ role, claimsUpdatedAt: Date.now() }, { merge: true });
   return { ok: true };
 });
 
