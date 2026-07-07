@@ -144,10 +144,15 @@ workflows:
       - name: Set marketing version & build number
         script: |
           cd youtilityknock-web/ios/App
-          # Marketing version (CFBundleShortVersionString) is what the App Store
-          # shows (e.g. 1.0, 1.1). Bump it for a new store release by setting the
-          # VERSION_NAME env var; it defaults to the current shipped value.
-          agvtool new-marketing-version "${VERSION_NAME:-1.0}"
+          # Marketing version (CFBundleShortVersionString) = the public
+          # major.minor from VERSION_NAME PLUS an auto-incrementing patch tied to
+          # Codemagic's build index. So every build is a fresh, always-increasing
+          # App Store "release train" and never hits "the train version X is
+          # closed for new build submissions" once a version has been released.
+          # Bump VERSION_NAME only for a real public milestone (e.g. 1.4 → 1.5).
+          MARKETING_VERSION="${VERSION_NAME:-1.0}.${BUILD_NUMBER}"
+          echo "Marketing version: $MARKETING_VERSION (build $BUILD_NUMBER)"
+          agvtool new-marketing-version "$MARKETING_VERSION"
           # Build number (CFBundleVersion) — Codemagic's incrementing index.
           agvtool new-version -all "$BUILD_NUMBER"
       - name: Fetch signing profiles & build IPA
@@ -252,7 +257,9 @@ workflows:
           android {
               defaultConfig {
                   versionCode (System.getenv("BUILD_NUMBER") ?: "1").toInteger() + 1
-                  versionName System.getenv("VERSION_NAME") ?: "1.0"
+                  // Auto-incrementing patch (major.minor from VERSION_NAME) so the
+                  // versionName always rises without a manual bump each release.
+                  versionName (System.getenv("VERSION_NAME") ?: "1.0") + "." + (System.getenv("BUILD_NUMBER") ?: "0")
               }
               signingConfigs {
                   release {

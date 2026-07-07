@@ -1,8 +1,10 @@
 # Changelog
 
-All notable changes to YoutilityKnock. This project uses a simple
-`MAJOR.MINOR` marketing version (what the App Store shows); CI assigns the build
-number automatically.
+All notable changes to YoutilityKnock. The public marketing version is the
+`MAJOR.MINOR` set by `VERSION_NAME` in `codemagic.yaml`; CI auto-appends the
+build index as the patch (e.g. `1.4` → `1.4.56`) so every build is a fresh,
+always-increasing App Store release train and never collides with a released
+version. Bump `VERSION_NAME` for a new public milestone and add a section here.
 
 ## [Unreleased]
 
@@ -37,6 +39,55 @@ number automatically.
   sends are held to 8am–9pm in the company's timezone. Admins assign each
   rep's ported number under Accounts once porting is complete — porting
   itself is a carrier process outside the app.
+
+## [1.4] — 2026-07
+
+### App Store "What's New" (user-facing)
+- **Reschedule appointments** right from the calendar — double-tap or use the new
+  Reschedule / reassign-closer button, or drag them to a new time. Setters,
+  managers, and admins can change the date or the assigned closer, and it syncs to
+  Google/Outlook.
+- **Throw Downs**: challenge a teammate head-to-head (doors, appointments, sales,
+  or points — today or this week), put fun stakes on the line, and let the app
+  crown the winner. Battles show up in Team Chat.
+- **Pitch Library** for everyone: see the week's Top 3 company pitches to learn
+  from the best; managers can review their team's pitches.
+- **Gamify** upgrades: standard milestone ladders for all, plus custom company
+  milestones, and reward nudges in chat and on your dashboard.
+- Smoother app: no more getting stuck zoomed in, faster sign-outs after inactivity,
+  and role changes take effect right away.
+
+### Added
+- Appointment **edit / drag-reschedule / reassign closer** (setter, manager, or
+  admin), syncing the move to the owner's Google/Outlook calendar in place.
+- Appointment popout shows the **setter**, and a **tagged DM** to the setter/closer
+  that links back to the appointment in Team Chat.
+- **⚔️ Throw Downs** — rep-vs-rep challenges with auto-settlement from stats and
+  Team-Chat battle updates (throttled: 90 min for daily, start/end of day for
+  weekly).
+- **Gamify milestones** — standard predesigned ladders + a company-customizable
+  ladder builder in the admin console; **reward shout-outs** (team chat +
+  individual nudges) and a dashboard **"Rewards in reach"** tracker.
+- **Company Rep Rankings** on the leaderboard (Doors/Convos/Appts/Closed/Close%).
+- **Pitch Library** for every rep: weekly Top 3 company pitches + manager downline
+  drill-in; surfaced by the "Voice recording & training" service.
+- **Leads** filtering by rep (downline/self) and date for admins/managers.
+- Admin **Company → Region → Team** hierarchy with regional managers; **Accounts**
+  profile modal with personal info; admin **change-email** (password + reason);
+  **Company Settings** tabs.
+- **30-minute inactivity auto-logout**; server-side **auto-close of idle shifts**.
+
+### Fixed
+- Removing the **Battery tool** service now hides both **Battery Tool** and
+  **Sold Projects** app-wide; the company-services baseline is enforced everywhere.
+- Role/permission changes apply **without a re-login** (incl. iOS).
+- iOS app no longer **stuck zoomed in** (pinch-zoom locked).
+- Pitch tools appear when **"Voice recording & training"** is enabled (no hidden
+  plan flag required).
+
+### Under the hood
+- Marketing version auto-increments (`VERSION_NAME` major.minor + build index),
+  so App Store publishing no longer fails with a closed release train.
 
 ## [1.2] — 2026-06
 
