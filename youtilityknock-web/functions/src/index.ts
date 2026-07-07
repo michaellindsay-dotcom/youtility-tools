@@ -1061,6 +1061,40 @@ export const updateUserProfile = onCall(async (request) => {
   return { ok: true, ...patch };
 });
 
+// Change a user's sign-in email (company admin / super-admin). Sensitive: the
+// caller re-authenticates with their own password client-side first, and a
+// reason is required and logged to the user's audit trail.
+export const changeUserEmail = onCall(async (request) => {
+  const caller = await getCaller(request);
+  const { uid, newEmail, reason } = (request.data || {}) as { uid?: string; newEmail?: string; reason?: string };
+  if (!uid) throw new HttpsError("invalid-argument", "uid required.");
+  const email = String(newEmail || "").trim().toLowerCase();
+  if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) throw new HttpsError("invalid-argument", "Enter a valid email.");
+  const note = String(reason || "").trim();
+  if (!note) throw new HttpsError("invalid-argument", "A reason is required.");
+  const ref = db.doc(`users/${uid}`);
+  const snap = await ref.get();
+  if (!snap.exists) throw new HttpsError("not-found", "User not found.");
+  const data = snap.data() as any;
+  authorizeForCompany(caller, data.companyId);
+  const oldEmail = (data.email as string) || "";
+  if (oldEmail.toLowerCase() === email) throw new HttpsError("invalid-argument", "That's already their email.");
+  try {
+    await getAuth().updateUser(uid, { email, emailVerified: false });
+  } catch (e: any) {
+    if (e?.code === "auth/email-already-exists") throw new HttpsError("already-exists", "That email is already in use by another account.");
+    if (e?.code === "auth/invalid-email") throw new HttpsError("invalid-argument", "That email is invalid.");
+    throw new HttpsError("internal", e?.message || "Couldn't update the email.");
+  }
+  await ref.set({ email }, { merge: true });
+  await ref.collection("auditLog").add({
+    type: "email_change", oldEmail, newEmail: email, reason: note,
+    changedBy: caller.uid, changedByEmail: (request.auth?.token?.email as string) || "", at: Date.now(),
+  });
+  logger.info(`Email for ${uid} changed ${oldEmail} → ${email} by ${caller.uid}: ${note}`);
+  return { ok: true, email };
+});
+
 // Assigns a rep's ported number (Telnyx) + where their calls forward to. Set
 // once a number's porting has actually completed — company admin or super-admin.
 export const setUserPhoneRouting = onCall(async (request) => {
