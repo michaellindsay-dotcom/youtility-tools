@@ -9,6 +9,15 @@ version. Bump `VERSION_NAME` for a new public milestone and add a section here.
 ## [Unreleased]
 
 ### Fixed
+- **Setter/Closer Rankings and Reports sit rate now come from the actual
+  appointments, not the stat counters.** The `appointments` counter had drifted
+  (double-counted), so the Setter Rankings showed inflated appointment numbers
+  (e.g. 10 when only 5 were set) and sit % read "—" because its denominator
+  hadn't accrued. Both boards, the Reports "Sit & close rates" card, and the
+  Leaderboard's "📅 Appointments" tile are now computed straight from the
+  appointment events: an appointment counts once when the setter sets it,
+  reschedule follow-ups don't add, cancelled appointments drop out, and sit % =
+  sits ÷ (sits + no-shows) shows a real percentage.
 - **Leaderboard Rep Rankings now match Reports.** The company Rep Rankings
   windowed appointments/doors/convos by *lead creation date* while Reports
   windowed by *knock date*, so a lead created earlier but re-knocked / set as an

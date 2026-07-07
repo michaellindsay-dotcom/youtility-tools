@@ -34,6 +34,7 @@ function periodStartMs(view: SeasonView): number {
 }
 
 interface FunnelRow { uid: string; name: string; doors: number; conv: number; appt: number; closed: number }
+interface MetricRow { uid: string; name: string; value: number }
 
 // Close rate = closes ÷ appointments. "—" when no appointments yet, so it
 // never reads as a misleading 0% / 100%.
@@ -46,6 +47,25 @@ export default function Leaderboard() {
   const [rows, setRows] = useState<UserStats[]>([]);
   const [selfRow, setSelfRow] = useState<UserStats | null>(null);
   const [showHow, setShowHow] = useState(false);
+  // Appointment/sit/close numbers come from the events (authoritative), not the
+  // drifting stat counters — one fetch powers both the Appointments top-3 tile
+  // and the setter/closer rankings below.
+  const [roleData, setRoleData] = useState<{ setters: SetterRow[]; closers: CloserRow[]; apptTops: MetricRow[] }>({ setters: [], closers: [], apptTops: [] });
+  const [roleLoading, setRoleLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    setRoleLoading(true);
+    httpsCallable(functions, "roleLeaderboards")({ view })
+      .then((r) => {
+        if (cancelled) return;
+        const d = r.data as { setters?: SetterRow[]; closers?: CloserRow[]; apptTops?: MetricRow[] };
+        setRoleData({ setters: d.setters || [], closers: d.closers || [], apptTops: d.apptTops || [] });
+      })
+      .catch((e) => { console.error("role leaderboards", e); if (!cancelled) setRoleData({ setters: [], closers: [], apptTops: [] }); })
+      .finally(() => { if (!cancelled) setRoleLoading(false); });
+    return () => { cancelled = true; };
+  }, [view]);
 
   useEffect(() => {
     if (!profile || !companyId) return;
@@ -110,17 +130,20 @@ export default function Leaderboard() {
   const podium = ranked.slice(0, 3);
   const rest = ranked.slice(3);
 
-  // Top 3 for each raw metric (independent of the points formula).
+  // Top 3 for each raw metric (independent of the points formula). Doors and
+  // sales come from the season counters; APPOINTMENTS come from the event-derived
+  // apptTops so this tile matches the Setter Rankings below (the appointments
+  // counter drifts).
   const metricTops = useMemo(() => {
     const merged = selfRow && !rows.some((r) => r.uid === selfRow.uid) ? [...rows, selfRow] : rows;
-    const top3 = (key: "doorsKnocked" | "appointments" | "sales") =>
+    const top3 = (key: "doorsKnocked" | "sales") =>
       merged
         .map((r) => ({ uid: r.uid, name: r.userName || r.uid, value: (r[key] as number) ?? 0 }))
         .filter((r) => r.value > 0)
         .sort((a, b) => b.value - a.value)
         .slice(0, 3);
-    return { doors: top3("doorsKnocked"), appts: top3("appointments"), sales: top3("sales") };
-  }, [rows, selfRow]);
+    return { doors: top3("doorsKnocked"), appts: roleData.apptTops, sales: top3("sales") };
+  }, [rows, selfRow, roleData.apptTops]);
 
   return (
     <div className="page-body lb">
@@ -154,7 +177,7 @@ export default function Leaderboard() {
         <MetricTop title="💰 Sales" rows={metricTops.sales} mine={profile?.uid} />
       </div>
 
-      <RoleLeaderboard view={view} mine={profile?.uid} />
+      <RoleLeaderboard view={view} mine={profile?.uid} setters={roleData.setters} closers={roleData.closers} loading={roleLoading} />
 
       {(role === "admin" || role === "manager") && <TeamRatings statsByUid={statsByUid} />}
 
@@ -255,29 +278,13 @@ function RepRankings({ view, mine }: { view: SeasonView; mine?: string }) {
 interface SetterRow { uid: string; name: string; doors: number; appts: number; sits: number; pitchedAppts: number; sitRate: number | null }
 interface CloserRow { uid: string; name: string; appts: number; sits: number; closes: number; turnedAways: number; closeRate: number | null }
 
-function RoleLeaderboard({ view, mine }: { view: SeasonView; mine?: string }) {
+function RoleLeaderboard({ view, mine, setters, closers, loading }: {
+  view: SeasonView; mine?: string; setters: SetterRow[]; closers: CloserRow[]; loading: boolean;
+}) {
   const { profile, role } = useAuth();
   const isMgr = role === "admin" || role === "manager" || role === "superadmin";
   // Default lane: closers land on the closer board, everyone else on setters.
   const [lane, setLane] = useState<"setters" | "closers">(profile?.isCloser ? "closers" : "setters");
-  const [setters, setSetters] = useState<SetterRow[]>([]);
-  const [closers, setClosers] = useState<CloserRow[]>([]);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    let cancelled = false;
-    setLoading(true);
-    httpsCallable(functions, "roleLeaderboards")({ view })
-      .then((r) => {
-        if (cancelled) return;
-        const d = r.data as { setters?: SetterRow[]; closers?: CloserRow[] };
-        setSetters(d.setters || []);
-        setClosers(d.closers || []);
-      })
-      .catch((e) => { console.error("role leaderboards", e); if (!cancelled) { setSetters([]); setClosers([]); } })
-      .finally(() => { if (!cancelled) setLoading(false); });
-    return () => { cancelled = true; };
-  }, [view]);
 
   const medal = ["🥇", "🥈", "🥉"];
   const th = { padding: "6px 8px", textAlign: "right" as const };
