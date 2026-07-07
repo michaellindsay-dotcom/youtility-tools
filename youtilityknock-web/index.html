@@ -2,7 +2,9 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, interactive-widget=resizes-visual" />
+    <!-- Lock zoom so the native (WKWebView) app can't pinch-zoom into a stuck,
+         oversized screen. WKWebView honors maximum-scale/user-scalable. -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover, interactive-widget=resizes-visual" />
     <meta name="theme-color" content="#0EA5E9" />
     <title>YoutilityKnock</title>
     <meta name="description" content="Door-to-door canvassing dashboard: leads, territories, and homeowner intel." />
