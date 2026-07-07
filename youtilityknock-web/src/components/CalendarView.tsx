@@ -1,15 +1,22 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { addDoc, collection, doc, getDocs, limit, orderBy, query, setDoc, where } from "firebase/firestore";
+import { httpsCallable } from "firebase/functions";
 import { getDownloadURL, ref as storageRef } from "firebase/storage";
-import { db, storage } from "../firebase";
+import { db, storage, functions } from "../firebase";
 import { APPT_LABEL } from "../lib/closerDispositions";
 import CloserDispositionModal from "./CloserDispositionModal";
 import type { ScheduleEvent } from "../types";
 
 type View = "day" | "week" | "month";
-type Me = { uid: string; displayName: string } | null;
+type Me = { uid: string; displayName: string; isManager?: boolean } | null;
 type Busy = { start: number; end: number };
+// Drag/edit capability threaded down to each event Block.
+type EditCtx = {
+  canEdit: (e: ScheduleEvent) => boolean;
+  onEdit: (e: ScheduleEvent) => void;
+  onDragStart: (e: ScheduleEvent) => void;
+};
 const DAY = 86_400_000;
 const HOUR_START = 6;   // 6 AM
 const HOUR_END = 21;    // 9 PM (inclusive row)
@@ -86,7 +93,37 @@ export default function CalendarView({
   const [selected, setSelected] = useState<ScheduleEvent | null>(null);
   // The closer can close out a past appointment straight from the calendar.
   const [dispoTarget, setDispoTarget] = useState<ScheduleEvent | null>(null);
+  // Edit (date/closer) target + the currently-dragged appointment.
+  const [editTarget, setEditTarget] = useState<ScheduleEvent | null>(null);
+  const dragRef = useRef<ScheduleEvent | null>(null);
   const narrow = useNarrow();
+
+  // The original setter, or a manager/admin for the team, may edit/reschedule.
+  const canEdit = (e: ScheduleEvent) =>
+    e.type === "appointment" && !!me && (!!me.isManager || e.setterUid === me.uid);
+
+  // Drop an appointment onto a new day/hour → reschedule it there (keeping its
+  // original minute-of-hour). Server enforces the same permission.
+  async function rescheduleTo(e: ScheduleEvent, dayStart: number, hour: number) {
+    const mins = new Date(e.startAt).getMinutes();
+    const newStart = dayStart + hour * 3_600_000 + mins * 60_000;
+    if (Math.abs(newStart - e.startAt) < 60_000) return; // no meaningful move
+    try {
+      await httpsCallable(functions, "rescheduleAppointment")({ eventId: e.id, startAt: newStart });
+    } catch (err) {
+      alert((err as Error)?.message || "Couldn't reschedule the appointment.");
+    }
+  }
+  const edit: EditCtx = {
+    canEdit,
+    onEdit: (e) => setEditTarget(e),
+    onDragStart: (e) => { dragRef.current = e; },
+  };
+  const onDropAt = (dayStart: number, hour: number) => {
+    const e = dragRef.current;
+    dragRef.current = null;
+    if (e && canEdit(e)) void rescheduleTo(e, dayStart, hour);
+  };
 
   // Reset the anchor to today whenever the view mode changes.
   useEffect(() => { setAnchor(startOfDay(Date.now())); }, [view]);
@@ -119,11 +156,11 @@ export default function CalendarView({
         <button type="button" className="btn ghost sm" onClick={() => step(1)}>›</button>
       </div>
 
-      {view === "day" && <DayGrid dayMs={anchor} events={events} busy={busy} onPick={setSelected} />}
+      {view === "day" && <DayGrid dayMs={anchor} events={events} busy={busy} onPick={setSelected} edit={edit} onDropAt={onDropAt} />}
       {view === "week" && (narrow
-        ? <WeekAgenda weekMs={startOfWeek(anchor)} events={events} busy={busy} onPick={setSelected} />
-        : <WeekGrid weekMs={startOfWeek(anchor)} events={events} busy={busy} onPick={setSelected} onOpenDay={openDay} />)}
-      {view === "month" && <MonthGrid monthMs={startOfMonth(anchor)} events={events} busy={busy} onPick={setSelected} onOpenDay={openDay} narrow={narrow} />}
+        ? <WeekAgenda weekMs={startOfWeek(anchor)} events={events} busy={busy} onPick={setSelected} edit={edit} />
+        : <WeekGrid weekMs={startOfWeek(anchor)} events={events} busy={busy} onPick={setSelected} onOpenDay={openDay} edit={edit} onDropAt={onDropAt} />)}
+      {view === "month" && <MonthGrid monthMs={startOfMonth(anchor)} events={events} busy={busy} onPick={setSelected} onOpenDay={openDay} narrow={narrow} edit={edit} />}
 
       {selected && (
         <EventPopout
@@ -142,25 +179,129 @@ export default function CalendarView({
         afterTheFact
         onClose={() => setDispoTarget(null)}
       />
+
+      {/* Setter / manager / admin edit: change date-time or reassign the closer. */}
+      {editTarget && (
+        <EditAppointmentModal event={editTarget} onClose={() => setEditTarget(null)} />
+      )}
     </div>
   );
+}
+
+// Change an appointment's date/time and/or reassign its closer. Shown when the
+// setter, a manager, or an admin double-clicks the block. Both edits go through
+// the server, which re-checks permission and keeps the external calendar in sync.
+function EditAppointmentModal({ event, onClose }: { event: ScheduleEvent; onClose: () => void }) {
+  const [when, setWhen] = useState(() => toLocalInput(event.startAt));
+  const [closerUid, setCloserUid] = useState(event.closerUid || "");
+  const [closers, setClosers] = useState<{ uid: string; name: string }[]>([]);
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await httpsCallable(functions, "listClosers")({});
+        const list = ((res.data as { closers?: { uid: string; name: string }[] })?.closers) || [];
+        if (!cancelled) setClosers(list);
+      } catch { /* leave dropdown with just the current closer */ }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  async function save() {
+    setErr(null);
+    const newStart = new Date(when).getTime();
+    if (!Number.isFinite(newStart)) { setErr("Pick a valid date and time."); return; }
+    const dateChanged = Math.abs(newStart - event.startAt) >= 60_000;
+    const closerChanged = !!closerUid && closerUid !== (event.closerUid || "");
+    if (!dateChanged && !closerChanged) { onClose(); return; }
+    setSaving(true);
+    try {
+      if (dateChanged) {
+        await httpsCallable(functions, "rescheduleAppointment")({ eventId: event.id, startAt: newStart });
+      }
+      if (closerChanged) {
+        await httpsCallable(functions, "reassignAppointment")({ eventId: event.id, closerUid });
+      }
+      onClose();
+    } catch (e) {
+      setErr((e as Error)?.message || "Couldn't save the changes.");
+      setSaving(false);
+    }
+  }
+
+  // Make sure the current closer is always an option even if listClosers is slow.
+  const options = closers.some((c) => c.uid === closerUid) || !closerUid
+    ? closers
+    : [{ uid: closerUid, name: event.closerName || "Current closer" }, ...closers];
+
+  return (
+    <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(2,8,18,.6)", display: "grid", placeItems: "center", zIndex: 1100, padding: 16 }}>
+      <div onClick={(e) => e.stopPropagation()} className="card" style={{ maxWidth: 420, width: "100%" }}>
+        <div className="row between" style={{ alignItems: "flex-start" }}>
+          <h3 style={{ margin: 0 }}>Edit appointment</h3>
+          <button className="btn ghost sm" onClick={onClose}>✕</button>
+        </div>
+        <div className="muted small" style={{ marginTop: 4 }}>{event.title || "Appointment"}</div>
+
+        <label className="muted small" style={{ display: "block", marginTop: 12, marginBottom: 4 }}>Date &amp; time</label>
+        <input
+          type="datetime-local"
+          value={when}
+          onChange={(e) => setWhen(e.target.value)}
+          style={{ width: "100%", borderRadius: 8, padding: 8, background: "#0b1727", color: "#e6eef8", border: "1px solid #21314a", fontSize: 14 }}
+        />
+
+        <label className="muted small" style={{ display: "block", marginTop: 12, marginBottom: 4 }}>Closer</label>
+        <select
+          value={closerUid}
+          onChange={(e) => setCloserUid(e.target.value)}
+          style={{ width: "100%", borderRadius: 8, padding: 8, background: "#0b1727", color: "#e6eef8", border: "1px solid #21314a", fontSize: 14 }}
+        >
+          <option value="">— Unassigned —</option>
+          {options.map((c) => <option key={c.uid} value={c.uid}>{c.name}</option>)}
+        </select>
+
+        {err && <div className="muted small" style={{ color: "#fca5a5", marginTop: 10 }}>{err}</div>}
+
+        <div className="row" style={{ justifyContent: "flex-end", gap: 8, marginTop: 16 }}>
+          <button className="btn ghost sm" onClick={onClose} disabled={saving}>Cancel</button>
+          <button className="btn primary sm" onClick={save} disabled={saving}>{saving ? "Saving…" : "Save changes"}</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ms → "YYYY-MM-DDTHH:mm" in local time for a datetime-local input.
+function toLocalInput(ms: number): string {
+  const d = new Date(ms);
+  const p = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
 }
 
 // One block shown inside a time cell. An overdue, undispositioned appointment
 // gets a red ring + ⚠ so a setter can spot at a glance that the closer hasn't
 // recorded an outcome yet.
-function Block({ e, onPick }: { e: ScheduleEvent; onPick: (e: ScheduleEvent) => void }) {
+function Block({ e, onPick, edit }: { e: ScheduleEvent; onPick: (e: ScheduleEvent) => void; edit?: EditCtx }) {
   const overdue = isOverdue(e);
+  const canEdit = !!edit?.canEdit(e);
   const navigate = useNavigate();
+  // Editors double-click to change the date/closer; everyone else jumps to the
+  // full customer history. Editors can also drag the block to a new time slot.
   return (
     <button
       type="button"
+      draggable={canEdit}
+      onDragStart={canEdit ? (ev) => { ev.stopPropagation(); edit?.onDragStart(e); } : undefined}
       onClick={() => onPick(e)}
-      onDoubleClick={() => { if (e.leadId) navigate(`/lead/${e.leadId}`); }}
-      title={`${fmtTime(e.startAt)} · ${e.title} · ${assigneeName(e)}${overdue ? " · ⚠ not dispositioned" : ""}${e.leadId ? " · double-click for full history" : ""}`}
+      onDoubleClick={() => { if (canEdit) edit?.onEdit(e); else if (e.leadId) navigate(`/lead/${e.leadId}`); }}
+      title={`${fmtTime(e.startAt)} · ${e.title} · ${assigneeName(e)}${overdue ? " · ⚠ not dispositioned" : ""}${canEdit ? " · double-click to edit · drag to reschedule" : e.leadId ? " · double-click for full history" : ""}`}
       style={{
         display: "block", width: "100%", textAlign: "left", border: "none", borderRadius: 6,
-        padding: "3px 6px", marginBottom: 3, cursor: "pointer", color: "#06121f",
+        padding: "3px 6px", marginBottom: 3, cursor: canEdit ? "grab" : "pointer", color: "#06121f",
         background: colorFor(e), fontSize: 11, lineHeight: 1.25, overflow: "hidden",
         boxShadow: overdue ? "inset 0 0 0 2px #ef4444" : undefined,
       }}
@@ -171,16 +312,19 @@ function Block({ e, onPick }: { e: ScheduleEvent; onPick: (e: ScheduleEvent) => 
   );
 }
 
-function DayGrid({ dayMs, events, busy, onPick }: { dayMs: number; events: ScheduleEvent[]; busy: Busy[]; onPick: (e: ScheduleEvent) => void }) {
+function DayGrid({ dayMs, events, busy, onPick, edit, onDropAt }: { dayMs: number; events: ScheduleEvent[]; busy: Busy[]; onPick: (e: ScheduleEvent) => void; edit?: EditCtx; onDropAt?: (dayStart: number, hour: number) => void }) {
   const dayEvents = events.filter((e) => sameDay(e.startAt, dayMs)).sort((a, b) => a.startAt - b.startAt);
   return (
     <div style={{ display: "grid", gridTemplateColumns: "64px 1fr", border: "1px solid #21314a", borderRadius: 8, overflow: "hidden" }}>
       {HOURS.map((h) => (
         <div key={h} style={{ display: "contents" }}>
           <div style={{ borderTop: "1px solid #21314a", padding: "4px 6px", fontSize: 11, color: "#8aa0b8", textAlign: "right" }}>{hourLabel(h)}</div>
-          <div style={{ borderTop: "1px solid #21314a", borderLeft: "1px solid #21314a", padding: 4, minHeight: 34 }}>
+          <div
+            onDragOver={onDropAt ? (ev) => ev.preventDefault() : undefined}
+            onDrop={onDropAt ? (ev) => { ev.preventDefault(); onDropAt(dayMs, h); } : undefined}
+            style={{ borderTop: "1px solid #21314a", borderLeft: "1px solid #21314a", padding: 4, minHeight: 34 }}>
             {hourBusy(busy, dayMs, h) && <BusyBlock />}
-            {dayEvents.filter((e) => new Date(e.startAt).getHours() === h).map((e) => <Block key={e.id} e={e} onPick={onPick} />)}
+            {dayEvents.filter((e) => new Date(e.startAt).getHours() === h).map((e) => <Block key={e.id} e={e} onPick={onPick} edit={edit} />)}
           </div>
         </div>
       ))}
@@ -188,7 +332,7 @@ function DayGrid({ dayMs, events, busy, onPick }: { dayMs: number; events: Sched
   );
 }
 
-function WeekGrid({ weekMs, events, busy, onPick, onOpenDay }: { weekMs: number; events: ScheduleEvent[]; busy: Busy[]; onPick: (e: ScheduleEvent) => void; onOpenDay: (ms: number) => void }) {
+function WeekGrid({ weekMs, events, busy, onPick, onOpenDay, edit, onDropAt }: { weekMs: number; events: ScheduleEvent[]; busy: Busy[]; onPick: (e: ScheduleEvent) => void; onOpenDay: (ms: number) => void; edit?: EditCtx; onDropAt?: (dayStart: number, hour: number) => void }) {
   const days = Array.from({ length: 7 }, (_, i) => weekMs + i * DAY);
   return (
     <div style={{ overflowX: "auto" }}>
@@ -205,9 +349,12 @@ function WeekGrid({ weekMs, events, busy, onPick, onOpenDay }: { weekMs: number;
           <div key={h} style={{ display: "contents" }}>
             <div style={{ borderTop: "1px solid #21314a", padding: "4px 4px", fontSize: 10, color: "#8aa0b8", textAlign: "right" }}>{hourLabel(h)}</div>
             {days.map((d) => (
-              <div key={d} style={{ borderTop: "1px solid #21314a", borderLeft: "1px solid #21314a", padding: 3, minHeight: 30 }}>
+              <div key={d}
+                onDragOver={onDropAt ? (ev) => ev.preventDefault() : undefined}
+                onDrop={onDropAt ? (ev) => { ev.preventDefault(); onDropAt(d, h); } : undefined}
+                style={{ borderTop: "1px solid #21314a", borderLeft: "1px solid #21314a", padding: 3, minHeight: 30 }}>
                 {hourBusy(busy, d, h) && <BusyBlock />}
-                {events.filter((e) => sameDay(e.startAt, d) && new Date(e.startAt).getHours() === h).sort((a, b) => a.startAt - b.startAt).map((e) => <Block key={e.id} e={e} onPick={onPick} />)}
+                {events.filter((e) => sameDay(e.startAt, d) && new Date(e.startAt).getHours() === h).sort((a, b) => a.startAt - b.startAt).map((e) => <Block key={e.id} e={e} onPick={onPick} edit={edit} />)}
               </div>
             ))}
           </div>
@@ -218,7 +365,7 @@ function WeekGrid({ weekMs, events, busy, onPick, onOpenDay }: { weekMs: number;
 }
 
 // Phone week view: a readable day-by-day agenda instead of the wide hourly grid.
-function WeekAgenda({ weekMs, events, busy, onPick }: { weekMs: number; events: ScheduleEvent[]; busy: Busy[]; onPick: (e: ScheduleEvent) => void }) {
+function WeekAgenda({ weekMs, events, busy, onPick, edit }: { weekMs: number; events: ScheduleEvent[]; busy: Busy[]; onPick: (e: ScheduleEvent) => void; edit?: EditCtx }) {
   const days = Array.from({ length: 7 }, (_, i) => weekMs + i * DAY);
   return (
     <div style={{ display: "grid", gap: 10 }}>
@@ -237,7 +384,7 @@ function WeekAgenda({ weekMs, events, busy, onPick }: { weekMs: number; events: 
             </div>
             {dayEvents.length > 0 && (
               <div style={{ padding: 8, display: "grid", gap: 4 }}>
-                {dayEvents.map((e) => <Block key={e.id} e={e} onPick={onPick} />)}
+                {dayEvents.map((e) => <Block key={e.id} e={e} onPick={onPick} edit={edit} />)}
               </div>
             )}
           </div>
@@ -247,7 +394,7 @@ function WeekAgenda({ weekMs, events, busy, onPick }: { weekMs: number; events: 
   );
 }
 
-function MonthGrid({ monthMs, events, busy, onPick, onOpenDay, narrow }: { monthMs: number; events: ScheduleEvent[]; busy: Busy[]; onPick: (e: ScheduleEvent) => void; onOpenDay: (ms: number) => void; narrow?: boolean }) {
+function MonthGrid({ monthMs, events, busy, onPick, onOpenDay, narrow, edit }: { monthMs: number; events: ScheduleEvent[]; busy: Busy[]; onPick: (e: ScheduleEvent) => void; onOpenDay: (ms: number) => void; narrow?: boolean; edit?: EditCtx }) {
   const gridStart = startOfWeek(monthMs);
   const month = new Date(monthMs).getMonth();
   const cells = Array.from({ length: 42 }, (_, i) => gridStart + i * DAY);
@@ -281,7 +428,10 @@ function MonthGrid({ monthMs, events, busy, onPick, onOpenDay, narrow }: { month
               ) : (
                 <>
                   {dayEvents.slice(0, 3).map((e) => (
-                    <button key={e.id} type="button" onClick={(ev) => { ev.stopPropagation(); onPick(e); }}
+                    <button key={e.id} type="button"
+                      onClick={(ev) => { ev.stopPropagation(); onPick(e); }}
+                      onDoubleClick={edit?.canEdit(e) ? (ev) => { ev.stopPropagation(); edit.onEdit(e); } : undefined}
+                      title={edit?.canEdit(e) ? "Double-click to edit date/closer" : undefined}
                       style={{ display: "block", width: "100%", textAlign: "left", border: "none", borderRadius: 4, padding: "1px 4px", marginBottom: 2, cursor: "pointer", color: "#06121f", background: colorFor(e), fontSize: 10, overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis" }}>
                       {fmtTime(e.startAt)} {assigneeName(e)}
                     </button>

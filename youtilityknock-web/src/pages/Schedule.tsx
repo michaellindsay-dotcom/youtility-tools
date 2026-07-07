@@ -166,7 +166,7 @@ export default function Schedule() {
           busy={busy}
           view={range}
           canHearRecording={isMgr}
-          me={profile ? { uid: profile.uid, displayName: profile.displayName || "" } : null}
+          me={profile ? { uid: profile.uid, displayName: profile.displayName || "", isManager: isMgr } : null}
           companyId={companyId}
         />
       )}

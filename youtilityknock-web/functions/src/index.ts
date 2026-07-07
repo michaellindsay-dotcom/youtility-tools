@@ -914,10 +914,15 @@ export const reassignAppointment = onCall(async (request) => {
   if (!ev) throw new HttpsError("not-found", "Appointment not found.");
   const company = ev.companyId as string;
 
-  let allowed = caller.isSuper || (caller.role === "admin" && caller.companyId === company);
+  const inDownline = Array.isArray(ev.visibilityPath) && (ev.visibilityPath as string[]).includes(caller.uid);
+  // The original setter, a company admin, or a manager for the team may reassign
+  // (plus the existing closer-manager reassign permission).
+  let allowed = caller.isSuper
+    || (caller.companyId === company && caller.role === "admin")
+    || ev.setterUid === caller.uid
+    || (caller.companyId === company && caller.role === "manager" && inDownline);
   if (!allowed) {
     const me = (await db.doc(`users/${caller.uid}`).get()).data() || {};
-    const inDownline = Array.isArray(ev.visibilityPath) && (ev.visibilityPath as string[]).includes(caller.uid);
     allowed = !!me.canReassignAppointments && me.companyId === company && inDownline;
   }
   if (!allowed) throw new HttpsError("permission-denied", "Not allowed to reassign this appointment.");
@@ -926,10 +931,52 @@ export const reassignAppointment = onCall(async (request) => {
   if (!newCloser || newCloser.companyId !== company || !newCloser.isCloser) {
     throw new HttpsError("invalid-argument", "Pick a closer in this company.");
   }
-  await evRef.set({ closerUid, updatedAt: Date.now() }, { merge: true });
+  await evRef.set({ closerUid, closerName: newCloser.displayName || newCloser.email || "Closer", updatedAt: Date.now() }, { merge: true });
   await rebuildCompanyHierarchy(company); // recompute appointment visibilityPath
   logger.info(`Appointment ${eventId} reassigned to ${closerUid} by ${caller.uid}`);
   return { ok: true };
+});
+
+// Reschedule an appointment to a new time. Allowed for the original setter, a
+// company admin, or a manager for the team. Moves the matching event on the
+// owner's external calendar in place (no duplicate).
+export const rescheduleAppointment = onCall(async (request) => {
+  const caller = await getCaller(request);
+  const { eventId, startAt } = (request.data || {}) as { eventId?: string; startAt?: number };
+  const start = Number(startAt);
+  if (!eventId || !Number.isFinite(start)) throw new HttpsError("invalid-argument", "eventId and startAt required.");
+  const evRef = db.doc(`events/${eventId}`);
+  const ev = (await evRef.get()).data();
+  if (!ev) throw new HttpsError("not-found", "Appointment not found.");
+  const company = ev.companyId as string;
+  const inTeam = Array.isArray(ev.visibilityPath) && (ev.visibilityPath as string[]).includes(caller.uid);
+  const allowed = caller.isSuper
+    || (caller.companyId === company && caller.role === "admin")
+    || ev.setterUid === caller.uid
+    || (caller.companyId === company && caller.role === "manager" && inTeam);
+  if (!allowed) throw new HttpsError("permission-denied", "Not allowed to reschedule this appointment.");
+
+  const dur = (Number(ev.durationMin) || 60) * 60 * 1000;
+  const endAt = start + dur;
+  await evRef.set({ startAt: start, endAt, updatedAt: Date.now() }, { merge: true });
+
+  // Move it on the owner's external calendar too (patch in place).
+  if (ev.userId) {
+    try {
+      const ids = await patchExternalEvent(
+        ev.userId as string,
+        { googleEventId: ev.googleEventId, microsoftEventId: ev.microsoftEventId },
+        { title: ev.title || "Appointment", address: ev.address, notes: ev.notes || ev.apptNotes, startMs: start, endMs: endAt },
+      );
+      if (ids.googleEventId !== ev.googleEventId || ids.microsoftEventId !== ev.microsoftEventId) {
+        await evRef.set(ids, { merge: true }).catch(() => {});
+      }
+    } catch (e) { logger.warn("reschedule external sync failed", e); }
+    if (ev.userId !== caller.uid) {
+      await notifyUser({ userId: ev.userId as string, type: "event", title: "Appointment moved", body: [ev.title, new Date(start).toLocaleString()].filter(Boolean).join(" — "), link: "/app/schedule" });
+    }
+  }
+  return { ok: true, startAt: start, endAt };
 });
 
 // Set a user's function (setter / closer / both). Keeps isSetter + isCloser in
@@ -2770,9 +2817,10 @@ async function recordCalendarSync(
 // Push an appointment to a rep's connected external calendars. Best-effort for
 // the booking itself (a calendar hiccup never blocks an appointment), but the
 // outcome is recorded so failures are visible and re-auth can be prompted.
-async function pushExternalEvent(uid: string, ev: { title: string; address?: string; notes?: string; startMs: number; endMs: number }): Promise<void> {
+async function pushExternalEvent(uid: string, ev: { title: string; address?: string; notes?: string; startMs: number; endMs: number }): Promise<{ googleEventId?: string; microsoftEventId?: string }> {
+  const ids: { googleEventId?: string; microsoftEventId?: string } = {};
   const tokSnap = await db.doc(`calendarTokens/${uid}`).get();
-  if (!tokSnap.exists) return;
+  if (!tokSnap.exists) return ids;
   const t = tokSnap.data() as { google?: { refreshToken?: string }; microsoft?: { refreshToken?: string } };
   const cfg = await getIntegrationConfig();
   const startISO = new Date(ev.startMs).toISOString();
@@ -2802,8 +2850,11 @@ async function pushExternalEvent(uid: string, ev: { title: string; address?: str
             end: { dateTime: endISO, timeZone: tz },
           }),
         });
-        if (r.ok) await recordCalendarSync(uid, "google", { needsReauth: false, lastSyncError: "" });
-        else {
+        if (r.ok) {
+          const gj = (await r.json().catch(() => ({}))) as { id?: string };
+          if (gj.id) ids.googleEventId = gj.id;
+          await recordCalendarSync(uid, "google", { needsReauth: false, lastSyncError: "" });
+        } else {
           const body = await r.text().catch(() => "");
           logger.warn(`google event push failed (${r.status})`, body);
           await recordCalendarSync(uid, "google", { needsReauth: r.status === 401, lastSyncError: `Google Calendar rejected the event (${r.status}).` });
@@ -2831,8 +2882,11 @@ async function pushExternalEvent(uid: string, ev: { title: string; address?: str
             end: { dateTime: endISO, timeZone: "UTC" },
           }),
         });
-        if (r.ok) await recordCalendarSync(uid, "microsoft", { needsReauth: false, lastSyncError: "" });
-        else {
+        if (r.ok) {
+          const mj = (await r.json().catch(() => ({}))) as { id?: string };
+          if (mj.id) ids.microsoftEventId = mj.id;
+          await recordCalendarSync(uid, "microsoft", { needsReauth: false, lastSyncError: "" });
+        } else {
           const body = await r.text().catch(() => "");
           logger.warn(`microsoft event push failed (${r.status})`, body);
           await recordCalendarSync(uid, "microsoft", { needsReauth: r.status === 401, lastSyncError: `Outlook rejected the event (${r.status}).` });
@@ -2843,6 +2897,62 @@ async function pushExternalEvent(uid: string, ev: { title: string; address?: str
       await recordCalendarSync(uid, "microsoft", { lastSyncError: "Couldn't reach Outlook." });
     }
   }
+  return ids;
+}
+
+// Move an already-pushed event (reschedule) on the owner's external calendars.
+// Falls back to creating a fresh one if we don't have a stored external id.
+async function patchExternalEvent(
+  uid: string,
+  ids: { googleEventId?: string; microsoftEventId?: string },
+  ev: { title: string; address?: string; notes?: string; startMs: number; endMs: number },
+): Promise<{ googleEventId?: string; microsoftEventId?: string }> {
+  const tokSnap = await db.doc(`calendarTokens/${uid}`).get();
+  if (!tokSnap.exists) return ids;
+  const t = tokSnap.data() as { google?: { refreshToken?: string }; microsoft?: { refreshToken?: string } };
+  const cfg = await getIntegrationConfig();
+  const startISO = new Date(ev.startMs).toISOString();
+  const endISO = new Date(ev.endMs).toISOString();
+  let tz = "UTC";
+  try {
+    const companyId = (await db.doc(`users/${uid}`).get()).data()?.companyId as string | undefined;
+    if (companyId) tz = (await companyScheduling(companyId)).timezone || "UTC";
+  } catch { /* default UTC */ }
+  const out = { ...ids };
+
+  if (t.google?.refreshToken && cfg.googleClientId && ids.googleEventId) {
+    try {
+      const at = await googleAccessToken(t.google.refreshToken, cfg);
+      if (at) {
+        await fetch(`https://www.googleapis.com/calendar/v3/calendars/primary/events/${ids.googleEventId}`, {
+          method: "PATCH",
+          headers: { Authorization: `Bearer ${at}`, "Content-Type": "application/json" },
+          body: JSON.stringify({ start: { dateTime: startISO, timeZone: tz }, end: { dateTime: endISO, timeZone: tz } }),
+        });
+      }
+    } catch (e) { logger.warn("google event patch failed", e); }
+  }
+  if (t.microsoft?.refreshToken && cfg.microsoftClientId && ids.microsoftEventId) {
+    try {
+      const at = await microsoftAccessToken(t.microsoft.refreshToken, cfg);
+      if (at) {
+        await fetch(`https://graph.microsoft.com/v1.0/me/events/${ids.microsoftEventId}`, {
+          method: "PATCH",
+          headers: { Authorization: `Bearer ${at}`, "Content-Type": "application/json" },
+          body: JSON.stringify({ start: { dateTime: startISO, timeZone: "UTC" }, end: { dateTime: endISO, timeZone: "UTC" } }),
+        });
+      }
+    } catch (e) { logger.warn("microsoft event patch failed", e); }
+  }
+  // No stored id for a connected provider → create it fresh so it still lands.
+  const needGoogle = t.google?.refreshToken && cfg.googleClientId && !ids.googleEventId;
+  const needMicrosoft = t.microsoft?.refreshToken && cfg.microsoftClientId && !ids.microsoftEventId;
+  if (needGoogle || needMicrosoft) {
+    const fresh = await pushExternalEvent(uid, ev);
+    if (needGoogle && fresh.googleEventId) out.googleEventId = fresh.googleEventId;
+    if (needMicrosoft && fresh.microsoftEventId) out.microsoftEventId = fresh.microsoftEventId;
+  }
+  return out;
 }
 
 // Push EVERY newly-created calendar event to its owner's external calendar.
@@ -2860,13 +2970,18 @@ export const onEventCreatedPushCalendar = onDocumentCreated("events/{eventId}", 
   if (!uid || !Number.isFinite(startMs)) return;
   const endMs = Number(ev.endAt) || startMs + (Number(ev.durationMin) || 60) * 60 * 1000;
   try {
-    await pushExternalEvent(uid, {
+    const ids = await pushExternalEvent(uid, {
       title: ev.title || "Appointment",
       address: ev.address,
       notes: ev.notes || ev.apptNotes,
       startMs,
       endMs,
     });
+    // Stash the external ids so a later reschedule MOVES the same event instead
+    // of creating a duplicate.
+    if (ids.googleEventId || ids.microsoftEventId) {
+      await event.data?.ref.set(ids, { merge: true }).catch(() => {});
+    }
   } catch (e) {
     logger.warn("event→calendar push failed", e);
   }
