@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { collection, doc, getDocs, onSnapshot, query, where } from "firebase/firestore";
-import { db } from "../firebase";
+import { httpsCallable } from "firebase/functions";
+import { db, functions } from "../firebase";
 import { useAuth } from "../auth/AuthContext";
 import { isRallyCardOnly } from "../lib/features";
 import {
@@ -20,6 +21,19 @@ interface Ranked extends UserStats {
 }
 
 const VIEWS: SeasonView[] = ["week", "month", "year", "alltime"];
+
+// Window start (ms) for the funnel rankings — the week is Monday-based to match
+// the admin Town Hall; all-time is 0 (everything).
+function periodStartMs(view: SeasonView): number {
+  const d = new Date();
+  d.setHours(0, 0, 0, 0);
+  if (view === "week") { const day = (d.getDay() + 6) % 7; d.setDate(d.getDate() - day); return d.getTime(); }
+  if (view === "month") { d.setDate(1); return d.getTime(); }
+  if (view === "year") { return new Date(d.getFullYear(), 0, 1).getTime(); }
+  return 0; // alltime
+}
+
+interface FunnelRow { uid: string; name: string; doors: number; conv: number; appt: number; closed: number }
 
 // Close rate = closes ÷ appointments. "—" when no appointments yet, so it
 // never reads as a misleading 0% / 100%.
@@ -167,6 +181,65 @@ export default function Leaderboard() {
       ) : (
         <div className="lb-list">
           {rest.map((r) => <RankRow key={r.uid} r={r} you={r.uid === profile?.uid} leaderScore={leaderScore} />)}
+        </div>
+      )}
+
+      <RepRankings view={view} mine={profile?.uid} />
+    </div>
+  );
+}
+
+// Company-wide rep funnel table (doors / convos / appts / closed / close%) for
+// the selected period — the same board the admin Town Hall shows. Computed
+// server-side so every rep sees the whole company, and no reps are missing.
+function RepRankings({ view, mine }: { view: SeasonView; mine?: string }) {
+  const [rows, setRows] = useState<FunnelRow[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    httpsCallable(functions, "companyFunnelRankings")({ startMs: periodStartMs(view) })
+      .then((r) => { if (!cancelled) setRows(((r.data as { rankings?: FunnelRow[] })?.rankings) || []); })
+      .catch((e) => { console.error("rep rankings", e); if (!cancelled) setRows([]); })
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, [view]);
+
+  const medal = ["🥇", "🥈", "🥉"];
+  return (
+    <div className="card lb-reprank" style={{ marginTop: 18 }}>
+      <h2 className="section-h" style={{ margin: "0 0 8px" }}>🏆 Rep Rankings · {SEASON_LABEL[view]}</h2>
+      {loading ? (
+        <div className="muted small">Loading rankings…</div>
+      ) : rows.length === 0 ? (
+        <div className="muted small">No rep activity yet {view !== "alltime" ? `for ${SEASON_LABEL[view].toLowerCase()}` : ""}.</div>
+      ) : (
+        <div style={{ overflowX: "auto" }}>
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 14 }}>
+            <thead>
+              <tr style={{ textAlign: "left", color: "var(--ink-dim)", fontSize: 12 }}>
+                <th style={{ padding: "6px 8px" }}>Rep</th>
+                <th style={{ padding: "6px 8px", textAlign: "right" }}>Doors</th>
+                <th style={{ padding: "6px 8px", textAlign: "right" }}>Convos</th>
+                <th style={{ padding: "6px 8px", textAlign: "right" }}>Appts</th>
+                <th style={{ padding: "6px 8px", textAlign: "right" }}>Closed</th>
+                <th style={{ padding: "6px 8px", textAlign: "right" }}>Close %</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((r, i) => (
+                <tr key={r.uid} style={{ borderTop: "1px solid var(--line)", fontWeight: r.uid === mine ? 700 : 400 }}>
+                  <td style={{ padding: "8px" }}>{i < 3 ? `${medal[i]} ` : ""}{r.uid === mine ? "You" : r.name}</td>
+                  <td style={{ padding: "8px", textAlign: "right" }}>{r.doors}</td>
+                  <td style={{ padding: "8px", textAlign: "right" }}>{r.conv}</td>
+                  <td style={{ padding: "8px", textAlign: "right" }}>{r.appt}</td>
+                  <td style={{ padding: "8px", textAlign: "right" }}>{r.closed}</td>
+                  <td style={{ padding: "8px", textAlign: "right" }}>{closeRate(r.closed, r.appt)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
       )}
     </div>

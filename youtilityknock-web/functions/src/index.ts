@@ -3563,6 +3563,60 @@ export const listClosers = onCall(async (request) => {
   return { closers };
 });
 
+// Company-wide rep funnel rankings (doors / convos / appts / closes) for a
+// window, computed from leads exactly like the admin Town Hall. Runs server-side
+// (admin SDK) so any rep — not just admins — can see the whole company's board;
+// a rep can't read every company lead directly under the security rules.
+export const companyFunnelRankings = onCall(async (request) => {
+  const caller = await getCaller(request);
+  const companyId = caller.companyId;
+  if (!companyId) throw new HttpsError("permission-denied", "No company.");
+  const startMs = Number((request.data as { startMs?: number } | undefined)?.startMs) || 0;
+
+  const CONVO = new Set(["pipeline", "appointment", "not_interested", "sold"]);
+  const knockAt = (l: any) => l.knockedAt || l.createdAt || 0;
+  const closeAt = (l: any) => l.soldAt || l.updatedAt || l.knockedAt || l.createdAt || 0;
+
+  const leadsCol = db.collection("leads");
+  let leadDocs;
+  try {
+    leadDocs = startMs > 0
+      ? (await leadsCol.where("companyId", "==", companyId).where("createdAt", ">=", startMs).get()).docs
+      : (await leadsCol.where("companyId", "==", companyId).get()).docs;
+  } catch {
+    // Composite index may be missing — fall back to the single-field query and
+    // window client-side below.
+    leadDocs = (await leadsCol.where("companyId", "==", companyId).get()).docs;
+  }
+  const soldDocs = (await leadsCol.where("companyId", "==", companyId).where("status", "==", "sold").get().catch(() => null))?.docs || [];
+  const usersSnap = await db.collection("users").where("companyId", "==", companyId).get();
+  const names: Record<string, string> = {};
+  usersSnap.forEach((d) => { const u = d.data(); names[d.id] = (u.displayName as string) || (u.email as string) || "Rep"; });
+
+  type Funnel = { doors: number; conv: number; appt: number; closed: number };
+  const perRep: Record<string, Funnel> = {};
+  const blank = (): Funnel => ({ doors: 0, conv: 0, appt: 0, closed: 0 });
+  for (const d of leadDocs) {
+    const l = d.data();
+    if (knockAt(l) < startMs) continue;
+    const uid = l.assignedTo as string; if (!uid) continue;
+    const acc = (perRep[uid] ??= blank());
+    if (l.verified !== false) { acc.doors++; if (CONVO.has(l.status)) acc.conv++; } // doors/convos need on-site
+    if (l.status === "appointment") acc.appt++;
+  }
+  for (const d of soldDocs) {
+    const l = d.data();
+    if (closeAt(l) < startMs) continue;
+    const uid = l.assignedTo as string; if (!uid) continue;
+    (perRep[uid] ??= blank()).closed++;
+  }
+  const rankings = Object.entries(perRep)
+    .map(([uid, f]) => ({ uid, name: names[uid] || "Rep", ...f }))
+    .sort((a, b) => b.closed - a.closed || b.appt - a.appt || b.conv - a.conv || b.doors - a.doors)
+    .slice(0, 25);
+  return { rankings };
+});
+
 // ════════════════════════════════════════════════════════════════════════════
 // WEEKLY SEASON RECAP — every Friday evening, post a hype recap to each
 // company's Team Chat: top 3 by points + the biggest climber vs. last week.
