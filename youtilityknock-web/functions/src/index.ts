@@ -3642,6 +3642,28 @@ export const listTeammates = onCall(async (request) => {
   return { teammates };
 });
 
+// Top 3 company pitches this week (by AI score) — visible to EVERY rep for
+// training. Runs server-side because a rep can't read teammates' pitch docs
+// under the rules; the audio itself is readable by any signed-in user, so the
+// client fetches the download URL from the returned audioPath.
+export const topCompanyPitches = onCall(async (request) => {
+  const caller = await getCaller(request);
+  if (!caller.companyId) throw new HttpsError("permission-denied", "No company.");
+  const weekStart = rStartOfWeek();
+  const snap = await db.collection("pitches").where("companyId", "==", caller.companyId).get();
+  const top = snap.docs
+    .map((d) => ({ id: d.id, ...(d.data() as any) }))
+    .filter((p) => p.status === "analyzed" && typeof p.score === "number" && (Number(p.createdAt) || 0) >= weekStart)
+    .sort((a, b) => (b.score as number) - (a.score as number))
+    .slice(0, 3)
+    .map((p) => ({
+      id: p.id, userName: p.userName || "Rep", score: p.score, address: p.address || "",
+      feedback: p.feedback || "", highlight: p.highlight || "", lowlight: p.lowlight || "",
+      audioPath: p.audioPath || "", createdAt: Number(p.createdAt) || 0,
+    }));
+  return { pitches: top };
+});
+
 const CHALLENGE_METRICS = new Set(["doors", "appointments", "sales", "points"]);
 type ChScore = { doors: number; conv: number; appt: number; sale: number };
 // Per-rep funnel for a window (leads owned by each uid), same rules as the Town
