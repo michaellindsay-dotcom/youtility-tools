@@ -3266,9 +3266,17 @@ const APPT_STATUS_LABEL: Record<string, string> = {
   pitched_failed_credit: "Pitched — Failed Credit",
   closed_won: "Closed / Won",
   no_show: "No Show",
+  turned_away: "Turned Away",
   reschedule: "Reschedule",
   closer_no_show: "Closer No Show",
 };
+// Setter sit-rate denominator ("pitched appointments"): every real sit plus a
+// homeowner no-show. Deliberately EXCLUDES turned_away (homeowner refused the
+// pitch — not the setter's miss) and closer_no_show, so those never drag down a
+// setter's sit %. reschedule is deferred — its follow-up is counted when sat.
+const SETTER_PITCHED_STATUSES = new Set([
+  "pitched_pending", "pitched_not_interested", "pitched_failed_credit", "closed_won", "no_show",
+]);
 
 // Choose the closer for a new appointment per company policy.
 async function pickCloser(companyId: string, sched: any, candidateUid?: string) {
@@ -3457,10 +3465,15 @@ export const closerDisposition = onCall(async (request) => {
   const closer = closerSnap.exists ? { uid: closerSnap.id, ...(closerSnap.data() as any) } : { uid: closerUid, companyId: ev.companyId };
   const setter = setterSnap && setterSnap.exists ? { uid: setterSnap.id, ...(setterSnap.data() as any) } : null;
 
-  if (CLOSER_SIT_STATUSES.has(finalStatus)) {
-    await serverBumpStats(closer, { closerSits: 1 });
-    if (setter) await serverBumpStats(setter, { sits: 1 });
+  const isSit = CLOSER_SIT_STATUSES.has(finalStatus);
+  if (isSit) await serverBumpStats(closer, { closerSits: 1 });
+  // Setter side: a sit lifts both sits and the pitched-appointment denominator;
+  // a no-show lifts only the denominator (a real appointment that didn't sit).
+  if (setter && SETTER_PITCHED_STATUSES.has(finalStatus)) {
+    await serverBumpStats(setter, isSit ? { sits: 1, pitchedAppts: 1 } : { pitchedAppts: 1 });
   }
+  // Turned away is tracked for the closer but never touches the setter's sit %.
+  if (finalStatus === "turned_away") await serverBumpStats(closer, { closerTurnedAways: 1 });
   if (finalStatus === "closed_won") {
     await serverBumpStats(closer, { closerCloses: 1, sales: 1 });
     if (ev.leadId) {
@@ -3621,6 +3634,60 @@ export const companyFunnelRankings = onCall(async (request) => {
     .sort((a, b) => b.closed - a.closed || b.appt - a.appt || b.conv - a.conv || b.doors - a.doors)
     .slice(0, 25);
   return { rankings };
+});
+
+// Separate leaderboards for setters and closers, so a setter sees where they
+// stack up against other setters and a closer against other closers. Built from
+// the rolled-up stat counters (season bucket for a period, userStats all-time)
+// joined to the roster for each rep's name + isCloser lane. Company-wide: any
+// rep sees the whole company's board for their lane.
+export const roleLeaderboards = onCall(async (request) => {
+  const caller = await getCaller(request);
+  const companyId = caller.companyId;
+  if (!companyId) throw new HttpsError("permission-denied", "No company.");
+  const view = ((request.data as { view?: string } | undefined)?.view || "week") as string;
+  const kind = view === "month" || view === "year" ? view : "week";
+
+  const usersSnap = await db.collection("users").where("companyId", "==", companyId).get();
+  const meta: Record<string, { name: string; isCloser: boolean; disabled: boolean }> = {};
+  usersSnap.forEach((d) => {
+    const u = d.data() as any;
+    meta[d.id] = { name: u.displayName || u.email || "Rep", isCloser: u.isCloser === true, disabled: u.disabled === true };
+  });
+
+  let statDocs;
+  if (view === "alltime") {
+    statDocs = (await db.collection("userStats").where("companyId", "==", companyId).get()).docs.map((d) => d.data() as any);
+  } else {
+    statDocs = (await db.collection("seasonStats")
+      .where("companyId", "==", companyId).where("period", "==", rPeriodKey(kind)).get())
+      .docs.map((d) => d.data() as any).filter((s) => s.kind === kind);
+  }
+
+  const num = (x: any) => Number(x) || 0;
+  const rate = (n: number, d: number) => (d > 0 ? Math.min(100, Math.round((n / d) * 100)) : null);
+  const setters: any[] = [];
+  const closers: any[] = [];
+  for (const s of statDocs) {
+    const uid = s.uid as string;
+    const m = uid ? meta[uid] : null;
+    if (!m || m.disabled) continue; // only current, active reps
+    const name = m.name || s.userName || "Rep";
+    if (m.isCloser) {
+      const sits = num(s.closerSits), closes = num(s.closerCloses);
+      if (num(s.closerAppts) + sits + closes === 0) continue;
+      closers.push({ uid, name, appts: num(s.closerAppts), sits, closes, turnedAways: num(s.closerTurnedAways), closeRate: rate(closes, sits) });
+    } else {
+      const appts = num(s.appointments), sits = num(s.sits);
+      if (appts + sits + num(s.doorsKnocked) === 0) continue;
+      setters.push({ uid, name, doors: num(s.doorsKnocked), appts, sits, pitchedAppts: num(s.pitchedAppts), sitRate: rate(sits, num(s.pitchedAppts)) });
+    }
+  }
+  // Setters ranked by real productive output (sits, then appts, then doors);
+  // closers by closes, then sits, then close rate.
+  setters.sort((a, b) => b.sits - a.sits || b.appts - a.appts || b.doors - a.doors);
+  closers.sort((a, b) => b.closes - a.closes || b.sits - a.sits || (b.closeRate ?? -1) - (a.closeRate ?? -1));
+  return { setters: setters.slice(0, 50), closers: closers.slice(0, 50) };
 });
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -4394,10 +4461,31 @@ export const getEmployeeReport = onCall(async (request) => {
   const worst = scored.length ? scored.reduce((a, b) => (b.score! < a.score! ? b : a)) : null;
 
   const all = rFunnel(leads, 0);
+  // Sit % (setter) and close % (closer), from the rolled-up counters. Sit rate =
+  // sits ÷ pitched appointments (excludes turn-aways). Displayed rates are capped
+  // at 100 to absorb any legacy skew from before pitchedAppts existed.
+  const s = (statSnap.exists ? statSnap.data() : {}) as any;
+  const num = (x: any) => Number(x) || 0;
+  const rate = (n: number, d: number) => (d > 0 ? Math.min(100, Math.round((n / d) * 100)) : null);
+  const sitMetrics = {
+    isCloser: rep.isCloser === true,
+    // Setter lane
+    apptsSet: num(s.appointments),
+    sits: num(s.sits),
+    pitchedAppts: num(s.pitchedAppts),
+    sitRate: rate(num(s.sits), num(s.pitchedAppts)),
+    // Closer lane
+    closerAppts: num(s.closerAppts),
+    closerSits: num(s.closerSits),
+    closerCloses: num(s.closerCloses),
+    closeRate: rate(num(s.closerCloses), num(s.closerSits)),
+    turnedAways: num(s.closerTurnedAways),
+  };
   return {
     rep: { uid: rep.uid, displayName: rep.displayName || "", email: rep.email || "", title: rep.title || rep.role || "", role: rep.role || "" },
     funnel: { today: rFunnel(leads, today), week: rFunnel(leads, week), month: rFunnel(leads, month), all },
     stats: statSnap.exists ? statSnap.data() : {},
+    sitMetrics,
     // Lifetime totals derived from the SAME lead set as the funnel, so the
     // footer matches the ALL-TIME column (the userStats counters drift).
     lifetime: { sold: all.closed, appts: all.appt, doors: all.doors },
