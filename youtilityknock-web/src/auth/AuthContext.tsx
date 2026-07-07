@@ -41,6 +41,10 @@ interface AuthState {
 
 const AuthContext = createContext<AuthState | undefined>(undefined);
 
+// Shared across tabs: last time the user did anything. Drives the 30-minute
+// inactivity auto-logout.
+const IDLE_KEY = "ykLastActive";
+
 // Profiles are created by the admin console (createUser Cloud Function), never
 // in the app. If a signed-in user has no profile/company, they have no access.
 function toProfile(uid: string, data: Record<string, unknown> | undefined): UserProfile | null {
@@ -191,11 +195,58 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     };
   }, []);
 
+  // Auto-logout after 30 minutes of inactivity. A timestamp in localStorage
+  // makes it survive reloads, background/resume on mobile, and multiple tabs
+  // (an active tab keeps refreshing the shared timestamp so idle tabs don't
+  // sign the whole device out from under an active one).
+  useEffect(() => {
+    if (!user) return;
+    const IDLE_LIMIT_MS = 30 * 60 * 1000;
+    const readLS = () => { try { return Number(window.localStorage.getItem(IDLE_KEY) || 0); } catch { return 0; } };
+    const writeLS = (t: number) => { try { window.localStorage.setItem(IDLE_KEY, String(t)); } catch { /* ignore */ } };
+    const clearLS = () => { try { window.localStorage.removeItem(IDLE_KEY); } catch { /* ignore */ } };
+
+    const kick = () => {
+      clearLS();
+      setBlockedReason("You were signed out after 30 minutes of inactivity. Sign in again to continue.");
+      void signOut(auth);
+    };
+
+    // Reopened (or left a tab) idle past the limit? Sign out right away.
+    const stored = readLS();
+    if (stored > 0 && Date.now() - stored >= IDLE_LIMIT_MS) { kick(); return; }
+
+    let last = Date.now();
+    writeLS(last);
+    const effectiveLast = () => Math.max(last, readLS());
+    const check = () => { if (Date.now() - effectiveLast() >= IDLE_LIMIT_MS) kick(); };
+
+    let lastWrite = Date.now();
+    const onActivity = () => {
+      const t = Date.now();
+      last = t;
+      if (t - lastWrite > 5000) { lastWrite = t; writeLS(t); } // throttle storage writes
+    };
+    const onVisible = () => { if (document.visibilityState === "visible") check(); };
+
+    const events = ["pointerdown", "keydown", "mousemove", "touchstart", "scroll", "wheel"];
+    events.forEach((e) => window.addEventListener(e, onActivity, { passive: true }));
+    document.addEventListener("visibilitychange", onVisible);
+    const iv = window.setInterval(check, 30_000);
+    return () => {
+      events.forEach((e) => window.removeEventListener(e, onActivity));
+      document.removeEventListener("visibilitychange", onVisible);
+      window.clearInterval(iv);
+    };
+  }, [user]);
+
   const login = async (email: string, password: string) => {
     await signInWithEmailAndPassword(auth, email, password);
+    try { window.localStorage.setItem(IDLE_KEY, String(Date.now())); } catch { /* ignore */ }
   };
   const loginWithGoogle = async () => {
     await signInWithPopup(auth, googleProvider);
+    try { window.localStorage.setItem(IDLE_KEY, String(Date.now())); } catch { /* ignore */ }
   };
   const logout = async () => {
     await signOut(auth);
