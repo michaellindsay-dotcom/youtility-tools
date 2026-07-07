@@ -8,6 +8,7 @@ import { computePoints } from "../lib/points";
 import { isUndispositionedPast } from "../lib/closerDispositions";
 import CalendarBanner from "../components/CalendarBanner";
 import BizCardHero from "../components/BizCardHero";
+import DashboardRewards from "../components/DashboardRewards";
 import Podium from "../components/Podium";
 import { cardAccentVars, cardThemeBg } from "../lib/cardTheme";
 import { CARD_SHARE_BASE_URL } from "./BusinessCard";
@@ -270,6 +271,9 @@ export default function Dashboard() {
           </div>
         </>
       )}
+
+      {/* Rewards the rep is closest to earning — a nudge toward the goal. */}
+      <DashboardRewards />
 
       {/* Top performers — the leaderboard Top 3 podium, moved to the bottom so
           the planner, today's numbers and weekly progress lead the dashboard.

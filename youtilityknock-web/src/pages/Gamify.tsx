@@ -26,6 +26,23 @@ const metricValue = (s: UserStats, m: MilestoneMetric): number =>
       : m === "sales" ? (s.sales ?? 0)
         : computePoints(s);
 
+// Standard, predesigned milestone ladders shown to every company (recognition
+// tiers). Companies can add their own on top via the admin "Gamify milestones".
+const STANDARD_LADDERS: Milestone[] = [
+  { id: "std-doors", name: "🚪 Door Warrior", metric: "doors", steps: [
+    { threshold: 100, reward: "Century Club 💯" }, { threshold: 500, reward: "Grinder ⚙️" },
+    { threshold: 1000, reward: "Iron Knocker 🦾" }, { threshold: 2500, reward: "Legend 👑" },
+  ] },
+  { id: "std-appts", name: "📅 Setter's Path", metric: "appointments", steps: [
+    { threshold: 10, reward: "Setter 📅" }, { threshold: 50, reward: "Booking Machine 🔥" },
+    { threshold: 100, reward: "Appointment King 👑" },
+  ] },
+  { id: "std-sales", name: "💰 Closer's Climb", metric: "sales", steps: [
+    { threshold: 1, reward: "First Blood 💰" }, { threshold: 10, reward: "Rainmaker 🌧️" },
+    { threshold: 25, reward: "Closer 🏆" }, { threshold: 50, reward: "Titan 💎" },
+  ] },
+];
+
 const BADGES = [
   { key: "first_blood", label: "First Knock", emoji: "👊", test: (s: UserStats) => (s.doorsKnocked ?? 0) >= 1 },
   { key: "centurion", label: "100 Doors", emoji: "💯", test: (s: UserStats) => (s.doorsKnocked ?? 0) >= 100 },
@@ -100,6 +117,11 @@ export default function Gamify() {
             </div>
           );
         })}
+      </div>
+
+      <h2 className="section-h" style={{ marginTop: 18 }}>🏅 Standard Milestones</h2>
+      <div style={{ display: "grid", gap: 12 }}>
+        {STANDARD_LADDERS.map((m) => <MilestoneLadder key={m.id} m={m} value={metricValue(s, m.metric)} />)}
       </div>
 
       {milestones.length > 0 && (
