@@ -44,9 +44,9 @@ const links: { to: string; label: string; icon: string; end?: boolean; feat?: Fe
   { to: "/battery", label: "Battery Tool", icon: "🔋", closer: true, feat: "battery", canvassOnly: true },
   { to: "/projects", label: "Sold Projects", icon: "📋", closer: true, feat: "battery", canvassOnly: true },
   { to: "/reports", label: "Reports", icon: "📊", roles: ["admin", "manager"], canvassOnly: true },
-  { to: "/pitches", label: "My Pitches", icon: "🎙️", feat: "pitch", canvassOnly: true },
+  { to: "/pitches", label: "My Pitches", icon: "🎙️", anyFeat: ["pitch", "voice"], canvassOnly: true },
   { to: "/training", label: "Training", icon: "🎓", feat: "voice", canvassOnly: true },
-  { to: "/pitch-library", label: "Pitch Library", icon: "🎬", feat: "pitch", canvassOnly: true },
+  { to: "/pitch-library", label: "Pitch Library", icon: "🎬", anyFeat: ["pitch", "voice"], canvassOnly: true },
   // Who's Working lives inside the Chat page (a rail view) — no nav item.
   // Like RallyCard: the Dashboard's Top Performers card links here, so
   // full-platform companies don't need a nav item; RallyCard-only companies
