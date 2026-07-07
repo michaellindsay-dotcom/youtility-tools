@@ -17,6 +17,19 @@ version. Bump `VERSION_NAME` for a new public milestone and add a section here.
   the appointment time up front so a bail-and-retry can't count twice.
 
 ### Added
+- **Setter & Closer leaderboards** — the Leaderboard now splits by lane so a
+  setter sees where they rank among other setters (doors / appts / sat / **sit
+  %**) and a closer among other closers (assigned / sat / closed / **close %**).
+  Reps land on their own lane automatically; managers and admins get a
+  Setters/Closers toggle.
+- **Sit rate** in Reports: for each rep, "Sit & close rates" shows appointments
+  set, sat, pitched appointments, and **sit % (sat ÷ pitched appointments)** on
+  the setter side, plus assigned/sat/closed/**close %**/turned-away on the
+  closer side.
+- New closer disposition **"Turned Away"** (homeowner refused the pitch at the
+  door). It's tracked for the closer but deliberately **does not count as a
+  pitched appointment** against the setter's sit rate — a turn-away isn't the
+  setter's miss.
 - **RallyCard** (formerly "Digital Business Card") — every rep can publish a
   public, no-login profile page (photo, bio, service area, reviews,
   click-to-call/text/email, and a lead-capture form that drops straight into

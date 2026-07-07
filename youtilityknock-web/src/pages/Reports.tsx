@@ -11,10 +11,17 @@ interface PitchItem {
   id: string; address: string; createdAt: number; status: string;
   score: number | null; highlight: string; lowlight: string; feedback: string;
 }
+interface SitMetrics {
+  isCloser: boolean;
+  apptsSet: number; sits: number; pitchedAppts: number; sitRate: number | null;
+  closerAppts: number; closerSits: number; closerCloses: number; closeRate: number | null;
+  turnedAways: number;
+}
 interface Report {
   rep: { uid: string; displayName: string; email: string; title: string; role: string };
   funnel: { today: Funnel; week: Funnel; month: Funnel; all: Funnel };
   stats: { sales?: number; appointments?: number; doorsKnocked?: number; shifts?: number };
+  sitMetrics?: SitMetrics;
   lifetime?: { sold: number; appts: number; doors: number };
   shiftHours: { week: number; month: number };
   leads: ReportLead[];
@@ -127,6 +134,44 @@ export default function Reports() {
               {" "}{report.shiftHours.week}h on shift this week
             </div>
           </div>
+
+          {report.sitMetrics && (() => {
+            const m = report.sitMetrics!;
+            const showSetter = m.apptsSet > 0 || m.sits > 0 || m.pitchedAppts > 0;
+            const showCloser = m.isCloser || m.closerSits > 0 || m.closerCloses > 0 || m.closerAppts > 0;
+            if (!showSetter && !showCloser) return null;
+            return (
+              <div className="card" style={{ marginTop: 16 }}>
+                <h3 className="section-h" style={{ marginTop: 0 }}>🎯 Sit &amp; close rates <span className="muted small">(all-time)</span></h3>
+                {showSetter && (
+                  <div style={{ marginBottom: showCloser ? 14 : 0 }}>
+                    <div className="muted small" style={{ marginBottom: 6 }}>As a setter</div>
+                    <div className="stat-grid tight">
+                      <div className="stat-cell"><div className="stat-num">{m.apptsSet}</div><div className="muted small">Appts set</div></div>
+                      <div className="stat-cell"><div className="stat-num">{m.sits}</div><div className="muted small">Sat</div></div>
+                      <div className="stat-cell"><div className="stat-num">{m.pitchedAppts}</div><div className="muted small">Pitched appts</div></div>
+                      <div className="stat-cell"><div className="stat-num">{m.sitRate == null ? "—" : `${m.sitRate}%`}</div><div className="muted small">Sit rate</div></div>
+                    </div>
+                    <div className="muted small" style={{ marginTop: 6 }}>
+                      Sit rate = sat ÷ pitched appointments. Homeowner turn-aways are excluded from pitched appointments.
+                    </div>
+                  </div>
+                )}
+                {showCloser && (
+                  <div>
+                    <div className="muted small" style={{ marginBottom: 6 }}>As a closer</div>
+                    <div className="stat-grid tight">
+                      <div className="stat-cell"><div className="stat-num">{m.closerAppts}</div><div className="muted small">Assigned</div></div>
+                      <div className="stat-cell"><div className="stat-num">{m.closerSits}</div><div className="muted small">Sat</div></div>
+                      <div className="stat-cell"><div className="stat-num">{m.closerCloses}</div><div className="muted small">Closed</div></div>
+                      <div className="stat-cell"><div className="stat-num">{m.closeRate == null ? "—" : `${m.closeRate}%`}</div><div className="muted small">Close rate</div></div>
+                      <div className="stat-cell"><div className="stat-num">{m.turnedAways}</div><div className="muted small">Turned away</div></div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            );
+          })()}
 
           {report.pitches && report.pitches.count > 0 && (
             <div className="card" style={{ marginTop: 16 }}>

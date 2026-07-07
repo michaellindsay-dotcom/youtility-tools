@@ -357,10 +357,13 @@ export interface UserStats {
   // Closer workflow. sits = appointments the setter's bookings actually sat;
   // closerAppts/closerSits/closerCloses are the closer's own tallies.
   sits?: number; // setter: of their set appointments, how many sat
+  pitchedAppts?: number; // setter: sit-rate denominator — sits + no-shows, but
+                         // NOT turn-aways or closer-no-shows (sit% = sits/pitchedAppts)
   closerAppts?: number; // closer: appointments routed to them
   closerSits?: number; // closer: appointments they actually sat/pitched
   closerCloses?: number; // closer: appointments they closed
   closerNoShows?: number; // closer: dispositions logged off-site (>100 ft)
+  closerTurnedAways?: number; // closer: homeowner refused the pitch at the door
   closerManagerPath?: string[]; // closer-chain ancestors (for manager roll-ups)
   updatedAt?: number;
   // Present on seasonStats docs (resetting week/month/year buckets).
@@ -457,6 +460,7 @@ export type ApptStatus =
   | "pitched_failed_credit"
   | "closed_won"
   | "no_show"
+  | "turned_away"
   | "reschedule"
   | "closer_no_show";
 

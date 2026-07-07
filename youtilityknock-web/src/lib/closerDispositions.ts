@@ -22,6 +22,10 @@ export const APPT_DISPOSITIONS: ApptDispo[] = [
   { value: "pitched_failed_credit", label: "Pitched — Failed Credit", color: "#FB923C", sit: true },
   { value: "closed_won", label: "Closed / Won", color: "#22C55E", sit: true },
   { value: "no_show", label: "No Show", color: "#64748B", sit: false },
+  // Homeowner was there but turned the closer away before a pitch. Not a sit,
+  // and deliberately NOT counted as a "pitched appointment" against the setter's
+  // sit rate (server drops it from the setter's denominator).
+  { value: "turned_away", label: "Turned Away", color: "#EAB308", sit: false },
   { value: "reschedule", label: "Reschedule", color: "#38BDF8", sit: false, followUp: true },
 ];
 

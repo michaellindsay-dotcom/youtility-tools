@@ -524,6 +524,20 @@ a {
   font-size: 13px;
   margin-top: 4px;
 }
+/* Compact metric cells (sit/close-rate blocks in Reports). */
+.stat-grid.tight { grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); gap: 10px; margin-bottom: 0; }
+.stat-cell {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 12px;
+  text-align: center;
+}
+.stat-num {
+  font-family: "Space Grotesk", sans-serif;
+  font-size: 24px;
+  font-weight: 700;
+}
 .quick-links {
   display: grid;
   grid-template-columns: 1fr 1fr;

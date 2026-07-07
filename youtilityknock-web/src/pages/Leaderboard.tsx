@@ -154,6 +154,8 @@ export default function Leaderboard() {
         <MetricTop title="💰 Sales" rows={metricTops.sales} mine={profile?.uid} />
       </div>
 
+      <RoleLeaderboard view={view} mine={profile?.uid} />
+
       {(role === "admin" || role === "manager") && <TeamRatings statsByUid={statsByUid} />}
 
       {view === "year" && (
@@ -236,6 +238,113 @@ function RepRankings({ view, mine }: { view: SeasonView; mine?: string }) {
                   <td style={{ padding: "8px", textAlign: "right" }}>{r.appt}</td>
                   <td style={{ padding: "8px", textAlign: "right" }}>{r.closed}</td>
                   <td style={{ padding: "8px", textAlign: "right" }}>{closeRate(r.closed, r.appt)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Setter and closer leaderboards, split by lane. A setter sees where they rank
+// among other setters (doors / appts / sat / sit %); a closer among other
+// closers (assigned / sat / closed / close %). Regular reps see only their own
+// lane; managers & admins get a toggle to see either.
+interface SetterRow { uid: string; name: string; doors: number; appts: number; sits: number; pitchedAppts: number; sitRate: number | null }
+interface CloserRow { uid: string; name: string; appts: number; sits: number; closes: number; turnedAways: number; closeRate: number | null }
+
+function RoleLeaderboard({ view, mine }: { view: SeasonView; mine?: string }) {
+  const { profile, role } = useAuth();
+  const isMgr = role === "admin" || role === "manager" || role === "superadmin";
+  // Default lane: closers land on the closer board, everyone else on setters.
+  const [lane, setLane] = useState<"setters" | "closers">(profile?.isCloser ? "closers" : "setters");
+  const [setters, setSetters] = useState<SetterRow[]>([]);
+  const [closers, setClosers] = useState<CloserRow[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    httpsCallable(functions, "roleLeaderboards")({ view })
+      .then((r) => {
+        if (cancelled) return;
+        const d = r.data as { setters?: SetterRow[]; closers?: CloserRow[] };
+        setSetters(d.setters || []);
+        setClosers(d.closers || []);
+      })
+      .catch((e) => { console.error("role leaderboards", e); if (!cancelled) { setSetters([]); setClosers([]); } })
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, [view]);
+
+  const medal = ["🥇", "🥈", "🥉"];
+  const th = { padding: "6px 8px", textAlign: "right" as const };
+  const td = { padding: "8px", textAlign: "right" as const };
+  const showClosers = lane === "closers";
+  const rows = showClosers ? closers : setters;
+
+  return (
+    <div className="card" style={{ marginTop: 18 }}>
+      <div className="row" style={{ justifyContent: "space-between", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 8 }}>
+        <h2 className="section-h" style={{ margin: 0 }}>
+          {showClosers ? "🤝 Closer Rankings" : "🎯 Setter Rankings"} · {SEASON_LABEL[view]}
+        </h2>
+        {/* Only managers/admins can flip lanes; a rep sees their own lane only. */}
+        {isMgr && (
+          <div className="type-pills">
+            <button className={"pill" + (!showClosers ? " active" : "")} onClick={() => setLane("setters")}>Setters</button>
+            <button className={"pill" + (showClosers ? " active" : "")} onClick={() => setLane("closers")}>Closers</button>
+          </div>
+        )}
+      </div>
+      {loading ? (
+        <div className="muted small">Loading rankings…</div>
+      ) : rows.length === 0 ? (
+        <div className="muted small">No {showClosers ? "closer" : "setter"} activity yet {view !== "alltime" ? `for ${SEASON_LABEL[view].toLowerCase()}` : ""}.</div>
+      ) : (
+        <div style={{ overflowX: "auto" }}>
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 14 }}>
+            <thead>
+              <tr style={{ textAlign: "left", color: "var(--ink-dim)", fontSize: 12 }}>
+                <th style={{ padding: "6px 8px" }}>{showClosers ? "Closer" : "Setter"}</th>
+                {showClosers ? (
+                  <>
+                    <th style={th}>Assigned</th>
+                    <th style={th}>Sat</th>
+                    <th style={th}>Closed</th>
+                    <th style={th}>Close %</th>
+                  </>
+                ) : (
+                  <>
+                    <th style={th}>Doors</th>
+                    <th style={th}>Appts</th>
+                    <th style={th}>Sat</th>
+                    <th style={th}>Sit %</th>
+                  </>
+                )}
+              </tr>
+            </thead>
+            <tbody>
+              {(showClosers ? closers : setters).map((r, i) => (
+                <tr key={r.uid} style={{ borderTop: "1px solid var(--line)", fontWeight: r.uid === mine ? 700 : 400 }}>
+                  <td style={{ padding: "8px" }}>{i < 3 ? `${medal[i]} ` : ""}{r.uid === mine ? "You" : r.name}</td>
+                  {showClosers ? (
+                    <>
+                      <td style={td}>{(r as CloserRow).appts}</td>
+                      <td style={td}>{(r as CloserRow).sits}</td>
+                      <td style={td}>{(r as CloserRow).closes}</td>
+                      <td style={td}>{(r as CloserRow).closeRate == null ? "—" : `${(r as CloserRow).closeRate}%`}</td>
+                    </>
+                  ) : (
+                    <>
+                      <td style={td}>{(r as SetterRow).doors}</td>
+                      <td style={td}>{(r as SetterRow).appts}</td>
+                      <td style={td}>{(r as SetterRow).sits}</td>
+                      <td style={td}>{(r as SetterRow).sitRate == null ? "—" : `${(r as SetterRow).sitRate}%`}</td>
+                    </>
+                  )}
                 </tr>
               ))}
             </tbody>
