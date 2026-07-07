@@ -127,7 +127,9 @@ export default function DispositionModal({
   // Pitch coaching: record the rep's pitch while this modal is open, upload on
   // save, and let the AI pipeline grade it. Opt-in feature + one-time consent.
   const pitch = usePitchRecorder();
-  const pitchOn = pitchSupported && hasFeature(company, "pitch") && !!profile;
+  // Enabled by the "Voice recording & training" service (voice) or the pitch
+  // plan feature — either turns on pitch capture + the library.
+  const pitchOn = pitchSupported && (hasFeature(company, "pitch") || hasFeature(company, "voice")) && !!profile;
   const [d, setD] = useState<Form | null>(null);
   // Two-step flow: step 1 = disposition + contact details; step 2 (only for
   // dispositions that schedule a follow-up or are sold) = appointment + photos.
