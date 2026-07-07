@@ -101,7 +101,9 @@
   .auth-card { width:100%; max-width:400px; }
   .hidden { display:none !important; }
   .pill { display:inline-flex; align-items:center; gap:6px; font-size:12px; padding:5px 10px; border-radius:999px;
-    border:1px solid var(--line-hi); background:rgba(255,255,255,.03); color:var(--ink-mid); }
+    border:1px solid var(--line-hi); background:rgba(255,255,255,.03); color:var(--ink-mid); cursor:pointer; }
+  .pill.active { background:var(--accent); border-color:var(--accent); color:#06121f; font-weight:600; }
+  .type-pills { display:flex; gap:8px; align-items:center; }
   .day-chip { display:inline-flex; align-items:center; gap:5px; font-size:13px; padding:7px 11px; border-radius:999px;
     border:1px solid var(--line-hi); background:rgba(255,255,255,.03); cursor:pointer; }
   .day-chip input { width:auto; }
@@ -235,13 +237,10 @@
     <p class="muted" style="margin:0 0 14px;font-size:13px;">Pick a section to manage it.</p>
     <div class="home-grid">
       <button class="home-btn" data-card="usersCard"><span class="hb-ico">👥</span><b>Accounts</b><small>Add people, set setter/closer function &amp; managers, reset passwords</small></button>
-      <button class="home-btn" data-card="schedulingCard"><span class="hb-ico">📅</span><b>Scheduling &amp; Closers</b><small>Booking window, business hours, appointment routing &amp; closers</small></button>
       <button class="home-btn" data-card="companySettingsCard"><span class="hb-ico">🛠️</span><b>Company settings</b><small>Max territories per rep &amp; other company options</small></button>
       <button class="home-btn" data-card="companyProfileCard"><span class="hb-ico">🏢</span><b>Company profile</b><small>Company name, phone, address &amp; email</small></button>
-      <button class="home-btn" data-card="companyBrandingCard"><span class="hb-ico">🏷</span><b>RallyCard branding</b><small>Company logo, website, phone &amp; address shown on every rep's card</small></button>
       <button class="home-btn" data-card="batteryPricingCard"><span class="hb-ico">🔋</span><b>Battery pricing</b><small>Per-product price &amp; install adder for proposals</small></button>
       <a class="home-btn" href="/pm" target="_blank" rel="noopener" style="text-decoration:none;color:inherit;"><span class="hb-ico">🏗️</span><b>Project Management</b><small>Signed deals, site surveys &amp; the install pipeline</small></a>
-      <button class="home-btn" data-card="rolesCard"><span class="hb-ico">🏷️</span><b>Roles &amp; titles</b><small>Custom titles and the access tier each grants</small></button>
       <button class="home-btn" data-card="teamsCard"><span class="hb-ico">🗂️</span><b>Teams</b><small>Group reps into teams</small></button>
       <button class="home-btn" data-card="rewardsCard"><span class="hb-ico">🎁</span><b>Rewards</b><small>Incentives, benchmarks &amp; the rewards store</small></button>
       <button class="home-btn" data-card="milestonesCard"><span class="hb-ico">🎯</span><b>Gamify milestones</b><small>Custom company milestone ladders reps climb</small></button>
@@ -255,6 +254,9 @@
   <div id="settingBackBar" class="hidden" style="margin-bottom:12px;">
     <button id="settingBack" class="btn ghost sm">← All settings</button>
   </div>
+
+  <!-- Tab bar for the grouped Company Settings page (built in JS). -->
+  <div id="companySettingsTabs" class="type-pills hidden" style="margin-bottom:14px;flex-wrap:wrap;"></div>
 
   <!-- Town Hall: the company owner's at-a-glance overview (company admins). -->
   <section id="townHall" class="hidden">
@@ -373,12 +375,9 @@
     <p class="muted" style="margin:0 0 14px;font-size:13px;">Pick a section to manage it.</p>
     <div class="home-grid">
       <button class="home-btn" data-card="usersCard"><span class="hb-ico">👥</span><b>Accounts</b><small>Add people, set function &amp; managers, reset passwords</small></button>
-      <button class="home-btn" data-card="rolesCard"><span class="hb-ico">🏷️</span><b>Roles &amp; titles</b><small>Custom titles and the access tier each grants</small></button>
       <button class="home-btn" data-card="teamsCard"><span class="hb-ico">🗂️</span><b>Teams</b><small>Group reps into teams</small></button>
-      <button class="home-btn" data-card="schedulingCard"><span class="hb-ico">📅</span><b>Scheduling &amp; Closers</b><small>Booking window, business hours &amp; appointment routing</small></button>
       <button class="home-btn" data-card="companyServicesCard"><span class="hb-ico">🧩</span><b>Services</b><small>Turn tools on/off for this company &amp; set the price override</small></button>
       <button class="home-btn" data-card="companyProfileCard"><span class="hb-ico">🏢</span><b>Company profile</b><small>Company name, phone, address &amp; email</small></button>
-      <button class="home-btn" data-card="companyBrandingCard"><span class="hb-ico">🏷</span><b>RallyCard branding</b><small>Company logo, website, phone &amp; address shown on every rep's card</small></button>
       <button class="home-btn" data-card="roleServicesCard"><span class="hb-ico">🔐</span><b>Role services</b><small>What each role (position) sees at login &amp; in the app</small></button>
       <button class="home-btn" data-card="companySettingsCard"><span class="hb-ico">⚙️</span><b>Settings</b><small>Max territories per rep &amp; other company options</small></button>
       <button class="home-btn" data-card="batteryPricingCard"><span class="hb-ico">🔋</span><b>Battery pricing</b><small>Per-product price &amp; install adder for proposals</small></button>
@@ -1613,6 +1612,32 @@ function enterConsole() {
 const COMPANY_SETTINGS_CARDS = ["schedulingCard","companySettingsCard","companyProfileCard","companyBrandingCard","batteryPricingCard","rolesCard","teamsCard","rewardsCard","milestonesCard","redemptionsCard","outreachCard","companyBillingCard","usersCard"];
 function hideAllSettingCards() {
   COMPANY_SETTINGS_CARDS.forEach((id) => { const el = $(id); if (el) el.classList.add("hidden"); });
+  const tabs = $("companySettingsTabs"); if (tabs) tabs.classList.add("hidden");
+}
+
+// The Company Settings page groups several settings as tabs (rather than each
+// being its own hub tile). Order = tab order.
+const COMPANY_SETTINGS_TABS = [
+  ["companySettingsCard", "Company"],
+  ["companyBrandingCard", "RallyCard branding"],
+  ["rolesCard", "Roles & titles"],
+  ["schedulingCard", "Scheduling & Closers"],
+];
+const COMPANY_SETTINGS_TAB_IDS = new Set(COMPANY_SETTINGS_TABS.map((t) => t[0]));
+
+// Open the grouped Company Settings page on a given tab (defaults to the first).
+function openCompanySettings(tabId) {
+  const active = COMPANY_SETTINGS_TAB_IDS.has(tabId) ? tabId : COMPANY_SETTINGS_TABS[0][0];
+  $("townHall").classList.add("hidden");
+  $("settingsHub").classList.add("hidden");
+  $("settingBackBar").classList.remove("hidden");
+  // Show only the active tab's card; hide every other setting card.
+  COMPANY_SETTINGS_CARDS.forEach((id) => { const el = $(id); if (el) el.classList.toggle("hidden", id !== active); });
+  const bar = $("companySettingsTabs");
+  bar.innerHTML = COMPANY_SETTINGS_TABS.map(([id, label]) =>
+    `<button class="pill${id === active ? " active" : ""}" data-tab="${id}">${label}</button>`).join("");
+  bar.classList.remove("hidden");
+  window.scrollTo({ top: 0, behavior: "smooth" });
 }
 function showAdminView(view) {
   state.adminView = view;
@@ -1640,15 +1665,19 @@ function showSettingsHub() {
   window.scrollTo({ top: 0, behavior: "smooth" });
 }
 // Open one setting in its own page (hub hidden, just this card + a back bar).
+// The grouped Company Settings tabs route to the tabbed page instead.
 function openSetting(cardId) {
+  if (COMPANY_SETTINGS_TAB_IDS.has(cardId)) { openCompanySettings(cardId); return; }
   $("townHall").classList.add("hidden");
   $("settingsHub").classList.add("hidden");
+  const tabs = $("companySettingsTabs"); if (tabs) tabs.classList.add("hidden");
   COMPANY_SETTINGS_CARDS.forEach((id) => { const el = $(id); if (el) el.classList.toggle("hidden", id !== cardId); });
   $("settingBackBar").classList.remove("hidden");
   window.scrollTo({ top: 0, behavior: "smooth" });
 }
 $("adminViewToggle").addEventListener("click", (e) => { const t = e.target.closest(".tab"); if (t) showAdminView(t.dataset.view); });
 $("settingsHub").addEventListener("click", (e) => { const b = e.target.closest(".home-btn"); if (b) openSetting(b.dataset.card); });
+$("companySettingsTabs").addEventListener("click", (e) => { const b = e.target.closest("[data-tab]"); if (b) openCompanySettings(b.dataset.tab); });
 $("settingBack").addEventListener("click", showSettingsHub);
 $("thRefresh").addEventListener("click", () => loadTownHall(state.selectedCompany));
 
