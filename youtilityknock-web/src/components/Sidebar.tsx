@@ -54,6 +54,7 @@ const links: { to: string; label: string; icon: string; end?: boolean; feat?: Fe
   { to: "/leaderboard", label: "Leaderboard", icon: "🏆", feat: "rewards", rallyOnlyLink: true },
   { to: "/gamify", label: "Gamify", icon: "🎮", feat: "rewards" },
   { to: "/rewards", label: "Rewards", icon: "🎁", feat: "rewards" },
+  { to: "/throwdowns", label: "Throw Downs", icon: "⚔️", feat: "rewards" },
   { to: "/territories", label: "Territories", icon: "▰", feat: "aiTerritories", canvassOnly: true },
   { to: "/settings", label: "Settings", icon: "⚐" },
 ];

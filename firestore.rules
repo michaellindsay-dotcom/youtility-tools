@@ -173,6 +173,15 @@ service cloud.firestore {
                     && (isSuper() || isCompanyAdmin() || inPath(resource.data.visibilityPath));
     }
 
+    // ── challenges (rep-vs-rep Throw Downs) ──────────────────────────────
+    // Participants (and company admins) may read; all writes go through the
+    // create/respond/tick Cloud Functions (admin SDK), so clients never write.
+    match /challenges/{challengeId} {
+      allow read: if inMyCompany(resource.data.companyId)
+                  && (isSuper() || isCompanyAdmin() || request.auth.uid in resource.data.participants);
+      allow create, update, delete: if false;
+    }
+
     // ── user stats ───────────────────────────────────────────────────────
     // Any company member can read their company's stats (powers a company-wide
     // leaderboard everyone can see). A user writes only their own.

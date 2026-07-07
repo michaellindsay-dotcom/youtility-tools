@@ -410,6 +410,33 @@ export interface ChatMessage {
   leadId?: string;
 }
 
+// A rep-vs-rep "Throw Down" challenge. Stakes are between the two reps (fun /
+// embarrassing / lunch), capped at $100. Winner is settled automatically from
+// stats when the window ends.
+export type ChallengeMetric = "doors" | "appointments" | "sales" | "points";
+export interface Challenge {
+  id: string;
+  companyId: string;
+  metric: ChallengeMetric;
+  period: "day" | "week";
+  startAt: number;
+  endAt: number;
+  stakes: string;
+  stakeValue?: number | null; // optional $ value, capped at 100
+  challengerUid: string;
+  challengerName: string;
+  opponentUid: string;
+  opponentName: string;
+  participants: string[]; // [challengerUid, opponentUid] — drives read access
+  status: "pending" | "active" | "declined" | "cancelled" | "settled";
+  challengerScore?: number;
+  opponentScore?: number;
+  scoresUpdatedAt?: number;
+  winnerUid?: string | null; // set on settle; null = tie
+  createdAt: number;
+  updatedAt: number;
+}
+
 export interface DmChannel {
   id: string;
   members: string[];

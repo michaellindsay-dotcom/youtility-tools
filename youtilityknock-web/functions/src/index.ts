@@ -3618,6 +3618,167 @@ export const companyFunnelRankings = onCall(async (request) => {
 });
 
 // ════════════════════════════════════════════════════════════════════════════
+// THROW DOWNS — rep-vs-rep challenges. Stakes are between the two reps (capped
+// at $100). The winner is settled automatically from stats when the window ends.
+// ════════════════════════════════════════════════════════════════════════════
+// Every active teammate in the caller's company (uid + name), so any rep can
+// pick an opponent even if the other rep isn't in their downline.
+export const listTeammates = onCall(async (request) => {
+  const caller = await getCaller(request);
+  if (!caller.companyId) throw new HttpsError("permission-denied", "No company.");
+  const snap = await db.collection("users").where("companyId", "==", caller.companyId).get();
+  const teammates = snap.docs
+    .filter((d) => d.id !== caller.uid)
+    .map((d): { uid: string; [k: string]: any } => ({ uid: d.id, ...(d.data() as Record<string, any>) }))
+    .filter((u) => u.disabled !== true)
+    .map((u) => ({ uid: u.uid, name: u.displayName || u.email || "Rep", isCloser: !!u.isCloser }))
+    .sort((a, b) => a.name.localeCompare(b.name));
+  return { teammates };
+});
+
+const CHALLENGE_METRICS = new Set(["doors", "appointments", "sales", "points"]);
+type ChScore = { doors: number; conv: number; appt: number; sale: number };
+// Per-rep funnel for a window (leads owned by each uid), same rules as the Town
+// Hall / leaderboard. Returns a map uid → counts for the requested uids only.
+async function challengeFunnel(companyId: string, startMs: number, endMs: number, uids: string[]): Promise<Record<string, ChScore>> {
+  const want = new Set(uids);
+  const out: Record<string, ChScore> = {};
+  uids.forEach((u) => { out[u] = { doors: 0, conv: 0, appt: 0, sale: 0 }; });
+  const CONVO = new Set(["pipeline", "appointment", "not_interested", "sold"]);
+  const knockAt = (l: any) => l.knockedAt || l.createdAt || 0;
+  const closeAt = (l: any) => l.soldAt || l.updatedAt || l.knockedAt || l.createdAt || 0;
+  const leadsCol = db.collection("leads");
+  let leadDocs;
+  try {
+    leadDocs = (await leadsCol.where("companyId", "==", companyId).where("createdAt", ">=", startMs).get()).docs;
+  } catch {
+    leadDocs = (await leadsCol.where("companyId", "==", companyId).get()).docs;
+  }
+  for (const d of leadDocs) {
+    const l = d.data();
+    const uid = l.assignedTo as string;
+    if (!want.has(uid)) continue;
+    const t = knockAt(l);
+    if (t < startMs || t >= endMs) continue;
+    const acc = out[uid];
+    if (l.verified !== false) { acc.doors++; if (CONVO.has(l.status)) acc.conv++; }
+    if (l.status === "appointment") acc.appt++;
+  }
+  const soldDocs = (await leadsCol.where("companyId", "==", companyId).where("status", "==", "sold").get().catch(() => null))?.docs || [];
+  for (const d of soldDocs) {
+    const l = d.data();
+    const uid = l.assignedTo as string;
+    if (!want.has(uid)) continue;
+    const c = closeAt(l);
+    if (c < startMs || c >= endMs) continue;
+    out[uid].sale++;
+  }
+  return out;
+}
+function scoreForMetric(f: ChScore, metric: string): number {
+  if (metric === "doors") return f.doors;
+  if (metric === "appointments") return f.appt;
+  if (metric === "sales") return f.sale;
+  return f.doors * 1 + f.conv * 3 + f.appt * 20 + f.sale * 100; // points
+}
+
+export const createChallenge = onCall(async (request) => {
+  const caller = await getCaller(request);
+  const companyId = caller.companyId;
+  if (!companyId) throw new HttpsError("permission-denied", "No company.");
+  const { opponentUid, metric, period, startAt, endAt, stakes, stakeValue } = (request.data || {}) as {
+    opponentUid?: string; metric?: string; period?: string; startAt?: number; endAt?: number; stakes?: string; stakeValue?: number | null;
+  };
+  if (!opponentUid || opponentUid === caller.uid) throw new HttpsError("invalid-argument", "Pick another rep to challenge.");
+  if (!metric || !CHALLENGE_METRICS.has(metric)) throw new HttpsError("invalid-argument", "Pick a valid metric.");
+  if (period !== "day" && period !== "week") throw new HttpsError("invalid-argument", "Pick day or week.");
+  const s = Number(startAt), e = Number(endAt);
+  if (!Number.isFinite(s) || !Number.isFinite(e) || e <= s || e - s > 8 * 86400000) throw new HttpsError("invalid-argument", "Bad window.");
+  const note = String(stakes || "").trim();
+  if (!note) throw new HttpsError("invalid-argument", "Add what's on the line.");
+  let value: number | null = null;
+  if (stakeValue != null && stakeValue !== undefined) {
+    value = Number(stakeValue);
+    if (!Number.isFinite(value) || value < 0) throw new HttpsError("invalid-argument", "Bad stake value.");
+    if (value > 100) throw new HttpsError("invalid-argument", "Stakes are capped at $100.");
+  }
+  const [meDoc, oppDoc] = await Promise.all([db.doc(`users/${caller.uid}`).get(), db.doc(`users/${opponentUid}`).get()]);
+  const opp = oppDoc.data();
+  if (!oppDoc.exists || !opp || opp.companyId !== companyId || opp.disabled === true) throw new HttpsError("invalid-argument", "Pick a rep in your company.");
+  const challengerName = (meDoc.data()?.displayName as string) || (meDoc.data()?.email as string) || "A teammate";
+  const opponentName = (opp.displayName as string) || (opp.email as string) || "Rep";
+  const now = Date.now();
+  const ref = await db.collection("challenges").add({
+    companyId, metric, period, startAt: s, endAt: e, stakes: note, stakeValue: value,
+    challengerUid: caller.uid, challengerName, opponentUid, opponentName,
+    participants: [caller.uid, opponentUid], status: "pending",
+    challengerScore: 0, opponentScore: 0, createdAt: now, updatedAt: now,
+  });
+  await notifyUser({ userId: opponentUid, type: "challenge", title: `⚔️ Throw Down from ${challengerName}`, body: `${metric} · ${period === "day" ? "today" : "this week"} — on the line: ${note}`, link: "/app/throwdowns" });
+  return { ok: true, id: ref.id };
+});
+
+export const respondChallenge = onCall(async (request) => {
+  const caller = await getCaller(request);
+  const { challengeId, action } = (request.data || {}) as { challengeId?: string; action?: string };
+  if (!challengeId || !["accept", "decline", "cancel"].includes(String(action))) throw new HttpsError("invalid-argument", "challengeId and action required.");
+  const ref = db.doc(`challenges/${challengeId}`);
+  const snap = await ref.get();
+  const c = snap.data();
+  if (!snap.exists || !c) throw new HttpsError("not-found", "Challenge not found.");
+  const isOpponent = c.opponentUid === caller.uid;
+  const isChallenger = c.challengerUid === caller.uid;
+  if (!isOpponent && !isChallenger && !caller.isSuper) throw new HttpsError("permission-denied", "Not your challenge.");
+  const now = Date.now();
+  if (action === "accept") {
+    if (!isOpponent || c.status !== "pending") throw new HttpsError("failed-precondition", "Can't accept this challenge.");
+    await ref.set({ status: "active", updatedAt: now }, { merge: true });
+    await notifyUser({ userId: c.challengerUid, type: "challenge", title: `✅ ${c.opponentName} accepted your Throw Down`, body: `${c.metric} · game on!`, link: "/app/throwdowns" });
+  } else if (action === "decline") {
+    if (!isOpponent || c.status !== "pending") throw new HttpsError("failed-precondition", "Can't decline this challenge.");
+    await ref.set({ status: "declined", updatedAt: now }, { merge: true });
+    await notifyUser({ userId: c.challengerUid, type: "challenge", title: `❌ ${c.opponentName} declined your Throw Down`, link: "/app/throwdowns" });
+  } else { // cancel
+    if (!isChallenger || (c.status !== "pending" && c.status !== "active")) throw new HttpsError("failed-precondition", "Can't cancel this challenge.");
+    await ref.set({ status: "cancelled", updatedAt: now }, { merge: true });
+    if (c.opponentUid) await notifyUser({ userId: c.opponentUid, type: "challenge", title: `🚫 ${c.challengerName} called off the Throw Down`, link: "/app/throwdowns" });
+  }
+  return { ok: true };
+});
+
+// Every 15 min: refresh live scores on active challenges and settle any whose
+// window has ended (winner = higher score; tie = no winner).
+export const tickChallenges = onSchedule("every 15 minutes", async () => {
+  const now = Date.now();
+  const snap = await db.collection("challenges").where("status", "==", "active").get();
+  for (const d of snap.docs) {
+    const c = d.data();
+    const startAt = Number(c.startAt) || 0;
+    const endAt = Number(c.endAt) || 0;
+    const windowEnd = Math.min(now, endAt);
+    try {
+      const funnel = await challengeFunnel(c.companyId as string, startAt, windowEnd, [c.challengerUid, c.opponentUid]);
+      const cs = scoreForMetric(funnel[c.challengerUid], c.metric as string);
+      const os = scoreForMetric(funnel[c.opponentUid], c.metric as string);
+      if (now >= endAt) {
+        const winnerUid = cs === os ? null : (cs > os ? c.challengerUid : c.opponentUid);
+        await d.ref.set({ status: "settled", challengerScore: cs, opponentScore: os, winnerUid, scoresUpdatedAt: now, updatedAt: now }, { merge: true });
+        const loserUid = winnerUid ? (winnerUid === c.challengerUid ? c.opponentUid : c.challengerUid) : null;
+        const winnerName = winnerUid === c.challengerUid ? c.challengerName : c.opponentName;
+        if (winnerUid) {
+          await notifyUser({ userId: winnerUid, type: "challenge", title: "🏆 You won the Throw Down!", body: `Final: ${cs} vs ${os}. Collect: ${c.stakes}`, link: "/app/throwdowns" });
+          if (loserUid) await notifyUser({ userId: loserUid, type: "challenge", title: `😤 ${winnerName} won the Throw Down`, body: `You owe: ${c.stakes}`, link: "/app/throwdowns" });
+        } else {
+          for (const u of [c.challengerUid, c.opponentUid]) await notifyUser({ userId: u, type: "challenge", title: "🤝 Throw Down tied", body: `Dead heat at ${cs}. Call it a draw?`, link: "/app/throwdowns" });
+        }
+      } else {
+        await d.ref.set({ challengerScore: cs, opponentScore: os, scoresUpdatedAt: now }, { merge: true });
+      }
+    } catch (e) { logger.warn("tickChallenges failed for", d.id, e); }
+  }
+});
+
+// ════════════════════════════════════════════════════════════════════════════
 // WEEKLY SEASON RECAP — every Friday evening, post a hype recap to each
 // company's Team Chat: top 3 by points + the biggest climber vs. last week.
 // Mirrors the client points model (lib/points.ts).
