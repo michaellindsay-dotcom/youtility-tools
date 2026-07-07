@@ -8,6 +8,14 @@ version. Bump `VERSION_NAME` for a new public milestone and add a section here.
 
 ## [Unreleased]
 
+### Fixed
+- Appointment counts no longer **double** on the leaderboard. The on-the-door
+  disposition modal counted an appointment on every save, so re-opening an
+  already-booked lead (to add a photo, tweak notes, confirm the closer, or fix
+  the time) re-counted it. It now counts only the transition *into* appointment
+  (and, likewise, *into* sold) — mirroring the server-side guard — and validates
+  the appointment time up front so a bail-and-retry can't count twice.
+
 ### Added
 - **RallyCard** (formerly "Digital Business Card") — every rep can publish a
   public, no-login profile page (photo, bio, service area, reviews,
