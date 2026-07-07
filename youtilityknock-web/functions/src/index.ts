@@ -213,9 +213,9 @@ async function authorizeForOrg(caller: Caller, orgId: string | undefined): Promi
 }
 
 async function authorizeForTargetUser(caller: Caller, targetUid: string) {
-  if (caller.uid === targetUid && !caller.isSuper) {
-    throw new HttpsError("permission-denied", "You can't change your own access.");
-  }
+  // Editing your own account is allowed; callers add narrow guards to stop the
+  // two moves that would lock you out (removing your own admin, disabling
+  // yourself). Deleting yourself is blocked in deleteUser.
   const snap = await db.doc(`users/${targetUid}`).get();
   if (!snap.exists) throw new HttpsError("not-found", "User not found.");
   const target = snap.data()!;
@@ -872,6 +872,19 @@ export const assignUserHierarchy = onCall(async (request) => {
   const target = await authorizeForTargetUser(caller, uid);
   const company = target.companyId as string;
 
+  // You can edit your own team/managers/etc., but not strip your own admin.
+  if (uid === caller.uid && !caller.isSuper) {
+    if (isPosition(position) && tierForPosition(position) !== "admin") {
+      throw new HttpsError("permission-denied", "You can't change your own role away from admin — ask another admin.");
+    }
+    if (roleId) {
+      const rs = await db.doc(`companies/${company}/roles/${roleId}`).get();
+      if (rs.exists && (rs.data()!.baseTier as string) !== "admin") {
+        throw new HttpsError("permission-denied", "You can't change your own role away from admin — ask another admin.");
+      }
+    }
+  }
+
   if (managerId === uid) throw new HttpsError("invalid-argument", "A user can't report to themselves.");
   if (closerManagerId === uid) throw new HttpsError("invalid-argument", "A user can't report to themselves.");
 
@@ -1120,6 +1133,9 @@ export const setUserRole = onCall(async (request) => {
   const { uid, role } = request.data as { uid?: string; role?: Tier };
   if (!uid || !TIERS.includes(role as Tier)) throw new HttpsError("invalid-argument", "uid and a valid tier are required.");
   await authorizeForTargetUser(caller, uid);
+  if (uid === caller.uid && !caller.isSuper && role !== "admin") {
+    throw new HttpsError("permission-denied", "You can't change your own role away from admin.");
+  }
   const existing = (await getAuth().getUser(uid)).customClaims || {};
   await getAuth().setCustomUserClaims(uid, { ...existing, role });
   await db.doc(`users/${uid}`).set({ role }, { merge: true });
@@ -1131,6 +1147,9 @@ export const setUserDisabled = onCall(async (request) => {
   const { uid, disabled } = request.data as { uid?: string; disabled?: boolean };
   if (!uid || typeof disabled !== "boolean") throw new HttpsError("invalid-argument", "uid and disabled flag required.");
   await authorizeForTargetUser(caller, uid);
+  if (uid === caller.uid && !caller.isSuper && disabled) {
+    throw new HttpsError("permission-denied", "You can't disable your own account.");
+  }
   await getAuth().updateUser(uid, { disabled });
   if (disabled) await getAuth().revokeRefreshTokens(uid);
   await db.doc(`users/${uid}`).set(
