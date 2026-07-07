@@ -114,7 +114,7 @@ export default function App() {
         <Route path="projects" element={<CanvassGate><Gated feature="battery"><CloserGate><Projects /></CloserGate></Gated></CanvassGate>} />
         <Route path="pitches" element={<CanvassGate><Gated feature="pitch"><Pitches /></Gated></CanvassGate>} />
         <Route path="training" element={<CanvassGate><Training /></CanvassGate>} />
-        <Route path="pitch-library" element={<CanvassGate><Gated feature="pitch"><RoleGate allow={["admin", "manager"]}><PitchLibrary /></RoleGate></Gated></CanvassGate>} />
+        <Route path="pitch-library" element={<CanvassGate><Gated feature="pitch"><PitchLibrary /></Gated></CanvassGate>} />
         <Route path="shifts" element={<CanvassGate><Gated anyOf={["planner", "analytics"]}><Shifts /></Gated></CanvassGate>} />
         {/* Analytics merged into the Success Planner screen; keep the old path working. */}
         <Route path="stats" element={<Navigate to="/shifts" replace />} />
