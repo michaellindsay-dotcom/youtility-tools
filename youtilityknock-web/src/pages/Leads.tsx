@@ -3,6 +3,7 @@ import {
   addDoc,
   collection,
   doc,
+  getDocs,
   onSnapshot,
   orderBy,
   query,
@@ -25,6 +26,8 @@ export default function Leads() {
   const { profile, role, companyId, company } = useAuth();
   const navigate = useNavigate();
   const isAdmin = role === "admin" || role === "superadmin";
+  // Admins/managers get extra filters (by rep in their downline + by date).
+  const canFilterByRep = role === "admin" || role === "manager";
   const [leads, setLeads] = useState<Lead[]>([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<LeadStatus | "all">("all");
@@ -32,6 +35,31 @@ export default function Leads() {
   const [showDeleted, setShowDeleted] = useState(false); // admin-only archive view
   const [deleteTarget, setDeleteTarget] = useState<Lead | null>(null);
   const [search, setSearch] = useState("");
+  // Manager/admin filters: "all" | "me" | a downline rep's uid, plus a date range.
+  const [repFilter, setRepFilter] = useState<string>("all");
+  const [fromDate, setFromDate] = useState("");
+  const [toDate, setToDate] = useState("");
+  const [roster, setRoster] = useState<{ uid: string; name: string }[]>([]);
+
+  // Downline roster (excludes self — "Me" is offered separately). Admins see the
+  // whole company; managers see their downstream via managerPath. Mirrors Reports.
+  useEffect(() => {
+    if (!profile || !companyId || !canFilterByRep) return;
+    const base = collection(db, "users");
+    const q = role === "admin"
+      ? query(base, where("companyId", "==", companyId))
+      : query(base, where("companyId", "==", companyId), where("managerPath", "array-contains", profile.uid));
+    getDocs(q)
+      .then((snap) => {
+        const list = snap.docs
+          .map((d) => ({ uid: d.id, data: d.data() as Record<string, unknown> }))
+          .filter((u) => u.uid !== profile.uid && u.data.disabled !== true)
+          .map((u) => ({ uid: u.uid, name: (u.data.displayName as string) || (u.data.email as string) || "Rep" }))
+          .sort((a, b) => a.name.localeCompare(b.name));
+        setRoster(list);
+      })
+      .catch((e) => console.error("leads roster", e));
+  }, [profile, role, companyId, canFilterByRep]);
 
   useEffect(() => {
     if (!profile || !companyId) return;
@@ -65,7 +93,18 @@ export default function Leads() {
   // Deleted leads are hidden everywhere except the admin's archive view.
   const active = leads.filter((l) => !l.deleted);
   const deleted = leads.filter((l) => l.deleted);
-  const byStatus = showDeleted ? deleted : (filter === "all" ? active : active.filter((l) => l.status === filter));
+  // Rep + date filters (admins/managers). Rep = the lead's owner, falling back
+  // to who created it; date range is on when the lead was created.
+  const repOf = (l: Lead) => l.assignedTo || l.createdBy;
+  const inRep = (l: Lead) =>
+    repFilter === "all" || (repFilter === "me" ? repOf(l) === profile?.uid : repOf(l) === repFilter);
+  const fromMs = fromDate ? new Date(`${fromDate}T00:00:00`).getTime() : null;
+  const toMs = toDate ? new Date(`${toDate}T23:59:59.999`).getTime() : null;
+  const inDate = (l: Lead) =>
+    (fromMs == null || (l.createdAt ?? 0) >= fromMs) && (toMs == null || (l.createdAt ?? 0) <= toMs);
+  const scoped = (showDeleted ? deleted : active).filter((l) => inRep(l) && inDate(l));
+  const byStatus = showDeleted ? scoped : (filter === "all" ? scoped : scoped.filter((l) => l.status === filter));
+  const filtersActive = repFilter !== "all" || !!fromDate || !!toDate;
   // Live search across name, phone (digits only), and address.
   const digits = (s: string) => s.replace(/\D/g, "");
   const q = search.trim().toLowerCase();
@@ -128,6 +167,27 @@ export default function Leads() {
         {search && <button className="btn ghost sm" onClick={() => setSearch("")}>Clear</button>}
       </div>
 
+      {canFilterByRep && (
+        <div className="row" style={{ marginBottom: 10, gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+          <select value={repFilter} onChange={(e) => setRepFilter(e.target.value)} title="Filter by rep">
+            <option value="all">👥 Everyone</option>
+            <option value="me">👤 Me</option>
+            {roster.map((u) => <option key={u.uid} value={u.uid}>{u.name}</option>)}
+          </select>
+          <label className="muted small" style={{ display: "flex", alignItems: "center", gap: 4 }}>
+            From <input type="date" value={fromDate} max={toDate || undefined} onChange={(e) => setFromDate(e.target.value)} />
+          </label>
+          <label className="muted small" style={{ display: "flex", alignItems: "center", gap: 4 }}>
+            To <input type="date" value={toDate} min={fromDate || undefined} onChange={(e) => setToDate(e.target.value)} />
+          </label>
+          {filtersActive && (
+            <button className="btn ghost sm" onClick={() => { setRepFilter("all"); setFromDate(""); setToDate(""); }}>
+              Clear filters
+            </button>
+          )}
+        </div>
+      )}
+
       {!showDeleted && (
         <div className="filter-bar">
           <button className={"chip-btn" + (filter === "all" ? " active" : "")} onClick={() => setFilter("all")}>All</button>
@@ -142,7 +202,7 @@ export default function Leads() {
       {loading ? (
         <div className="muted">Loading leads…</div>
       ) : shown.length === 0 ? (
-        <div className="empty">{q ? `No leads match "${search.trim()}".` : showDeleted ? "No deleted leads." : "No leads yet. Add one or run an address lookup."}</div>
+        <div className="empty">{q ? `No leads match "${search.trim()}".` : filtersActive ? "No leads match the selected rep/date filters." : showDeleted ? "No deleted leads." : "No leads yet. Add one or run an address lookup."}</div>
       ) : (
         <div className="lead-list">
           {shown.map((lead) => (
