@@ -133,6 +133,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // Track the UID we've already tried to self-heal so a permanently
     // profile-less account doesn't loop calling relinkMyProfile.
     let relinkTried: string | null = null;
+    // Last-seen claimsUpdatedAt: when an admin changes this user's role /
+    // position, the server bumps this. We force-refresh the ID token so the new
+    // custom claims (and the security-rule access they grant) take effect right
+    // away — including on the iOS app — instead of after the ~1h token cycle or
+    // a re-login. 0 = not yet seeded (the token from sign-in is already current).
+    let lastClaimsAt = 0;
     const stopProfile = () => {
       if (unsubProfile) {
         unsubProfile();
@@ -142,6 +148,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const unsub = onAuthStateChanged(auth, (u) => {
       setUser(u);
       stopProfile();
+      lastClaimsAt = 0;
       if (!u) {
         setProfile(null);
         setNoAccess(false);
@@ -176,6 +183,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
                 }
               });
             return;
+          }
+          // Role/claims changed server-side → pull a fresh ID token so the new
+          // access applies immediately (seed silently on the first snapshot).
+          const claimsAt = Number(snap.data()?.claimsUpdatedAt) || 0;
+          if (lastClaimsAt === 0) {
+            lastClaimsAt = claimsAt;
+          } else if (claimsAt > lastClaimsAt) {
+            lastClaimsAt = claimsAt;
+            void u.getIdToken(true).catch(() => { /* refreshes on next cycle */ });
           }
           setProfile(p);
           setNoAccess(p === null);
