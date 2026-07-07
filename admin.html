@@ -1379,6 +1379,7 @@ const updateTeam      = httpsCallable(fns, "updateTeam");
 const assignUserHierarchy = httpsCallable(fns, "assignUserHierarchy");
 const setUserPhoneRouting = httpsCallable(fns, "setUserPhoneRouting");
 const updateUserProfile = httpsCallable(fns, "updateUserProfile");
+const changeUserEmail = httpsCallable(fns, "changeUserEmail");
 const setPositionServices = httpsCallable(fns, "setPositionServices");
 const reassignAppointment = httpsCallable(fns, "reassignAppointment");
 const impersonate     = httpsCallable(fns, "impersonate");
@@ -4291,7 +4292,12 @@ function renderProfileBody(uid, ov) {
     <h4 style="margin:12px 0 6px;font-size:13px;">Account info</h4>
     <div class="grid-2">
       <div class="field"><span>Name</span><input class="pfName" value="${esc(u.displayName || '')}" /></div>
-      <div class="field"><span>Email</span><input value="${esc(u.email || '')}" disabled title="Sign-in email — contact support to change" /></div>
+      <div class="field"><span>Email <span class="muted small">(sign-in)</span></span>
+        <div class="row" style="gap:8px;align-items:center;">
+          <input value="${esc(u.email || '')}" disabled style="flex:1;min-width:0;" />
+          <button type="button" class="btn ghost sm pfEmailBtn">Change</button>
+        </div>
+      </div>
       <div class="field"><span>Phone</span><input class="pfPhone" value="${esc(u.phone || '')}" placeholder="(555) 123-4567" /></div>
       <div class="field"><span>Birthday</span><input class="pfBirthday" type="date" value="${esc(u.birthday || '')}" /></div>
       <div class="field"><span>Shirt size</span><input class="pfShirt" value="${esc(u.shirtSize || '')}" placeholder="e.g. L" /></div>
@@ -4353,6 +4359,8 @@ function renderProfileBody(uid, ov) {
     } catch (e) { pbanner(e.message || "Save failed.", "error"); }
     finally { ev.target.disabled = false; }
   });
+
+  pb.querySelector(".pfEmailBtn").addEventListener("click", () => openChangeEmailModal(u, ov));
 
   async function saveCustomTitle(roleId) {
     try { await assignUserHierarchy({ uid: u.id, roleId: roleId || null }); pbanner("Custom title updated.", "good"); await refresh(); }
@@ -4426,6 +4434,52 @@ function renderProfileBody(uid, ov) {
       pbanner(`Mirroring ${u.email} in a new tab.`, "good");
     } catch (e) { pbanner(e.message || "Mirror failed.", "error"); }
     finally { mb.disabled = false; mb.textContent = "Mirror"; }
+  });
+}
+
+// Change a user's sign-in email. Sensitive: the admin re-authenticates with
+// their own password and records a reason, which the server logs.
+function openChangeEmailModal(u, parentOv) {
+  const ov = document.createElement("div");
+  ov.style.cssText = "position:fixed;inset:0;background:rgba(2,8,18,.72);display:grid;place-items:center;z-index:3200;padding:16px;";
+  ov.innerHTML = `<div class="card" style="max-width:440px;width:100%;" onclick="event.stopPropagation()">
+    <h3 style="margin-top:0;">Change sign-in email</h3>
+    <p class="muted small">${esc(u.displayName || u.email || "This user")} currently signs in as <strong>${esc(u.email || "")}</strong>. This changes how they log in (their password stays the same). Confirm with your password and a reason.</p>
+    <label class="field"><span>New email</span><input id="ceEmail" type="email" value="${esc(u.email || '')}" /></label>
+    <label class="field"><span>Reason (required)</span><textarea id="ceReason" rows="2" placeholder="Why is this email changing?"></textarea></label>
+    <label class="field"><span>Your password</span><input id="cePw" type="password" autocomplete="current-password" /></label>
+    <div class="row" style="justify-content:flex-end;gap:8px;margin-top:12px;">
+      <button class="btn ghost sm" id="ceCancel">Cancel</button>
+      <button class="btn primary sm" id="ceConfirm">Change email</button>
+    </div>
+    <div class="banner" id="ceBanner" style="margin-top:10px;"></div>
+  </div>`;
+  ov.addEventListener("click", () => ov.remove());
+  ov.querySelector("#ceCancel").addEventListener("click", () => ov.remove());
+  document.body.appendChild(ov);
+  ov.querySelector("#ceConfirm").addEventListener("click", async () => {
+    const be = ov.querySelector("#ceBanner");
+    const email = ov.querySelector("#ceEmail").value.trim();
+    const reason = ov.querySelector("#ceReason").value.trim();
+    const pw = ov.querySelector("#cePw").value;
+    if (!email) { banner(be, "Enter the new email.", "error"); return; }
+    if (!reason) { banner(be, "A reason is required.", "error"); return; }
+    if (!pw) { banner(be, "Enter your password to confirm.", "error"); return; }
+    if (!auth.currentUser?.email) { banner(be, "No admin account loaded.", "error"); return; }
+    const btn = ov.querySelector("#ceConfirm"); btn.disabled = true; btn.textContent = "Changing…";
+    try {
+      await reauthenticateWithCredential(auth.currentUser, EmailAuthProvider.credential(auth.currentUser.email, pw));
+      await changeUserEmail({ uid: u.id, newEmail: email, reason });
+      ov.remove();
+      await loadUsers(); populateUserFormSelects();
+      if (parentOv && document.body.contains(parentOv)) renderProfileBody(u.id, parentOv);
+      banner($("banner"), `Sign-in email changed to ${email}.`, "good");
+    } catch (e) {
+      const code = e?.code;
+      banner(be, (code === "auth/wrong-password" || code === "auth/invalid-credential")
+        ? "That password is incorrect." : (e?.message || "Couldn't change the email."), "error");
+      btn.disabled = false; btn.textContent = "Change email";
+    }
   });
 }
 
