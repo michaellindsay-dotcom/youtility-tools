@@ -42,12 +42,12 @@ function Gated({
   anyOf?: FeatureKey[];
   children: React.ReactNode;
 }) {
-  const { company, profile, team } = useAuth();
+  const { company, profile, team, companyServices } = useAuth();
   const keys = anyOf ?? (feature ? [feature] : []);
-  // Honor the SAME effective access the sidebar uses (company plan + the user's
-  // role/position + team services), so a service deactivated for this role can't
-  // be reached by typing its URL — it's hidden entirely, not just from the nav.
-  const allowed = keys.some((k) => userHasService(company, profile, team, k));
+  // Honor the SAME effective access the sidebar uses (company plan + company-wide
+  // baseline + the user's role/position + team services), so a service
+  // deactivated can't be reached by typing its URL — it's hidden entirely.
+  const allowed = keys.some((k) => userHasService(company, profile, team, k, companyServices));
   return allowed ? <>{children}</> : <Navigate to="/" replace />;
 }
 
@@ -110,8 +110,8 @@ export default function App() {
         <Route path="team" element={<Team />} />
         <Route path="reports" element={<CanvassGate><RoleGate allow={["admin", "manager"]}><Reports /></RoleGate></CanvassGate>} />
         <Route path="closer" element={<CanvassGate><CloserGate><Closer /></CloserGate></CanvassGate>} />
-        <Route path="battery" element={<CanvassGate><CloserGate><BatteryTool /></CloserGate></CanvassGate>} />
-        <Route path="projects" element={<CanvassGate><CloserGate><Projects /></CloserGate></CanvassGate>} />
+        <Route path="battery" element={<CanvassGate><Gated feature="battery"><CloserGate><BatteryTool /></CloserGate></Gated></CanvassGate>} />
+        <Route path="projects" element={<CanvassGate><Gated feature="battery"><CloserGate><Projects /></CloserGate></Gated></CanvassGate>} />
         <Route path="pitches" element={<CanvassGate><Gated feature="pitch"><Pitches /></Gated></CanvassGate>} />
         <Route path="training" element={<CanvassGate><Training /></CanvassGate>} />
         <Route path="pitch-library" element={<CanvassGate><Gated feature="pitch"><RoleGate allow={["admin", "manager"]}><PitchLibrary /></RoleGate></Gated></CanvassGate>} />

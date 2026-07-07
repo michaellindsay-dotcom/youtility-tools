@@ -46,18 +46,38 @@ export function isRallyCardOnly(company: Company | null | undefined): boolean {
   return !hasFeature(company, "map");
 }
 
-// Effective per-USER access: the company plan AND, when configured, the user's
-// position + team services. Team services are a locked baseline; the position
-// adds to them. When nothing is configured (no positionServices for the user's
-// position and no team services), there's no extra restriction — exactly today's
-// behavior. Admins always see everything the company has.
+// Service keys the admin console's "Company services" / "Team services"
+// checkboxes manage. The company-wide baseline is only enforced for these (so
+// keys outside this set — e.g. pitch, card — are never accidentally gated by it).
+const BASELINE_KEYS = new Set<string>([
+  "map", "skiptrace", "scheduling", "calendar", "chat", "analytics", "rewards", "planner",
+  "battery", "voice", "historical", "aiRecommend", "aiTerritories", "movers", "leads", "team",
+]);
+
+// Effective per-USER access: the company plan AND the company-wide services
+// baseline AND, when configured, the user's position + team services.
+//
+// `companyServices` is the admin console's "Company services" umbrella baseline —
+// a hard company-wide ceiling for EVERYONE (admins included): if it's configured
+// and a service isn't in it, that service is off for the whole company (e.g.
+// unchecking "Battery tool & proposal" removes the Battery Tool + Sold Projects
+// everywhere). When it's null/empty, there's no company-wide restriction.
+//
+// Team services are a per-team restriction on top of that; the position adds to
+// them. When nothing is configured, there's no extra restriction — today's
+// behavior. Admins see everything the company still has.
 export function userHasService(
   company: Company | null | undefined,
   profile: UserProfile | null | undefined,
   team: Team | null | undefined,
   key: FeatureKey,
+  companyServices?: string[] | null,
 ): boolean {
   if (!hasFeature(company, key)) return false;
+  // Company-wide baseline (umbrella "Company services"): a hard ceiling for all.
+  if (BASELINE_KEYS.has(key) && Array.isArray(companyServices) && companyServices.length > 0 && !companyServices.includes(key)) {
+    return false;
+  }
   const pos = profile?.position;
   if (profile?.role === "admin" || pos === "admin") return true;
   const ps = company?.positionServices;

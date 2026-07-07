@@ -42,7 +42,7 @@ const links: { to: string; label: string; icon: string; end?: boolean; feat?: Fe
   { to: "/team", label: "Team", icon: "⛩", feat: "team", rallyOnlyLink: true },
   { to: "/closer", label: "Closer", icon: "🤝", closer: true, canvassOnly: true },
   { to: "/battery", label: "Battery Tool", icon: "🔋", closer: true, feat: "battery", canvassOnly: true },
-  { to: "/projects", label: "Sold Projects", icon: "📋", closer: true, canvassOnly: true },
+  { to: "/projects", label: "Sold Projects", icon: "📋", closer: true, feat: "battery", canvassOnly: true },
   { to: "/reports", label: "Reports", icon: "📊", roles: ["admin", "manager"], canvassOnly: true },
   { to: "/pitches", label: "My Pitches", icon: "🎙️", feat: "pitch", canvassOnly: true },
   { to: "/training", label: "Training", icon: "🎓", feat: "voice", canvassOnly: true },
@@ -60,7 +60,7 @@ const links: { to: string; label: string; icon: string; end?: boolean; feat?: Fe
 ];
 
 export default function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
-  const { company, role, profile, team, logout } = useAuth();
+  const { company, role, profile, team, companyServices, logout } = useAuth();
   const navigate = useNavigate();
   const [previewPos, setPreviewPos] = useState<Position | "">("");
   const canPreview = role === "admin" || role === "superadmin";
@@ -97,8 +97,8 @@ export default function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
     // otherwise the user's position must be in the allow-list.
     if (l.positions && !(eff.role === "admin" || (eff.profile?.position && l.positions.includes(eff.profile.position)))) return false;
     if (l.roles && !(eff.role && l.roles.includes(eff.role))) return false;
-    if (l.anyFeat) return l.anyFeat.some((f) => userHasService(company, eff.profile, team, f));
-    return !l.feat || userHasService(company, eff.profile, team, l.feat);
+    if (l.anyFeat) return l.anyFeat.some((f) => userHasService(company, eff.profile, team, f, companyServices));
+    return !l.feat || userHasService(company, eff.profile, team, l.feat, companyServices);
   });
   return (
     <aside className="sidebar">
