@@ -1057,10 +1057,15 @@ export const cancelAppointment = onCall(async (request) => {
 
   const company = ev.companyId as string;
   const inTeam = Array.isArray(ev.visibilityPath) && (ev.visibilityPath as string[]).includes(caller.uid);
+  // Only the setter who SET it, a team manager, or a company admin — never the
+  // closer. For a routed appointment the setter is setterUid (userId is the
+  // closer); for a self-gen appointment (no closer) the setter is userId.
+  const isSetter = ev.setterUid
+    ? ev.setterUid === caller.uid
+    : (!ev.closerUid && ev.userId === caller.uid);
   const allowed = caller.isSuper
     || (caller.companyId === company && caller.role === "admin")
-    || ev.setterUid === caller.uid
-    || ev.userId === caller.uid
+    || isSetter
     || (caller.companyId === company && caller.role === "manager" && inTeam);
   if (!allowed) throw new HttpsError("permission-denied", "Not allowed to cancel this appointment.");
 
