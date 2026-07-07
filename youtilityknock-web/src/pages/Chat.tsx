@@ -12,6 +12,7 @@ import {
   where,
 } from "firebase/firestore";
 import { ref as storageRef, uploadBytes, getDownloadURL } from "firebase/storage";
+import { useNavigate } from "react-router-dom";
 import { db, storage } from "../firebase";
 import { useAuth } from "../auth/AuthContext";
 import WhosWorkingPanel from "../components/WhosWorkingPanel";
@@ -26,6 +27,7 @@ type Conversation = { kind: "channel" } | { kind: "working" } | { kind: "dm"; ot
 
 export default function Chat() {
   const { profile, role, companyId } = useAuth();
+  const navigate = useNavigate();
   const [conv, setConv] = useState<Conversation>({ kind: "channel" });
   const [teammates, setTeammates] = useState<UserProfile[]>([]);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -222,6 +224,17 @@ export default function Chat() {
                         </a>
                       )}
                       {m.text && <div className="chat-text">{m.text}</div>}
+                      {(m.apptEventId || m.leadId) && (
+                        <button
+                          type="button"
+                          className="chat-appt-tag"
+                          onClick={() => navigate(m.leadId ? `/lead/${m.leadId}` : "/schedule")}
+                          title="Open this appointment"
+                          style={{ display: "inline-flex", alignItems: "center", gap: 6, marginTop: 6, padding: "4px 8px", borderRadius: 8, border: "1px solid rgba(56,189,248,.5)", background: "rgba(56,189,248,.12)", color: "#bae6fd", fontSize: 12, cursor: "pointer" }}
+                        >
+                          📅 {m.apptTitle || "Appointment"}{m.apptAt ? ` · ${new Date(m.apptAt).toLocaleDateString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}` : ""} →
+                        </button>
+                      )}
                       <div className="chat-time">{ts(m)}</div>
                     </div>
                   </div>

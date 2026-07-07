@@ -4022,20 +4022,33 @@ async function serverBumpStats(rep: any, deltas: Record<string, number>) {
   ]);
 }
 
-// Auto-end shifts left running longer than 8 hours — a rep forgot to clock out.
-// Caps the recorded end at start + 8h and credits the rolled-up stats the same
-// way a manual stop does. Runs server-side so it fires even with the app closed.
+// Auto-end shifts that a rep left running: either idle for 30+ minutes (the app
+// was closed/backgrounded so the client couldn't stop it) or running past 8
+// hours. Credits the rolled-up stats the same way a manual stop does. Runs
+// server-side so it fires even with the app closed. The idle case ends the shift
+// at its last activity, so idle time isn't counted as worked hours.
 const SHIFT_MAX_MS = 8 * 60 * 60 * 1000;
-export const shiftAutoStop = onSchedule("every 30 minutes", async () => {
-  const cutoff = Date.now() - SHIFT_MAX_MS;
-  // Active shifts are few (one per working rep), so filter the start time in
-  // code rather than needing a (status, startAt) composite index.
+const SHIFT_IDLE_MS = 30 * 60 * 1000;
+export const shiftAutoStop = onSchedule("every 15 minutes", async () => {
+  const now = Date.now();
+  // Active shifts are few (one per working rep), so evaluate in code rather than
+  // needing a composite index.
   const snap = await db.collection("shifts").where("status", "==", "active").get();
   for (const d of snap.docs) {
     const s = d.data();
     const startAt = Number(s.startAt) || 0;
-    if (!startAt || startAt >= cutoff) continue; // not over 8h yet
-    await d.ref.set({ status: "ended", endAt: startAt + SHIFT_MAX_MS, autoEnded: true, updatedAt: Date.now() }, { merge: true });
+    if (!startAt) continue;
+    // The app heartbeats lastActivityAt while it's open and in use; older shifts
+    // predate it, so fall back to startAt.
+    const lastActive = Number(s.lastActivityAt) || startAt;
+    const idle = now - lastActive >= SHIFT_IDLE_MS;
+    const tooLong = now - startAt >= SHIFT_MAX_MS;
+    if (!idle && !tooLong) continue;
+    const endAt = idle ? lastActive : startAt + SHIFT_MAX_MS;
+    await d.ref.set(
+      { status: "ended", endAt, autoEnded: true, autoEndReason: idle ? "idle" : "max", updatedAt: now },
+      { merge: true },
+    );
     const uid = (s.userId as string) || "";
     if (uid) {
       const rep = (await db.doc(`users/${uid}`).get()).data();

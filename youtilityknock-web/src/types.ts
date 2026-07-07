@@ -337,6 +337,11 @@ export interface Shift {
   endAt?: number;
   doorsKnocked?: number;
   notes?: string;
+  // Heartbeated by the app while open+active; drives the server's stale-shift
+  // auto-close (ends a shift idle for 30+ min, e.g. app closed mid-shift).
+  lastActivityAt?: number;
+  autoEnded?: boolean;
+  autoEndReason?: "idle" | "max";
 }
 
 export interface UserStats {
@@ -397,6 +402,12 @@ export interface ChatMessage {
   text?: string;
   imageUrl?: string;
   createdAt: number;
+  // Optional appointment reference — set when a message is sent from the
+  // calendar popout, so the chat shows a clickable tag for that appointment.
+  apptEventId?: string;
+  apptTitle?: string;
+  apptAt?: number;
+  leadId?: string;
 }
 
 export interface DmChannel {

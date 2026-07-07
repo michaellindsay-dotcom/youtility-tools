@@ -82,6 +82,20 @@ export function ShiftProvider({ children }: { children: ReactNode }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Heartbeat: while the app is open AND recently used, persist a throttled
+  // last-activity time so the server's stale-shift closer knows this shift is
+  // alive. If the app is closed/backgrounded the heartbeat stops, and the
+  // server auto-ends the shift after 30 idle minutes.
+  useEffect(() => {
+    const t = setInterval(() => {
+      const a = activeRef.current;
+      if (a && Date.now() - lastActivity.current <= IDLE_MS) {
+        void updateDoc(doc(db, "shifts", a.id), { lastActivityAt: Date.now() }).catch(() => {});
+      }
+    }, 2 * 60 * 1000);
+    return () => clearInterval(t);
+  }, []);
+
   async function startShift() {
     if (activeRef.current || !profile || !companyId) return;
     setStarting(true);
@@ -98,6 +112,7 @@ export function ShiftProvider({ children }: { children: ReactNode }) {
         visibilityPath: [profile.uid, ...(profile.managerPath ?? [])],
         status: "active",
         startAt: Date.now(),
+        lastActivityAt: Date.now(),
         doorsKnocked: 0,
       });
       lastActivity.current = Date.now();
@@ -118,7 +133,7 @@ export function ShiftProvider({ children }: { children: ReactNode }) {
     lastActivity.current = Date.now();
     const a = activeRef.current;
     if (!a || !verified) return;
-    await updateDoc(doc(db, "shifts", a.id), { doorsKnocked: increment(1) }).catch(() => {});
+    await updateDoc(doc(db, "shifts", a.id), { doorsKnocked: increment(1), lastActivityAt: Date.now() }).catch(() => {});
   }
 
   const elapsedSec = active ? Math.max(0, Math.floor((now - active.startAt) / 1000)) : 0;
