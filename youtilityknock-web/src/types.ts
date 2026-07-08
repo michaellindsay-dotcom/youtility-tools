@@ -70,6 +70,9 @@ export interface Company {
   // which products reps may offer (unset/empty = all products offered).
   batteryPricing?: Record<string, { price: number; adder: number }>;
   batteryOffered?: string[];
+  // Battery Field Playbook overrides (rate-reality copy + utility export rates),
+  // edited in the admin console and deep-merged over the regional default.
+  batteryPlaybook?: Record<string, unknown>;
   // Proposal pricing slide: cash-reservation deposit (a flat $ amount OR a % of
   // the system price), and the Sungage financing-application destination.
   batteryDepositUsd?: number; // flat deposit (default $2,500 when unset)

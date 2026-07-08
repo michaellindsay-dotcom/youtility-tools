@@ -343,12 +343,20 @@ const PB_STYLES = `
 
 type Tab = "pitch" | "utility" | "numbers";
 
-export default function BatteryPlaybook({ companyName, region = "charleston", onClose }: {
+export default function BatteryPlaybook({ companyName, region = "charleston", overrides, onClose }: {
   companyName?: string;
   region?: string;
+  // Company-level overrides saved from the admin console (Battery Playbook).
+  // Deep-merged over the regional default so admins can keep rate figures and
+  // utility export rates current without a code deploy.
+  overrides?: Record<string, unknown> | null;
   onClose: () => void;
 }) {
-  const pb = REGION_PLAYBOOKS[region] || CHARLESTON;
+  const base = REGION_PLAYBOOKS[region] || CHARLESTON;
+  // Shallow top-level merge is enough: each override key (rateAngle, utilities,
+  // savingsUtilities, …) is saved whole by the admin editor, and only non-empty
+  // keys are written — so an unset field keeps the built-in default.
+  const pb: RegionPlaybook = { ...base, ...(overrides || {}) } as RegionPlaybook;
   const [tab, setTab] = useState<Tab>("pitch");
 
   // Grid-down demo

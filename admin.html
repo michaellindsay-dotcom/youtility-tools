@@ -1171,6 +1171,55 @@
       <button id="batteryPricingSave" class="btn primary sm">Save pricing</button>
     </div>
     <div id="batteryPricingBanner" class="banner"></div>
+
+    <div style="margin-top:24px;border-top:1px solid var(--line,#23202e);padding-top:16px;">
+      <h3 style="font-size:15px;margin:0 0 4px;">Field Playbook — rates &amp; talk track</h3>
+      <p class="muted" style="margin:0 0 12px;font-size:13px;">Powers the rep <strong>Field Playbook</strong> in the Battery Tool. Edit these to keep the rate-reality talk track and utility export rates current for this company — they override the built-in defaults. Wrap words in <code>**double asterisks**</code> to <strong>bold</strong> them.</p>
+
+      <label style="display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--muted,#8a8199);max-width:640px;">
+        Rate-card headline
+        <input id="pbRateHeadline" type="text" placeholder="The rate math they don't advertise" />
+      </label>
+      <label style="display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--muted,#8a8199);margin-top:12px;max-width:640px;">
+        Rate-card body (the numbers)
+        <textarea id="pbRateBody" rows="4" style="resize:vertical;"></textarea>
+      </label>
+      <label style="display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--muted,#8a8199);margin-top:12px;max-width:640px;">
+        &ldquo;Middleman&rdquo; analogy callout
+        <textarea id="pbRateAnalogy" rows="4" style="resize:vertical;"></textarea>
+      </label>
+
+      <h4 style="font-size:13px;margin:18px 0 6px;">Utility export rates <span class="muted" style="font-weight:400;">(Utility tab)</span></h4>
+      <div style="overflow-x:auto;">
+        <table style="width:100%;border-collapse:collapse;font-size:13px;">
+          <thead><tr style="text-align:left;color:var(--muted,#8a8199);">
+            <th style="padding:6px 8px;">Utility</th>
+            <th style="padding:6px 8px;width:110px;">They pay</th>
+            <th style="padding:6px 8px;width:150px;">Export label</th>
+            <th style="padding:6px 8px;width:130px;">Export value</th>
+          </tr></thead>
+          <tbody id="pbUtilRows"></tbody>
+        </table>
+      </div>
+
+      <h4 style="font-size:13px;margin:18px 0 6px;">Savings-calculator rates <span class="muted" style="font-weight:400;">(¢ / kWh)</span></h4>
+      <div style="overflow-x:auto;">
+        <table style="width:100%;border-collapse:collapse;font-size:13px;">
+          <thead><tr style="text-align:left;color:var(--muted,#8a8199);">
+            <th style="padding:6px 8px;">Utility</th>
+            <th style="padding:6px 8px;width:120px;">They pay (¢)</th>
+            <th style="padding:6px 8px;width:120px;">Buy-back (¢)</th>
+          </tr></thead>
+          <tbody id="pbSaveRows"></tbody>
+        </table>
+      </div>
+
+      <div class="row" style="justify-content:flex-end;gap:8px;margin-top:16px;">
+        <button id="battPlaybookReset" class="btn ghost sm">Reset to defaults</button>
+        <button id="battPlaybookSave" class="btn primary sm">Save playbook</button>
+      </div>
+      <div id="battPlaybookBanner" class="banner"></div>
+    </div>
   </section>
 
   <!-- YoutilityCRM link (per company) -->
@@ -1411,6 +1460,7 @@ const setCompanyOptions = httpsCallable(fns, "setCompanyOptions");
 const setCompanyBranding = httpsCallable(fns, "setCompanyBranding");
 const setCompanyProfile  = httpsCallable(fns, "setCompanyProfile");
 const setBatteryPricing = httpsCallable(fns, "setBatteryPricing");
+const setBatteryPlaybook = httpsCallable(fns, "setBatteryPlaybook");
 const createRole      = httpsCallable(fns, "createRole");
 const deleteRole      = httpsCallable(fns, "deleteRole");
 const createTeam      = httpsCallable(fns, "createTeam");
@@ -2351,7 +2401,111 @@ async function loadBatteryPricing(companyId) {
   $("bpAgreementCc").value = Array.isArray(c.agreementCcEmails) ? c.agreementCcEmails.join(", ") : "";
   $("bpAgreementUrl").value = c.agreementTemplateUrl || "";
   syncDepositLabel();
+  renderPlaybook(mergePlaybook(c.batteryPlaybook));
 }
+
+// Rate-editable subset of the Battery Field Playbook — MIRRORS the Charleston
+// default in youtilityknock-web/src/pages/BatteryPlaybook.tsx. Keep in sync.
+const PLAYBOOK_DEFAULT = {
+  rateAngle: {
+    headline: "The rate math they don't advertise",
+    body: "Dominion's base rates just went up around **7.6%** — roughly **$12 more a month** on a typical bill — and the fixed monthly charge climbed from $9.50 toward **$13** before you use a single kWh. You're on **time-of-use**, so your midday solar is worth the least and the **6pm peak** costs the most, right as your panels fade. And the surplus you export? They pay you **pennies** and sell it next door at **full retail**.",
+    analogy: "Picture the utility as a middleman parked in your driveway: he buys your afternoon sun at wholesale, walks it next door, and sells it to your neighbor at retail — you're his cheapest supplier by day and his full-price customer after dark. **A battery fires the middleman:** you bank your own power and spend it at peak instead of buying it back.",
+  },
+  utilities: [
+    { name: "Dominion Energy SC", sub: "Metro Charleston · former SCE&G", heat: "warm", pay: "~15¢", getLabel: "Solar Choice export", getValue: "TOU + true-up",
+      gap: "Mandatory **time-of-use** plan, and any extra solar trues up each November at a low avoided-cost rate. Exporting is a bad deal — **self-consumption is the whole game.**",
+      angle: "“Store your midday solar and spend it at the 6pm peak instead of selling it back cheap. The battery is how you actually keep the savings they promised you.”",
+      hoods: ["Mount Pleasant", "West Ashley", "James Island", "North Charleston"] },
+    { name: "Berkeley Electric Co-op", sub: "Outlying & coastal areas", heat: "hot", pay: "~14¢", getLabel: "Co-op export", getValue: "~4–6¢",
+      gap: "Co-ops credit exports at a fraction of retail. **The gap between what they pay and what they get back is huge** — that gap is exactly what a battery recaptures.",
+      angle: "“On a co-op, sending solar back is almost charity. A battery lets you use every kWh you make instead of giving it away.”",
+      hoods: ["Daniel Island", "Goose Creek", "Moncks Corner", "Awendaw"] },
+    { name: "Santee Cooper", sub: "State-owned · parts of the Lowcountry", heat: "max", pay: "~12¢", getLabel: "Export credit", getValue: "~4¢",
+      gap: "Roughly 4¢ summer / 3.8¢ non-summer for exports. **The strongest battery case in the region** — exporting is worth almost nothing here.",
+      angle: "“Santee Cooper pays you about 4 cents for power worth 12. Store it, don't sell it — that's the entire pitch.”",
+      hoods: ["Berkeley pockets", "Georgetown Co.", "Horry Co."] },
+  ],
+  savingsUtilities: [
+    { name: "Dominion SC", pay: 15, get: 4 },
+    { name: "Berkeley Co-op", pay: 14, get: 5 },
+    { name: "Santee Cooper", pay: 12, get: 4 },
+  ],
+};
+
+// Effective playbook currently in the editor (default overlaid with the saved
+// override), so Save can preserve fields the form doesn't expose (gap/angle/…).
+let pbEffective = null;
+const mergePlaybook = (ov) => {
+  const o = (ov && typeof ov === "object") ? ov : {};
+  return {
+    rateAngle: o.rateAngle && typeof o.rateAngle === "object" ? { ...PLAYBOOK_DEFAULT.rateAngle, ...o.rateAngle } : { ...PLAYBOOK_DEFAULT.rateAngle },
+    utilities: Array.isArray(o.utilities) && o.utilities.length ? o.utilities : PLAYBOOK_DEFAULT.utilities.map((u) => ({ ...u })),
+    savingsUtilities: Array.isArray(o.savingsUtilities) && o.savingsUtilities.length ? o.savingsUtilities : PLAYBOOK_DEFAULT.savingsUtilities.map((u) => ({ ...u })),
+  };
+};
+
+function renderPlaybook(pb) {
+  pbEffective = pb;
+  $("pbRateHeadline").value = pb.rateAngle.headline || "";
+  $("pbRateBody").value = pb.rateAngle.body || "";
+  $("pbRateAnalogy").value = pb.rateAngle.analogy || "";
+  const esc = (s) => String(s == null ? "" : s).replace(/"/g, "&quot;");
+  $("pbUtilRows").innerHTML = pb.utilities.map((u, i) => `
+    <tr style="border-top:1px solid var(--line,#23202e);">
+      <td style="padding:6px 8px;"><input data-pbu-name="${i}" type="text" value="${esc(u.name)}" style="width:100%;" /></td>
+      <td style="padding:6px 8px;"><input data-pbu-pay="${i}" type="text" value="${esc(u.pay)}" style="width:100%;" /></td>
+      <td style="padding:6px 8px;"><input data-pbu-label="${i}" type="text" value="${esc(u.getLabel)}" style="width:100%;" /></td>
+      <td style="padding:6px 8px;"><input data-pbu-value="${i}" type="text" value="${esc(u.getValue)}" style="width:100%;" /></td>
+    </tr>`).join("");
+  $("pbSaveRows").innerHTML = pb.savingsUtilities.map((u, i) => `
+    <tr style="border-top:1px solid var(--line,#23202e);">
+      <td style="padding:6px 8px;"><input data-pbs-name="${i}" type="text" value="${esc(u.name)}" style="width:100%;" /></td>
+      <td style="padding:6px 8px;"><input data-pbs-pay="${i}" type="number" min="0" step="0.1" value="${Number(u.pay) || 0}" style="width:100%;" /></td>
+      <td style="padding:6px 8px;"><input data-pbs-get="${i}" type="number" min="0" step="0.1" value="${Number(u.get) || 0}" style="width:100%;" /></td>
+    </tr>`).join("");
+}
+
+function collectPlaybook() {
+  const base = pbEffective || mergePlaybook(null);
+  const val = (sel) => document.querySelector(sel)?.value;
+  return {
+    rateAngle: {
+      headline: ($("pbRateHeadline").value || "").trim(),
+      body: ($("pbRateBody").value || "").trim(),
+      analogy: ($("pbRateAnalogy").value || "").trim(),
+    },
+    // Preserve gap/angle/hoods/sub/heat from the effective playbook; overlay the
+    // editable display fields.
+    utilities: base.utilities.map((u, i) => ({
+      ...u,
+      name: (val(`[data-pbu-name="${i}"]`) ?? u.name).trim(),
+      pay: (val(`[data-pbu-pay="${i}"]`) ?? u.pay).trim(),
+      getLabel: (val(`[data-pbu-label="${i}"]`) ?? u.getLabel).trim(),
+      getValue: (val(`[data-pbu-value="${i}"]`) ?? u.getValue).trim(),
+    })),
+    savingsUtilities: base.savingsUtilities.map((u, i) => ({
+      name: (val(`[data-pbs-name="${i}"]`) ?? u.name).trim(),
+      pay: Number(val(`[data-pbs-pay="${i}"]`)) || 0,
+      get: Number(val(`[data-pbs-get="${i}"]`)) || 0,
+    })),
+  };
+}
+
+$("battPlaybookReset").addEventListener("click", () => {
+  renderPlaybook(mergePlaybook(null));
+  banner($("battPlaybookBanner"), "Reset to defaults — click Save playbook to apply.", "good");
+});
+$("battPlaybookSave").addEventListener("click", async () => {
+  if (!state.selectedCompany) return;
+  $("battPlaybookSave").disabled = true;
+  try {
+    await setBatteryPlaybook({ companyId: state.selectedCompany, playbook: collectPlaybook() });
+    banner($("battPlaybookBanner"), "Field Playbook saved.", "good");
+  } catch (e) { banner($("battPlaybookBanner"), e.message || "Save failed.", "error"); }
+  finally { $("battPlaybookSave").disabled = false; }
+});
+
 $("batteryPricingSave").addEventListener("click", async () => {
   if (!state.selectedCompany) return;
   $("batteryPricingSave").disabled = true;
