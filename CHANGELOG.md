@@ -34,13 +34,16 @@ version. Bump `VERSION_NAME` for a new public milestone and add a section here.
 - **Battery Tool → Field Playbook** — a rep-facing sales aid launched from the
   Battery Tool header. Three tabs: **Pitch** (an interactive grid-down demo —
   flip the grid off / battery on and watch the loads react — plus discovery
-  questions, battery-vs-generator, objection handling, and an honest tax-credit
-  reality check), **Utility** (local utility intel with export rates and
-  per-utility talk tracks), and **Numbers** (quick storm-runtime and "solar
-  you're giving away" calculators). Full-screen overlay themed to match the tool
-  (violet glass, Space Grotesk / Inter / JetBrains Mono). Ships with the
-  Charleston / South Carolina market; the region content is data-driven so more
-  markets can be added later.
+  questions, a **rate-reality** card leaning on the recent Dominion increase /
+  time-of-use / low buy-back rates with a "utility-as-middleman" analogy, a
+  **who's-watching-your-system** angle for owners left behind by installers that
+  folded or don't monitor, battery-vs-generator, and objection handling), **Utility**
+  (local utility intel with export rates and per-utility talk tracks), and
+  **Numbers** (quick storm-runtime and "solar you're giving away" calculators).
+  The Pitch page is written for **homeowners who already have solar**. Full-screen
+  overlay themed to match the tool (violet glass, Space Grotesk / Inter /
+  JetBrains Mono). Ships with the Charleston / South Carolina market; the region
+  content is data-driven so more markets can be added later.
 - **Cancel / delete an appointment** from the Edit-appointment dialog (setter,
   team manager, or company admin). Cancelling fully unwinds it: it reverses the
   appointment credit in the exact period it was earned (so both the leaderboard
