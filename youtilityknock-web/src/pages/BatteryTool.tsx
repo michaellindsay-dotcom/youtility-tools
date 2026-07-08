@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import AgreementSignView from "./AgreementSignView";
+import BatteryPlaybook from "./BatteryPlaybook";
 import { addDoc, collection, doc, getDoc, getDocs, limit, onSnapshot, query, where } from "firebase/firestore";
 import { httpsCallable } from "firebase/functions";
 import { db, functions } from "../firebase";
@@ -411,6 +412,8 @@ export default function BatteryTool() {
   // When the rep signs on this device, show the agreement sign view as an in-app
   // overlay (never navigate out to the web URL — that drops the native session).
   const [signOverlay, setSignOverlay] = useState<{ id: string; token: string } | null>(null);
+  // Rep-facing sales playbook (grid-down demo, utility intel, door calculators).
+  const [playbookOpen, setPlaybookOpen] = useState(false);
 
   // 1. Customer
   const [customerName, setCustomerName] = useState("");
@@ -1332,6 +1335,9 @@ export default function BatteryTool() {
         <div className="bt-eyebrow">· Energy storage studio</div>
         <h1 className="bt-title">Battery Tool</h1>
         <p className="bt-sub">Analyze the bill, size the load, and craft a premium battery proposal.</p>
+        <button className="btn ghost" style={{ marginTop: 14 }} onClick={() => setPlaybookOpen(true)}>
+          📖 Field Playbook
+        </button>
       </div>
 
       {/* 1. Customer */}
@@ -1961,6 +1967,12 @@ export default function BatteryTool() {
         sungageApplyUrl={company?.sungageApplyUrl}
         onLetsDoIt={handleLetsDoIt}
       />
+
+      {/* Rep-facing sales playbook — a full-screen overlay (portaled) with the
+          grid-down demo, local utility intel, and quick door calculators. */}
+      {playbookOpen && (
+        <BatteryPlaybook companyName={company?.name} onClose={() => setPlaybookOpen(false)} />
+      )}
 
       {/* In-app agreement signing (rep's device). Portaled so its fixed overlay
           isn't trapped by a blurred ancestor. On success we route to the site
