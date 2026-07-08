@@ -37,6 +37,8 @@ interface RegionPlaybook {
   storms: string;       // "Ian or Dorian"
   opener: string;
   discovery: string[];
+  rateAngle: { headline: string; body: string; analogy: string };
+  orphanAngle: { headline: string; body: string };
   objections: { q: string; a: string }[];
   honest: string[];
   utilities: RegionUtility[];
@@ -52,29 +54,38 @@ const CHARLESTON: RegionPlaybook = {
   region: "Lowcountry",
   storms: "Ian or Dorian",
   opener:
-    "“I'm not here to sell you panels. I help Lowcountry homeowners **keep their own power when the grid quits** — and stop handing the utility their solar for pennies.”",
+    "“You already made the smart move — you went solar. I'm here about the part the utility keeps quiet: rates are climbing, your buy-back keeps shrinking, and they're reselling your afternoon sun to your neighbors at full retail. Let's make that power **yours to keep**.”",
   discovery: [
-    "When Ian or Dorian hit, **how long were you out** — and what did it cost you? Spoiled food, a hotel, meds in a warm fridge?",
-    "Do you already have solar? Has your bill actually gone the way they promised since the utility moved you to time-of-use?",
-    "If the grid dropped tonight for four days — **what three things have to stay on** in your house?",
+    "Since they moved you to **time-of-use**, has your bill actually done what the solar company promised — or has it crept back up?",
+    "When Ian or Dorian hit, your panels shut off for safety and you were **just as dark as the house without solar** — how long were you out, and what did it cost you?",
+    "Do you even know what your system is producing right now — and **who you'd call** if it stopped tomorrow?",
   ],
+  rateAngle: {
+    headline: "The rate math they don't advertise",
+    body: "Dominion's base rates just went up around **7.6%** — roughly **$12 more a month** on a typical bill — and the fixed monthly charge climbed from $9.50 toward **$13** before you use a single kWh. You're on **time-of-use**, so your midday solar is worth the least and the **6pm peak** costs the most, right as your panels fade. And the surplus you export? They pay you **pennies** and sell it next door at **full retail**.",
+    analogy: "Picture the utility as a middleman parked in your driveway: he buys your afternoon sun at wholesale, walks it next door, and sells it to your neighbor at retail — you're his cheapest supplier by day and his full-price customer after dark. **A battery fires the middleman:** you bank your own power and spend it at peak instead of buying it back.",
+  },
+  orphanAngle: {
+    headline: "Who's actually watching your system?",
+    body: "A lot of Lowcountry solar was sold by companies that have since **folded, stopped answering the phone, or never really monitored production** in the first place. Panels quietly underproduce for years and nobody catches it. We **monitor it, maintain it, and we're still here** to pick up the phone — so the system you already paid for actually delivers, and the battery on top of it has someone minding it for the long haul.",
+  },
   objections: [
     {
-      q: "Isn't there a tax credit for this?",
-      a: "Straight answer: **the 30% federal credit ended for owned systems on Jan 1, 2026.** I won't pretend it's there. But South Carolina's 25% state credit still applies with solar, and the real payoff is not losing a fridge of food and meds every storm.",
+      q: "My solar already covers my bill.",
+      a: "It did — until time-of-use and this year's rate hike quietly ate into it, and the buy-back rate kept dropping. Pull up a recent **true-up statement** with me. A battery protects the savings you were actually promised and keeps the lights on when the grid drops and your panels shut off with it.",
+    },
+    {
+      q: "My installer handles all that.",
+      a: "Are they still in business? A lot of the companies that blanketed the Lowcountry are gone or don't call back. We **monitor and maintain**, we're local, and you get **one number that actually picks up**.",
     },
     {
       q: "I'll just get a generator.",
-      a: "A lot of folks do — until the gas stations are dry and it's day three. A battery never asks you to go find fuel in a hurricane. **Show them the demo above.**",
-    },
-    {
-      q: "I already have solar.",
-      a: "Perfect — you're exactly who this helps most. Your panels shut off in an outage for safety, and the utility's buying your extra solar for a few cents. A battery keeps that power **yours**.",
+      a: "A lot of folks do — until the gas stations are dry and it's day three. A battery never asks you to go find fuel in a hurricane, it's silent, and it recharges off the solar you already own. **Show them the demo above.**",
     },
   ],
   honest: [
-    "There's **no federal check** in 2026 for a battery bought with cash or a loan. Say it plainly.",
-    "What's real: SC's **25% state tax credit** (with solar), a **property-tax exemption**, and if you go through a lease/PPA the finance company can still use the 48E credit through 2027. Lead with resilience, back it with the state credit — never the reverse.",
+    "Lead with the **rate reality and resilience** — not a tax credit. The 30% federal credit ended for owned systems in 2026; don't dangle it.",
+    "What's still real: SC's **25% state tax credit** (with a qualifying solar-plus-storage project) and a **property-tax exemption**; a lease/PPA can still capture the 48E credit through 2027. Mention it as a bonus — never the headline. The honest headline is simpler: **rates up, buy-back down, and their panels go dark in an outage. The battery fixes all three.**",
   ],
   utilities: [
     {
@@ -211,8 +222,8 @@ const PB_STYLES = `
 .bp-toggles { display:flex; gap:9px; }
 .bp-tog { flex:1; background:var(--bp-bg); border:1px solid var(--bp-line); border-radius:11px; padding:10px; display:flex; flex-direction:column; gap:7px; cursor:pointer; transition:border-color .2s; }
 .bp-tog:active { transform:scale(0.98); }
-.bp-toglabel { font-family:'JetBrains Mono',monospace; font-size:10px; letter-spacing:0.1em; text-transform:uppercase; color:var(--bp-dim); font-weight:500; }
-.bp-switch { display:flex; align-items:center; gap:8px; font-family:'Space Grotesk',sans-serif; font-weight:600; font-size:14px; letter-spacing:0.03em; text-transform:uppercase; }
+.bp-toglabel { font-family:'JetBrains Mono',monospace; font-size:10px; letter-spacing:0.1em; text-transform:uppercase; color:#c8c0dc; font-weight:600; }
+.bp-switch { display:flex; align-items:center; gap:8px; font-family:'Space Grotesk',sans-serif; font-weight:600; font-size:14px; letter-spacing:0.03em; text-transform:uppercase; color:#f3f0fb; }
 .bp-track { width:38px; height:21px; border-radius:20px; background:var(--bp-line-hi); position:relative; flex:none; transition:background .25s; }
 .bp-track::after { content:""; position:absolute; top:2px; left:2px; width:17px; height:17px; border-radius:50%; background:var(--bp-dim); transition:all .25s; }
 .bp-tog.on .bp-track { background:var(--bp-accent); }
@@ -224,6 +235,10 @@ const PB_STYLES = `
 
 .bp-opener { font-family:'Space Grotesk',sans-serif; font-weight:400; font-size:18px; line-height:1.32; color:var(--bp-ink); border-left:3px solid var(--bp-accent); padding-left:13px; }
 .bp-opener strong { font-weight:600; color:var(--bp-accent-hi); }
+.bp-body { font-size:13.5px; line-height:1.5; color:#d3ddec; }
+.bp-body strong { color:var(--bp-accent-hi); font-weight:600; }
+.bp-callout { margin-top:12px; background:radial-gradient(130% 100% at 0% 0%,rgba(139,92,246,0.14),var(--bp-850)); border:1px solid rgba(139,92,246,0.3); border-left:3px solid var(--bp-accent); border-radius:12px; padding:12px 14px; font-size:13.5px; line-height:1.5; color:#e3dcf3; }
+.bp-callout strong { color:var(--bp-accent-hi); font-weight:600; }
 .bp-qlist { list-style:none; display:flex; flex-direction:column; gap:12px; padding:0; margin:0; }
 .bp-qlist li { display:flex; gap:11px; font-size:14px; line-height:1.42; color:#cdd8e8; }
 .bp-qlist .qn { font-family:'Space Grotesk',sans-serif; font-weight:700; color:var(--bp-accent-hi); flex:none; font-size:15px; }
@@ -430,6 +445,17 @@ export default function BatteryPlaybook({ companyName, region = "charleston", on
                     <li key={i}><span className="qn">{i + 1}</span><span><Rich text={q} /></span></li>
                   ))}
                 </ul>
+              </div>
+
+              <div className="bp-card">
+                <h3><span className="num">$</span>{pb.rateAngle.headline}</h3>
+                <p className="bp-body"><Rich text={pb.rateAngle.body} /></p>
+                <div className="bp-callout"><Rich text={pb.rateAngle.analogy} /></div>
+              </div>
+
+              <div className="bp-card">
+                <h3><span className="num">◎</span>{pb.orphanAngle.headline}</h3>
+                <p className="bp-body"><Rich text={pb.orphanAngle.body} /></p>
               </div>
 
               <div className="bp-card">
