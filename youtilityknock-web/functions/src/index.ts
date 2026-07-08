@@ -5812,6 +5812,51 @@ export const setBatteryPricing = onCall(async (request) => {
   return { ok: true };
 });
 
+// Save a company's Battery Field Playbook overrides (rate-reality copy + utility
+// export rates + savings-calculator numbers). The app deep-merges these over the
+// built-in regional default, so admins keep the playbook current as utility
+// rates change without a code deploy. Company admin / super-admin only.
+export const setBatteryPlaybook = onCall(async (request) => {
+  const caller = await getCaller(request);
+  const { companyId, playbook } = (request.data || {}) as { companyId?: string; playbook?: any };
+  authorizeForCompany(caller, companyId);
+  const p = (playbook && typeof playbook === "object") ? playbook : {};
+  const str = (v: unknown, n = 2000) => String(v ?? "").slice(0, n);
+  const out: Record<string, unknown> = {};
+
+  if (p.rateAngle && typeof p.rateAngle === "object") {
+    out.rateAngle = {
+      headline: str(p.rateAngle.headline, 200),
+      body: str(p.rateAngle.body, 1200),
+      analogy: str(p.rateAngle.analogy, 1200),
+    };
+  }
+  if (Array.isArray(p.utilities)) {
+    out.utilities = p.utilities.slice(0, 12).map((u: any) => ({
+      name: str(u?.name, 120),
+      sub: str(u?.sub, 160),
+      heat: ["warm", "hot", "max"].includes(u?.heat) ? u.heat : "warm",
+      pay: str(u?.pay, 40),
+      getLabel: str(u?.getLabel, 60),
+      getValue: str(u?.getValue, 60),
+      gap: str(u?.gap, 800),
+      angle: str(u?.angle, 800),
+      hoods: Array.isArray(u?.hoods) ? u.hoods.slice(0, 12).map((h: any) => str(h, 60)) : [],
+    }));
+  }
+  if (Array.isArray(p.savingsUtilities)) {
+    out.savingsUtilities = p.savingsUtilities.slice(0, 12).map((u: any) => ({
+      name: str(u?.name, 120),
+      pay: Math.max(0, Number(u?.pay) || 0),
+      get: Math.max(0, Number(u?.get) || 0),
+    }));
+  }
+  await db.doc(`companies/${companyId}`).set(
+    { batteryPlaybook: out, batteryPlaybookUpdatedAt: Date.now() }, { merge: true },
+  );
+  return { ok: true };
+});
+
 // Analyze an uploaded utility bill or solar-production document (image or PDF)
 // with Claude vision and return structured numbers for the battery tool.
 export const analyzeEnergyDocument = onCall({ timeoutSeconds: 120 }, async (request) => {

@@ -31,6 +31,17 @@ version. Bump `VERSION_NAME` for a new public milestone and add a section here.
   the appointment time up front so a bail-and-retry can't count twice.
 
 ### Added
+- **Field Playbook rate figures are now admin-editable.** Under Battery pricing
+  in the admin console, a **"Field Playbook — rates & talk track"** editor lets a
+  company admin update the rate-reality copy, each utility's export rates, and the
+  savings-calculator ¢/kWh numbers. Saved per company and merged over the built-in
+  defaults, so reps' playbooks stay current as utility rates change — no code
+  deploy. Backed by a new `setBatteryPlaybook` callable and a `batteryPlaybook`
+  company field.
+- **Shareable Battery Playbook page** — a self-contained, no-login HTML version of
+  the Field Playbook (`/battery-playbook.html`) with the full interactive demo,
+  utility intel, and calculators, so reps can send it to homeowners or teammates
+  to explore on their own.
 - **Battery Tool → Field Playbook** — a rep-facing sales aid launched from the
   Battery Tool header. Three tabs: **Pitch** (an interactive grid-down demo —
   flip the grid off / battery on and watch the loads react — plus discovery

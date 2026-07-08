@@ -1971,7 +1971,11 @@ export default function BatteryTool() {
       {/* Rep-facing sales playbook — a full-screen overlay (portaled) with the
           grid-down demo, local utility intel, and quick door calculators. */}
       {playbookOpen && (
-        <BatteryPlaybook companyName={company?.name} onClose={() => setPlaybookOpen(false)} />
+        <BatteryPlaybook
+          companyName={company?.name}
+          overrides={company?.batteryPlaybook}
+          onClose={() => setPlaybookOpen(false)}
+        />
       )}
 
       {/* In-app agreement signing (rep's device). Portaled so its fixed overlay

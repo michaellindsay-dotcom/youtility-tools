@@ -1,0 +1,355 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="theme-color" content="#0a0712">
+<title>Charleston Storm Kit — Battery Field Playbook</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+
+.bp-root {
+  --bp-bg:#0a0712; --bp-900:#0e0a17; --bp-850:#150f1f; --bp-800:#1b1329;
+  --bp-line:rgba(255,255,255,0.08); --bp-line-hi:rgba(255,255,255,0.14);
+  --bp-accent:#8b5cf6; --bp-accent-hi:#a78bfa; --bp-gold:#ffd86b; --bp-green:#34d399; --bp-red:#f87171;
+  --bp-ink:#ece8f5; --bp-dim:#9b93b3; --bp-dim2:#6b6385; --bp-nav:64px;
+  position:fixed; inset:0; z-index:7000; overflow-y:auto; overflow-x:hidden; -webkit-overflow-scrolling:touch;
+  color:var(--bp-ink); font-family:'Inter',-apple-system,BlinkMacSystemFont,sans-serif;
+  background:
+    radial-gradient(120% 60% at 50% -8%, rgba(139,92,246,0.18), transparent 60%),
+    radial-gradient(90% 50% at 100% 0%, rgba(167,139,250,0.09), transparent 55%),
+    var(--bp-bg);
+}
+.bp-shell { width:100%; max-width:560px; margin:0 auto; min-height:100%; padding-bottom:calc(var(--bp-nav) + env(safe-area-inset-bottom) + 8px); position:relative; }
+.bp-root *, .bp-root *::before, .bp-root *::after { min-width:0; }
+
+.bp-head { position:sticky; top:0; z-index:20; background:linear-gradient(180deg,var(--bp-bg) 70%,rgba(10,7,18,0.85)); backdrop-filter:blur(8px); -webkit-backdrop-filter:blur(8px); padding:14px 16px 12px; border-bottom:1px solid var(--bp-line); }
+.bp-brandrow { display:flex; align-items:center; justify-content:space-between; gap:10px; }
+.bp-brand { display:flex; align-items:center; gap:9px; min-width:0; }
+.bp-bolt { width:26px; height:26px; flex:none; }
+.bp-word { font-family:'Space Grotesk',sans-serif; font-weight:600; letter-spacing:0.12em; font-size:14px; text-transform:uppercase; line-height:1; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.bp-word small { display:block; font-family:'JetBrains Mono',monospace; font-size:9.5px; letter-spacing:0.24em; color:var(--bp-accent-hi); font-weight:500; margin-top:3px; }
+.bp-season { display:flex; align-items:center; gap:6px; font-size:10.5px; font-weight:600; color:var(--bp-gold); background:rgba(255,216,107,0.10); border:1px solid rgba(255,216,107,0.28); padding:6px 9px; border-radius:20px; text-transform:uppercase; letter-spacing:0.06em; flex:none; }
+.bp-pulse { width:7px; height:7px; border-radius:50%; background:var(--bp-gold); animation:bp-pulse 2.4s infinite; }
+@keyframes bp-pulse { 0%{box-shadow:0 0 0 0 rgba(255,216,107,0.5)} 70%{box-shadow:0 0 0 7px rgba(255,216,107,0)} 100%{box-shadow:0 0 0 0 rgba(255,216,107,0)} }
+.bp-x { position:absolute; top:12px; right:12px; }
+
+.bp-main { padding:18px 16px 8px; }
+.bp-eyebrow { font-family:'JetBrains Mono',monospace; font-weight:500; letter-spacing:0.2em; text-transform:uppercase; font-size:11px; color:var(--bp-dim); margin-bottom:8px; }
+.bp-h2 { font-family:'Space Grotesk',sans-serif; font-weight:600; font-size:23px; line-height:1.05; letter-spacing:-0.01em; margin-bottom:14px; }
+.bp-h2 .accent { color:var(--bp-accent-hi); }
+
+.bp-card { background:linear-gradient(180deg,rgba(33,24,48,0.6),rgba(21,15,31,0.6)); border:1px solid var(--bp-line); border-radius:14px; padding:16px; margin-bottom:14px; }
+.bp-card h3 { font-family:'Space Grotesk',sans-serif; font-weight:600; font-size:15px; letter-spacing:0.01em; color:var(--bp-ink); margin-bottom:10px; display:flex; align-items:center; gap:8px; }
+.bp-card h3 .num { font-family:'JetBrains Mono',monospace; font-size:11px; color:#1a1225; background:var(--bp-accent-hi); width:20px; height:20px; border-radius:6px; display:grid; place-items:center; flex:none; font-weight:700; }
+
+/* Grid-down demo */
+.bp-demo { background:linear-gradient(180deg,var(--bp-800),var(--bp-900)); border:1px solid var(--bp-line); border-radius:16px; padding:16px 16px 18px; margin-bottom:16px; transition:border-color .3s; }
+.bp-demo.down { border-color:rgba(248,113,113,0.4); }
+.bp-demo.lit { border-color:rgba(167,139,250,0.5); }
+.bp-status { font-family:'Space Grotesk',sans-serif; font-weight:700; font-size:13px; letter-spacing:0.06em; text-transform:uppercase; display:flex; align-items:center; gap:8px; margin-bottom:2px; }
+.bp-statusline { font-size:12.5px; color:var(--bp-dim); min-height:34px; margin-bottom:14px; }
+.bp-dot { width:9px; height:9px; border-radius:50%; flex:none; }
+.bp-loads { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:9px; margin-bottom:16px; }
+.bp-load { background:var(--bp-bg); border:1px solid var(--bp-line); border-radius:11px; padding:11px 6px 9px; text-align:center; transition:all .35s ease; opacity:0.32; color:var(--bp-dim2); }
+.bp-load svg { width:22px; height:22px; margin-bottom:5px; }
+.bp-load span { display:block; font-size:10px; font-weight:600; letter-spacing:0.02em; }
+.bp-load.on { opacity:1; border-color:rgba(167,139,250,0.45); background:radial-gradient(120% 120% at 50% 0%,rgba(139,92,246,0.18),var(--bp-bg)); color:var(--bp-accent-hi); }
+.bp-load.flicker { opacity:0.7; animation:bp-flick 1.3s infinite; color:var(--bp-gold); }
+@keyframes bp-flick { 0%,100%{opacity:0.7} 45%{opacity:0.28} 47%{opacity:0.7} 80%{opacity:0.4} }
+.bp-toggles { display:flex; gap:9px; }
+.bp-tog { flex:1; background:var(--bp-bg); border:1px solid var(--bp-line); border-radius:11px; padding:10px; display:flex; flex-direction:column; gap:7px; cursor:pointer; transition:border-color .2s; }
+.bp-tog:active { transform:scale(0.98); }
+.bp-toglabel { font-family:'JetBrains Mono',monospace; font-size:10px; letter-spacing:0.1em; text-transform:uppercase; color:#c8c0dc; font-weight:600; }
+.bp-switch { display:flex; align-items:center; gap:8px; font-family:'Space Grotesk',sans-serif; font-weight:600; font-size:14px; letter-spacing:0.03em; text-transform:uppercase; color:#f3f0fb; }
+.bp-track { width:38px; height:21px; border-radius:20px; background:var(--bp-line-hi); position:relative; flex:none; transition:background .25s; }
+.bp-track::after { content:""; position:absolute; top:2px; left:2px; width:17px; height:17px; border-radius:50%; background:var(--bp-dim); transition:all .25s; }
+.bp-tog.on .bp-track { background:var(--bp-accent); }
+.bp-tog.on .bp-track::after { left:19px; background:#fff; }
+.bp-tog.on { border-color:rgba(139,92,246,0.5); }
+.bp-tog.on .bp-switch { color:var(--bp-accent-hi); }
+.bp-tog.grid.on .bp-track { background:var(--bp-red); }
+.bp-tog.grid.on .bp-switch { color:var(--bp-red); }
+
+.bp-opener { font-family:'Space Grotesk',sans-serif; font-weight:400; font-size:18px; line-height:1.32; color:var(--bp-ink); border-left:3px solid var(--bp-accent); padding-left:13px; }
+.bp-opener strong { font-weight:600; color:var(--bp-accent-hi); }
+.bp-body { font-size:13.5px; line-height:1.5; color:#d3ddec; }
+.bp-body strong { color:var(--bp-accent-hi); font-weight:600; }
+.bp-callout { margin-top:12px; background:radial-gradient(130% 100% at 0% 0%,rgba(139,92,246,0.14),var(--bp-850)); border:1px solid rgba(139,92,246,0.3); border-left:3px solid var(--bp-accent); border-radius:12px; padding:12px 14px; font-size:13.5px; line-height:1.5; color:#e3dcf3; }
+.bp-callout strong { color:var(--bp-accent-hi); font-weight:600; }
+.bp-qlist { list-style:none; display:flex; flex-direction:column; gap:12px; padding:0; margin:0; }
+.bp-qlist li { display:flex; gap:11px; font-size:14px; line-height:1.42; color:#cdd8e8; }
+.bp-qlist .qn { font-family:'Space Grotesk',sans-serif; font-weight:700; color:var(--bp-accent-hi); flex:none; font-size:15px; }
+.bp-qlist strong { color:var(--bp-ink); font-weight:600; }
+
+.bp-vs { display:grid; grid-template-columns:1fr 1fr; border:1px solid var(--bp-line); border-radius:12px; overflow:hidden; }
+.bp-vs .col { padding:13px; }
+.bp-vs .batt { background:radial-gradient(130% 100% at 0% 0%,rgba(139,92,246,0.12),var(--bp-850)); }
+.bp-vs .gen { background:var(--bp-900); border-left:1px solid var(--bp-line); }
+.bp-vs .ch { font-family:'Space Grotesk',sans-serif; font-weight:600; font-size:13px; letter-spacing:0.04em; text-transform:uppercase; margin-bottom:10px; }
+.bp-vs .batt .ch { color:var(--bp-accent-hi); }
+.bp-vs .gen .ch { color:var(--bp-dim); }
+.bp-vs ul { list-style:none; display:flex; flex-direction:column; gap:8px; padding:0; margin:0; }
+.bp-vs li { font-size:12.5px; line-height:1.35; color:#c3d0e2; display:flex; gap:7px; }
+.bp-vs li::before { content:""; width:5px; height:5px; border-radius:50%; background:var(--bp-accent-hi); margin-top:6px; flex:none; }
+.bp-vs .gen li::before { background:var(--bp-red); }
+
+.bp-obj { border-top:1px solid var(--bp-line); padding-top:12px; margin-top:12px; }
+.bp-obj:first-child { border-top:0; padding-top:0; margin-top:0; }
+.bp-obj .q { font-size:13px; font-weight:600; color:var(--bp-dim); margin-bottom:5px; }
+.bp-obj .a { font-size:13.5px; line-height:1.45; color:#d3ddec; }
+.bp-obj .a strong { color:var(--bp-accent-hi); font-weight:600; }
+
+.bp-honest { background:linear-gradient(180deg,rgba(248,113,113,0.08),var(--bp-850)); border:1px solid rgba(248,113,113,0.28); }
+.bp-honest h3 { color:var(--bp-red); }
+.bp-honest p { font-size:13px; line-height:1.5; color:#d3ddec; margin-bottom:10px; }
+.bp-honest p:last-child { margin-bottom:0; }
+.bp-honest strong { color:var(--bp-accent-hi); }
+
+/* Utility cards */
+.bp-util { width:100%; text-align:left; background:var(--bp-850); border:1px solid var(--bp-line); border-radius:14px; padding:15px 16px; margin-bottom:12px; cursor:pointer; transition:border-color .2s; color:inherit; font-family:inherit; }
+.bp-util.open { border-color:var(--bp-line-hi); }
+.bp-util .top { display:flex; align-items:center; justify-content:space-between; gap:10px; }
+.bp-uname { font-family:'Space Grotesk',sans-serif; font-weight:600; font-size:16px; }
+.bp-uname small { display:block; font-family:'Inter'; font-weight:500; font-size:11px; color:var(--bp-dim); margin-top:2px; }
+.bp-heat { font-family:'JetBrains Mono',monospace; font-size:9.5px; font-weight:700; letter-spacing:0.08em; text-transform:uppercase; padding:5px 8px; border-radius:20px; flex:none; }
+.bp-heat.warm { color:var(--bp-accent-hi); background:rgba(139,92,246,0.14); border:1px solid rgba(139,92,246,0.32); }
+.bp-heat.hot { color:var(--bp-gold); background:rgba(255,216,107,0.13); border:1px solid rgba(255,216,107,0.32); }
+.bp-heat.max { color:var(--bp-red); background:rgba(248,113,113,0.14); border:1px solid rgba(248,113,113,0.38); }
+.bp-rates { display:flex; gap:10px; margin-top:13px; }
+.bp-rate { flex:1; background:var(--bp-bg); border:1px solid var(--bp-line); border-radius:10px; padding:10px; }
+.bp-rate .rl { font-family:'JetBrains Mono',monospace; font-size:9.5px; letter-spacing:0.06em; text-transform:uppercase; color:var(--bp-dim); margin-bottom:4px; }
+.bp-rate .rv { font-family:'Space Grotesk',sans-serif; font-weight:600; font-size:18px; font-variant-numeric:tabular-nums; }
+.bp-rate.get .rv { color:var(--bp-red); }
+.bp-gap { margin-top:11px; background:var(--bp-bg); border:1px dashed var(--bp-line-hi); border-radius:10px; padding:10px 12px; font-size:12.5px; line-height:1.4; color:#cdd8e8; }
+.bp-gap strong { color:var(--bp-accent-hi); }
+.bp-udetail { max-height:0; overflow:hidden; transition:max-height .3s ease; }
+.bp-util.open .bp-udetail { max-height:680px; }
+.bp-angle { margin-top:13px; }
+.bp-angle .al { font-family:'Space Grotesk',sans-serif; font-weight:600; font-size:12px; letter-spacing:0.06em; text-transform:uppercase; color:var(--bp-accent-hi); margin-bottom:7px; }
+.bp-angle p { font-size:13px; line-height:1.45; color:#d3ddec; }
+.bp-hoods { margin-top:12px; display:flex; flex-wrap:wrap; gap:6px; }
+.bp-hood { font-size:11px; color:#bcccdf; background:var(--bp-800); border:1px solid var(--bp-line); border-radius:16px; padding:5px 10px; }
+.bp-chev { width:18px; height:18px; transition:transform .3s; flex:none; color:var(--bp-dim); }
+.bp-util.open .bp-chev { transform:rotate(180deg); }
+.bp-tip { font-size:12px; color:var(--bp-dim); line-height:1.5; padding:2px 2px 10px; }
+.bp-tip strong { color:var(--bp-ink); }
+
+/* Calculators */
+.bp-seg { display:flex; background:var(--bp-900); border:1px solid var(--bp-line); border-radius:11px; padding:4px; margin-bottom:16px; gap:4px; }
+.bp-seg button { flex:1; background:none; border:none; color:var(--bp-dim); font-family:'Space Grotesk',sans-serif; font-weight:500; font-size:12.5px; letter-spacing:0.03em; text-transform:uppercase; padding:9px; border-radius:8px; cursor:pointer; transition:all .2s; }
+.bp-seg button.on { background:var(--bp-accent); color:#fff; font-weight:600; }
+.bp-field { margin-bottom:15px; }
+.bp-flabel { display:block; font-family:'JetBrains Mono',monospace; font-size:11px; font-weight:500; letter-spacing:0.06em; color:var(--bp-dim); text-transform:uppercase; margin-bottom:8px; }
+.bp-flabel .v { float:right; font-family:'Space Grotesk',sans-serif; color:var(--bp-accent-hi); font-size:14px; text-transform:none; letter-spacing:0; }
+.bp-chips { display:flex; gap:8px; flex-wrap:wrap; }
+.bp-chips.loads { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); }
+.bp-chip { background:var(--bp-900); border:1px solid var(--bp-line); border-radius:10px; padding:11px 10px; font-size:13px; font-weight:500; color:#c3d0e2; cursor:pointer; transition:all .18s; display:flex; align-items:center; gap:8px; text-align:left; }
+.bp-chip .kwh { margin-left:auto; font-family:'JetBrains Mono',monospace; font-size:10.5px; color:var(--bp-dim); font-variant-numeric:tabular-nums; }
+.bp-chip.sel { border-color:var(--bp-accent); background:radial-gradient(130% 120% at 0% 0%,rgba(139,92,246,0.16),var(--bp-900)); color:var(--bp-ink); }
+.bp-chip.sel .kwh { color:var(--bp-accent-hi); }
+.bp-chip.size { justify-content:center; min-width:56px; flex:1; }
+.bp-range { -webkit-appearance:none; appearance:none; width:100%; height:6px; border-radius:6px; background:var(--bp-line-hi); outline:none; margin-top:4px; }
+.bp-range::-webkit-slider-thumb { -webkit-appearance:none; width:24px; height:24px; border-radius:50%; background:var(--bp-accent); cursor:pointer; border:3px solid var(--bp-bg); box-shadow:0 0 0 1px var(--bp-accent); }
+.bp-range::-moz-range-thumb { width:22px; height:22px; border-radius:50%; background:var(--bp-accent); cursor:pointer; border:3px solid var(--bp-bg); }
+
+.bp-readout { background:linear-gradient(180deg,var(--bp-800),var(--bp-900)); border:1px solid var(--bp-line-hi); border-radius:16px; padding:18px; margin-top:4px; text-align:center; position:relative; overflow:hidden; }
+.bp-readout::before { content:""; position:absolute; inset:0; background:radial-gradient(90% 70% at 50% 0%,rgba(139,92,246,0.12),transparent 65%); }
+.bp-rl { position:relative; font-family:'JetBrains Mono',monospace; font-size:11px; letter-spacing:0.12em; text-transform:uppercase; color:var(--bp-dim); margin-bottom:6px; }
+.bp-big { position:relative; font-family:'Space Grotesk',sans-serif; font-weight:700; font-size:46px; line-height:1; color:var(--bp-accent-hi); font-variant-numeric:tabular-nums; }
+.bp-big.money { color:var(--bp-gold); }
+.bp-big .u { font-size:18px; color:var(--bp-dim); font-weight:500; margin-left:4px; }
+.bp-rsub { position:relative; font-size:13px; color:#cdd8e8; margin-top:9px; line-height:1.45; }
+.bp-rsub strong { color:var(--bp-accent-hi); }
+.bp-big.money + .bp-rsub strong { color:var(--bp-gold); }
+.bp-warn { display:flex; align-items:flex-start; gap:8px; background:rgba(248,113,113,0.1); border:1px solid rgba(248,113,113,0.28); border-radius:10px; padding:10px 12px; margin-top:12px; font-size:12px; line-height:1.4; color:#f0c9c5; text-align:left; }
+.bp-warn svg { width:16px; height:16px; flex:none; margin-top:1px; color:var(--bp-red); }
+.bp-credit { position:relative; margin-top:12px; background:rgba(52,211,153,0.07); border:1px solid rgba(52,211,153,0.25); border-radius:10px; padding:11px 13px; font-size:12.5px; line-height:1.45; color:#cfeee2; text-align:left; }
+.bp-credit strong { color:var(--bp-green); }
+
+.bp-foot { padding:14px 4px 6px; }
+.bp-disc { font-size:10.5px; color:var(--bp-dim2); line-height:1.5; text-align:center; }
+
+/* Bottom nav */
+.bp-nav { position:fixed; bottom:0; left:0; right:0; max-width:560px; margin:0 auto; height:calc(var(--bp-nav) + env(safe-area-inset-bottom)); padding-bottom:env(safe-area-inset-bottom); background:rgba(12,9,22,0.92); backdrop-filter:blur(14px); -webkit-backdrop-filter:blur(14px); border-top:1px solid var(--bp-line); display:flex; z-index:30; }
+.bp-nav button { flex:1; background:none; border:none; color:var(--bp-dim); display:flex; flex-direction:column; align-items:center; justify-content:center; gap:4px; cursor:pointer; padding-top:6px; font-family:'Space Grotesk',sans-serif; font-weight:500; font-size:11px; letter-spacing:0.06em; text-transform:uppercase; transition:color .2s; }
+.bp-nav button svg { width:22px; height:22px; }
+.bp-nav button.on { color:var(--bp-accent-hi); }
+
+@media (prefers-reduced-motion:reduce) { .bp-root *, .bp-root *::before, .bp-root *::after { transition:none !important; animation:none !important; } }
+
+
+html,body{margin:0;background:var(--bp-bg,#0a0712)}
+.bp-root{position:relative!important;inset:auto!important;z-index:auto;min-height:100vh}
+.bp-x{display:none!important}
+
+</style>
+</head>
+<body>
+<div class="bp-root">
+<div class="bp-shell">
+  <header class="bp-head" style="position:sticky">
+    <div class="bp-brandrow"><div class="bp-brand">
+      <svg class="bp-bolt" viewBox="0 0 24 24" fill="none"><path d="M13 2 4 14h6l-1 8 9-12h-6l1-8Z" fill="#a78bfa" stroke="#a78bfa" stroke-width="1.4" stroke-linejoin="round"/></svg>
+      <div class="bp-word">Sun Service<small>Charleston Storm Kit</small></div></div>
+      <div class="bp-season"><span class="bp-pulse"></span>Storm Season</div></div>
+  </header>
+  <main class="bp-main">
+    <section class="pb-panel" data-tab="pitch">
+      <div class="bp-eyebrow">The demo · show them, don't tell them</div>
+      <div class="bp-demo" id="demo">
+        <div class="bp-status"><span class="bp-dot" id="dot"></span><span id="statusT"></span></div>
+        <div class="bp-statusline" id="statusL"></div>
+        <div class="bp-loads" id="loads">
+          <div class="bp-load" data-ess="1"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="2.5" width="12" height="19" rx="2.2"/><path d="M6 10h12"/><path d="M9 6v1.5M9 12.5v2.5"/></svg><span>Fridge</span></div><div class="bp-load" data-ess="1"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18h6"/><path d="M10 21h4"/><path d="M12 3a6 6 0 0 0-3.5 10.9c.6.5.9 1.2 1 1.9v.2h5v-.2c.1-.7.4-1.4 1-1.9A6 6 0 0 0 12 3Z"/></svg><span>Lights</span></div><div class="bp-load" data-ess="1"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5a10 10 0 0 1 14 0"/><path d="M8 15.5a5.5 5.5 0 0 1 8 0"/><circle cx="12" cy="19" r="1" fill="currentColor" stroke="none"/></svg><span>Wi-Fi</span></div><div class="bp-load" data-ess="1"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="6" width="17" height="12" rx="2.4"/><path d="M12 9.5v5M9.5 12h5"/></svg><span>CPAP</span></div><div class="bp-load" data-ess="1"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3s6 6.4 6 10.5a6 6 0 0 1-12 0C6 9.4 12 3 12 3Z"/><path d="M9.5 13.5a2.5 2.5 0 0 0 2.5 2.5"/></svg><span>Well pump</span></div><div class="bp-load" data-ess="0"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="9" rx="2"/><path d="M6.5 9.5h11"/><path d="M8 18c0-1 1-1.5 1-2.5M12 18.5c0-1 1-1.5 1-2.5M16 18c0-1 1-1.5 1-2.5"/></svg><span>Central AC</span></div>
+        </div>
+        <div class="bp-toggles">
+          <button class="bp-tog grid" id="gridTog"><span class="bp-toglabel">Grid</span><span class="bp-switch"><span class="bp-track"></span><span id="gridW">Online</span></span></button>
+          <button class="bp-tog" id="battTog"><span class="bp-toglabel">Their battery</span><span class="bp-switch"><span class="bp-track"></span><span id="battW">Off</span></span></button>
+        </div>
+      </div>
+      <div class="bp-card"><div class="bp-opener">“You already made the smart move — you went solar. I'm here about the part the utility keeps quiet: rates are climbing, your buy-back keeps shrinking, and they're reselling your afternoon sun to your neighbors at full retail. Let's make that power <strong>yours to keep</strong>.”</div></div>
+      <div class="bp-card"><h3><span class="num">?</span>Discovery — let them talk</h3>
+        <ul class="bp-qlist"><li><span class="qn">1</span><span>Since they moved you to <strong>time-of-use</strong>, has your bill actually done what the solar company promised — or has it crept back up?</span></li><li><span class="qn">2</span><span>When Ian or Dorian hit, your panels shut off for safety and you were <strong>just as dark as the house without solar</strong> — how long were you out, and what did it cost you?</span></li><li><span class="qn">3</span><span>Do you even know what your system is producing right now — and <strong>who you'd call</strong> if it stopped tomorrow?</span></li></ul></div>
+      <div class="bp-card"><h3><span class="num">$</span>The rate math they don't advertise</h3>
+        <p class="bp-body">Dominion's base rates just went up around <strong>7.6%</strong> — roughly <strong>$12 more a month</strong> on a typical bill — and the fixed monthly charge climbed from $9.50 toward <strong>$13</strong> before you use a single kWh. You're on <strong>time-of-use</strong>, so your midday solar is worth the least and the <strong>6pm peak</strong> costs the most, right as your panels fade. And the surplus you export? They pay you <strong>pennies</strong> and sell it next door at <strong>full retail</strong>.</p><div class="bp-callout">Picture the utility as a middleman parked in your driveway: he buys your afternoon sun at wholesale, walks it next door, and sells it to your neighbor at retail — you're his cheapest supplier by day and his full-price customer after dark. <strong>A battery fires the middleman:</strong> you bank your own power and spend it at peak instead of buying it back.</div></div>
+      <div class="bp-card"><h3><span class="num">◎</span>Who's actually watching your system?</h3>
+        <p class="bp-body">A lot of Lowcountry solar was sold by companies that have since <strong>folded, stopped answering the phone, or never really monitored production</strong> in the first place. Panels quietly underproduce for years and nobody catches it. We <strong>monitor it, maintain it, and we're still here</strong> to pick up the phone — so the system you already paid for actually delivers, and the battery on top of it has someone minding it for the long haul.</p></div>
+      <div class="bp-card"><h3>Battery vs. the generator next door</h3>
+        <div class="bp-vs">
+          <div class="col batt"><div class="ch">Home battery</div><ul><li>Silent — no engine, no neighbors complaining</li><li>No fuel runs during a storm</li><li>Switches over automatically, instantly</li><li>Recharges from your own solar for days</li><li>Safe indoors — zero fumes</li></ul></div>
+          <div class="col gen"><div class="ch">Gas generator</div><ul><li>Needs fuel you can't get mid-disaster</li><li>Loud, fumes, manual start</li><li>Refuel every few hours, day and night</li><li>Dies when the gas runs out</li><li>Carbon monoxide risk</li></ul></div>
+        </div></div>
+      <div class="bp-card"><h3>Handle the pushback</h3>
+        <div class="bp-obj"><div class="q">“My solar already covers my bill.”</div><div class="a">It did — until time-of-use and this year's rate hike quietly ate into it, and the buy-back rate kept dropping. Pull up a recent <strong>true-up statement</strong> with me. A battery protects the savings you were actually promised and keeps the lights on when the grid drops and your panels shut off with it.</div></div><div class="bp-obj"><div class="q">“My installer handles all that.”</div><div class="a">Are they still in business? A lot of the companies that blanketed the Lowcountry are gone or don't call back. We <strong>monitor and maintain</strong>, we're local, and you get <strong>one number that actually picks up</strong>.</div></div><div class="bp-obj"><div class="q">“I'll just get a generator.”</div><div class="a">A lot of folks do — until the gas stations are dry and it's day three. A battery never asks you to go find fuel in a hurricane, it's silent, and it recharges off the solar you already own.</div></div></div>
+      <div class="bp-card bp-honest"><h3>Stay honest — it closes</h3><p>Lead with the <strong>rate reality and resilience</strong> — not a tax credit. The 30% federal credit ended for owned systems in 2026; don't dangle it.</p><p>What's still real: SC's <strong>25% state tax credit</strong> (with a qualifying solar-plus-storage project) and a <strong>property-tax exemption</strong>; a lease/PPA can still capture the 48E credit through 2027. Mention it as a bonus — never the headline. The honest headline is simpler: <strong>rates up, buy-back down, and their panels go dark in an outage. The battery fixes all three.</strong></p></div>
+    </section>
+
+    <section class="pb-panel" data-tab="utility" hidden>
+      <div class="bp-eyebrow">Know the territory first</div>
+      <h2 class="bp-h2">Which meter is on <span class="accent">their wall?</span></h2>
+      <p class="bp-tip">The economics flip block to block. Confirm the utility before you run numbers — a weaker export rate makes your battery case <strong>stronger</strong>, not weaker.</p>
+      
+      <button class="bp-util">
+        <div class="top"><div class="bp-uname">Dominion Energy SC<small>Metro Charleston · former SCE&G</small></div>
+          <div style="display:flex;align-items:center;gap:8px"><span class="bp-heat warm">warm</span><svg class="bp-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m6 9 6 6 6-6"/></svg></div></div>
+        <div class="bp-rates"><div class="bp-rate pay"><div class="rl">They pay</div><div class="rv">~15¢</div></div>
+          <div class="bp-rate get"><div class="rl">Solar Choice export</div><div class="rv">TOU + true-up</div></div></div>
+        <div class="bp-udetail"><div class="bp-gap">Mandatory <strong>time-of-use</strong> plan, and any extra solar trues up each November at a low avoided-cost rate. Exporting is a bad deal — <strong>self-consumption is the whole game.</strong></div>
+          <div class="bp-angle"><div class="al">Your angle</div><p>“Store your midday solar and spend it at the 6pm peak instead of selling it back cheap. The battery is how you actually keep the savings they promised you.”</p></div>
+          <div class="bp-hoods"><span class="bp-hood">Mount Pleasant</span><span class="bp-hood">West Ashley</span><span class="bp-hood">James Island</span><span class="bp-hood">North Charleston</span></div></div>
+      </button>
+      <button class="bp-util">
+        <div class="top"><div class="bp-uname">Berkeley Electric Co-op<small>Outlying & coastal areas</small></div>
+          <div style="display:flex;align-items:center;gap:8px"><span class="bp-heat hot">hot</span><svg class="bp-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m6 9 6 6 6-6"/></svg></div></div>
+        <div class="bp-rates"><div class="bp-rate pay"><div class="rl">They pay</div><div class="rv">~14¢</div></div>
+          <div class="bp-rate get"><div class="rl">Co-op export</div><div class="rv">~4–6¢</div></div></div>
+        <div class="bp-udetail"><div class="bp-gap">Co-ops credit exports at a fraction of retail. <strong>The gap between what they pay and what they get back is huge</strong> — that gap is exactly what a battery recaptures.</div>
+          <div class="bp-angle"><div class="al">Your angle</div><p>“On a co-op, sending solar back is almost charity. A battery lets you use every kWh you make instead of giving it away.”</p></div>
+          <div class="bp-hoods"><span class="bp-hood">Daniel Island</span><span class="bp-hood">Goose Creek</span><span class="bp-hood">Moncks Corner</span><span class="bp-hood">Awendaw</span></div></div>
+      </button>
+      <button class="bp-util">
+        <div class="top"><div class="bp-uname">Santee Cooper<small>State-owned · parts of the Lowcountry</small></div>
+          <div style="display:flex;align-items:center;gap:8px"><span class="bp-heat max">max</span><svg class="bp-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m6 9 6 6 6-6"/></svg></div></div>
+        <div class="bp-rates"><div class="bp-rate pay"><div class="rl">They pay</div><div class="rv">~12¢</div></div>
+          <div class="bp-rate get"><div class="rl">Export credit</div><div class="rv">~4¢</div></div></div>
+        <div class="bp-udetail"><div class="bp-gap">Roughly 4¢ summer / 3.8¢ non-summer for exports. <strong>The strongest battery case in the region</strong> — exporting is worth almost nothing here.</div>
+          <div class="bp-angle"><div class="al">Your angle</div><p>“Santee Cooper pays you about 4 cents for power worth 12. Store it, don't sell it — that's the entire pitch.”</p></div>
+          <div class="bp-hoods"><span class="bp-hood">Berkeley pockets</span><span class="bp-hood">Georgetown Co.</span><span class="bp-hood">Horry Co.</span></div></div>
+      </button>
+      <p class="bp-tip" style="margin-top:4px">Note: <strong>Duke Energy is upstate/Pee Dee, not Charleston.</strong> If you ever work Duke territory, their PowerPair program adds a real battery incentive — but it doesn't apply here.</p>
+    </section>
+
+    <section class="pb-panel" data-tab="numbers" hidden>
+      <div class="bp-eyebrow">Run it at the door</div>
+      <h2 class="bp-h2">The <span class="accent">numbers</span> that matter</h2>
+      <div class="bp-seg"><button class="on" data-calc="run">Storm runtime</button><button data-calc="save">Solar you're giving away</button></div>
+      <div class="pb-calc" data-calc="run">
+        <div class="bp-card">
+          <div class="bp-field"><label class="bp-flabel">Battery size <span class="v" id="sizeV">13.5 kWh</span></label>
+            <div class="bp-chips" id="sizes"><button class="bp-chip size" data-size="10">10</button><button class="bp-chip size sel" data-size="13.5">13.5</button><button class="bp-chip size" data-size="20">20</button><button class="bp-chip size" data-size="27">27</button><button class="bp-chip size" data-size="40">40</button></div>
+            <p class="bp-tip" style="padding:8px 0 0">SigenStor stacks modularly — start small, add more.</p></div>
+          <div class="bp-field" style="margin-bottom:6px"><label class="bp-flabel">What are we keeping on?</label>
+            <div class="bp-chips loads" id="runLoads">
+              <button class="bp-chip sel" data-kwh="1.5">Fridge / freezer<span class="kwh">1.5</span></button><button class="bp-chip sel" data-kwh="1">Lights + phones<span class="kwh">1</span></button><button class="bp-chip sel" data-kwh="0.6">Wi-Fi + TV<span class="kwh">0.6</span></button><button class="bp-chip sel" data-kwh="0.5">CPAP / medical<span class="kwh">0.5</span></button><button class="bp-chip" data-kwh="2">Well pump<span class="kwh">2</span></button><button class="bp-chip" data-kwh="5">Window AC<span class="kwh">5</span></button><button class="bp-chip" data-kwh="30" data-ac="1">Central AC<span class="kwh">30</span></button><button class="bp-chip" data-kwh="3">Electric cooking<span class="kwh">3</span></button>
+            </div></div>
+        </div>
+        <div class="bp-readout"><div class="bp-rl">Backup runtime, no sun</div>
+          <div class="bp-big" id="runDays"></div><div class="bp-rsub" id="runSub"></div>
+          <div class="bp-warn" id="acWarn" style="display:none"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 9v4M12 17h.01M10.3 3.9 2 18a2 2 0 0 0 1.7 3h16.6a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z"/></svg><span>Central AC drains any home battery fast. Be honest: back up essentials for days, or cool one room with a window unit — not the whole house for a week.</span></div></div>
+      </div>
+      <div class="pb-calc" data-calc="save" hidden>
+        <div class="bp-card">
+          <div class="bp-field"><label class="bp-flabel">Their utility</label>
+            <div class="bp-chips" id="savePick"><button class="bp-chip sel" data-pay="15" data-get="4">Dominion SC</button><button class="bp-chip" data-pay="14" data-get="5">Berkeley Co-op</button><button class="bp-chip" data-pay="12" data-get="4">Santee Cooper</button></div></div>
+          <div class="bp-field"><label class="bp-flabel">Solar sent back to grid each month <span class="v" id="expV">250 kWh</span></label>
+            <input class="bp-range" type="range" id="expRange" min="0" max="900" step="10" value="250">
+            <p class="bp-tip" style="padding:8px 0 0">Pull this from their bill or solar app — the "exported" or "sold" number.</p></div>
+        </div>
+        <div class="bp-readout"><div class="bp-rl">Value the battery recaptures / year</div>
+          <div class="bp-big money" id="saveYr"></div><div class="bp-rsub" id="saveSub"></div>
+          <div class="bp-credit">Then stack SC's <strong>25% state tax credit</strong> (with solar, capped $3,500/yr) and the <strong>property-tax exemption</strong> on top. This estimate is the ongoing recapture only — not the full deal.</div></div>
+      </div>
+    </section>
+
+    <footer class="bp-foot"><p class="bp-disc">Field estimates for conversation, not a binding quote. Confirm the homeowner's actual tariff and system before proposing. Not tax or financial advice — homeowners should confirm credits with a tax professional.</p></footer>
+  </main>
+  <nav class="bp-nav">
+    <button class="on" data-tab="pitch"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M8 10h8M8 14h5"/><path d="M21 12a8 8 0 0 1-11.6 7.1L3 21l1.9-6.4A8 8 0 1 1 21 12Z"/></svg>Pitch</button>
+    <button data-tab="utility"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3 21V9l9-6 9 6v12"/><path d="M9 21v-6h6v6"/></svg>Utility</button>
+    <button data-tab="numbers"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="3" width="16" height="18" rx="2"/><path d="M8 7h8M8 11h8M8 15h5"/></svg>Numbers</button>
+  </nav>
+</div>
+</div>
+<script>
+(function(){
+  var $=function(s,r){return (r||document).querySelector(s)},$$=function(s,r){return [].slice.call((r||document).querySelectorAll(s))};
+  // Tabs
+  $$('.bp-nav button').forEach(function(b){b.addEventListener('click',function(){
+    $$('.bp-nav button').forEach(function(x){x.classList.remove('on')});b.classList.add('on');
+    $$('.pb-panel').forEach(function(p){p.hidden=(p.dataset.tab!==b.dataset.tab)});
+    window.scrollTo(0,0);
+  })});
+  // Demo
+  var gridDown=false,batt=false;
+  function demo(){
+    var d=$('#demo'), loads=$$('#loads .bp-load');
+    d.className='bp-demo'+(gridDown&&!batt?' down':gridDown&&batt?' lit':'');
+    $('#gridTog').className='bp-tog grid'+(gridDown?' on':''); $('#battTog').className='bp-tog'+(batt?' on':'');
+    $('#gridW').textContent=gridDown?'Down':'Online'; $('#battW').textContent=batt?'On':'Off';
+    if(!gridDown){$('#dot').style.background='var(--bp-gold)';$('#statusT').textContent="Grid online — power's flowing";$('#statusL').textContent='Everything runs off the grid, like normal.';loads.forEach(function(l){l.className='bp-load on'});}
+    else if(!batt){$('#dot').style.background='var(--bp-red)';$('#statusT').textContent='Grid down — no battery';$('#statusL').textContent="You're in the dark. Fridge warming, phones dying, well pump off.";loads.forEach(function(l){l.className='bp-load'});}
+    else{$('#dot').style.background='var(--bp-accent-hi)';$('#statusT').textContent='Grid down — battery carrying the home';$('#statusL').textContent='Essentials stay lit for days. AC flickers — it draws too much to run all day.';loads.forEach(function(l){l.className='bp-load '+(l.dataset.ess==='1'?'on':'flicker')});}
+  }
+  $('#gridTog').addEventListener('click',function(){gridDown=!gridDown;demo()});
+  $('#battTog').addEventListener('click',function(){batt=!batt;demo()});
+  demo();
+  // Accordions
+  $$('.bp-util').forEach(function(u){u.addEventListener('click',function(){var open=u.classList.contains('open');$$('.bp-util').forEach(function(x){x.classList.remove('open')});if(!open)u.classList.add('open')})});
+  // Calc subtabs
+  $$('.bp-seg button').forEach(function(b){b.addEventListener('click',function(){$$('.bp-seg button').forEach(function(x){x.classList.remove('on')});b.classList.add('on');$$('.pb-calc').forEach(function(c){c.hidden=(c.dataset.calc!==b.dataset.calc)})})});
+  // Runtime
+  var size=13.5;
+  $$('#sizes .size').forEach(function(c){c.addEventListener('click',function(){$$('#sizes .size').forEach(function(x){x.classList.remove('sel')});c.classList.add('sel');size=parseFloat(c.dataset.size);$('#sizeV').textContent=size+' kWh';runCalc()})});
+  $$('#runLoads .bp-chip').forEach(function(c){c.addEventListener('click',function(){c.classList.toggle('sel');runCalc()})});
+  function runCalc(){
+    var draw=0,ac=false;$$('#runLoads .bp-chip.sel').forEach(function(c){draw+=parseFloat(c.dataset.kwh);if(c.dataset.ac)ac=true});
+    var big=$('#runDays'),sub=$('#runSub');
+    if(draw<=0){big.innerHTML='—';sub.textContent='Pick what needs to stay on.';$('#acWarn').style.display='none';return;}
+    var days=size/draw,val,unit;if(days>=1){val=days.toFixed(1);unit='days';}else{val=Math.round(days*24);unit=val===1?'hour':'hours';}
+    big.innerHTML=val+'<span class="u">'+unit+'</span>';
+    sub.innerHTML='Pulling <strong>'+draw.toFixed(1)+' kWh/day</strong> off a <strong>'+size+' kWh</strong> battery. Solar recharge extends this every sunny hour.';
+    $('#acWarn').style.display=ac?'flex':'none';
+  }
+  runCalc();
+  // Savings
+  var pay=15,get=4;
+  $$('#savePick .bp-chip').forEach(function(c){c.addEventListener('click',function(){$$('#savePick .bp-chip').forEach(function(x){x.classList.remove('sel')});c.classList.add('sel');pay=parseFloat(c.dataset.pay);get=parseFloat(c.dataset.get);saveCalc()})});
+  $('#expRange').addEventListener('input',saveCalc);
+  function saveCalc(){var exp=parseFloat($('#expRange').value);$('#expV').textContent=exp+' kWh';var gap=pay-get,yr=Math.round(exp*gap/100*12);$('#saveYr').textContent='$'+yr.toLocaleString();$('#saveSub').innerHTML='They pay <strong>'+pay+'¢</strong> but get <strong>'+get+'¢</strong> back. That <strong>'+gap+'¢ gap</strong> on '+exp+' kWh/mo is money a battery keeps in the house.';}
+  saveCalc();
+})();
+</script>
+</body>
+</html>
