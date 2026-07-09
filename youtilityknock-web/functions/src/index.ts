@@ -1111,9 +1111,67 @@ export const reassignAppointment = onCall(async (request) => {
   if (!newCloser || newCloser.companyId !== company || !newCloser.isCloser) {
     throw new HttpsError("invalid-argument", "Pick a closer in this company.");
   }
-  await evRef.set({ closerUid, closerName: newCloser.displayName || newCloser.email || "Closer", updatedAt: Date.now() }, { merge: true });
-  await rebuildCompanyHierarchy(company); // recompute appointment visibilityPath
-  logger.info(`Appointment ${eventId} reassigned to ${closerUid} by ${caller.uid}`);
+  const closerName = newCloser.displayName || newCloser.email || "Closer";
+  // Who owned the appointment before this reassign (the "Assigned to" rep + the
+  // calendar it sits on). Capture it before we overwrite so we can pull the
+  // event off their external calendar.
+  const prevOwnerUid = (ev.userId as string) || "";
+  const ownerChanged = prevOwnerUid !== closerUid;
+
+  // Hand the appointment fully to the new closer: they become the OWNER
+  // ("Assigned to"), not just the named closer. Dropping userId off the old rep
+  // — plus the visibilityPath rebuild below — removes their access entirely, so
+  // a reassigned appointment no longer lingers with the person who lost it.
+  await evRef.set({
+    userId: closerUid,
+    userName: closerName,
+    closerUid,
+    closerName,
+    // The old owner's external-calendar ids point at THEIR calendar; clear them
+    // so a later reschedule doesn't patch an event on the wrong person's calendar.
+    googleEventId: null,
+    microsoftEventId: null,
+    updatedAt: Date.now(),
+  }, { merge: true });
+  await rebuildCompanyHierarchy(company); // recompute appointment visibilityPath (drops the old owner)
+
+  // Move it off the previous owner's Google/Outlook and onto the new closer's,
+  // so it disappears from the old rep's calendar too — not just the app.
+  if (ownerChanged) {
+    if (prevOwnerUid && (ev.googleEventId || ev.microsoftEventId)) {
+      await deleteExternalEvent(prevOwnerUid, {
+        googleEventId: ev.googleEventId as string | undefined,
+        microsoftEventId: ev.microsoftEventId as string | undefined,
+      }).catch((e) => logger.warn("reassign: old calendar delete failed", e));
+    }
+    const startMs = Number(ev.startAt);
+    if (Number.isFinite(startMs)) {
+      try {
+        const ids = await pushExternalEvent(closerUid, {
+          title: (ev.title as string) || "Appointment",
+          address: ev.address as string | undefined,
+          notes: (ev.notes as string) || (ev.apptNotes as string) || undefined,
+          startMs,
+          endMs: Number(ev.endAt) || startMs + (Number(ev.durationMin) || 60) * 60 * 1000,
+        });
+        if (ids.googleEventId || ids.microsoftEventId) await evRef.set(ids, { merge: true });
+      } catch (e) { logger.warn("reassign: new calendar push failed", e); }
+    }
+    await notifyUser({
+      userId: closerUid, type: "event",
+      title: "New appointment to close",
+      body: [ev.title, ev.startAt ? new Date(Number(ev.startAt)).toLocaleString() : ""].filter(Boolean).join(" — "),
+      link: "/app/closer",
+    }).catch(() => {});
+    if (prevOwnerUid) await notifyUser({
+      userId: prevOwnerUid, type: "event",
+      title: "Appointment reassigned",
+      body: [ev.title, `reassigned to ${closerName}`].filter(Boolean).join(" — "),
+      link: "/app/schedule",
+    }).catch(() => {});
+  }
+
+  logger.info(`Appointment ${eventId} reassigned to ${closerUid} (owner ${prevOwnerUid || "—"}→${closerUid}) by ${caller.uid}`);
   return { ok: true };
 });
 
