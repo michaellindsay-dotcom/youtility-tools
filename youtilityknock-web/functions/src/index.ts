@@ -810,6 +810,75 @@ export const relinkMyProfile = onCall(async (request) => {
   return { ok: true, companyId, relinkedFrom: oldId };
 });
 
+// linkProfileToUid — admin manually links an existing company profile to a
+// specific Firebase Auth UID (the "Account ID" shown on the ACCOUNT NOT SET UP
+// gate). This is the fallback for when auto-relink can't resolve it on its own —
+// e.g. a duplicate profile for the same email makes it ambiguous, so it refuses
+// to guess. The admin opens the person's profile and pastes the Account ID.
+// Company admin / super-admin.
+export const linkProfileToUid = onCall(async (request) => {
+  const caller = await getCaller(request);
+  const { profileUid, targetUid } = (request.data || {}) as { profileUid?: string; targetUid?: string };
+  if (!profileUid || !targetUid) throw new HttpsError("invalid-argument", "profileUid and targetUid required.");
+  const target = String(targetUid).trim();
+  if (!/^[A-Za-z0-9_-]{6,}$/.test(target)) throw new HttpsError("invalid-argument", "That doesn't look like a valid Account ID.");
+
+  const snap = await db.doc(`users/${profileUid}`).get();
+  if (!snap.exists) throw new HttpsError("not-found", "Profile not found.");
+  const data = snap.data() as any;
+  const companyId = data.companyId as string;
+  if (!companyId) throw new HttpsError("failed-precondition", "That profile isn't attached to a company.");
+  authorizeForCompany(caller, companyId);
+
+  // The target Auth account must exist, and its email should match the profile
+  // so we never hand a company profile to an unrelated login.
+  const authUser = await getAuth().getUser(target).catch(() => null);
+  if (!authUser) throw new HttpsError("not-found", "No sign-in account with that Account ID. Have them sign in once first.");
+  const profileEmail = String(data.email || "").trim().toLowerCase();
+  const authEmail = String(authUser.email || "").trim().toLowerCase();
+  if (profileEmail && authEmail && profileEmail !== authEmail) {
+    throw new HttpsError("failed-precondition",
+      `That Account ID signs in as ${authUser.email}, but this profile is ${data.email}. Double-check the ID.`);
+  }
+  if (target === profileUid) return { ok: true, alreadyLinked: true };
+
+  // Re-key the profile onto the target UID (same as auto-relink, but explicit).
+  await db.doc(`users/${target}`).set(
+    { ...data, uid: target, email: authUser.email || data.email, disabled: false, invitePending: false,
+      relinkedFrom: profileUid, relinkedAt: Date.now() },
+    { merge: true },
+  );
+  await snap.ref.set({ relinkedTo: target, disabled: true, updatedAt: Date.now() }, { merge: true });
+
+  // Retire any OTHER same-email profiles so the next login isn't ambiguous.
+  if (authUser.email) {
+    const dupes = await db.collection("users").where("email", "==", authUser.email).get();
+    for (const d of dupes.docs) {
+      if (d.id === target || d.id === profileUid) continue;
+      if (d.data()?.relinkedTo) continue;
+      await d.ref.set({ relinkedTo: target, disabled: true, updatedAt: Date.now() }, { merge: true });
+    }
+  }
+
+  // Re-point manager chains that referenced the old id so reports still ladder up.
+  const company = await db.collection("users").where("companyId", "==", companyId).get();
+  let batch = db.batch();
+  let ops = 0;
+  for (const d of company.docs) {
+    const u = d.data();
+    const patch: Record<string, unknown> = {};
+    if (u.managerId === profileUid) patch.managerId = target;
+    if (u.closerManagerId === profileUid) patch.closerManagerId = target;
+    if (Object.keys(patch).length) { batch.update(d.ref, patch); if (++ops >= 450) { await batch.commit(); batch = db.batch(); ops = 0; } }
+  }
+  if (ops) await batch.commit();
+
+  await getAuth().setCustomUserClaims(target, { role: (data.role as string) || "user", companyId });
+  await rebuildCompanyHierarchy(companyId);
+  logger.info(`Admin ${caller.uid} linked profile ${profileUid} → ${target} (${authUser.email}) in ${companyId}`);
+  return { ok: true, companyId, linkedFrom: profileUid };
+});
+
 // ───────────────────────────────────────────────────────────────────────────
 // Company role catalog (titles on a base tier). Company admin / super-admin.
 // ───────────────────────────────────────────────────────────────────────────

@@ -1470,6 +1470,7 @@ const setUserPhoneRouting = httpsCallable(fns, "setUserPhoneRouting");
 const updateUserProfile = httpsCallable(fns, "updateUserProfile");
 const resendInvite    = httpsCallable(fns, "resendInvite");
 const getUserLoginMeta = httpsCallable(fns, "getUserLoginMeta");
+const linkProfileToUid = httpsCallable(fns, "linkProfileToUid");
 const changeUserEmail = httpsCallable(fns, "changeUserEmail");
 const setPositionServices = httpsCallable(fns, "setPositionServices");
 const reassignAppointment = httpsCallable(fns, "reassignAppointment");
@@ -4668,6 +4669,7 @@ function renderProfileBody(uid, ov) {
       ${state.isSuper && !isSelf ? '<button class="btn sm mirrorBtn">Mirror</button>' : ''}
       <button class="btn sm resetBtn">Reset password</button>
       ${u.email ? '<button class="btn sm resendBtn">Resend invite link</button>' : ''}
+      <button class="btn sm linkIdBtn" title="Link this profile to the Account ID shown on the &quot;Account not set up&quot; screen">Link login (Account ID)</button>
       ${(!isSelf || state.isSuper) ? `<button class="btn sm ${u.disabled ? '' : 'danger'} disBtn">${u.disabled ? 'Enable account' : 'Disable account'}</button>` : ''}
       ${(!isSelf || state.isSuper) ? '<button class="btn sm danger delBtn">Delete account</button>' : ''}
     </div>
@@ -4767,6 +4769,22 @@ function renderProfileBody(uid, ov) {
       else pbanner("Sign-in link generated.", "good");
     } catch (e) { pbanner(e.message || "Could not resend the invite.", "error"); }
     finally { ev.target.disabled = false; ev.target.textContent = orig; }
+  });
+  const linkIdBtn = pb.querySelector(".linkIdBtn");
+  if (linkIdBtn) linkIdBtn.addEventListener("click", async (ev) => {
+    const id = (prompt(
+      `Paste the Account ID from this person's "Account not set up" screen.\n` +
+      `It links ${u.displayName || u.email || "this profile"} to that exact login.`,
+    ) || "").trim();
+    if (!id) return;
+    ev.target.disabled = true;
+    try {
+      const res = await linkProfileToUid({ profileUid: u.id, targetUid: id });
+      if (res.data && res.data.alreadyLinked) pbanner("That's already the linked Account ID — nothing to change.", "good");
+      else pbanner(`Linked. ${u.displayName || u.email} can log in now.`, "good");
+      await refresh();
+    } catch (e) { pbanner(e.message || "Could not link that Account ID.", "error"); }
+    finally { ev.target.disabled = false; }
   });
   const disBtn = pb.querySelector(".disBtn");
   if (disBtn) disBtn.addEventListener("click", async () => {
