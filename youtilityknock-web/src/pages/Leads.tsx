@@ -17,6 +17,7 @@ import { useAuth } from "../auth/AuthContext";
 import { isRallyCardOnly } from "../lib/features";
 import { bumpStats } from "../lib/stats";
 import { DISPOSITIONS, DISP_LABEL, DISP_COLOR } from "../lib/dispositions";
+import EditLeadModal from "../components/EditLeadModal";
 import type { Lead, LeadStatus } from "../types";
 
 const STATUSES = DISPOSITIONS;
@@ -34,6 +35,7 @@ export default function Leads() {
   const [showAdd, setShowAdd] = useState(false);
   const [showDeleted, setShowDeleted] = useState(false); // admin-only archive view
   const [deleteTarget, setDeleteTarget] = useState<Lead | null>(null);
+  const [editTarget, setEditTarget] = useState<Lead | null>(null);
   const [search, setSearch] = useState("");
   // Manager/admin filters: "all" | "me" | a downline rep's uid, plus a date range.
   const [repFilter, setRepFilter] = useState<string>("all");
@@ -233,6 +235,7 @@ export default function Leads() {
                   {DISP_LABEL[lead.status] || lead.status}
                 </span>
                 <button className="btn ghost sm" title="Open customer history" onClick={() => navigate(`/lead/${lead.id}`)}>👁</button>
+                {!showDeleted && <button className="btn ghost sm" title="Edit name, address, phone" onClick={() => setEditTarget(lead)}>✏️</button>}
                 {isAdmin && (showDeleted ? (
                   <button className="btn ghost sm" onClick={() => restore(lead)}>Restore</button>
                 ) : (
@@ -252,6 +255,8 @@ export default function Leads() {
           onClose={() => setDeleteTarget(null)}
         />
       )}
+
+      {editTarget && <EditLeadModal lead={editTarget} onClose={() => setEditTarget(null)} />}
     </div>
   );
 }

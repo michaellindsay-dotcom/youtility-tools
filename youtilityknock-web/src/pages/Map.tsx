@@ -184,11 +184,15 @@ export default function MapPage() {
       })
         .on("click", (e: L.LeafletMouseEvent) => {
           e.originalEvent.stopPropagation();
+          // Who worked it last — the most recent knock in the history timeline.
+          const hist = Array.isArray(lead.history) ? lead.history : [];
+          const last = hist.length ? hist.reduce((a, b) => (b.at > a.at ? b : a)) : null;
           setDispoTarget({
             leadId: lead.id, address: lead.address, lat: c[0], lng: c[1], status: lead.status,
             name: lead.ownerName || "", phone: lead.phone || "", email: lead.email || "", notes: lead.notes || "",
             enrichment: lead.enrichment,
             photoHomeUrl: lead.photoHomeUrl, photoBillUrl: lead.photoBillUrl,
+            lastBy: last?.byName || undefined, lastStatus: last?.status, lastAt: last?.at,
           });
         })
         .addTo(leadLayer.current);
