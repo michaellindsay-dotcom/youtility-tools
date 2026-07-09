@@ -13,6 +13,7 @@ import { hasFeature } from "../lib/features";
 import { fetchAreaIncentives, incentiveDates, type AreaIncentive } from "../lib/incentives";
 import { usePitchRecorder, pitchSupported } from "../lib/pitch";
 import { validAppointmentTime } from "../lib/scheduling";
+import { isFatalFirestoreError, recoverFirestore } from "../lib/firestoreRecovery";
 import { useShift } from "../shift/ShiftContext";
 import SlotPicker from "./SlotPicker";
 import type { LeadStatus, LeadEnrichment, EventType } from "../types";
@@ -493,7 +494,14 @@ export default function DispositionModal({
       onClose();
     } catch (e) {
       console.error("Save failed", e);
-      setErr((e as Error)?.message || "Couldn't save. Please try again.");
+      // A corrupt on-device Firestore cache throws a fatal internal assertion on
+      // every write. Wipe it and reload instead of stranding the rep with an
+      // error they can't clear (the "delete + reinstall the app" bug).
+      if (isFatalFirestoreError(e) && recoverFirestore()) {
+        setErr("Your offline data got corrupted — repairing and reloading. Hang on, then try again.");
+      } else {
+        setErr((e as Error)?.message || "Couldn't save. Please try again.");
+      }
     } finally {
       setSaving(false);
     }

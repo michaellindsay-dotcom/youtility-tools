@@ -5,10 +5,16 @@ import { Capacitor } from "@capacitor/core";
 import App from "./App";
 import { AuthProvider } from "./auth/AuthContext";
 import { ShiftProvider } from "./shift/ShiftContext";
+import { installFirestoreCrashRecovery } from "./lib/firestoreRecovery";
 import SharedProposalView from "./pages/SharedProposalView";
 import AgreementSignView from "./pages/AgreementSignView";
 import PublicCard from "./pages/PublicCard";
 import "./index.css";
+
+// Self-heal a corrupt Firestore IndexedDB cache (the "INTERNAL ASSERTION FAILED:
+// Unexpected state" crash) instead of leaving the rep stranded. Install before
+// anything touches Firestore so the backstop is armed for the first snapshot.
+installFirestoreCrashRecovery();
 
 // On iOS this WKWebView reports env(safe-area-inset-top) as 0, so the fixed
 // header drew over the status bar. Rather than fight env(), tell the native
