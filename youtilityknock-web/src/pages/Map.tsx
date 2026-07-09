@@ -8,7 +8,7 @@ import { httpsCallable } from "firebase/functions";
 import { Geolocation } from "@capacitor/geolocation";
 import { db, auth, functions } from "../firebase";
 import { useAuth } from "../auth/AuthContext";
-import { DISP_COLOR } from "../lib/dispositions";
+import { DISP_COLOR, DISPOSITIONS } from "../lib/dispositions";
 import { lookupArea, parseAreaProperties, lookupMovers, parseMovers, type MoverHome } from "../lib/knockstat";
 import { moverIcon, moverColor, moverPopupHtml, daysAgo, MOVER_DAYS } from "../lib/movers";
 import { getTile, putTile, nearbyCachedHomes } from "../lib/homeCache";
@@ -136,6 +136,14 @@ export default function MapPage() {
   const followRef = useRef(false);
   followRef.current = following;
   const [dispoTarget, setDispoTarget] = useState<DispoInput | null>(null);
+
+  // Pin filters — narrow the lead pins by the date they were worked and/or by
+  // disposition. Empty selections mean "show everything". Available to every
+  // user (a rep filtering their own map, a manager filtering the whole team's).
+  const [showFilters, setShowFilters] = useState(false);
+  const [fromDate, setFromDate] = useState(""); // yyyy-mm-dd
+  const [toDate, setToDate] = useState("");
+  const [dispoSel, setDispoSel] = useState<Set<string>>(new Set());
   // Save panel shown after an area is drawn: name it + assign it to a rep.
   const [savePanel, setSavePanel] = useState(false);
   const [drawName, setDrawName] = useState("");
@@ -156,6 +164,27 @@ export default function MapPage() {
     const snap = await getDocs(q);
     return snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<Lead, "id">) }));
   }
+
+  // ── pin filters (date worked + disposition) ───────────────────────────────
+  const fromMs = fromDate ? new Date(`${fromDate}T00:00:00`).getTime() : null;
+  const toMs = toDate ? new Date(`${toDate}T23:59:59.999`).getTime() : null;
+  const filtersActive = dispoSel.size > 0 || !!fromDate || !!toDate;
+  // When a lead was last worked — the disposition time, else its newest history
+  // entry, else when it was created. Drives the date filter.
+  const leadActivityMs = (lead: Lead): number => {
+    const hist = Array.isArray(lead.history) ? lead.history : [];
+    const lastHist = hist.length ? hist.reduce((a, b) => (b.at > a.at ? b : a)).at : 0;
+    return lead.knockedAt || lastHist || lead.updatedAt || lead.createdAt || 0;
+  };
+  const passesPinFilters = (lead: Lead): boolean => {
+    if (dispoSel.size && !dispoSel.has(lead.status)) return false;
+    if (fromMs != null || toMs != null) {
+      const t = leadActivityMs(lead);
+      if (fromMs != null && t < fromMs) return false;
+      if (toMs != null && t > toMs) return false;
+    }
+    return true;
+  };
 
   async function buildPins() {
     leadLayer.current.clearLayers();
@@ -182,10 +211,16 @@ export default function MapPage() {
       });
     }
     leadsRef.current = leads;
+    // Keep the address→coord index complete (it de-dupes gray home pins) even
+    // when the active filters hide some lead pins.
     leads.forEach((lead) => {
       const c = validCoord(lead.lat, lead.lng);
+      if (c && lead.address) homeCoordByAddr.current.set(normAddr(lead.address), c);
+    });
+    // Draw only the pins passing the date + disposition filters.
+    leads.filter(passesPinFilters).forEach((lead) => {
+      const c = validCoord(lead.lat, lead.lng);
       if (!c) return;
-      if (lead.address) homeCoordByAddr.current.set(normAddr(lead.address), c);
       L.marker(c, {
         icon: homeIcon(DISP_COLOR[lead.status] || "#94A3B8", lead.verified === false),
         zIndexOffset: 1000, // always above generic home pins
@@ -741,6 +776,13 @@ export default function MapPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [companyId, profile, role]);
 
+  // Re-draw the lead pins whenever the date / disposition filters change. Only
+  // once the map exists (the initial build runs from the map-init effect).
+  useEffect(() => {
+    if (mapRef.current) void buildPins();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fromDate, toDate, dispoSel]);
+
   // Load the reps this manager/admin can assign areas to (their downstream).
   useEffect(() => {
     if (!companyId || !profile || !canDraw) return;
@@ -863,6 +905,14 @@ export default function MapPage() {
         >
           ☀️
         </button>
+        {/* Filter: narrow the lead pins by date worked and/or disposition. */}
+        <button
+          className={"map-fab" + (showFilters ? " active" : "")}
+          onClick={() => setShowFilters((s) => !s)}
+          aria-label="Filter pins" title="Filter pins by date & disposition"
+        >
+          🗂{filtersActive ? <span className="map-fab-badge">✓</span> : null}
+        </button>
         {/* Live team locations — managers/admins see everyone online right now. */}
         {canManageAreas && (
           <button
@@ -924,6 +974,55 @@ export default function MapPage() {
           <div className="row end">
             <button className="btn sm" onClick={cancelDraw}>Cancel</button>
             <button className="btn primary sm" onClick={saveArea}>{canManageAreas ? "Save area" : "Propose area"}</button>
+          </div>
+        </div>
+      )}
+
+      {/* Filter panel: narrow lead pins by date worked + disposition */}
+      {showFilters && (
+        <div className="map-save-panel map-filter-panel">
+          <div className="msp-title">Filter pins</div>
+          <div className="row" style={{ gap: 8 }}>
+            <label className="field" style={{ flex: 1, minWidth: 0 }}>
+              <span>Worked from</span>
+              <input type="date" value={fromDate} max={toDate || undefined} onChange={(e) => setFromDate(e.target.value)} />
+            </label>
+            <label className="field" style={{ flex: 1, minWidth: 0 }}>
+              <span>Worked to</span>
+              <input type="date" value={toDate} min={fromDate || undefined} onChange={(e) => setToDate(e.target.value)} />
+            </label>
+          </div>
+          <div className="field">
+            <span>Dispositions {dispoSel.size ? `(${dispoSel.size})` : "(all)"}</span>
+            <div className="row" style={{ flexWrap: "wrap", gap: 6, marginTop: 2 }}>
+              {DISPOSITIONS.map((d) => {
+                const on = dispoSel.has(d.value);
+                return (
+                  <button
+                    key={d.value}
+                    type="button"
+                    onClick={() => setDispoSel((prev) => {
+                      const next = new Set(prev);
+                      if (next.has(d.value)) next.delete(d.value); else next.add(d.value);
+                      return next;
+                    })}
+                    style={{
+                      borderRadius: 999, padding: "3px 10px", fontSize: 12, cursor: "pointer",
+                      border: `1px solid ${d.color}`,
+                      background: on ? d.color : "transparent",
+                      color: on ? "#0b1220" : "#e6eef8",
+                      fontWeight: on ? 600 : 400,
+                    }}
+                  >
+                    {d.label}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+          <div className="row end">
+            <button className="btn sm" onClick={() => { setFromDate(""); setToDate(""); setDispoSel(new Set()); }} disabled={!filtersActive}>Clear</button>
+            <button className="btn primary sm" onClick={() => setShowFilters(false)}>Done</button>
           </div>
         </div>
       )}
