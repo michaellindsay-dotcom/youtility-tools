@@ -690,6 +690,60 @@ export const inviteUser = onCall(async (request) => {
   return { ok: true, uid: userRecord.uid, inviteLink: link, emailed };
 });
 
+// resendInvite — regenerate and re-email a magic sign-in link for an EXISTING
+// account (e.g. the invite was missed or expired). Company admin / super-admin.
+export const resendInvite = onCall(async (request) => {
+  const caller = await getCaller(request);
+  const { uid } = (request.data || {}) as { uid?: string };
+  if (!uid) throw new HttpsError("invalid-argument", "uid required.");
+  const snap = await db.doc(`users/${uid}`).get();
+  if (!snap.exists) throw new HttpsError("not-found", "User not found.");
+  const u = snap.data() as any;
+  authorizeForCompany(caller, u.companyId);
+  const email = String(u.email || "").trim();
+  if (!email) throw new HttpsError("failed-precondition", "This account has no email to send to.");
+
+  let link = "";
+  try {
+    link = await getAuth().generateSignInWithEmailLink(email, { url: `${APP_URL}/app/login?invite=1`, handleCodeInApp: true });
+  } catch (err: any) {
+    throw new HttpsError("internal", err?.message || "Could not generate the sign-in link.");
+  }
+  await db.doc(`users/${uid}`).set({ invitePending: true, inviteResentAt: Date.now() }, { merge: true });
+
+  let emailed = false;
+  try {
+    const cfg = await getNotifyConfig();
+    const companyName = (await db.doc(`companies/${u.companyId}`).get()).data()?.name || "your team";
+    emailed = await sendEmail(
+      cfg, email, "Your YoutilityKnock sign-in link",
+      `Hi ${u.displayName || "there"},\n\nHere's a fresh link to sign in to ${companyName} on YoutilityKnock:\n${link}\n\n` +
+        `Tap it to sign in, then set your password. If you didn't request this, you can ignore it.`,
+    );
+  } catch (err) {
+    logger.warn("resendInvite email send failed", err);
+  }
+  return { ok: true, emailed, link };
+});
+
+// getUserLoginMeta — the account's last sign-in / creation time from Firebase
+// Auth (not stored in the profile doc). Company admin / super-admin.
+export const getUserLoginMeta = onCall(async (request) => {
+  const caller = await getCaller(request);
+  const { uid } = (request.data || {}) as { uid?: string };
+  if (!uid) throw new HttpsError("invalid-argument", "uid required.");
+  const snap = await db.doc(`users/${uid}`).get();
+  if (!snap.exists) throw new HttpsError("not-found", "User not found.");
+  authorizeForCompany(caller, (snap.data() as any).companyId);
+  const rec = await getAuth().getUser(uid).catch(() => null);
+  const m = rec?.metadata as any;
+  return {
+    lastSignInTime: m?.lastSignInTime || null, // RFC-1123 string, or null if never signed in
+    creationTime: m?.creationTime || null,
+    emailVerified: rec?.emailVerified ?? null,
+  };
+});
+
 // ───────────────────────────────────────────────────────────────────────────
 // relinkMyProfile — self-heal a login whose profile lives under a DIFFERENT
 // document ID than this Auth UID. The app loads a profile at users/<uid>, but
