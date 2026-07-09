@@ -6,7 +6,7 @@ import { ref as storageRef, uploadBytes, getDownloadURL } from "firebase/storage
 import { Geolocation } from "@capacitor/geolocation";
 import { db, auth, storage, functions } from "../firebase";
 import { useAuth } from "../auth/AuthContext";
-import { DISPOSITIONS } from "../lib/dispositions";
+import { DISPOSITIONS, DISP_LABEL } from "../lib/dispositions";
 import { lookupAddress, normalizeKnockstatResponse, buildEnrichment } from "../lib/knockstat";
 import { bumpStats } from "../lib/stats";
 import { hasFeature } from "../lib/features";
@@ -78,6 +78,12 @@ export interface DispoInput {
   photoHomeUrl?: string;
   photoBillUrl?: string;
   smsOptIn?: boolean;
+  // Who last worked this home (for an existing lead) — surfaced at the top of
+  // the card so the rep sees who set/dispositioned it before them.
+  lastBy?: string;
+  lastStatus?: LeadStatus | string;
+  lastAt?: number;
+  setterName?: string;
 }
 
 interface Form {
@@ -539,6 +545,37 @@ export default function DispositionModal({
       {(summary || enriching) && (
         <div className="muted small dispo-summary">{enriching ? "Looking up home data…" : summary}</div>
       )}
+
+      {/* Who worked this home before you (existing lead only). */}
+      {(target?.setterName || target?.lastBy) && (
+        <div className="muted small dispo-summary">
+          {target.setterName ? `📅 Set by ${target.setterName}` : `🗒 Last worked by ${target.lastBy}`}
+          {target.lastStatus ? ` · ${DISP_LABEL[target.lastStatus as LeadStatus] || target.lastStatus}` : ""}
+          {target.lastAt ? ` · ${new Date(target.lastAt).toLocaleDateString([], { month: "short", day: "numeric" })}` : ""}
+        </div>
+      )}
+
+      {/* Owner contacts pulled from property data (ATTOM + BatchData skip-trace).
+          Tap one to drop it into the Phone / Email field. */}
+      {(() => {
+        const owners = d.enrichment?.owners || [];
+        const phones = Array.from(new Set(owners.flatMap((o) => o.phones || []).filter(Boolean)));
+        const emails = Array.from(new Set(owners.flatMap((o) => o.emails || []).filter(Boolean)));
+        if (!phones.length && !emails.length) return null;
+        return (
+          <div style={{ margin: "2px 0 10px" }}>
+            <div className="field-label" style={{ marginBottom: 5 }}>From property data — tap to use</div>
+            <div className="row" style={{ gap: 6, flexWrap: "wrap" }}>
+              {phones.map((p) => (
+                <button key={p} type="button" className="chip-btn" onClick={() => setD({ ...d, phone: p })}>📞 {p}</button>
+              ))}
+              {emails.map((em) => (
+                <button key={em} type="button" className="chip-btn" onClick={() => setD({ ...d, email: em })}>✉️ {em}</button>
+              ))}
+            </div>
+          </div>
+        );
+      })()}
 
       {geo.locating && (
         <div className="muted small dispo-summary">📍 Getting a precise location…</div>

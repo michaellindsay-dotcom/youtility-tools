@@ -8,6 +8,17 @@ version. Bump `VERSION_NAME` for a new public milestone and add a section here.
 
 ## [Unreleased]
 
+### Added
+- **Edit a lead's name, address, and phone** — an **✏️ Edit** action on the Leads
+  list and the customer screen opens a quick editor for name / address / phone /
+  email, so a rep can fix a mistyped detail without re-dispositioning.
+- **Owner contacts on the door card** — the disposition card now shows the owner
+  phone(s) and email(s) pulled from property data (ATTOM + **BatchData**
+  skip-trace) as tap-to-fill chips, so a rep can drop a real number/email onto
+  the lead in one tap.
+- **See who worked a home first** — tapping a lead pin on the map now shows
+  **who last set / dispositioned it and when**, right at the top of the card.
+
 ### Fixed
 - **Setter/Closer Rankings and Reports sit rate now come from the actual
   appointments, not the stat counters.** The `appointments` counter had drifted

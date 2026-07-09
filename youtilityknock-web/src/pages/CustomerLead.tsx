@@ -8,6 +8,7 @@ import { DISP_LABEL, DISP_COLOR } from "../lib/dispositions";
 import { APPT_LABEL, APPT_COLOR, isDispositioned } from "../lib/closerDispositions";
 import DispositionModal, { type DispoInput } from "../components/DispositionModal";
 import CloserDispositionModal from "../components/CloserDispositionModal";
+import EditLeadModal from "../components/EditLeadModal";
 import type { Lead, LeadHistoryEntry, ScheduleEvent } from "../types";
 
 interface PitchRow { id: string; createdAt: number; status: string; score: number | null; feedback: string; audioPath?: string; address?: string }
@@ -30,6 +31,7 @@ export default function CustomerLead() {
   const [proposals, setProposals] = useState<ProposalRow[]>([]);
   const [audio, setAudio] = useState<Record<string, string>>({});
   const [dispoOpen, setDispoOpen] = useState(false);
+  const [editOpen, setEditOpen] = useState(false);
   const [closeoutTarget, setCloseoutTarget] = useState<ScheduleEvent | null>(null);
   const [nudgeState, setNudgeState] = useState<"idle" | "sending" | "sent" | "error">("idle");
   const [loading, setLoading] = useState(true);
@@ -137,7 +139,10 @@ export default function CustomerLead() {
             <h1 style={{ marginBottom: 2 }}>{lead.ownerName || "Homeowner"}</h1>
             <div className="muted small">{[lead.address, lead.city, lead.state, lead.zip].filter(Boolean).join(", ")}</div>
           </div>
-          <button className="btn ghost sm" onClick={() => navigate(-1)}>← Back</button>
+          <div className="row" style={{ gap: 8 }}>
+            {canManage && <button className="btn ghost sm" onClick={() => setEditOpen(true)}>✏️ Edit</button>}
+            <button className="btn ghost sm" onClick={() => navigate(-1)}>← Back</button>
+          </div>
         </div>
         {summarize(lead.enrichment) && <p className="page-sub" style={{ marginTop: 6 }}>{summarize(lead.enrichment)}</p>}
       </div>
@@ -330,6 +335,8 @@ export default function CustomerLead() {
         afterTheFact
         onClose={() => setCloseoutTarget(null)}
       />
+
+      {editOpen && <EditLeadModal lead={lead} onClose={() => setEditOpen(false)} />}
     </div>
   );
 }
