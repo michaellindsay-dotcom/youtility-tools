@@ -8,6 +8,13 @@ version. Bump `VERSION_NAME` for a new public milestone and add a section here.
 
 ## [Unreleased]
 
+### Fixed
+- **A rep's own pins no longer vanish after they disposition a home.** On the map,
+  setters/closers were only shown "new" (unworked) doors, so the moment a rep set
+  an appointment or dispositioned a home its pin disappeared. Reps now always see
+  the homes they've worked (their own leads, any status), plus the unworked doors
+  in their assigned areas.
+
 ### Added
 - **Edit a lead's name, address, and phone** — an **✏️ Edit** action on the Leads
   list and the customer screen opens a quick editor for name / address / phone /
