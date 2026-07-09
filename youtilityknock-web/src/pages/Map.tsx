@@ -161,15 +161,23 @@ export default function MapPage() {
     leadLayer.current.clearLayers();
     // Deleted (archived) leads are hidden everywhere except the admin's list.
     let leads = (await fetchLeads()).filter((lead) => !lead.deleted);
-    // Non-managers (setters/closers) see only NEW (unworked) leads, and only
-    // inside their assigned areas — actionable doors in their zone, nothing
-    // else. Managers/admins see the full picture.
+    // Non-managers (setters/closers) see two things: the homes THEY'VE worked
+    // (their own leads — any status, anywhere, so a door they just set or
+    // dispositioned stays on their map), PLUS the unworked ("new") doors inside
+    // their assigned areas. Managers/admins see the full picture.
     if (!canManageAreas) {
+      const uid = profile?.uid;
       const areas = assigned.current.filter((t) => t.polygon && t.polygon.length >= 3);
+      const mine = (lead: Lead) =>
+        lead.assignedTo === uid ||
+        lead.createdBy === uid ||
+        (Array.isArray(lead.history) && lead.history.some((h) => h.byUid === uid));
       leads = leads.filter((lead) => {
-        if (lead.status !== "new") return false;
         const c = validCoord(lead.lat, lead.lng);
         if (!c) return false;
+        if (mine(lead)) return true; // always keep the rep's own worked homes
+        // Otherwise only actionable unworked doors in their assigned zone.
+        if (lead.status !== "new") return false;
         return areas.some((t) => inPolygon({ lat: c[0], lng: c[1] }, t.polygon!));
       });
     }
