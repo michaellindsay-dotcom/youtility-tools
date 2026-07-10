@@ -10,6 +10,7 @@ import CalendarBanner from "../components/CalendarBanner";
 import BizCardHero from "../components/BizCardHero";
 import DashboardRewards from "../components/DashboardRewards";
 import Podium from "../components/Podium";
+import { TownHallCard } from "../components/CompanyReport";
 import { cardAccentVars, cardThemeBg } from "../lib/cardTheme";
 import { CARD_SHARE_BASE_URL } from "./BusinessCard";
 import type { EventType, Lead, ScheduleEvent, Shift, UserStats } from "../types";
@@ -216,6 +217,10 @@ export default function Dashboard() {
       <RallyCardHero />
 
       <CalendarBanner />
+
+      {/* Company overview (Town Hall) — admins & managers get it right on the
+          dashboard, scoped to their downline for managers. */}
+      {(role === "admin" || role === "manager") && <TownHallCard />}
 
       <div className="dash-2col">
         {/* Success planner (optional service) — whole card opens the full planner */}

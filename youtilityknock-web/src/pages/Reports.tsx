@@ -3,6 +3,7 @@ import { collection, getDocs, query, where } from "firebase/firestore";
 import { httpsCallable } from "firebase/functions";
 import { db, functions } from "../firebase";
 import { useAuth } from "../auth/AuthContext";
+import { CompanyDrilldown } from "../components/CompanyReport";
 import type { UserProfile } from "../types";
 
 interface Funnel { doors: number; conv: number; appt: number; closed: number }
@@ -51,6 +52,7 @@ export default function Reports() {
   const [sel, setSel] = useState<string>("");
   const [report, setReport] = useState<Report | null>(null);
   const [loading, setLoading] = useState(false);
+  const [mode, setMode] = useState<"company" | "employee">("company");
 
   // Roster: admins see the whole company; managers see their downstream.
   useEffect(() => {
@@ -92,9 +94,18 @@ export default function Reports() {
     <div className="page-body">
       <div className="page-head">
         <h1>📊 Reports</h1>
-        <p className="page-sub">{role === "admin" ? "Anyone in your company" : "Your team"} — detailed activity, and set closes on their behalf.</p>
+        <p className="page-sub">{role === "admin" ? "Whole company" : "Your downline"} — company totals with region, team &amp; rep drill-down, or one person in detail.</p>
       </div>
 
+      <div className="seg-toggle" style={{ marginBottom: 16 }}>
+        <button className={mode === "company" ? "active" : ""} onClick={() => setMode("company")}>🏢 Company</button>
+        <button className={mode === "employee" ? "active" : ""} onClick={() => setMode("employee")}>👤 By employee</button>
+      </div>
+
+      {mode === "company" && <CompanyDrilldown />}
+
+      {mode === "employee" && (
+      <>
       <div className="card" style={{ marginBottom: 16 }}>
         <label className="muted small" htmlFor="rep-select">Employee</label>
         <select id="rep-select" className="input" value={sel} onChange={(e) => loadReport(e.target.value)} style={{ marginTop: 6 }}>
@@ -198,6 +209,8 @@ export default function Reports() {
           )}
 
         </>
+      )}
+      </>
       )}
     </div>
   );
