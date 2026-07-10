@@ -3,6 +3,7 @@ import {
   addDoc,
   collection,
   doc,
+  getDoc,
   getDocs,
   limit,
   onSnapshot,
@@ -23,7 +24,7 @@ function dmId(a: string, b: string): string {
   return [a, b].sort().join("__");
 }
 
-type Conversation = { kind: "channel" } | { kind: "working" } | { kind: "dm"; other: UserProfile };
+type Conversation = { kind: "channel" } | { kind: "team" } | { kind: "working" } | { kind: "dm"; other: UserProfile };
 
 export default function Chat() {
   const { profile, role, companyId } = useAuth();
@@ -33,8 +34,21 @@ export default function Chat() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [text, setText] = useState("");
   const [sending, setSending] = useState(false);
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [teamName, setTeamName] = useState("");
   const fileRef = useRef<HTMLInputElement>(null);
   const endRef = useRef<HTMLDivElement>(null);
+  const teamId = profile?.teamId || null;
+
+  // Team name for the "Team" channel label (only when the rep is on a team).
+  useEffect(() => {
+    if (!companyId || !teamId) { setTeamName(""); return; }
+    let live = true;
+    getDoc(doc(db, "companies", companyId, "teams", teamId))
+      .then((s) => { if (live) setTeamName((s.data()?.name as string) || "My team"); })
+      .catch(() => { if (live) setTeamName("My team"); });
+    return () => { live = false; };
+  }, [companyId, teamId]);
 
   // Load teammates for the DM list (same scope as the Team page).
   useEffect(() => {
@@ -75,6 +89,19 @@ export default function Chat() {
         setMessages(snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<ChatMessage, "id">) })))
       );
     }
+    if (conv.kind === "team") {
+      if (!teamId) { setMessages([]); return; }
+      const q = query(
+        collection(db, "teamChat"),
+        where("companyId", "==", companyId),
+        where("teamId", "==", teamId),
+        orderBy("createdAt", "asc"),
+        limit(200)
+      );
+      return onSnapshot(q, (snap) =>
+        setMessages(snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<ChatMessage, "id">) })))
+      );
+    }
     const cid = dmId(profile.uid, conv.other.uid);
     const q = query(collection(db, "dms", cid, "messages"), orderBy("createdAt", "asc"), limit(200));
     return onSnapshot(q, (snap) =>
@@ -89,11 +116,13 @@ export default function Chat() {
   const title = useMemo(
     () =>
       conv.kind === "channel"
-        ? "Team Chat"
+        ? "Company Chat"
+        : conv.kind === "team"
+        ? (teamName || "Team") + " Chat"
         : conv.kind === "working"
         ? "Who's Working"
         : conv.other.displayName,
-    [conv]
+    [conv, teamName]
   );
 
   async function send(imageUrl?: string) {
@@ -113,6 +142,9 @@ export default function Chat() {
         return; // no message stream — the compose bar isn't shown here anyway
       } else if (conv.kind === "channel") {
         await addDoc(collection(db, "chat"), { companyId, ...base });
+      } else if (conv.kind === "team") {
+        if (!teamId) return;
+        await addDoc(collection(db, "teamChat"), { companyId, teamId, ...base });
       } else {
         const cid = dmId(profile.uid, conv.other.uid);
         // Ensure the channel doc exists (members + last-message preview).
@@ -157,57 +189,64 @@ export default function Chat() {
   const ts = (m: ChatMessage) =>
     m.createdAt ? new Date(m.createdAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }) : "";
 
+  // Pick a conversation and roll the dropdown back up.
+  const choose = (c: Conversation) => { setConv(c); setPickerOpen(false); };
+
   return (
-    <div className="page-body chat-page">
-      <div className="chat-layout">
-        <aside className="chat-rail">
-          <button
-            className={"chat-conv" + (conv.kind === "channel" ? " active" : "")}
-            onClick={() => setConv({ kind: "channel" })}
-          >
+    <div className="page-body chat-page chat-full">
+      <div className="chat-topbar">
+        <button className="chat-back" onClick={() => navigate(-1)} aria-label="Close chat" title="Close">✕</button>
+        <button className="chat-picker-toggle" onClick={() => setPickerOpen((o) => !o)} aria-expanded={pickerOpen}>
+          <span className="chat-topbar-title">{title}</span>
+          <span className={"chat-caret" + (pickerOpen ? " open" : "")}>▾</span>
+        </button>
+      </div>
+
+      {/* Collapsible conversation picker — Company / Team / Individual. */}
+      <div className={"chat-picker" + (pickerOpen ? " open" : "")}>
+        <div className="chat-picker-inner">
+          <div className="chat-rail-label muted small">Company</div>
+          <button className={"chat-conv" + (conv.kind === "channel" ? " active" : "")} onClick={() => choose({ kind: "channel" })}>
             <span className="chat-conv-ico">#</span>
-            <div>
-              <div className="chat-conv-name">Team Chat</div>
-              <div className="muted small">Everyone in your company</div>
-            </div>
+            <div><div className="chat-conv-name">Company Chat</div><div className="muted small">Everyone in your company</div></div>
           </button>
-          <button
-            className={"chat-conv" + (conv.kind === "working" ? " active" : "")}
-            onClick={() => setConv({ kind: "working" })}
-          >
+          <button className={"chat-conv" + (conv.kind === "working" ? " active" : "")} onClick={() => choose({ kind: "working" })}>
             <span className="chat-conv-ico">🔥</span>
-            <div>
-              <div className="chat-conv-name">Who's Working</div>
-              <div className="muted small">Live shifts &amp; shout-outs</div>
-            </div>
+            <div><div className="chat-conv-name">Who's Working</div><div className="muted small">Live shifts &amp; shout-outs</div></div>
           </button>
-          <div className="chat-rail-label muted small">Direct messages</div>
+
+          {teamId && (
+            <>
+              <div className="chat-rail-label muted small">Team</div>
+              <button className={"chat-conv" + (conv.kind === "team" ? " active" : "")} onClick={() => choose({ kind: "team" })}>
+                <span className="chat-conv-ico">👥</span>
+                <div><div className="chat-conv-name">{teamName || "My team"} Chat</div><div className="muted small">Just your team</div></div>
+              </button>
+            </>
+          )}
+
+          <div className="chat-rail-label muted small">Individual</div>
           {teammates.length === 0 && <div className="muted small" style={{ padding: "8px 12px" }}>No teammates yet.</div>}
           {teammates.map((u) => (
             <button
               key={u.uid}
               className={"chat-conv" + (conv.kind === "dm" && conv.other.uid === u.uid ? " active" : "")}
-              onClick={() => setConv({ kind: "dm", other: u })}
+              onClick={() => choose({ kind: "dm", other: u })}
             >
               <span className="avatar sm">{(u.displayName || "?").slice(0, 1).toUpperCase()}</span>
-              <div>
-                <div className="chat-conv-name">{u.displayName}</div>
-                <div className="muted small">{u.title || u.role}</div>
-              </div>
+              <div><div className="chat-conv-name">{u.displayName}</div><div className="muted small">{u.title || u.role}</div></div>
             </button>
           ))}
-        </aside>
+        </div>
+      </div>
 
-        <section className="chat-main">
-          {conv.kind === "working" ? (
-            <div className="chat-working">
-              <WhosWorkingPanel />
-            </div>
-          ) : (
-          <>
-          <div className="chat-head">
-            <h2>{title}</h2>
+      <section className="chat-main">
+        {conv.kind === "working" ? (
+          <div className="chat-working">
+            <WhosWorkingPanel />
           </div>
+        ) : (
+          <>
           <div className="chat-stream">
             {messages.length === 0 ? (
               <div className="empty">No messages yet. Say hello 👋</div>
@@ -280,7 +319,6 @@ export default function Chat() {
           </>
           )}
         </section>
-      </div>
     </div>
   );
 }
