@@ -261,6 +261,17 @@ service cloud.firestore {
                     && (resource.data.userId == request.auth.uid || isCompanyAdmin() || isSuper());
     }
 
+    // ── team chat (a channel scoped to a team within the company) ────────
+    match /teamChat/{messageId} {
+      allow read: if inMyCompany(resource.data.companyId);
+      allow create: if isSignedIn()
+                    && request.resource.data.companyId == myCompany()
+                    && request.resource.data.userId == request.auth.uid
+                    && request.resource.data.teamId is string;
+      allow update, delete: if isSignedIn()
+                    && (resource.data.userId == request.auth.uid || isCompanyAdmin() || isSuper());
+    }
+
     // ── direct messages ──────────────────────────────────────────────────
     match /dms/{channelId} {
       allow read: if isSignedIn() && request.auth.uid in resource.data.members;
