@@ -892,6 +892,19 @@
       </div>
     </div>
 
+    <div id="customContractBlock" style="margin:18px 0 4px;">
+      <h3 style="font-size:14px;margin:0 0 6px;">Custom contract <span id="customContractStatus" class="pill"></span></h3>
+      <p class="muted small" style="margin:0 0 8px;">Paste a custom service agreement for this company. When set, it <strong>replaces</strong> the standard agreement in the preview and in the emailed sign-then-pay contract. Leave blank to use the standard one. Basic formatting: <code>## Heading</code>, <code>- bullet</code>.</p>
+      <textarea id="companyContractText" rows="8" placeholder="Paste the custom agreement text here…" style="width:100%;font-family:inherit;font-size:13px;line-height:1.5;box-sizing:border-box;"></textarea>
+      <div class="row" style="justify-content:space-between;align-items:center;margin-top:8px;flex-wrap:wrap;gap:8px;">
+        <button id="contractInsertTemplate" class="btn ghost sm" type="button">Insert per-sale template</button>
+        <span style="display:flex;gap:8px;">
+          <button id="contractCustomClear" class="btn ghost sm" type="button">Clear</button>
+          <button id="contractCustomSave" class="btn primary sm" type="button">Save custom contract</button>
+        </span>
+      </div>
+    </div>
+
     <div id="createInvoiceBlock">
       <h3 style="font-size:14px;margin:16px 0 8px;">Create invoice</h3>
       <div class="grid-2">
@@ -1515,6 +1528,7 @@ const providerSignInvoice = httpsCallable(fns, "providerSignInvoice");
 const squareSaveOrgCardAndSubscribe = httpsCallable(fns, "squareSaveOrgCardAndSubscribe");
 const markInvoicePaid   = httpsCallable(fns, "markInvoicePaid");
 const getContractPdf    = httpsCallable(fns, "getContractPdf");
+const setCompanyContract = httpsCallable(fns, "setCompanyContract");
 
 function banner(el, msg, kind="info") {
   el.className = "banner show " + kind;
@@ -2769,6 +2783,18 @@ async function loadBilling(companyId, companyName) {
     $("createInvoiceBlock").style.display = "";
   }
 
+  // Custom contract — super-admin, standalone company only (it's the Provider's
+  // own terms). Org-billed companies use the org-level agreement.
+  const showCustomContract = state.isSuper && !c.organizationId;
+  $("customContractBlock").style.display = showCustomContract ? "" : "none";
+  if (showCustomContract) {
+    const txt = (c.contractCustomText || "").trim();
+    $("companyContractText").value = c.contractCustomText || "";
+    const status = $("customContractStatus");
+    status.textContent = txt ? "custom set" : "standard";
+    status.style.color = txt ? "#86efac" : "";
+  }
+
   // Charge / Bill now / Stripe portal — super-admin, standalone company only
   // (org-member companies are billed through the org).
   const showBillActions = state.isSuper && !c.organizationId;
@@ -2968,6 +2994,97 @@ $("contractPreview").addEventListener("click", async () => {
   } catch (e) { banner($("companyBillingBanner"), e.message || "Could not build the contract.", "error"); }
   finally { $("contractPreview").disabled = false; }
 });
+
+// ── custom contract (super-admin) ────────────────────────────────────────────
+$("contractCustomSave").addEventListener("click", async () => {
+  if (!billingCompany) return;
+  $("contractCustomSave").disabled = true;
+  try {
+    const { data } = await setCompanyContract({ companyId: billingCompany, contractCustomText: $("companyContractText").value });
+    banner($("companyBillingBanner"), data.hasCustom
+      ? "Custom contract saved — it'll be used for the preview and the sign-then-pay contract. Use “Preview contract” to check it."
+      : "Custom contract cleared — this company uses the standard agreement.", "good");
+    await loadBilling(billingCompany);
+  } catch (e) { banner($("companyBillingBanner"), e.message || "Could not save the contract.", "error"); }
+  finally { $("contractCustomSave").disabled = false; }
+});
+$("contractCustomClear").addEventListener("click", () => {
+  if (!$("companyContractText").value.trim() || confirm("Clear the custom contract? This company will fall back to the standard agreement once you Save.")) {
+    $("companyContractText").value = "";
+  }
+});
+$("contractInsertTemplate").addEventListener("click", () => {
+  const t = $("companyContractText");
+  if (t.value.trim() && !confirm("Replace what's in the box with the per-sale template?")) return;
+  t.value = PER_SALE_CONTRACT_TEMPLATE;
+  banner($("companyBillingBanner"), "Template inserted — fill in the [bracketed] items, then Save.", "good");
+});
+
+// Plain-text per-sale / honor-system agreement. The contract PDF adds the header,
+// acceptance, and e-signature blocks, so this body ends before signatures.
+const PER_SALE_CONTRACT_TEMPLATE = `## The short version
+- You get full access to the YoutilityKnock app for your team.
+- You pay $100 per sale, with a $500 minimum every 30 days.
+- Every $100 sale counts toward that $500 — so the minimum only kicks in on slow cycles.
+- We bill the card on file. Your first payment is due as soon as you get the invoice.
+- The $100-per-sale price runs on trust — you report your sales honestly.
+- If that trust is broken, access is shut off and you owe what the app is really worth, not just the $100 you skipped.
+
+## 1. What you get
+Access to YoutilityKnock for your team — the field/canvassing map, lead and homeowner tracking, appointment setting and closer routing, your customer/CRM records, reporting and leaderboards, texting/calling, and the proposal, pitch, and battery tools — plus updates and hosting. You're getting a license to use it; you don't own it.
+
+## 2. What it costs
+$100 per sale, with a $500 minimum every 30 days.
+Every 30 days we total up your sales. Each sale is $100, and every $100 counts toward the $500 minimum. If your sales for the cycle add up to less than $500, we bill the difference so the cycle lands at $500. If they add up to $500 or more, you just pay the per-sale total — no extra minimum on top.
+- 0 sales in the cycle → you pay $500 (the minimum).
+- 3 sales → $300 in per-sale charges + $200 to reach the minimum = $500.
+- 5 sales → $500 (minimum covered).
+- 8 sales → $800 (no extra minimum).
+Your first payment is due upon receipt of the invoice.
+
+## 3. How billing works
+- Card on file. You keep a valid card (or ACH) on file and authorize us to charge it for what's owed.
+- Every Monday we email you an itemized invoice of that week's sales.
+- Monday and Tuesday are yours to review it and email us if anything looks off.
+- Wednesday we run the card. If you don't flag anything by end of Tuesday, the invoice is considered good and we charge it. If you flag a specific item, we charge everything else and sort out the flagged one with you.
+- The $500 minimum is trued up on the 30-day cycle — if your sales didn't reach $500, we bill the difference.
+- Late or failed payments can pause access until they're caught up, and may carry a small late fee (1.5%/month or the legal max).
+
+## 4. What counts as a "sale"
+A sale is any solar/battery/energy project that's sold or marked "sold," or any project where you (or your reps) take any money — a deposit, down payment, or any payment — from a customer. It counts once per project, at whichever happens first (marked sold, or money taken), whether it's recorded in the app or not.
+
+## 5. The honest-count promise
+The $100-per-sale price only works because we trust you to count every sale honestly. We can't stand at every door, so we rely on you to report every sale — including deals closed or paid for outside the app. So you agree to:
+- Report every sale, accurately and on time.
+- Not hide, delay, split, mislabel, or leave out sales to dodge the fee.
+- Not run deals through spreadsheets, side systems, or paper to get around the per-sale charge.
+- Not turn off or mess with the app's tracking, and not share logins to hide how much you're selling.
+Every time you pay, you're confirming the sales you reported are complete and honest.
+
+## 6. If the trust is broken
+If you hide sales or work around the per-sale fee:
+- Access is shut off immediately — no waiting period, no refund.
+- You pay the sales you skipped, plus interest.
+- You also owe a per-company service expense of $[●] for the affected period — a simple, agreed reflection of what the app is worth to your business — because a hidden sale costs us more than the $100 that was skipped.
+- You cover the reasonable cost of collecting it.
+We can also check your records now and then, with reasonable notice, to make sure sales line up.
+
+## 7. Using the app the right way
+- Don't copy, resell, rent, sublicense, or hand the app to anyone else, and don't try to reverse-engineer or rebuild it or use it to build a competitor.
+- Don't scrape or bulk-export the data beyond normal use, and don't get around the way sales are counted or billed.
+- Follow the law in the field. How you knock, call, and text — and getting the consents you need (TCPA, Do-Not-Knock rules, consumer and privacy laws) — is on you. The app is a tool; using it legally is your responsibility.
+
+## 8. Our stuff stays ours
+YoutilityKnock — the software, designs, workflows, tools, and the name — is ours and stays ours. You own your customer and lead data; you let us host and use it to run and improve the service. Any ideas or feedback you send us, we can use freely.
+
+## 9. The basic legal stuff
+- As-is. We work hard to keep the app running well, but it's provided "as is" — we can't promise it's error-free or guarantee any sales result.
+- Limits. Except for what you owe us (fees, skipped-sale amounts), neither side is on the hook for indirect or runaway damages.
+- You cover us for claims that come out of how you use the app or run your sales (including any consumer-law issues).
+- Confidential stuff stays confidential on both sides.
+- This can end anytime with 30 days' notice (you still owe through the end date), or immediately if the trust is broken or fees go unpaid.
+- The winning side of a dispute can recover reasonable fees and costs.
+- This is the whole deal; if one part doesn't hold up, the rest still stands.`;
 $("invoiceMarkPaid").addEventListener("click", async () => {
   const id = $("invoiceSelect").value;
   if (!id) { banner($("companyBillingBanner"), "Pick an invoice first.", "error"); return; }

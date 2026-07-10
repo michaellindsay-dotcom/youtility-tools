@@ -6412,6 +6412,10 @@ function buildContractPdf(opts: {
   companyName: string; contactName: string; plan: string; monthly: number;
   enterprise: boolean; perCompanyFee: number; orgFee: number; dateStr: string;
   referenceNumber?: string;
+  // A per-company custom agreement. When set, it REPLACES the standard plan
+  // sections (1–7) below; the header, acceptance, and e-signature blocks stay,
+  // so the sign-then-pay flow still stamps the signatures on it.
+  customBody?: string;
   // When the customer has e-signed (sign-then-pay), stamp the acceptance block.
   signedName?: string; signedDateStr?: string;
   // When the Provider (super-admin) has counter-signed, stamp that block too.
@@ -6434,31 +6438,45 @@ function buildContractPdf(opts: {
 
     doc.text(`This Service Agreement ("Agreement") is between ${PROVIDER_LEGAL_NAME}, provider of the ${PRODUCT_NAME} platform ("Provider"), and ${opts.companyName} ("Customer").`);
 
-    H("1. Service & Plan");
-    doc.text(`Provider will make the ${PRODUCT_NAME} platform available to Customer under the "${opts.plan}" plan at $${opts.monthly} per month.`);
-    if (opts.enterprise) {
-      doc.text(`Enterprise terms apply: an additional $${opts.perCompanyFee} per company and $${opts.orgFee} per organization, per month.`);
+    if (opts.customBody && opts.customBody.trim()) {
+      // Render the custom agreement text. Light Markdown: "#"/"##" lines become
+      // section headings, "-"/"*"/"1." lines become bullets, blank lines break
+      // paragraphs, and **bold**/backtick markers are stripped for clean print.
+      const strip = (s: string) => s.replace(/\*\*/g, "").replace(/`/g, "").trim();
+      for (const raw of opts.customBody.replace(/\r/g, "").split("\n")) {
+        const t = raw.trim();
+        if (!t) { doc.moveDown(0.4); continue; }
+        if (/^#{1,6}\s+/.test(t)) H(strip(t.replace(/^#{1,6}\s+/, "")));
+        else if (/^([-*•]|\d+[.)])\s+/.test(t)) doc.text("•  " + strip(t.replace(/^([-*•]|\d+[.)])\s+/, "")), { indent: 12 });
+        else doc.text(strip(t));
+      }
+    } else {
+      H("1. Service & Plan");
+      doc.text(`Provider will make the ${PRODUCT_NAME} platform available to Customer under the "${opts.plan}" plan at $${opts.monthly} per month.`);
+      if (opts.enterprise) {
+        doc.text(`Enterprise terms apply: an additional $${opts.perCompanyFee} per company and $${opts.orgFee} per organization, per month.`);
+      }
+
+      H("2. Recurring Billing & Cancellation");
+      doc.text(`This is a recurring monthly fee. The plan covers up to 100 users across all of Customer's organizations; each additional user beyond 100 is billed at $85 per user, per month. The card on file is automatically charged on a 30-day cycle based on the companies and users on the account. Customer must provide written notice of cancellation at least 30 days in advance; charges already billed for the then-current cycle are non-refundable.`);
+
+      H("3. Billing — Due on Receipt");
+      doc.text("Invoices are due on receipt. If an invoice is not paid, Provider may suspend access to the platform until payment is received. Suspension does not delete Customer data.");
+
+      H("4. Term & Termination");
+      doc.text("This Agreement continues month-to-month until terminated by either party with written notice as described in Section 2. Provider may suspend or terminate the service for non-payment.");
+
+      H("5. Data");
+      doc.text(`Customer owns its data. Provider stores and processes it solely to provide the service, in accordance with the Privacy Policy at ${PRIVACY_URL}.`);
+
+      H("6. Limitation of Liability");
+      doc.text(`To the maximum extent permitted by law, Provider's total liability arising out of or related to this Agreement will not exceed the amounts paid by Customer to Provider in the three (3) months preceding the claim. Neither party will be liable for indirect, incidental, special, or consequential damages. The service is provided "as is" without warranties of any kind.`);
+
+      H("7. Governing Law");
+      doc.text(`This Agreement is governed by the laws of the State of ${GOVERNING_LAW_STATE}, without regard to its conflict-of-laws rules. The parties consent to the exclusive jurisdiction of the state and federal courts located in ${GOVERNING_LAW_STATE}.`);
     }
 
-    H("2. Recurring Billing & Cancellation");
-    doc.text(`This is a recurring monthly fee. The plan covers up to 100 users across all of Customer's organizations; each additional user beyond 100 is billed at $85 per user, per month. The card on file is automatically charged on a 30-day cycle based on the companies and users on the account. Customer must provide written notice of cancellation at least 30 days in advance; charges already billed for the then-current cycle are non-refundable.`);
-
-    H("3. Billing — Due on Receipt");
-    doc.text("Invoices are due on receipt. If an invoice is not paid, Provider may suspend access to the platform until payment is received. Suspension does not delete Customer data.");
-
-    H("4. Term & Termination");
-    doc.text("This Agreement continues month-to-month until terminated by either party with written notice as described in Section 2. Provider may suspend or terminate the service for non-payment.");
-
-    H("5. Data");
-    doc.text(`Customer owns its data. Provider stores and processes it solely to provide the service, in accordance with the Privacy Policy at ${PRIVACY_URL}.`);
-
-    H("6. Limitation of Liability");
-    doc.text(`To the maximum extent permitted by law, Provider's total liability arising out of or related to this Agreement will not exceed the amounts paid by Customer to Provider in the three (3) months preceding the claim. Neither party will be liable for indirect, incidental, special, or consequential damages. The service is provided "as is" without warranties of any kind.`);
-
-    H("7. Governing Law");
-    doc.text(`This Agreement is governed by the laws of the State of ${GOVERNING_LAW_STATE}, without regard to its conflict-of-laws rules. The parties consent to the exclusive jurisdiction of the state and federal courts located in ${GOVERNING_LAW_STATE}.`);
-
-    H("8. Acceptance");
+    H(opts.customBody && opts.customBody.trim() ? "Acceptance" : "8. Acceptance");
     doc.text("This Agreement is executed by the Provider first and then by the Customer. By signing below, each party agrees to the terms of this Agreement.");
 
     // Provider counter-signature (executed first) — stamped if signed.
@@ -6522,6 +6540,7 @@ async function buildCompanyContractPdf(companyId: string, opts?: ContractSig): P
     plan: (company.plan as string) || "Standard",
     monthly: Number(company.planPrice) || 0,
     enterprise, perCompanyFee, orgFee,
+    customBody: (company.contractCustomText as string) || undefined,
     dateStr: contractDateFmt(Date.now()),
     referenceNumber: opts?.referenceNumber,
     signedName: opts?.signedName,
@@ -7002,6 +7021,25 @@ export const getContractPdf = onCall(async (request) => {
     pdf = await buildCompanyContractPdf(authorizeForCompany(caller, companyId));
   }
   return { filename: `${PRODUCT_NAME}-Service-Agreement.pdf`, base64: pdf.toString("base64") };
+});
+
+// setCompanyContract — save (or clear) a per-company custom service agreement.
+// When set, it replaces the standard plan sections on this company's contract
+// everywhere it's built (preview, and the invoice/sign-then-pay flow), so a
+// custom deal can be sent for signature through the normal billing flow.
+// Super-admin only (it's the Provider's own legal terms).
+export const setCompanyContract = onCall(async (request) => {
+  const caller = await getCaller(request);
+  requireSuper(caller);
+  const { companyId, contractCustomText } = (request.data || {}) as
+    { companyId?: string; contractCustomText?: string };
+  if (!companyId) throw new HttpsError("invalid-argument", "companyId required.");
+  const text = typeof contractCustomText === "string" ? contractCustomText.trim() : "";
+  await db.doc(`companies/${companyId}`).set(
+    { contractCustomText: text || null, contractCustomUpdatedAt: Date.now(), contractCustomBy: caller.uid },
+    { merge: true },
+  );
+  return { ok: true, hasCustom: !!text };
 });
 
 // Lift a due-on-receipt lock once an invoice is paid — cascades to every member
