@@ -107,6 +107,35 @@ workflows:
           # on every App Store submission. Capacitor defaults to "1,2".
           sed -i '' 's/TARGETED_DEVICE_FAMILY = "1,2"/TARGETED_DEVICE_FAMILY = "1"/g' \
             ios/App/App.xcodeproj/project.pbxproj
+      - name: Firebase push config (iOS) — only when GOOGLE_SERVICE_INFO_PLIST is set
+        script: |
+          # Guarded: with no GOOGLE_SERVICE_INFO_PLIST env var, this is a no-op and
+          # the build is unchanged. Set that secure var (base64 of your Firebase
+          # GoogleService-Info.plist) to turn push on. You must also enable the
+          # Push Notifications capability on the us.youtility.knock App ID and add
+          # the APNs key in Firebase → Cloud Messaging.
+          cd youtilityknock-web
+          if [ -z "$GOOGLE_SERVICE_INFO_PLIST" ]; then
+            echo "GOOGLE_SERVICE_INFO_PLIST not set — skipping iOS push setup (push inactive, build unaffected)."; exit 0
+          fi
+          echo "$GOOGLE_SERVICE_INFO_PLIST" | base64 --decode > ios/App/App/GoogleService-Info.plist
+          ENT=ios/App/App/App.entitlements
+          P=/usr/libexec/PlistBuddy
+          [ -f "$ENT" ] || printf '%s\n' '<?xml version="1.0" encoding="UTF-8"?>' '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">' '<plist version="1.0"><dict/></plist>' > "$ENT"
+          $P -c "Set :aps-environment production" "$ENT" 2>/dev/null || $P -c "Add :aps-environment string production" "$ENT"
+          gem install xcodeproj --no-document >/dev/null 2>&1 || sudo gem install xcodeproj --no-document
+          ruby -e '
+            require "xcodeproj"
+            proj = Xcodeproj::Project.open("ios/App/App.xcodeproj")
+            target = proj.targets.find { |t| t.name == "App" }
+            group = proj.main_group.find_subpath("App", true)
+            unless group.files.any? { |f| f.path == "GoogleService-Info.plist" }
+              target.add_resources([group.new_reference("GoogleService-Info.plist")])
+            end
+            target.build_configurations.each { |c| c.build_settings["CODE_SIGN_ENTITLEMENTS"] = "App/App.entitlements" }
+            proj.save
+          '
+          echo "iOS push config injected."
       - name: Generate app icons & splash screens
         script: |
           cd youtilityknock-web
@@ -215,6 +244,22 @@ workflows:
           npm install @capacitor/android
           [ -d android ] || npx cap add android
           npx cap sync android
+      - name: Firebase push config (Android) — only when GOOGLE_SERVICES_JSON is set
+        script: |
+          # Guarded: with no GOOGLE_SERVICES_JSON env var, this is a no-op and the
+          # build is unchanged. Set that secure var (base64 of your Firebase
+          # google-services.json) to turn push on.
+          cd youtilityknock-web
+          if [ -z "$GOOGLE_SERVICES_JSON" ]; then
+            echo "GOOGLE_SERVICES_JSON not set — skipping Android push setup (push inactive, build unaffected)."; exit 0
+          fi
+          echo "$GOOGLE_SERVICES_JSON" | base64 --decode > android/app/google-services.json
+          # Apply the Google Services gradle plugin so the json is processed.
+          grep -q "com.google.gms:google-services" android/build.gradle || \
+            sed -i "0,/dependencies {/s//dependencies {\n        classpath 'com.google.gms:google-services:4.4.2'/" android/build.gradle
+          grep -q "com.google.gms.google-services" android/app/build.gradle || \
+            echo "apply plugin: 'com.google.gms.google-services'" >> android/app/build.gradle
+          echo "Android push config injected."
       - name: Generate app icons & splash screens
         script: |
           cd youtilityknock-web

@@ -1,7 +1,9 @@
-import { Routes, Route, Navigate } from "react-router-dom";
+import { useEffect } from "react";
+import { Routes, Route, Navigate, useNavigate } from "react-router-dom";
 import ProtectedRoute from "./auth/ProtectedRoute";
 import Layout from "./components/Layout";
 import { useAuth } from "./auth/AuthContext";
+import { initPush, teardownPush } from "./lib/push";
 import { userHasService, isRallyCardOnly, type FeatureKey } from "./lib/features";
 import Login from "./pages/Login";
 import Dashboard from "./pages/Dashboard";
@@ -90,8 +92,23 @@ function Home() {
   return isRallyCardOnly(company) ? <Navigate to="/card" replace /> : <Dashboard />;
 }
 
+// Registers this device for native push once signed in, and drops the token on
+// sign-out. No-op on web. Renders nothing.
+function PushInit() {
+  const { profile } = useAuth();
+  const navigate = useNavigate();
+  const uid = profile?.uid;
+  useEffect(() => {
+    if (uid) void initPush((link) => navigate(link));
+    else void teardownPush();
+  }, [uid, navigate]);
+  return null;
+}
+
 export default function App() {
   return (
+    <>
+    <PushInit />
     <Routes>
       <Route path="/login" element={<Login />} />
       <Route
@@ -131,5 +148,6 @@ export default function App() {
         <Route path="settings" element={<Settings />} />
       </Route>
     </Routes>
+    </>
   );
 }
