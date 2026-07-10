@@ -169,6 +169,11 @@ export default function MapPage() {
   const fromMs = fromDate ? new Date(`${fromDate}T00:00:00`).getTime() : null;
   const toMs = toDate ? new Date(`${toDate}T23:59:59.999`).getTime() : null;
   const filtersActive = dispoSel.size > 0 || !!fromDate || !!toDate;
+  // When a filter is on we hide the auto-populated gray home pins and show only
+  // the filtered lead pins. A ref so the map callbacks (addHomeMarker/autoRoam)
+  // see the current value without being rebound.
+  const filtersActiveRef = useRef(false);
+  filtersActiveRef.current = filtersActive;
   // When a lead was last worked — the disposition time, else its newest history
   // entry, else when it was created. Drives the date filter.
   const leadActivityMs = (lead: Lead): number => {
@@ -314,6 +319,9 @@ export default function MapPage() {
     // Index the precise coordinate by address first (even if we dedupe/skip the
     // marker below) so movers can always snap onto it.
     if (h.address) homeCoordByAddr.current.set(normAddr(h.address), [h.lat, h.lng]);
+    // While a date/disposition filter is on, don't draw the auto gray home pins —
+    // only the filtered lead pins show. (Coord still indexed above for snapping.)
+    if (filtersActiveRef.current) return false;
     const key = `${h.lat.toFixed(5)},${h.lng.toFixed(5)}`;
     if (homeKeys.current.has(key)) return false; // already on the map
     homeKeys.current.add(key);
@@ -419,6 +427,8 @@ export default function MapPage() {
   async function loadHomes() {
     const map = mapRef.current;
     if (!map || !profile) return;
+    // Filtering hides the gray home pins — clear any that are up and don't pull.
+    if (filtersActiveRef.current) { homeLayer.current.clearLayers(); homeKeys.current.clear(); return; }
     setLoadingHomes(true);
     homeLayer.current.clearLayers();
     homeKeys.current.clear();
@@ -478,8 +488,9 @@ export default function MapPage() {
         moverLayer.current.clearLayers();
         moverKeys.current.clear();
       }
-      // Skip the gray home pulls while isolating movers — saves the ATTOM call.
-      if (!moversOnlyRef.current) {
+      // Skip the gray home pulls while isolating movers or filtering — the
+      // filtered map shows only lead pins, so there's nothing to repopulate.
+      if (!moversOnlyRef.current && !filtersActiveRef.current) {
         if (homeLayer.current.getLayers().length > HOME_CAP) {
           homeLayer.current.clearLayers();
           homeKeys.current.clear();
@@ -777,9 +788,17 @@ export default function MapPage() {
   }, [companyId, profile, role]);
 
   // Re-draw the lead pins whenever the date / disposition filters change. Only
-  // once the map exists (the initial build runs from the map-init effect).
+  // once the map exists (the initial build runs from the map-init effect). Also
+  // toggle the gray home pins: hide them while filtering, restore when cleared.
   useEffect(() => {
-    if (mapRef.current) void buildPins();
+    if (!mapRef.current) return;
+    void buildPins();
+    if (filtersActive) {
+      homeLayer.current.clearLayers();
+      homeKeys.current.clear();
+    } else {
+      void loadHomes();
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fromDate, toDate, dispoSel]);
 
