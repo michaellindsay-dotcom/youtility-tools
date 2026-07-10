@@ -18,6 +18,7 @@
     "deploy": "npm run build && firebase deploy"
   },
   "dependencies": {
+    "@capacitor-firebase/messaging": "^6.3.1",
     "@capacitor/android": "^6.1.2",
     "@capacitor/app": "^6.0.0",
     "@capacitor/core": "^6.1.2",

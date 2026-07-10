@@ -6,6 +6,7 @@ import { initializeApp } from "firebase-admin/app";
 import { getAuth } from "firebase-admin/auth";
 import { getFirestore, FieldValue } from "firebase-admin/firestore";
 import { getStorage } from "firebase-admin/storage";
+import { getMessaging } from "firebase-admin/messaging";
 import Stripe from "stripe";
 import * as crypto from "crypto";
 import PDFDocument from "pdfkit";
@@ -1737,7 +1738,37 @@ interface NotifyOpts {
   link?: string;
 }
 
-// Write the in-app notification, then email + SMS the user iff they're offline.
+// Send a native push (FCM) to every device the user has registered. Invalid /
+// unregistered tokens are pruned so the list stays clean. Best-effort: never
+// throws into the caller. No-op when the user has no tokens (e.g. web-only).
+async function sendPush(userId: string, title: string, body: string, link: string, type: string): Promise<void> {
+  try {
+    const snap = await db.doc(`users/${userId}`).get();
+    const tokens: string[] = Array.isArray(snap.data()?.pushTokens) ? snap.data()!.pushTokens : [];
+    if (!tokens.length) return;
+    const res = await getMessaging().sendEachForMulticast({
+      tokens,
+      notification: { title, body: body || undefined },
+      data: { link: link || "", type: type || "" },
+      apns: { payload: { aps: { sound: "default" } } },
+      android: { priority: "high", notification: { sound: "default" } },
+    });
+    // Drop tokens the device/registration no longer accepts.
+    const dead: string[] = [];
+    res.responses.forEach((r, i) => {
+      const code = (r.error as { code?: string } | undefined)?.code || "";
+      if (!r.success && (code.includes("registration-token-not-registered") || code.includes("invalid-argument") || code.includes("invalid-registration-token"))) {
+        dead.push(tokens[i]);
+      }
+    });
+    if (dead.length) await snap.ref.set({ pushTokens: FieldValue.arrayRemove(...dead) }, { merge: true });
+  } catch (e) {
+    logger.warn("sendPush failed", e);
+  }
+}
+
+// Write the in-app notification, push to the user's devices, then email + SMS
+// iff they're offline.
 async function notifyUser(opts: NotifyOpts): Promise<void> {
   const { userId, type, title, body = "", link = "" } = opts;
   await db.collection("notifications").add({
@@ -1749,6 +1780,8 @@ async function notifyUser(opts: NotifyOpts): Promise<void> {
     read: false,
     createdAt: Date.now(),
   });
+
+  await sendPush(userId, title, body, link, type); // native push to their phone(s)
 
   if (await isOnline(userId)) return; // in-app/push is enough when they're active
 
@@ -1762,6 +1795,30 @@ async function notifyUser(opts: NotifyOpts): Promise<void> {
     u.phone ? sendSms(cfg, u.phone, line) : Promise.resolve(false),
   ]);
 }
+
+// registerPushToken — the native app saves its FCM device token here so the
+// user's phone(s) receive push. Tokens are kept as a set on the user doc.
+export const registerPushToken = onCall(async (request) => {
+  if (!request.auth) throw new HttpsError("unauthenticated", "Sign in required.");
+  const { token, platform } = (request.data || {}) as { token?: string; platform?: string };
+  if (!token || typeof token !== "string") throw new HttpsError("invalid-argument", "token required.");
+  await db.doc(`users/${request.auth.uid}`).set(
+    { pushTokens: FieldValue.arrayUnion(token), pushPlatform: platform || null, pushUpdatedAt: Date.now() },
+    { merge: true },
+  );
+  return { ok: true };
+});
+
+// unregisterPushToken — drop a device token (sign-out / notifications off).
+export const unregisterPushToken = onCall(async (request) => {
+  if (!request.auth) throw new HttpsError("unauthenticated", "Sign in required.");
+  const { token } = (request.data || {}) as { token?: string };
+  if (!token) throw new HttpsError("invalid-argument", "token required.");
+  await db.doc(`users/${request.auth.uid}`).set(
+    { pushTokens: FieldValue.arrayRemove(token) }, { merge: true },
+  );
+  return { ok: true };
+});
 
 // ════════════════════════════════════════════════════════════════════════════
 // LEAD OUTREACH AUTOMATION — ported rep numbers via Telnyx.
