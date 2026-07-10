@@ -3979,6 +3979,7 @@ async function computeApptMetrics(companyId: string, startMs: number): Promise<{
 // Start-of-period (ms) for the appointment boards — Monday-based week to match
 // the rest of the app; all-time = 0.
 function apptPeriodStart(view: string): number {
+  if (view === "day") { const d = new Date(); d.setHours(0, 0, 0, 0); return d.getTime(); }
   if (view === "month") return rStartOfMonth();
   if (view === "year") return new Date(new Date().getFullYear(), 0, 1).getTime();
   if (view === "alltime") return 0;
@@ -4042,6 +4043,139 @@ export const roleLeaderboards = onCall(async (request) => {
   closers.sort((a, b) => b.closes - a.closes || b.sits - a.sits || (b.closeRate ?? -1) - (a.closeRate ?? -1));
   apptTops.sort((a, b) => b.value - a.value);
   return { setters: setters.slice(0, 50), closers: closers.slice(0, 50), apptTops: apptTops.slice(0, 3) };
+});
+
+// getCompanyRollup — aggregated setter + closer results for the caller's scope,
+// returned as a Company → Regions → Teams → Users tree with sit% and close% at
+// every level. Admins/super see the whole company; a manager sees only their
+// downline (setter and closer chains). Drives the field Town Hall card and the
+// drill-down report. Metrics are event-based (computeApptMetrics), doors come
+// from the stats buckets — the same sources as the leaderboards.
+export const getCompanyRollup = onCall(async (request) => {
+  const caller = await getCaller(request);
+  const companyId = caller.companyId;
+  if (!companyId) throw new HttpsError("permission-denied", "No company.");
+  if (!(caller.isSuper || caller.role === "admin" || caller.role === "manager")) {
+    throw new HttpsError("permission-denied", "Managers and admins only.");
+  }
+  const view = ((request.data as { period?: string } | undefined)?.period || "week") as string;
+  const kind = view === "month" || view === "year" ? view : "week";
+  const startMs = apptPeriodStart(view);
+
+  // Active users, scoped to the caller's downline for managers.
+  const usersSnap = await db.collection("users").where("companyId", "==", companyId).get();
+  const seeAll = caller.isSuper || caller.role === "admin";
+  type U = { uid: string; name: string; isCloser: boolean; teamId: string | null };
+  const users: U[] = [];
+  usersSnap.forEach((d) => {
+    const u = d.data() as any;
+    if (u.disabled === true) return;
+    const inDownline = seeAll
+      || d.id === caller.uid
+      || (Array.isArray(u.managerPath) && u.managerPath.includes(caller.uid))
+      || (Array.isArray(u.closerManagerPath) && u.closerManagerPath.includes(caller.uid));
+    if (!inDownline) return;
+    users.push({ uid: d.id, name: u.displayName || u.email || "Rep", isCloser: u.isCloser === true, teamId: (u.teamId as string) || null });
+  });
+
+  // Per-user setter/closer metrics (event-based) + doors from the stats buckets.
+  const { setters: sm, closers: cm } = await computeApptMetrics(companyId, startMs);
+  // Doors: live count of leads knocked in the window (attributed to the rep who
+  // owns the door), so "today" reflects the day's activity — the same
+  // leads-based counting the admin Town Hall uses. All-time uses the lifetime
+  // door counter instead of scanning every lead ever.
+  const doorsByUid: Record<string, number> = {};
+  if (view === "alltime") {
+    (await db.collection("userStats").where("companyId", "==", companyId).get())
+      .forEach((d) => { const s = d.data() as any; if (s.uid) doorsByUid[s.uid] = Number(s.doorsKnocked) || 0; });
+  } else {
+    try {
+      const leadsSnap = await db.collection("leads")
+        .where("companyId", "==", companyId).where("knockedAt", ">=", startMs).get();
+      leadsSnap.forEach((d) => {
+        const l = d.data() as any;
+        if (l.deleted) return;
+        const uid = (l.assignedTo as string) || (l.createdBy as string);
+        if (uid) doorsByUid[uid] = (doorsByUid[uid] || 0) + 1;
+      });
+    } catch (e) {
+      // Missing composite index → fall back to the season buckets (weekly/monthly
+      // only; a daily view just shows appt-derived metrics until the index builds).
+      logger.warn("rollup doors: knockedAt query failed, falling back to season stats", e);
+      if (view !== "day") {
+        (await db.collection("seasonStats").where("companyId", "==", companyId).where("period", "==", rPeriodKey(kind)).get())
+          .forEach((d) => { const s = d.data() as any; if (s.kind === kind && s.uid) doorsByUid[s.uid] = Number(s.doorsKnocked) || 0; });
+      }
+    }
+  }
+
+  // Teams + regions (a region is a team with kind==="region"; a team joins a
+  // region via parentTeamId).
+  const teamsSnap = await db.collection(`companies/${companyId}/teams`).get();
+  const regionName: Record<string, string> = {};
+  teamsSnap.forEach((t) => { const d = t.data() as any; if (d.kind === "region") regionName[t.id] = d.name || "Region"; });
+  const teamMeta: Record<string, { name: string; regionId: string | null }> = {};
+  teamsSnap.forEach((t) => {
+    const d = t.data() as any;
+    if (d.kind === "region") return;
+    const parent = (d.parentTeamId as string) || null;
+    teamMeta[t.id] = { name: d.name || "Team", regionId: parent && regionName[parent] ? parent : null };
+  });
+
+  const blank = () => ({ doors: 0, setterAppts: 0, setterSits: 0, setterPitched: 0, closerAppts: 0, closerSits: 0, closes: 0, turnedAways: 0, reps: 0, closerReps: 0 });
+  type M = ReturnType<typeof blank>;
+  const add = (a: M, u: U) => {
+    const s = sm[u.uid]; const c = cm[u.uid];
+    a.doors += doorsByUid[u.uid] || 0;
+    a.setterAppts += s?.appts || 0; a.setterSits += s?.sits || 0; a.setterPitched += s?.pitched || 0;
+    a.closerAppts += c?.appts || 0; a.closerSits += c?.sits || 0; a.closes += c?.closes || 0; a.turnedAways += c?.turnedAways || 0;
+    a.reps += 1; if (u.isCloser) a.closerReps += 1;
+  };
+  const rate = (n: number, d: number) => (d > 0 ? Math.min(100, Math.round((n / d) * 100)) : null);
+  const node = (m: M, name: string, type: string, id: string | null, extra?: Record<string, unknown>) => ({
+    type, id, name, ...m, sitRate: rate(m.setterSits, m.setterPitched), closeRate: rate(m.closes, m.closerSits), ...extra,
+  });
+  const sumOf = (arr: U[]) => { const m = blank(); for (const u of arr) add(m, u); return m; };
+
+  // Group users → team → region.
+  const usersByTeam: Record<string, U[]> = {};
+  const noTeam: U[] = [];
+  for (const u of users) {
+    if (u.teamId && teamMeta[u.teamId]) (usersByTeam[u.teamId] ??= []).push(u);
+    else noTeam.push(u);
+  }
+  const teamsByRegion: Record<string, string[]> = {};
+  const noRegionTeams: string[] = [];
+  for (const tid of Object.keys(usersByTeam)) {
+    const rid = teamMeta[tid].regionId;
+    if (rid) (teamsByRegion[rid] ??= []).push(tid);
+    else noRegionTeams.push(tid);
+  }
+  const buildUser = (u: U) => node(sumOf([u]), u.name, "user", u.uid, { isCloser: u.isCloser });
+  const byClose = (a: { closes: number; setterSits: number }, b: { closes: number; setterSits: number }) => b.closes - a.closes || b.setterSits - a.setterSits;
+  const buildTeam = (tid: string, name: string, roster: U[]) =>
+    node(sumOf(roster), name, "team", tid, { users: roster.map(buildUser).sort(byClose) });
+
+  const regions: unknown[] = [];
+  for (const rid of Object.keys(teamsByRegion)) {
+    const teamNodes = teamsByRegion[rid].map((tid) => buildTeam(tid, teamMeta[tid].name, usersByTeam[tid])).sort(byClose);
+    const roster = teamsByRegion[rid].flatMap((tid) => usersByTeam[tid]);
+    regions.push(node(sumOf(roster), regionName[rid] || "Region", "region", rid, { teams: teamNodes }));
+  }
+  if (noRegionTeams.length) {
+    const teamNodes = noRegionTeams.map((tid) => buildTeam(tid, teamMeta[tid].name, usersByTeam[tid])).sort(byClose);
+    const roster = noRegionTeams.flatMap((tid) => usersByTeam[tid]);
+    regions.push(node(sumOf(roster), "Teams (no region)", "region", "__noregion", { teams: teamNodes }));
+  }
+  if (noTeam.length) {
+    const team = node(sumOf(noTeam), "Unassigned", "team", "__noteam", { users: noTeam.map(buildUser).sort(byClose) });
+    regions.push(node(sumOf(noTeam), "Unassigned", "region", "__unassigned", { teams: [team] }));
+  }
+  (regions as { closes: number; setterSits: number }[]).sort(byClose);
+
+  const companyName = (await db.doc(`companies/${companyId}`).get()).data()?.name || "Company";
+  const company = node(sumOf(users), companyName, "company", companyId, { regions });
+  return { period: view, scopedToDownline: !seeAll, company };
 });
 
 // ════════════════════════════════════════════════════════════════════════════
