@@ -6,7 +6,7 @@ import {
   FINANCE_OPTIONS,
   SUNGAGE_PORTAL_URL,
   computeFinance,
-  financeOptionById,
+  type FinanceOption,
 } from "../lib/financing";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -138,6 +138,9 @@ export interface SolarShowProps {
   // for the Sungage financing application (defaults to the dealer login portal).
   depositUsd?: number;
   sungageApplyUrl?: string;
+  // Company-configured financing plans to offer (enabled ones). Falls back to
+  // the built-in Sungage defaults when not provided.
+  financeOptions?: FinanceOption[];
   // "Let's do this" → start the agreement/close flow with the chosen payment.
   // Only wired from the closer's tool (the homeowner viewer leaves it unset).
   onLetsDoIt?: (selection: ProposalCloseSelection) => void;
@@ -335,10 +338,18 @@ export default function SolarProposalShow(props: SolarShowProps) {
     chosenProductId,
     depositUsd = 2500,
     sungageApplyUrl,
+    financeOptions,
     onLetsDoIt,
   } = props;
 
   const hasOptions = !!(options && options.length);
+
+  // Financing plans to show: the company's enabled plans, else Sungage defaults.
+  const finOpts = useMemo(
+    () => (financeOptions && financeOptions.length ? financeOptions : FINANCE_OPTIONS),
+    [financeOptions]
+  );
+  const finById = useCallback((id: string) => finOpts.find((o) => o.id === id) || finOpts[0], [finOpts]);
 
   const [idx, setIdx] = useState(0);
 
@@ -359,7 +370,11 @@ export default function SolarProposalShow(props: SolarShowProps) {
   );
   // Pricing selection (lifted so the "Let's do this" CTA can build the agreement).
   const [payMode, setPayMode] = useState<"finance" | "cash">("finance");
-  const [financeOptId, setFinanceOptId] = useState<string>(FINANCE_OPTIONS[0].id);
+  const [financeOptId, setFinanceOptId] = useState<string>(finOpts[0].id);
+  // Keep the selected plan valid if the offered plans change.
+  useEffect(() => {
+    if (!finOpts.some((o) => o.id === financeOptId)) setFinanceOptId(finOpts[0].id);
+  }, [finOpts, financeOptId]);
 
   const active = useMemo(() => {
     const base = options?.find((o) => o.productId === selectedId) || options?.[0];
@@ -442,7 +457,7 @@ export default function SolarProposalShow(props: SolarShowProps) {
         setCompareIds(options.slice(0, 2).map((o) => o.productId));
         setUnitsById({});
         setPayMode("finance");
-        setFinanceOptId(FINANCE_OPTIONS[0].id);
+        setFinanceOptId(finOpts[0].id);
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -907,6 +922,7 @@ export default function SolarProposalShow(props: SolarShowProps) {
                         firstName={name.split(" ")[0]}
                         depositUsd={depositUsd}
                         sungageApplyUrl={sungageApplyUrl || SUNGAGE_PORTAL_URL}
+                        finOpts={finOpts}
                         mode={payMode}
                         setMode={setPayMode}
                         optId={financeOptId}
@@ -955,7 +971,7 @@ export default function SolarProposalShow(props: SolarShowProps) {
                               },
                             };
                             if (payMode === "finance") {
-                              const opt = financeOptionById(financeOptId);
+                              const opt = finById(financeOptId);
                               const fin = computeFinance(opt, price);
                               sel.finance = { optionId: opt.id, name: opt.name, apr: opt.apr, termYears: opt.termYears, monthly: fin.monthly };
                             } else {
@@ -1215,6 +1231,7 @@ function PricingSlide({
   firstName,
   depositUsd,
   sungageApplyUrl,
+  finOpts,
   mode,
   setMode,
   optId,
@@ -1225,6 +1242,7 @@ function PricingSlide({
   firstName: string;
   depositUsd: number;
   sungageApplyUrl: string;
+  finOpts: FinanceOption[];
   mode: "finance" | "cash";
   setMode: (m: "finance" | "cash") => void;
   optId: string;
@@ -1234,7 +1252,7 @@ function PricingSlide({
 
   // Finance the system sale price (grossed up by the dealer fee inside compute).
   const financeBase = roi.grossCost > 0 ? roi.grossCost : roi.netCost;
-  const opt = financeOptionById(optId);
+  const opt = finOpts.find((o) => o.id === optId) || finOpts[0];
   const fin = useMemo(() => computeFinance(opt, financeBase), [opt, financeBase]);
 
   const cashPrice = roi.netCost > 0 ? roi.netCost : roi.grossCost;
@@ -1254,8 +1272,8 @@ function PricingSlide({
         <div className="sps-glass sps-fin">
           <div className="sps-fin-pick">
             <label className="sps-fin-pick-l">Financing plan</label>
-            <select className="sps-fin-select" value={optId} onChange={(e) => setOptId(e.target.value as typeof optId)}>
-              {FINANCE_OPTIONS.map((o) => (
+            <select className="sps-fin-select" value={optId} onChange={(e) => setOptId(e.target.value)}>
+              {finOpts.map((o) => (
                 <option key={o.id} value={o.id}>
                   {o.name}
                 </option>
@@ -1275,12 +1293,12 @@ function PricingSlide({
           <button
             className="sps-pay-cta"
             style={{ background: accent }}
-            onClick={() => window.open(sungageApplyUrl, "_blank", "noopener,noreferrer")}
+            onClick={() => window.open(opt.applyUrl || sungageApplyUrl, "_blank", "noopener,noreferrer")}
           >
-            Apply with Sungage ↗
+            Apply with {opt.financeCompany || "Sungage"} ↗
           </button>
           <div className="sps-fin-foot">
-            Estimated payment for discussion — your exact rate and payment are confirmed by Sungage on approval.
+            Estimated payment for discussion — your exact rate and payment are confirmed by {opt.financeCompany || "Sungage"} on approval.
           </div>
         </div>
       ) : (

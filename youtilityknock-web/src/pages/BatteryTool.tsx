@@ -32,6 +32,7 @@ import {
   type IncentiveReport,
 } from "../lib/incentives";
 import SolarProposalShow, { type ProposalOption, type ProposalCloseSelection } from "./SolarProposalShow";
+import { resolveFinanceOptions, FINANCE_OPTIONS, type FinanceOption } from "../lib/financing";
 
 const fmt = (ms: number) =>
   new Date(ms).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
@@ -775,6 +776,40 @@ export default function BatteryTool() {
     }
   };
 
+  // 6b. Company financing plans editor (admin). Seeded from the company's saved
+  // plans, falling back to the built-in defaults so there's always a starting
+  // point. Edits include ALL plans (even disabled ones) so they can be toggled.
+  const [showFinanceAdmin, setShowFinanceAdmin] = useState(false);
+  const [financeDraft, setFinanceDraft] = useState<FinanceOption[]>([]);
+  const [financeSaving, setFinanceSaving] = useState(false);
+  const [financeSaved, setFinanceSaved] = useState(false);
+  const [financeError, setFinanceError] = useState("");
+  useEffect(() => {
+    const seed = Array.isArray(company?.financeOptions) && company?.financeOptions?.length
+      ? company.financeOptions : FINANCE_OPTIONS;
+    setFinanceDraft(seed.map((o) => ({ ...o, enabled: o.enabled !== false })));
+  }, [company?.financeOptions]);
+  const updateFin = (i: number, patch: Partial<FinanceOption>) =>
+    setFinanceDraft((cur) => cur.map((o, idx) => (idx === i ? { ...o, ...patch } : o)));
+  const addFin = () =>
+    setFinanceDraft((cur) => [...cur, {
+      id: `fin${cur.length}_${Math.round(Number(String(Date.now()).slice(-6)))}`,
+      name: "New plan", financeCompany: "", blurb: "", termYears: 20,
+      apr: 0.0999, dealerFee: 0, kind: "level", applyUrl: "", enabled: true,
+    }]);
+  const removeFin = (i: number) => setFinanceDraft((cur) => cur.filter((_, idx) => idx !== i));
+  const saveFinance = async () => {
+    if (!companyId) return;
+    setFinanceSaving(true); setFinanceSaved(false); setFinanceError("");
+    try {
+      await httpsCallable<{ companyId: string; financeOptions: FinanceOption[] }, { ok?: boolean }>(
+        functions, "setBatteryPricing"
+      )({ companyId, financeOptions: financeDraft });
+      setFinanceSaved(true);
+    } catch (e) { setFinanceError((e as Error).message || "Couldn't save financing."); }
+    finally { setFinanceSaving(false); }
+  };
+
   // 6c. Incentives
   const [incLoading, setIncLoading] = useState(false);
   const [incError, setIncError] = useState("");
@@ -1150,6 +1185,7 @@ export default function BatteryTool() {
         chosenProductId: system.product.id,
         depositUsd,
         sungageApplyUrl: company?.sungageApplyUrl,
+        financeOptions: resolveFinanceOptions(company),
         // homeImage intentionally omitted — too large to persist; the viewer
         // uses the photoreal scene.
       };
@@ -1739,6 +1775,80 @@ export default function BatteryTool() {
                 )}
               </div>
             )}
+
+            {/* Admin-only proposal financing plans. */}
+            {role === "admin" && (
+              <div className="card" style={{ marginTop: 14 }}>
+                <div className="row" style={{ justifyContent: "space-between", alignItems: "center" }}>
+                  <span className="lb-row-name">Financing plans (admin)</span>
+                  <button className="btn ghost sm" onClick={() => setShowFinanceAdmin((v) => !v)}>
+                    {showFinanceAdmin ? "Hide" : "Edit"}
+                  </button>
+                </div>
+                {showFinanceAdmin && (
+                  <>
+                    <p className="muted small" style={{ marginTop: 8 }}>
+                      Set the lender, rate, term, and dealer fee for each plan. Toggle a plan off to hide it on the proposal. These drive the proposal's payment estimate.
+                    </p>
+                    <div className="lb-list" style={{ marginTop: 10 }}>
+                      {financeDraft.map((o, i) => (
+                        <div key={i} className="lb-row card" style={{ display: "block" }}>
+                          <div className="row" style={{ justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+                            <label className="day-chip">
+                              <input type="checkbox" checked={o.enabled !== false} onChange={(e) => updateFin(i, { enabled: e.target.checked })} />
+                              {o.enabled !== false ? " Shown on proposal" : " Hidden"}
+                            </label>
+                            <button className="btn ghost sm danger" onClick={() => removeFin(i)}>Remove</button>
+                          </div>
+                          <div className="grid-2">
+                            <label className="field"><span>Plan name</span>
+                              <input value={o.name} onChange={(e) => updateFin(i, { name: e.target.value })} /></label>
+                            <label className="field"><span>Finance company</span>
+                              <input value={o.financeCompany || ""} placeholder="e.g. Sungage" onChange={(e) => updateFin(i, { financeCompany: e.target.value })} /></label>
+                            <label className="field"><span>APR %</span>
+                              <input type="number" inputMode="decimal" value={+(o.apr * 100).toFixed(2)} onChange={(e) => updateFin(i, { apr: (Number(e.target.value) || 0) / 100 })} /></label>
+                            <label className="field"><span>Term (years)</span>
+                              <input type="number" inputMode="numeric" value={o.termYears} onChange={(e) => updateFin(i, { termYears: Number(e.target.value) || 0 })} /></label>
+                            <label className="field"><span>Dealer fee %</span>
+                              <input type="number" inputMode="decimal" value={+(o.dealerFee * 100).toFixed(2)} onChange={(e) => updateFin(i, { dealerFee: (Number(e.target.value) || 0) / 100 })} /></label>
+                            <label className="field"><span>Plan type</span>
+                              <select value={o.kind} onChange={(e) => updateFin(i, { kind: e.target.value as FinanceOption["kind"] })}>
+                                <option value="level">Level payment</option>
+                                <option value="escalator">Escalator (steps up)</option>
+                                <option value="deferred">Deferred start</option>
+                              </select></label>
+                            {o.kind === "escalator" && (
+                              <label className="field"><span>Yearly step-up %</span>
+                                <input type="number" inputMode="decimal" value={+((o.escalator || 0) * 100).toFixed(2)} onChange={(e) => updateFin(i, { escalator: (Number(e.target.value) || 0) / 100 })} /></label>
+                            )}
+                            {o.kind === "deferred" && (
+                              <>
+                                <label className="field"><span>Defer months</span>
+                                  <input type="number" inputMode="numeric" value={o.deferMonths || 0} onChange={(e) => updateFin(i, { deferMonths: Number(e.target.value) || 0 })} /></label>
+                                <label className="field"><span>Deferred %</span>
+                                  <input type="number" inputMode="decimal" value={+((o.deferPct || 0) * 100).toFixed(2)} onChange={(e) => updateFin(i, { deferPct: (Number(e.target.value) || 0) / 100 })} /></label>
+                              </>
+                            )}
+                          </div>
+                          <label className="field"><span>Short description (shown on the proposal)</span>
+                            <input value={o.blurb || ""} onChange={(e) => updateFin(i, { blurb: e.target.value })} /></label>
+                          <label className="field"><span>Apply link (where the homeowner applies)</span>
+                            <input value={o.applyUrl || ""} placeholder="https://…" onChange={(e) => updateFin(i, { applyUrl: e.target.value })} /></label>
+                        </div>
+                      ))}
+                    </div>
+                    <div className="row" style={{ gap: 8, marginTop: 10, alignItems: "center", flexWrap: "wrap" }}>
+                      <button className="btn ghost sm" onClick={addFin}>+ Add finance company</button>
+                      <button className="btn primary sm" onClick={saveFinance} disabled={financeSaving}>
+                        {financeSaving ? "Saving…" : "Save financing"}
+                      </button>
+                      {financeSaved && <span className="muted small" style={{ color: "#34d399" }}>✅ Saved.</span>}
+                      {financeError && <span className="muted small" style={{ color: "#ef4444" }}>{financeError}</span>}
+                    </div>
+                  </>
+                )}
+              </div>
+            )}
           </>
         )}
       </div>
@@ -1965,6 +2075,7 @@ export default function BatteryTool() {
         chosenProductId={system?.product.id}
         depositUsd={depositUsd}
         sungageApplyUrl={company?.sungageApplyUrl}
+        financeOptions={resolveFinanceOptions(company)}
         onLetsDoIt={handleLetsDoIt}
       />
 

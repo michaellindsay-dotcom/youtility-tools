@@ -6148,7 +6148,7 @@ export const updateProjectStatus = onCall(async (request) => {
 // Admin: set company-wide battery pricing (price + install adder per product).
 export const setBatteryPricing = onCall(async (request) => {
   const caller = await getCaller(request);
-  const { companyId, pricing, offered, depositUsd, depositPct, sungageApplyUrl, agreementInstallerName, agreementCcEmails, agreementTemplateUrl } = (request.data || {}) as {
+  const { companyId, pricing, offered, depositUsd, depositPct, sungageApplyUrl, agreementInstallerName, agreementCcEmails, agreementTemplateUrl, financeOptions } = (request.data || {}) as {
     companyId?: string;
     pricing?: Record<string, { price?: number; adder?: number }>;
     offered?: string[];
@@ -6158,6 +6158,7 @@ export const setBatteryPricing = onCall(async (request) => {
     agreementInstallerName?: string;
     agreementCcEmails?: string[];
     agreementTemplateUrl?: string;
+    financeOptions?: any[];
   };
   authorizeForCompany(caller, companyId);
   const clean: Record<string, { price: number; adder: number }> = {};
@@ -6179,6 +6180,32 @@ export const setBatteryPricing = onCall(async (request) => {
   if (agreementCcEmails !== undefined) {
     patch.agreementCcEmails = (Array.isArray(agreementCcEmails) ? agreementCcEmails : [])
       .map((e) => String(e || "").trim()).filter((e) => /.+@.+\..+/.test(e)).slice(0, 20);
+  }
+  // Company-configurable proposal financing plans (dealer fees, APR, terms, and
+  // which lender). Only the enabled ones are shown on the proposal.
+  if (Array.isArray(financeOptions)) {
+    const pctClamp = (v: unknown) => Math.max(0, Math.min(0.9999, Number(v) || 0));
+    patch.financeOptions = financeOptions.slice(0, 12).map((o: any, i: number) => {
+      const kind = ["escalator", "deferred", "level"].includes(o?.kind) ? o.kind : "level";
+      const opt: Record<string, unknown> = {
+        id: (String(o?.id || "").trim() || `fin${i}`).slice(0, 40),
+        name: (String(o?.name || "").trim() || "Financing plan").slice(0, 80),
+        financeCompany: String(o?.financeCompany || "").trim().slice(0, 80),
+        blurb: String(o?.blurb || "").trim().slice(0, 200),
+        termYears: Math.max(1, Math.min(40, Math.round(Number(o?.termYears) || 20))),
+        apr: pctClamp(o?.apr),
+        dealerFee: pctClamp(o?.dealerFee),
+        kind,
+        applyUrl: String(o?.applyUrl || "").trim().slice(0, 600),
+        enabled: o?.enabled !== false,
+      };
+      if (kind === "escalator") opt.escalator = pctClamp(o?.escalator);
+      if (kind === "deferred") {
+        opt.deferMonths = Math.max(0, Math.min(120, Math.round(Number(o?.deferMonths) || 0)));
+        opt.deferPct = pctClamp(o?.deferPct);
+      }
+      return opt;
+    });
   }
   await db.doc(`companies/${companyId}`).set(patch, { merge: true });
   return { ok: true };

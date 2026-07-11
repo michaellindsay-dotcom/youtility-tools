@@ -1,4 +1,5 @@
 // Shared domain types used across the dashboard and (mirrored) in functions.
+import type { FinanceOption } from "./lib/financing";
 
 // System access tiers. Custom company roles are TITLES that map onto one of
 // these base tiers (see CompanyRole.baseTier).
@@ -78,6 +79,7 @@ export interface Company {
   batteryDepositUsd?: number; // flat deposit (default $2,500 when unset)
   batteryDepositPct?: number; // % of system price; takes precedence when > 0
   sungageApplyUrl?: string; // dealer's Sungage application link (else portal fallback)
+  financeOptions?: FinanceOption[]; // company's proposal financing plans (dealer fees, APR, lender, on/off)
   createdAt?: number;
   // Company branding — shown on every rep's RallyCard unless the rep uploads
   // their own logo override (UserProfile.cardLogoUrl).
