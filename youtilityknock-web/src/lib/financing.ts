@@ -9,10 +9,10 @@
 export const SUNGAGE_PORTAL_URL =
   "https://auth.sungage.com/u/login?state=hKFo2SBCOFRFQkdoNnN6bFczVjVrM05fQXlVMTFhelZlQWNCbKFur3VuaXZlcnNhbC1sb2dpbqN0aWTZIGlneGFEX1RjRmhnVHhOZTR5TmMyZ2ZwQVF1dTVYNzNHo2NpZNkgZjRnY2FqdzVIMmRCaXozaWw4RUN2c3g1bkRYTTJNY1Q";
 
-export type FinanceOptionId = "sunrise" | "deferred" | "standard";
+export type FinanceOptionId = string;
 
 export interface FinanceOption {
-  id: FinanceOptionId;
+  id: string;
   name: string;
   blurb: string;
   termYears: number;
@@ -22,6 +22,10 @@ export interface FinanceOption {
   escalator?: number; // annual payment step-up, decimal
   deferMonths?: number; // deferral window
   deferPct?: number; // portion of the balance deferred
+  // Company-configurable extras (set in the Battery Tool → Financing editor).
+  financeCompany?: string; // lender name shown on the "Apply" button
+  applyUrl?: string; // where the homeowner applies (falls back to Sungage portal)
+  enabled?: boolean; // show this plan on the proposal (default true)
 }
 
 export const FINANCE_OPTIONS: FinanceOption[] = [
@@ -59,6 +63,19 @@ export const FINANCE_OPTIONS: FinanceOption[] = [
 
 export const financeOptionById = (id: string): FinanceOption =>
   FINANCE_OPTIONS.find((o) => o.id === id) || FINANCE_OPTIONS[0];
+
+// The finance plans a proposal should offer: a company's own configured plans
+// (only the enabled ones), or the built-in Sungage defaults when none are set.
+export function resolveFinanceOptions(
+  company?: { financeOptions?: FinanceOption[] } | null,
+): FinanceOption[] {
+  const custom = company?.financeOptions;
+  if (Array.isArray(custom) && custom.length) {
+    const on = custom.filter((o) => o && o.enabled !== false);
+    if (on.length) return on;
+  }
+  return FINANCE_OPTIONS;
+}
 
 // Standard fully-amortizing monthly payment.
 function amortize(principal: number, monthlyRate: number, n: number): number {
