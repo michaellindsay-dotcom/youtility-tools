@@ -1164,6 +1164,11 @@
         <input id="bpSungageUrl" type="url" placeholder="https://auth.sungage.com/…  (blank = use the Sungage dealer login portal)" />
       </label>
 
+      <h3 style="font-size:15px;margin:18px 0 4px;">Financing plans</h3>
+      <p class="muted" style="margin:0 0 12px;font-size:13px;">The lender plans shown on the battery proposal. Set the finance company, APR, term, and dealer fee, and toggle each on or off. Leave all off/empty to use the built-in Sungage plans.</p>
+      <div id="bpFinanceList" style="max-width:720px;"></div>
+      <button id="bpFinanceAdd" class="btn ghost sm" type="button">+ Add finance company</button>
+
       <h3 style="font-size:15px;margin:18px 0 4px;">Battery agreement</h3>
       <p class="muted" style="margin:0 0 12px;font-size:13px;">Used when a closer signs a customer up. Leave the installer name to fill the contractor-of-record line; add anyone who should receive a copy of every signed agreement.</p>
       <label style="display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--muted,#8a8199);max-width:600px;">
@@ -2388,6 +2393,75 @@ function renderBatteryPricingRows(pricing, offered) {
   }).join("");
   $("batteryPricingRows").innerHTML = rows;
 }
+
+// Built-in Sungage plans — the seed shown when a company has no custom plans.
+const DEFAULT_FINANCE = [
+  { id: "sunrise", name: "Sungage Sunrise", financeCompany: "Sungage", blurb: "Lowest 3.99% rate — payment steps up 2.9% a year", termYears: 20, apr: 0.0399, dealerFee: 0.3299, kind: "escalator", escalator: 0.029, applyUrl: "", enabled: true },
+  { id: "deferred", name: "Sungage Deferred", financeCompany: "Sungage", blurb: "3.99% with lower payments for the first 3 years", termYears: 20, apr: 0.0399, dealerFee: 0.3149, kind: "deferred", deferMonths: 36, deferPct: 0.25, applyUrl: "", enabled: true },
+  { id: "standard", name: "Sungage 8.99%", financeCompany: "Sungage", blurb: "Smallest financed amount — level payments, no step-up", termYears: 20, apr: 0.0899, dealerFee: 0.0399, kind: "level", applyUrl: "", enabled: true },
+];
+const finField = (t, inner) => `<label style="display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--muted,#8a8199);">${t}${inner}</label>`;
+function renderBatteryFinance(list) {
+  const arr = Array.isArray(list) ? list : [];
+  const pct = (v) => +(((Number(v) || 0) * 100).toFixed(2));
+  $("bpFinanceList").innerHTML = arr.map((o, i) => {
+    const kind = o.kind || "level";
+    return `<div class="bp-fin-row" style="border:1px solid var(--line,#23202e);border-radius:10px;padding:12px;margin-bottom:10px;">
+      <input type="hidden" data-fin="id" value="${escHtml(o.id || ("fin" + i))}"/>
+      <div class="row" style="justify-content:space-between;align-items:center;margin-bottom:8px;">
+        <label style="font-size:12px;display:flex;gap:6px;align-items:center;"><input type="checkbox" data-fin="enabled" ${o.enabled !== false ? "checked" : ""}/> Shown on proposal</label>
+        <button class="btn ghost sm" type="button" data-fin-remove="${i}">Remove</button>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+        ${finField("Plan name", `<input data-fin="name" value="${escHtml(o.name || "")}"/>`)}
+        ${finField("Finance company", `<input data-fin="financeCompany" value="${escHtml(o.financeCompany || "")}" placeholder="e.g. Sungage"/>`)}
+        ${finField("APR %", `<input type="number" step="0.01" data-fin="apr" value="${pct(o.apr)}"/>`)}
+        ${finField("Term (years)", `<input type="number" step="1" data-fin="termYears" value="${Number(o.termYears) || 20}"/>`)}
+        ${finField("Dealer fee %", `<input type="number" step="0.01" data-fin="dealerFee" value="${pct(o.dealerFee)}"/>`)}
+        ${finField("Plan type", `<select data-fin="kind"><option value="level" ${kind === "level" ? "selected" : ""}>Level payment</option><option value="escalator" ${kind === "escalator" ? "selected" : ""}>Escalator (steps up)</option><option value="deferred" ${kind === "deferred" ? "selected" : ""}>Deferred start</option></select>`)}
+        ${finField("Yearly step-up % (escalator only)", `<input type="number" step="0.01" data-fin="escalator" value="${pct(o.escalator)}"/>`)}
+        ${finField("Defer months (deferred only)", `<input type="number" step="1" data-fin="deferMonths" value="${Number(o.deferMonths) || 0}"/>`)}
+        ${finField("Deferred % (deferred only)", `<input type="number" step="0.01" data-fin="deferPct" value="${pct(o.deferPct)}"/>`)}
+        ${finField("Apply link", `<input type="url" data-fin="applyUrl" value="${escHtml(o.applyUrl || "")}" placeholder="https://…"/>`)}
+      </div>
+      <div style="margin-top:10px;">${finField("Short description (shown on the proposal)", `<input data-fin="blurb" value="${escHtml(o.blurb || "")}"/>`)}</div>
+    </div>`;
+  }).join("") || `<p class="muted" style="font-size:13px;margin:0 0 8px;">No plans yet — the proposal uses the built-in Sungage plans. Add one to override.</p>`;
+}
+function readBatteryFinance() {
+  return [...document.querySelectorAll("#bpFinanceList .bp-fin-row")].map((row, i) => {
+    const g = (k) => row.querySelector(`[data-fin="${k}"]`);
+    const kind = g("kind")?.value || "level";
+    const o = {
+      id: (g("id")?.value || "").trim() || ("fin" + i),
+      name: (g("name")?.value || "").trim() || "Financing plan",
+      financeCompany: (g("financeCompany")?.value || "").trim(),
+      blurb: (g("blurb")?.value || "").trim(),
+      termYears: Number(g("termYears")?.value) || 20,
+      apr: (Number(g("apr")?.value) || 0) / 100,
+      dealerFee: (Number(g("dealerFee")?.value) || 0) / 100,
+      kind,
+      applyUrl: (g("applyUrl")?.value || "").trim(),
+      enabled: !!g("enabled")?.checked,
+    };
+    if (kind === "escalator") o.escalator = (Number(g("escalator")?.value) || 0) / 100;
+    if (kind === "deferred") { o.deferMonths = Number(g("deferMonths")?.value) || 0; o.deferPct = (Number(g("deferPct")?.value) || 0) / 100; }
+    return o;
+  });
+}
+$("bpFinanceAdd")?.addEventListener("click", () => {
+  const cur = readBatteryFinance();
+  cur.push({ id: "fin" + Date.now(), name: "New plan", financeCompany: "", blurb: "", termYears: 20, apr: 0.0999, dealerFee: 0, kind: "level", applyUrl: "", enabled: true });
+  renderBatteryFinance(cur);
+});
+$("bpFinanceList")?.addEventListener("click", (e) => {
+  const btn = e.target.closest("[data-fin-remove]");
+  if (!btn) return;
+  const cur = readBatteryFinance();
+  cur.splice(Number(btn.dataset.finRemove), 1);
+  renderBatteryFinance(cur);
+});
+
 // Toggle the deposit value label between $ and % as the type changes.
 function syncDepositLabel() {
   const pct = $("bpDepositType")?.value === "pct";
@@ -2417,6 +2491,7 @@ async function loadBatteryPricing(companyId) {
   $("bpInstaller").value = c.agreementInstallerName || "";
   $("bpAgreementCc").value = Array.isArray(c.agreementCcEmails) ? c.agreementCcEmails.join(", ") : "";
   $("bpAgreementUrl").value = c.agreementTemplateUrl || "";
+  renderBatteryFinance(Array.isArray(c.financeOptions) && c.financeOptions.length ? c.financeOptions : DEFAULT_FINANCE);
   syncDepositLabel();
   renderPlaybook(mergePlaybook(c.batteryPlaybook));
 }
@@ -2547,6 +2622,7 @@ $("batteryPricingSave").addEventListener("click", async () => {
       agreementInstallerName: ($("bpInstaller")?.value || "").trim(),
       agreementCcEmails: ($("bpAgreementCc")?.value || "").split(",").map((e) => e.trim()).filter(Boolean),
       agreementTemplateUrl: ($("bpAgreementUrl")?.value || "").trim(),
+      financeOptions: readBatteryFinance(),
     });
     banner($("batteryPricingBanner"), "Battery pricing saved.", "good");
   } catch (e) { banner($("batteryPricingBanner"), e.message || "Save failed.", "error"); }
