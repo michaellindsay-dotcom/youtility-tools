@@ -39,9 +39,18 @@ export default function Schedule() {
 
   useEffect(() => {
     if (!profile || !companyId) return;
-    // Own events + (for managers/admins) downstream via visibilityPath.
+    // Company admins / super-admins see the WHOLE company's schedule (they can,
+    // per the security rules). Managers see their downline via visibilityPath.
+    // Everyone else sees only their own events.
+    const seeAll = role === "admin" || role === "superadmin";
     const q =
-      role === "admin" || role === "manager"
+      seeAll
+        ? query(
+            collection(db, "events"),
+            where("companyId", "==", companyId),
+            orderBy("startAt", "asc")
+          )
+        : role === "manager"
         ? query(
             collection(db, "events"),
             where("companyId", "==", companyId),
