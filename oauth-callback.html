@@ -1,9 +1,15 @@
 <!DOCTYPE html>
 <!--
-  OAuth popup landing page. Google / Microsoft redirect here with ?code=…
-  after the rep grants calendar access. We hand the code back to the app window
-  that opened this popup, then close. No secrets here — the code is exchanged
-  for tokens server-side by a Cloud Function.
+  OAuth landing page. Google / Microsoft redirect here with ?code=… after the
+  rep grants calendar access. No secrets here — the code is exchanged for tokens
+  server-side by a Cloud Function.
+
+  Two return paths, chosen by the `state` value the app set:
+    • Web  → postMessage the code to the opener window, then close.
+    • App  (state ends with ":native") → deep-link the code back into the
+      installed app via us.youtility.knock://oauth-callback so the native shell
+      picks it up. The app's WebView origin isn't a valid Google redirect, so
+      native OAuth must land on this hosted page and bounce back.
 -->
 <html lang="en">
 <head>
@@ -27,7 +33,17 @@
     var state = params.get("state") || "";
     var payload = { source: "yk-oauth", code: code, error: error, state: state };
     try {
-      if (window.opener) {
+      // Installed app: hand the code back through the custom-scheme deep link.
+      if (state.indexOf(":native") !== -1) {
+        var q = new URLSearchParams();
+        if (code) q.set("code", code);
+        if (error) q.set("error", error);
+        q.set("state", state);
+        document.getElementById("msg").textContent = error
+          ? "Connection cancelled — returning to the app…"
+          : "Calendar connected — returning to the app…";
+        window.location.replace("us.youtility.knock://oauth-callback?" + q.toString());
+      } else if (window.opener) {
         window.opener.postMessage(payload, window.location.origin);
         document.getElementById("msg").textContent = error
           ? "Connection cancelled."
