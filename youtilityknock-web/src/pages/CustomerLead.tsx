@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { addDoc, collection, doc, onSnapshot, query, setDoc, where } from "firebase/firestore";
+import { httpsCallable } from "firebase/functions";
 import { getDownloadURL, ref as storageRef } from "firebase/storage";
-import { db, storage } from "../firebase";
+import { db, storage, functions } from "../firebase";
 import { useAuth } from "../auth/AuthContext";
 import { DISP_LABEL, DISP_COLOR } from "../lib/dispositions";
 import { APPT_LABEL, APPT_COLOR, isDispositioned } from "../lib/closerDispositions";
@@ -35,6 +36,8 @@ export default function CustomerLead() {
   const [closeoutTarget, setCloseoutTarget] = useState<ScheduleEvent | null>(null);
   const [nudgeState, setNudgeState] = useState<"idle" | "sending" | "sent" | "error">("idle");
   const [loading, setLoading] = useState(true);
+  // Bumped to re-subscribe after granting a closer access to this lead.
+  const [accessTry, setAccessTry] = useState(0);
   const isMgr = role === "admin" || role === "manager";
 
   // Not the closer? Nudge the assigned closer in a DM to close out the appt.
@@ -64,8 +67,16 @@ export default function CustomerLead() {
     return onSnapshot(doc(db, "leads", leadId), (snap) => {
       setLead(snap.exists() ? ({ id: snap.id, ...(snap.data() as Omit<Lead, "id">) }) : null);
       setLoading(false);
-    }, (e) => { console.error("lead", e); setLoading(false); });
-  }, [leadId]);
+    }, (e) => {
+      // A closer opening their appointment may not be on the lead's visibility
+      // yet (older appointments). Grant access via the appointment, then retry.
+      if ((e as { code?: string })?.code === "permission-denied" && accessTry === 0) {
+        httpsCallable(functions, "ensureCloserLeadAccess")({ leadId })
+          .then(() => setAccessTry(1)) // re-subscribe now that we're on the lead
+          .catch(() => { console.error("lead", e); setLoading(false); });
+      } else { console.error("lead", e); setLoading(false); }
+    });
+  }, [leadId, accessTry]);
 
   // Everything linked to this lead: appointments, recordings, proposals.
   useEffect(() => {
