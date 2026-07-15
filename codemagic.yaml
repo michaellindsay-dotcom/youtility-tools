@@ -175,6 +175,16 @@ workflows:
           $P -c "Delete :UISupportedInterfaceOrientations" "$PLIST" 2>/dev/null || true
           $P -c "Add :UISupportedInterfaceOrientations array" "$PLIST"
           $P -c "Add :UISupportedInterfaceOrientations:0 string UIInterfaceOrientationPortrait" "$PLIST"
+          # Register the us.youtility.knock:// URL scheme so the calendar OAuth
+          # flow can deep-link the auth code back from the system browser into
+          # the app (Google rejects the WebView's own origin as a redirect URI).
+          if ! $P -c "Print :CFBundleURLTypes" "$PLIST" >/dev/null 2>&1; then
+            $P -c "Add :CFBundleURLTypes array" "$PLIST"
+            $P -c "Add :CFBundleURLTypes:0 dict" "$PLIST"
+            $P -c "Add :CFBundleURLTypes:0:CFBundleURLName string us.youtility.knock" "$PLIST"
+            $P -c "Add :CFBundleURLTypes:0:CFBundleURLSchemes array" "$PLIST"
+            $P -c "Add :CFBundleURLTypes:0:CFBundleURLSchemes:0 string us.youtility.knock" "$PLIST"
+          fi
       - name: Install CocoaPods
         script: |
           cd youtilityknock-web/ios/App && pod install
@@ -295,6 +305,12 @@ workflows:
           # Lock MainActivity to portrait (field app — no rotation).
           grep -q 'android:screenOrientation' "$MANIFEST" || \
             sed -i 's#android:name=".MainActivity"#android:name=".MainActivity"\n            android:screenOrientation="portrait"#' "$MANIFEST"
+          # Register the us.youtility.knock:// deep link so calendar OAuth can
+          # hand the auth code back from the browser into the app (Google won't
+          # accept the WebView origin as a redirect URI). Added as its own
+          # intent-filter on MainActivity.
+          grep -q 'android:scheme="us.youtility.knock"' "$MANIFEST" || \
+            sed -i 's#</activity>#    <intent-filter>\n                <action android:name="android.intent.action.VIEW" />\n                <category android:name="android.intent.category.DEFAULT" />\n                <category android:name="android.intent.category.BROWSABLE" />\n                <data android:scheme="us.youtility.knock" />\n            </intent-filter>\n        </activity>#' "$MANIFEST"
       - name: Target Android 15 (API 35) for Play compliance
         script: |
           # Google Play requires new apps to target API 35. Bump the SDK levels
