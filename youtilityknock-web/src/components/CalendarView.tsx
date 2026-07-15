@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { useNavigate } from "react-router-dom";
 import { addDoc, collection, doc, getDocs, limit, orderBy, query, setDoc, where } from "firebase/firestore";
 import { httpsCallable } from "firebase/functions";
@@ -553,9 +554,13 @@ function EventPopout({ ev, canHearRecording, me, companyId, edit, onClose, onDis
   }, [canHearRecording, ev.leadId]);
 
   const fmt = (ms: number) => new Date(ms).toLocaleString([], { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
-  return (
-    <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(2,8,18,.6)", display: "grid", placeItems: "center", zIndex: 1000, padding: 16 }}>
-      <div onClick={(e) => e.stopPropagation()} className="card" style={{ maxWidth: 440, width: "100%", background: "var(--bg-2)", border: "1px solid #2a3a55", boxShadow: "0 24px 60px rgba(0,0,0,.55)", maxHeight: "90vh", overflowY: "auto" }}>
+  // Portal to <body> and use the shared .modal-overlay (z-index 2000 + top/bottom
+  // safe-area padding) so the card is centered in the real viewport and its
+  // header never slides under the status bar / top nav. maxHeight:100% keeps it
+  // inside that padded track and scrolls internally.
+  return createPortal(
+    <div onClick={onClose} className="modal-overlay">
+      <div onClick={(e) => e.stopPropagation()} className="card" style={{ maxWidth: 440, width: "100%", background: "var(--bg-2)", border: "1px solid #2a3a55", boxShadow: "0 24px 60px rgba(0,0,0,.55)", maxHeight: "100%", overflowY: "auto" }}>
         <div className="row between" style={{ alignItems: "flex-start" }}>
           <h3 style={{ margin: 0 }}>{ev.title || "Appointment"}</h3>
           <button className="btn ghost sm" onClick={onClose}>✕</button>
@@ -637,6 +642,7 @@ function EventPopout({ ev, canHearRecording, me, companyId, edit, onClose, onDis
           </div>
         )}
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }
