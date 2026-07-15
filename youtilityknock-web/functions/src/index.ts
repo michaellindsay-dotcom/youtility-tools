@@ -3744,6 +3744,29 @@ export const createCloserAppointment = onCall(async (request) => {
     reminded: false,
     createdAt: now,
   };
+  // Re-booking a lead that already has an OPEN (undispositioned) appointment must
+  // REPLACE it, not stack a second one — otherwise the same customer shows up
+  // twice, often under two different closers. Remove any prior scheduled
+  // appointment for this lead first, reversing that closer's queue count and
+  // pulling it off their external calendar. (Dispositioned appointments are kept
+  // as history.)
+  if (d.leadId) {
+    const prior = await db.collection("events").where("leadId", "==", d.leadId).get().catch(() => null);
+    for (const p of (prior?.docs || [])) {
+      const e = p.data() as any;
+      if (e.type !== "appointment" || e.companyId !== companyId) continue;
+      if ((e.apptStatus || "scheduled") !== "scheduled") continue;
+      if (e.closerUid) {
+        const cs = await db.doc(`users/${e.closerUid}`).get();
+        if (cs.exists) await serverBumpStatsAt({ uid: cs.id, ...(cs.data() as any) }, { closerAppts: -1 }, Number(e.createdAt) || now).catch(() => {});
+      }
+      if (e.userId && (e.googleEventId || e.microsoftEventId)) {
+        await deleteExternalEvent(e.userId as string, { googleEventId: e.googleEventId, microsoftEventId: e.microsoftEventId }).catch(() => {});
+      }
+      await p.ref.delete().catch(() => {});
+    }
+  }
+
   const ref = await db.collection("events").add(ev);
 
   // The setter's `appointments` stat is bumped client-side (same as before);
