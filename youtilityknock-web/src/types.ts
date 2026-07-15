@@ -477,6 +477,7 @@ export interface ScheduleEvent {
   type: EventType;
   title: string;
   address?: string;
+  phone?: string; // customer phone, carried onto the appointment for the closer
   leadId?: string;
   startAt: number;
   endAt?: number;
