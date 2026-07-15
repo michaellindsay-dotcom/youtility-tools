@@ -3471,11 +3471,15 @@ export const onEventCreatedPushCalendar = onDocumentCreated("events/{eventId}", 
   const startMs = Number(ev.startAt);
   if (!uid || !Number.isFinite(startMs)) return;
   const endMs = Number(ev.endAt) || startMs + (Number(ev.durationMin) || 60) * 60 * 1000;
+  // Put the customer's phone at the top of the calendar description so the
+  // closer can tap-to-call straight from Google/Outlook.
+  const baseNotes = ev.notes || ev.apptNotes || "";
+  const notes = ev.phone ? `📞 ${ev.phone}${baseNotes ? `\n\n${baseNotes}` : ""}` : baseNotes;
   try {
     const ids = await pushExternalEvent(uid, {
       title: ev.title || "Appointment",
       address: ev.address,
-      notes: ev.notes || ev.apptNotes,
+      notes,
       startMs,
       endMs,
     });
@@ -3537,6 +3541,7 @@ export const assignAppointment = onCall(async (request) => {
     address?: string;
     name?: string;
     notes?: string;
+    phone?: string;
     leadId?: string;
     candidateUid?: string; // for manual
     pushExternal?: boolean;
@@ -3592,6 +3597,15 @@ export const assignAppointment = onCall(async (request) => {
   }
 
   const managerPath = (chosen.managerPath as string[]) || [];
+  // Carry the customer's phone onto the appointment so it shows on the rep's
+  // calendar (in-app + pushed to Google/Outlook).
+  let apptPhone: string | null = d.phone || null;
+  if (d.leadId && !apptPhone) {
+    try {
+      const ld = (await db.doc(`leads/${d.leadId}`).get()).data() as any;
+      if (ld) apptPhone = ld.phone || ld.phoneNumber || null;
+    } catch { /* non-fatal */ }
+  }
   const ev = {
     companyId,
     userId: chosen.uid,
@@ -3599,6 +3613,7 @@ export const assignAppointment = onCall(async (request) => {
     type: "appointment",
     title: d.title || `Appointment${d.name ? ` — ${d.name}` : ""}`,
     address: d.address || "",
+    phone: apptPhone,
     leadId: d.leadId || null,
     startAt: d.startAt,
     endAt,
@@ -3693,7 +3708,7 @@ export const createCloserAppointment = onCall(async (request) => {
   const caller = await getCaller(request);
   const d = (request.data || {}) as {
     companyId?: string; startAt?: number; durationMin?: number;
-    title?: string; address?: string; name?: string; notes?: string;
+    title?: string; address?: string; name?: string; notes?: string; phone?: string;
     leadId?: string; candidateCloserUid?: string;
   };
   const companyId = d.companyId || caller.companyId || "";
@@ -3729,10 +3744,15 @@ export const createCloserAppointment = onCall(async (request) => {
   // closer has them in hand at the door.
   let incentives: any[] = [];
   let incentivesUtility: any = null;
+  // Also carry the customer's phone onto the appointment so it lands on the
+  // closer's calendar (in-app and pushed to Google/Outlook) — they can call
+  // ahead without digging into the lead.
+  let leadPhone: string | null = d.phone || null;
   if (d.leadId) {
     try {
       const ld = (await db.doc(`leads/${d.leadId}`).get()).data() as any;
       if (ld && Array.isArray(ld.incentives)) { incentives = ld.incentives; incentivesUtility = ld.incentivesUtility || null; }
+      if (ld && !leadPhone) leadPhone = ld.phone || ld.phoneNumber || null;
     } catch { /* non-fatal */ }
   }
 
@@ -3743,6 +3763,7 @@ export const createCloserAppointment = onCall(async (request) => {
     type: "appointment",
     title: d.title || `Appointment${d.name ? ` — ${d.name}` : ""}`,
     address: d.address || "",
+    phone: leadPhone,
     leadId: d.leadId || null,
     incentives,
     incentivesUtility,
@@ -6143,6 +6164,7 @@ export const scheduleSiteSurvey = onCall(async (request) => {
     type: "site_survey",
     title: `Site survey — ${proj.customerName || ""}`.trim(),
     address: proj.address || "",
+    phone: proj.phone || proj.phoneNumber || null,
     leadId: proj.leadId || null,
     projectId: id,
     customerName: proj.customerName || "",

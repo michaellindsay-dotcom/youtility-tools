@@ -594,6 +594,7 @@ function EventPopout({ ev, canHearRecording, me, companyId, edit, onClose, onDis
           {ev.setterName && <div className="field-row"><dt>Setter</dt><dd>📇 {ev.setterName}</dd></div>}
           {ev.closerName && <div className="field-row"><dt>Closer</dt><dd>🤝 {ev.closerName}</dd></div>}
           {ev.address && <div className="field-row"><dt>Address</dt><dd>{ev.address}</dd></div>}
+          {ev.phone && <div className="field-row"><dt>Phone</dt><dd>📞 <a href={`tel:${ev.phone}`}>{ev.phone}</a></dd></div>}
           <div className="field-row"><dt>Status</dt><dd>{ev.apptStatus ? (APPT_LABEL[ev.apptStatus] || ev.apptStatus) : "Scheduled — awaiting closer"}</dd></div>
         </dl>
         {(ev.notes || ev.apptNotes) && <div className="muted small" style={{ marginTop: 6 }}>📝 {ev.apptNotes || ev.notes}</div>}
