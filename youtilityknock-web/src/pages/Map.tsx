@@ -144,6 +144,8 @@ export default function MapPage() {
   const [fromDate, setFromDate] = useState(""); // yyyy-mm-dd
   const [toDate, setToDate] = useState("");
   const [dispoSel, setDispoSel] = useState<Set<string>>(new Set());
+  const [addrQuery, setAddrQuery] = useState(""); // free-text address search (input)
+  const [addrApplied, setAddrApplied] = useState(""); // debounced value actually filtered on
   // Save panel shown after an area is drawn: name it + assign it to a rep.
   const [savePanel, setSavePanel] = useState(false);
   const [drawName, setDrawName] = useState("");
@@ -168,7 +170,8 @@ export default function MapPage() {
   // ── pin filters (date worked + disposition) ───────────────────────────────
   const fromMs = fromDate ? new Date(`${fromDate}T00:00:00`).getTime() : null;
   const toMs = toDate ? new Date(`${toDate}T23:59:59.999`).getTime() : null;
-  const filtersActive = dispoSel.size > 0 || !!fromDate || !!toDate;
+  const addrNeedle = normAddr(addrApplied);
+  const filtersActive = dispoSel.size > 0 || !!fromDate || !!toDate || !!addrNeedle;
   // When a filter is on we hide the auto-populated gray home pins and show only
   // the filtered lead pins. A ref so the map callbacks (addHomeMarker/autoRoam)
   // see the current value without being rebound.
@@ -183,6 +186,7 @@ export default function MapPage() {
   };
   const passesPinFilters = (lead: Lead): boolean => {
     if (dispoSel.size && !dispoSel.has(lead.status)) return false;
+    if (addrNeedle && !normAddr(lead.address).includes(addrNeedle)) return false;
     if (fromMs != null || toMs != null) {
       const t = leadActivityMs(lead);
       if (fromMs != null && t < fromMs) return false;
@@ -223,9 +227,12 @@ export default function MapPage() {
       if (c && lead.address) homeCoordByAddr.current.set(normAddr(lead.address), c);
     });
     // Draw only the pins passing the date + disposition filters.
-    leads.filter(passesPinFilters).forEach((lead) => {
+    const shown = leads.filter(passesPinFilters);
+    const matchCoords: L.LatLngExpression[] = [];
+    shown.forEach((lead) => {
       const c = validCoord(lead.lat, lead.lng);
       if (!c) return;
+      if (addrNeedle) matchCoords.push(c);
       L.marker(c, {
         icon: homeIcon(DISP_COLOR[lead.status] || "#94A3B8", lead.verified === false),
         zIndexOffset: 1000, // always above generic home pins
@@ -245,6 +252,11 @@ export default function MapPage() {
         })
         .addTo(leadLayer.current);
     });
+    // Address search: pan/zoom to whatever matched so the result is in view.
+    if (addrNeedle && matchCoords.length && mapRef.current) {
+      const b = L.latLngBounds(matchCoords).pad(0.2);
+      mapRef.current.fitBounds(b, { maxZoom: 17, animate: true });
+    }
   }
 
   async function buildTerritories() {
@@ -800,7 +812,14 @@ export default function MapPage() {
       void loadHomes();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [fromDate, toDate, dispoSel]);
+  }, [fromDate, toDate, dispoSel, addrApplied]);
+
+  // Debounce the address search so typing doesn't re-query Firestore on every
+  // keystroke — apply it ~300ms after the rep stops typing.
+  useEffect(() => {
+    const t = setTimeout(() => setAddrApplied(addrQuery.trim()), 300);
+    return () => clearTimeout(t);
+  }, [addrQuery]);
 
   // Load the reps this manager/admin can assign areas to (their downstream).
   useEffect(() => {
@@ -928,9 +947,9 @@ export default function MapPage() {
         <button
           className={"map-fab" + (showFilters ? " active" : "")}
           onClick={() => setShowFilters((s) => !s)}
-          aria-label="Filter pins" title="Filter pins by date & disposition"
+          aria-label="Filter pins" title="Search & filter pins by address, date & disposition"
         >
-          🗂{filtersActive ? <span className="map-fab-badge">✓</span> : null}
+          🔍{filtersActive ? <span className="map-fab-badge">✓</span> : null}
         </button>
         {/* Live team locations — managers/admins see everyone online right now. */}
         {canManageAreas && (
@@ -1001,6 +1020,17 @@ export default function MapPage() {
       {showFilters && (
         <div className="map-save-panel map-filter-panel">
           <div className="msp-title">Filter pins</div>
+          <label className="field">
+            <span>Search address</span>
+            <input
+              type="text"
+              value={addrQuery}
+              onChange={(e) => setAddrQuery(e.target.value)}
+              placeholder="🔍 Street, city or ZIP…"
+              autoComplete="off"
+              inputMode="search"
+            />
+          </label>
           <div className="row" style={{ gap: 8 }}>
             <label className="field" style={{ flex: 1, minWidth: 0 }}>
               <span>Worked from</span>
@@ -1040,7 +1070,7 @@ export default function MapPage() {
             </div>
           </div>
           <div className="row end">
-            <button className="btn sm" onClick={() => { setFromDate(""); setToDate(""); setDispoSel(new Set()); }} disabled={!filtersActive}>Clear</button>
+            <button className="btn sm" onClick={() => { setFromDate(""); setToDate(""); setDispoSel(new Set()); setAddrQuery(""); setAddrApplied(""); }} disabled={!filtersActive}>Clear</button>
             <button className="btn primary sm" onClick={() => setShowFilters(false)}>Done</button>
           </div>
         </div>
