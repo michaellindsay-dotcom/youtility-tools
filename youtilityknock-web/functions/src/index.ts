@@ -331,17 +331,34 @@ async function rebuildCompanyHierarchy(companyId: string) {
   }
   await flush();
 
+  // Read appointments up front so a lead's assigned CLOSER (and their closer-
+  // managers) can also see that lead — a closer needs the customer's phone +
+  // history for their appointment, but the lead's owner-chain is the setter's.
+  const apptSnap = await db.collection("events").where("companyId", "==", companyId).where("closerUid", "!=", null).get().catch(() => null);
+  const leadCloserVis: Record<string, string[]> = {};
+  if (apptSnap) {
+    for (const d of apptSnap.docs) {
+      const e = d.data();
+      const leadId = e.leadId as string | undefined;
+      const closerUid = e.closerUid as string | undefined;
+      if (!leadId || !closerUid) continue;
+      leadCloserVis[leadId] = Array.from(new Set([
+        ...(leadCloserVis[leadId] || []), closerUid, ...fullCloserPathFor(closerUid),
+      ]));
+    }
+  }
+
   const leadsSnap = await db.collection("leads").where("companyId", "==", companyId).get();
   for (const d of leadsSnap.docs) {
     const owner = (d.data().assignedTo as string) || d.data().createdBy;
-    batch.update(d.ref, { visibilityPath: [owner, ...fullPathFor(owner)] });
+    const vis = Array.from(new Set([owner, ...fullPathFor(owner), ...(leadCloserVis[d.id] || [])]));
+    batch.update(d.ref, { visibilityPath: vis });
     if (++ops >= 450) await flush();
   }
   await flush();
 
   // Appointments are visible up BOTH chains: the closer's closer-managers and
   // the setter's setter-managers.
-  const apptSnap = await db.collection("events").where("companyId", "==", companyId).where("closerUid", "!=", null).get().catch(() => null);
   if (apptSnap) {
     for (const d of apptSnap.docs) {
       const e = d.data();
@@ -3769,6 +3786,16 @@ export const createCloserAppointment = onCall(async (request) => {
 
   const ref = await db.collection("events").add(ev);
 
+  // Let the closer (and their closer-managers) read the lead — its phone, email,
+  // and knock history — since they're now taking this appointment. Added to the
+  // lead's visibilityPath; rebuildCompanyHierarchy keeps it on later reorgs.
+  if (d.leadId) {
+    await db.doc(`leads/${d.leadId}`).set(
+      { visibilityPath: FieldValue.arrayUnion(closer.uid, ...closerPath) },
+      { merge: true },
+    ).catch((e) => logger.warn("lead closer-visibility failed", e));
+  }
+
   // The setter's `appointments` stat is bumped client-side (same as before);
   // here we only tally the closer's incoming queue.
   await serverBumpStats(closer, { closerAppts: 1 });
@@ -3782,6 +3809,40 @@ export const createCloserAppointment = onCall(async (request) => {
   });
 
   return { ok: true, eventId: ref.id, closerUid: closer.uid, closerName: closer.displayName || "" };
+});
+
+// ensureCloserLeadAccess — a closer opening their appointment needs to read the
+// customer's lead (phone, email, knock history), but the lead's owner-chain is
+// the setter's, so the closer isn't on its visibilityPath. If they hold an
+// appointment for the lead, add them (and their closer-managers) so they can
+// read it. Self-heals appointments booked before this was granted at create
+// time; new bookings already grant it in createCloserAppointment.
+export const ensureCloserLeadAccess = onCall(async (request) => {
+  const caller = await getCaller(request);
+  const { leadId } = (request.data || {}) as { leadId?: string };
+  if (!leadId) throw new HttpsError("invalid-argument", "leadId required.");
+  const leadRef = db.doc(`leads/${leadId}`);
+  const lead = (await leadRef.get()).data() as any;
+  if (!lead) throw new HttpsError("not-found", "Lead not found.");
+  if (!caller.isSuper && caller.companyId && lead.companyId !== caller.companyId) {
+    throw new HttpsError("permission-denied", "Wrong company.");
+  }
+  const vis: string[] = Array.isArray(lead.visibilityPath) ? lead.visibilityPath : [];
+  if (vis.includes(caller.uid) || lead.assignedTo === caller.uid) return { ok: true, already: true };
+  // Must actually hold an appointment for this customer.
+  const appts = await db.collection("events").where("leadId", "==", leadId).get();
+  const holds = appts.docs.some((d) => {
+    const e = d.data() as any;
+    return e.type === "appointment" && (
+      e.closerUid === caller.uid || e.userId === caller.uid ||
+      (Array.isArray(e.visibilityPath) && e.visibilityPath.includes(caller.uid))
+    );
+  });
+  if (!holds) throw new HttpsError("permission-denied", "No appointment for this customer.");
+  const me = (await db.doc(`users/${caller.uid}`).get()).data() as any;
+  const path = Array.isArray(me?.closerManagerPath) ? me.closerManagerPath : [];
+  await leadRef.set({ visibilityPath: FieldValue.arrayUnion(caller.uid, ...path) }, { merge: true });
+  return { ok: true, granted: true };
 });
 
 // A closer records the outcome of an assigned appointment.
