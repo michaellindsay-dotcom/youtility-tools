@@ -3667,8 +3667,11 @@ const SETTER_PITCHED_STATUSES = new Set([
   "pitched_pending", "pitched_not_interested", "pitched_failed_credit", "closed_won", "no_show",
 ]);
 
-// Choose the closer for a new appointment per company policy.
-async function pickCloser(companyId: string, sched: any, candidateUid?: string) {
+// Choose the closer for a new appointment per company policy. When a slot
+// (startMs/endMs) is given, the closer's availability is enforced: an explicitly
+// picked closer must be free, and auto-assignment only considers free closers —
+// so a booking never lands on a closer whose calendar is already blocked.
+async function pickCloser(companyId: string, sched: any, candidateUid?: string, startMs?: number, endMs?: number) {
   const usersSnap = await db.collection("users").where("companyId", "==", companyId).get();
   let closers = usersSnap.docs
     .map((u): { uid: string; [k: string]: any } => ({ uid: u.id, ...(u.data() as Record<string, any>) }))
@@ -3677,12 +3680,29 @@ async function pickCloser(companyId: string, sched: any, candidateUid?: string) 
     throw new HttpsError("failed-precondition", "No closers are set up for this company yet — turn a rep into a closer in Team settings.");
   }
   const method = sched.closerAssignment || "round_robin";
+  const buf = Number(sched.bufferMin) || 0;
+  const checkSlot = Number.isFinite(startMs) && Number.isFinite(endMs);
+
   if (method === "setter_select") {
     if (!candidateUid) throw new HttpsError("invalid-argument", "Pick a closer for this appointment.");
     const found = closers.find((c) => c.uid === candidateUid);
     if (!found) throw new HttpsError("failed-precondition", "That closer isn't available.");
+    if (checkSlot && !(await isUserFree(found.uid, startMs!, endMs!, buf).catch(() => true))) {
+      throw new HttpsError("failed-precondition", "That closer is already booked at that time — pick another time or closer.");
+    }
     return found;
   }
+
+  // Auto-assignment: narrow to closers who are actually free at the slot, so a
+  // busy closer is never chosen. If nobody's free, the booking is refused.
+  if (checkSlot) {
+    const flags = await Promise.all(closers.map((c) => isUserFree(c.uid, startMs!, endMs!, buf).catch(() => true)));
+    closers = closers.filter((_, i) => flags[i]);
+    if (closers.length === 0) {
+      throw new HttpsError("failed-precondition", "No closer is available at that time — pick another time.");
+    }
+  }
+
   if (method === "close_rate") {
     const statsSnap = await db.collection("userStats").where("companyId", "==", companyId).get();
     const rate: Record<string, number> = {};
@@ -3732,7 +3752,7 @@ export const createCloserAppointment = onCall(async (request) => {
   const setter: { uid: string; [k: string]: any } = setterSnap.exists
     ? { uid: setterSnap.id, ...(setterSnap.data() as Record<string, any>) }
     : { uid: caller.uid, companyId };
-  const closer = await pickCloser(companyId, sched, d.candidateCloserUid);
+  const closer = await pickCloser(companyId, sched, d.candidateCloserUid, d.startAt, endAt);
 
   // Appointments roll up BOTH org charts: the closer's closer-managers and the
   // setter's setter-managers.
