@@ -2,6 +2,9 @@ import { useEffect, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
+import "leaflet.markercluster";
+import "leaflet.markercluster/dist/MarkerCluster.css";
+import "leaflet.markercluster/dist/MarkerCluster.Default.css";
 import { initials, avatarColor } from "../lib/points";
 import { addDoc, collection, doc, getDocs, onSnapshot, query, setDoc, where } from "firebase/firestore";
 import { httpsCallable } from "firebase/functions";
@@ -77,8 +80,22 @@ export default function MapPage() {
   const { profile, role, companyId } = useAuth();
   const elRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<L.Map | null>(null);
-  const leadLayer = useRef<L.LayerGroup>(L.layerGroup());
-  const homeLayer = useRef<L.LayerGroup>(L.layerGroup());
+  // Home + lead pins can number in the hundreds/thousands, so they live in
+  // marker-cluster groups: nearby pins collapse into a count bubble when zoomed
+  // out (fast first paint + smooth panning), and clustering switches OFF at the
+  // rep's walking zoom so every individual door still shows exactly as before.
+  // removeOutsideVisibleBounds keeps off-screen markers out of the DOM, and
+  // chunkedLoading renders in non-blocking batches so a big pull never freezes.
+  const CLUSTER_OPTS: L.MarkerClusterGroupOptions = {
+    disableClusteringAtZoom: 18,
+    maxClusterRadius: 60,
+    spiderfyOnMaxZoom: false,
+    showCoverageOnHover: false,
+    removeOutsideVisibleBounds: true,
+    chunkedLoading: true,
+  };
+  const leadLayer = useRef<L.LayerGroup>(L.markerClusterGroup(CLUSTER_OPTS));
+  const homeLayer = useRef<L.LayerGroup>(L.markerClusterGroup(CLUSTER_OPTS));
   const moverLayer = useRef<L.LayerGroup>(L.layerGroup());
   const leadsRef = useRef<Lead[]>([]);
   const homeKeys = useRef<Set<string>>(new Set()); // dedupe accumulated home pins
@@ -447,7 +464,9 @@ export default function MapPage() {
     try {
       const token = await auth.currentUser!.getIdToken();
       if (assigned.current.length) {
-        for (const t of assigned.current) {
+        // Pull every assigned area's homes in parallel — one slow provider
+        // round-trip no longer blocks the next, so all zones fill in together.
+        await Promise.all(assigned.current.map(async (t) => {
           const poly = t.polygon!;
           const lats = poly.map((p) => p.lat);
           const lngs = poly.map((p) => p.lng);
@@ -460,7 +479,7 @@ export default function MapPage() {
           parseAreaProperties(raw)
             .filter((h) => inPolygon({ lat: h.lat, lng: h.lng }, poly))
             .forEach((h) => addHomeMarker(h));
-        }
+        }));
       }
       // Always also pull homes around where the rep is / is looking.
       const c = myLoc.current || { lat: map.getCenter().lat, lng: map.getCenter().lng };
@@ -767,25 +786,34 @@ export default function MapPage() {
       roamTimer.current = setTimeout(() => void autoRoam(), 700);
     });
 
-    (async () => {
+    // Load everything that DOESN'T need the GPS fix right away — the rep's own
+    // lead pins and their territories paint immediately instead of the whole map
+    // sitting empty for up to 8s while location resolves.
+    void (async () => {
+      await buildTerritories();
+      await buildPins();
+      applyTerritoryFocus(); // zoom to the focused territory (polygon → its homes → notice)
+      void loadMovers(); // drop recent move-in pins for the area / live location
+      void loadSolarPins(); // drop ☀️/🔥 solar-scanner pins (CRM add-on)
+    })();
+
+    // Get the location fix in PARALLEL. When it lands, recenter on the rep and
+    // pull the gray home pins around them; if it never arrives, fall back to
+    // loading homes around whatever the map is currently showing.
+    void (async () => {
       try {
         const pos = await Geolocation.getCurrentPosition({ enableHighAccuracy: true, timeout: 8000 });
         myLoc.current = { lat: pos.coords.latitude, lng: pos.coords.longitude };
         // Don't recenter on the rep when we were sent to view a specific
-        // territory — applyTerritoryFocus will frame that area instead.
+        // territory — applyTerritoryFocus frames that area instead.
         if (!focusId) map.setView([myLoc.current.lat, myLoc.current.lng], 18);
         setYou(myLoc.current.lat, myLoc.current.lng);
         // Instantly repaint homes we've cached nearby (no network), then refresh.
         nearbyCachedHomes(myLoc.current.lat, myLoc.current.lng).forEach((h) => addHomeMarker(h));
       } catch {
-        /* location denied */
+        /* location denied / slow — fall back to the current map view */
       }
-      await buildTerritories();
-      await buildPins();
-      applyTerritoryFocus(); // zoom to the focused territory (polygon → its homes → notice)
       await loadHomes();
-      void loadMovers(); // drop recent move-in pins for the area / live location
-      void loadSolarPins(); // drop ☀️/🔥 solar-scanner pins (CRM add-on)
       void startWatching(); // track the "You" marker (recenters only in follow mode)
     })();
 
