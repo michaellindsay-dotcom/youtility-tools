@@ -76,7 +76,7 @@ function inPolygon(pt: LatLng, poly: LatLng[]): boolean {
 }
 
 export default function MapPage() {
-  const { profile, role, companyId } = useAuth();
+  const { profile, role, companyId, company } = useAuth();
   const elRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<L.Map | null>(null);
   // Home + lead pins can number in the hundreds/thousands, so they live in
@@ -133,20 +133,10 @@ export default function MapPage() {
   const [status, setStatus] = useState("");
   const [mode, setMode] = useState<MapMode>("view");
   const [loadingHomes, setLoadingHomes] = useState(false);
-  // "Movers only" hides the lead + gray home pins so just the recent move-ins
-  // show. The ref lets the async roam loop read the current toggle state.
-  const [moversOnly, setMoversOnly] = useState(false);
-  const moversOnlyRef = useRef(false);
-  moversOnlyRef.current = moversOnly;
   // Live team locations (managers/admins) — everyone in the company who's
   // online right now, shown at their last-published GPS position.
   const [showTeam, setShowTeam] = useState(false);
   const [teamCount, setTeamCount] = useState(0);
-  // Solar Scanner pins (CRM add-on) — on by default; the ref lets async loads
-  // read the current toggle without re-subscribing.
-  const [showSolar, setShowSolar] = useState(true);
-  const showSolarRef = useRef(true);
-  showSolarRef.current = showSolar;
   // Follow mode: when ON (compass button), the map recenters on the rep's live
   // location as they move. OFF (default) lets them pan/zoom freely. The ref lets
   // the geolocation watch read the current toggle without re-subscribing.
@@ -174,6 +164,12 @@ export default function MapPage() {
   modeRef.current = mode;
 
   const canManageAreas = role === "admin" || role === "manager";
+  // Solar-scanner / hot-lead pins are a CRM add-on: only auto-shown when the
+  // company is provisioned with the CRM (crmCompanyId set) AND the viewer is a
+  // manager/admin. Reps and non-add-on companies never load them.
+  const solarAllowed = canManageAreas && !!company?.crmCompanyId;
+  const solarAllowedRef = useRef(false);
+  solarAllowedRef.current = solarAllowed;
   const canDraw = !!profile; // reps can draw too — their areas become proposals
 
   async function fetchLeads(): Promise<Lead[]> {
@@ -512,11 +508,10 @@ export default function MapPage() {
             .forEach((m) => addMoverMarker(m));
         }
       }
-      // Movers outside the assigned area: only when isolating movers.
-      if (moversOnlyRef.current) {
-        const c = myLoc.current || { lat: map.getCenter().lat, lng: map.getCenter().lng };
-        await fetchNearbyMovers(c);
-      }
+      // Also auto-populate recent move-ins around where the rep is / is looking,
+      // not just inside an assigned area.
+      const c = myLoc.current || { lat: map.getCenter().lat, lng: map.getCenter().lng };
+      await fetchNearbyMovers(c);
     } catch {
       /* silent — movers are supplemental to the home pins */
     }
@@ -593,9 +588,9 @@ export default function MapPage() {
         moverKeys.current.clear();
       }
       // We no longer auto-pull gray property pins as the rep pans — long-press a
-      // home to look it up instead. Move-ins outside the assigned area still
-      // roam in while isolating movers.
-      if (moversOnlyRef.current) await fetchNearbyMovers({ lat: ctr.lat, lng: ctr.lng });
+      // home to look it up instead. Recent move-ins DO auto-populate in whatever
+      // area they're viewing (no toggle button anymore).
+      await fetchNearbyMovers({ lat: ctr.lat, lng: ctr.lng });
       lastLoadCenter.current = ctr;
     } catch {
       /* silent — keep what's already shown */
@@ -605,31 +600,11 @@ export default function MapPage() {
     }
   }
 
-  // Toggle "movers only": detach the lead + home pin layers (leaving just the
-  // mover pins), or restore them. Used by the 🚚 FAB under the pencil. Reloads
-  // movers so the recent move-ins outside the assigned area appear when ON, and
-  // are cleared when OFF (leaving only assigned-area move-ins).
-  async function toggleMoversOnly() {
-    const map = mapRef.current;
-    if (!map) return;
-    const next = !moversOnly;
-    setMoversOnly(next);
-    moversOnlyRef.current = next;
-    if (next) {
-      map.removeLayer(homeLayer.current);
-      map.removeLayer(leadLayer.current);
-    } else {
-      homeLayer.current.addTo(map);
-      leadLayer.current.addTo(map);
-    }
-    await loadMovers();
-  }
-
-  // Refresh button: recenter on the rep's live location, then reload movers
-  // always and the homes/leads too unless hidden.
+  // Refresh button: recenter on the rep's live location, then reload movers,
+  // solar (if allowed), and pull nearby homes on demand.
   async function refresh() {
     await recenterToMe();
-    if (!moversOnly) await loadHomes();
+    await loadHomes();
     await loadMovers();
     void loadSolarPins();
   }
@@ -641,7 +616,8 @@ export default function MapPage() {
   // Supplemental — a failure never blocks the rest of the map.
   async function loadSolarPins() {
     solarLayer.current.clearLayers();
-    if (!companyId || !showSolarRef.current) return;
+    // Only the CRM-add-on companies' managers/admins auto-see solar pins.
+    if (!companyId || !solarAllowedRef.current) return;
     try {
       const pins = await fetchSolarPins(companyId);
       for (const p of pins) {
@@ -652,15 +628,6 @@ export default function MapPage() {
     } catch {
       /* solar pins are supplemental — never surface an error here */
     }
-  }
-
-  // Toggle the solar layer on/off (FAB). Repaints on enable.
-  async function toggleSolar() {
-    const next = !showSolar;
-    setShowSolar(next);
-    showSolarRef.current = next;
-    if (next) await loadSolarPins();
-    else solarLayer.current.clearLayers();
   }
 
   // Center the map on the rep's exact location (acquiring a fresh fix if we
@@ -938,6 +905,14 @@ export default function MapPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fromDate, toDate, dispoSel]);
 
+  // (Re)load the solar-scanner pins when the add-on/role gate resolves — the
+  // company doc loads async, so solarAllowed can flip to true after first paint.
+  useEffect(() => {
+    if (!mapRef.current) return;
+    void loadSolarPins();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [solarAllowed]);
+
   // Debounced type-ahead suggestions for the address search box.
   useEffect(() => {
     if (pickedSuggest.current) { pickedSuggest.current = false; return; }
@@ -1038,13 +1013,7 @@ export default function MapPage() {
         >
           🧭
         </button>
-        <button
-          className={"map-fab" + (mode === "drop" ? " active" : "")}
-          onClick={() => setMode(mode === "drop" ? "view" : "drop")}
-          aria-label="Drop a home pin" title="Drop a home pin"
-        >
-          📍
-        </button>
+        {/* Long-press a home to look it up + knock it — no drop-pin button. */}
         {canDraw && (
           <button
             className={"map-fab" + (mode === "draw" ? " active" : "")}
@@ -1054,22 +1023,8 @@ export default function MapPage() {
             ✏
           </button>
         )}
-        {/* Movers: isolate recent move-in pins (hide leads + gray homes). */}
-        <button
-          className={"map-fab" + (moversOnly ? " active" : "")}
-          onClick={toggleMoversOnly}
-          aria-label="Show movers only" title="Movers — recent move-ins only"
-        >
-          🚚
-        </button>
-        {/* Solar: show/hide the CRM solar-scanner pins (☀️ sent · 🔥 hot lead). */}
-        <button
-          className={"map-fab" + (showSolar ? " active" : "")}
-          onClick={toggleSolar}
-          aria-label="Toggle solar scanner pins" title="Solar Scanner pins (☀️ sent · 🔥 hot lead)"
-        >
-          ☀️
-        </button>
+        {/* Movers auto-populate in-area now; solar pins auto-load for CRM
+            managers/admins — both no longer have a toggle button. */}
         {/* Filter: narrow the lead pins by date worked and/or disposition. */}
         <button
           className={"map-fab" + (showFilters ? " active" : "")}
