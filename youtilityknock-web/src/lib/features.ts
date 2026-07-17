@@ -15,6 +15,11 @@ export const FEATURES = [
   // wide (same opt-out style as the row above) so it never disappears for an
   // existing customer; a company can still be RallyCard-only (see below).
   "card",
+  // Market Recommendations — an opt-IN add-on (default OFF, see COMPANY_GATED):
+  // managers/admins search a city/ZIP/address and see recent move-ins within a
+  // mile for area & market recommendations. Off unless the super admin turns it
+  // on for the company.
+  "marketRec",
 ] as const;
 export type FeatureKey = (typeof FEATURES)[number];
 
@@ -23,6 +28,8 @@ export type FeatureKey = (typeof FEATURES)[number];
 // the new per-role/team services only ever *restrict*, never silently disable.
 const COMPANY_GATED = new Set<string>([
   "map", "skiptrace", "scheduling", "calendar", "rewards", "analytics", "chat", "planner", "pitch",
+  // Opt-in add-on: OFF unless the super admin adds it to the company's features.
+  "marketRec",
 ]);
 
 // Whether a company's plan includes a feature. A company with no `features`

@@ -3929,6 +3929,7 @@ const SERVICES = [
   ["movers", "Movers list"],
   ["leads", "Leads list"],
   ["team", "Team roster"],
+  ["marketRec", "Market Recommendations (add-on)"],
 ];
 // These default ON company-wide and are only restrictable per role/team, so they
 // appear in the role/team editors but NOT the company on/off grid (where an
@@ -3988,7 +3989,12 @@ async function loadCompanies() {
 async function loadCompanyServices(companyId) {
   let c = {};
   try { const s = await getDoc(doc(db, "companies", companyId)); c = s.exists() ? s.data() : {}; } catch {}
-  const on = (key) => !Array.isArray(c.features) || c.features.includes(key);
+  // Opt-in add-ons are OFF unless explicitly listed (even for legacy companies
+  // with no features array, which otherwise default everything ON).
+  const OPT_IN = new Set(["marketRec"]);
+  const on = (key) => OPT_IN.has(key)
+    ? (Array.isArray(c.features) && c.features.includes(key))
+    : (!Array.isArray(c.features) || c.features.includes(key));
   $("companyServicesGrid").innerHTML = SERVICES.filter(([k]) => !PER_ROLE_ONLY.has(k)).map(([k, label]) =>
     `<label class="day-chip"><input type="checkbox" class="svcChk" value="${k}" ${on(k) ? "checked" : ""} /> ${label}</label>`).join("");
   $("companyServicesPrice").value = Number(c.planPrice) || 0;

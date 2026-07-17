@@ -12,6 +12,7 @@ import { Geolocation } from "@capacitor/geolocation";
 import { db, auth, functions } from "../firebase";
 import { useAuth } from "../auth/AuthContext";
 import { DISP_COLOR, DISPOSITIONS } from "../lib/dispositions";
+import { hasFeature } from "../lib/features";
 import { lookupArea, parseAreaProperties, lookupMovers, parseMovers, type MoverHome } from "../lib/knockstat";
 import { moverIcon, moverColor, moverPopupHtml, daysAgo, MOVER_DAYS } from "../lib/movers";
 import { getTile, putTile, nearbyCachedHomes } from "../lib/homeCache";
@@ -23,8 +24,6 @@ type MapMode = "view" | "draw" | "drop";
 
 const DEFAULT_CENTER: [number, number] = [40.34, -111.91];
 const NEAREST_N = 200;
-const ROAM_THRESHOLD_M = 450; // reload nearby movers once you've moved ~0.28 mi
-const MOVER_CAP = 500; // accumulate up to this many roaming mover pins, then reset
 
 const HOUSE_SVG =
   '<svg viewBox="0 0 24 24" width="14" height="14" fill="#fff"><path d="M12 3 3 10.5h2.4V21h5.1v-6h3v6h5.1V10.5H21z"/></svg>';
@@ -103,8 +102,6 @@ export default function MapPage() {
   // address — lets a mover snap onto the exact pin of the home it belongs to.
   const homeCoordByAddr = useRef<Map<string, [number, number]>>(new Map());
   const lastLoadCenter = useRef<L.LatLng | null>(null);
-  const loadingRef = useRef(false);
-  const roamTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const youMarker = useRef<L.CircleMarker | null>(null);
   const searchMarker = useRef<L.Marker | null>(null); // dropped where an address search lands
   const lastLongPress = useRef(0); // de-dupe touch long-press vs desktop contextmenu
@@ -150,6 +147,13 @@ export default function MapPage() {
   const [addrBusy, setAddrBusy] = useState(false); // geocoding the typed address
   const [addrSuggest, setAddrSuggest] = useState<string[]>([]); // type-ahead predictions
   const pickedSuggest = useRef(false); // suppress the next autocomplete after a pick
+  // Market Recommendations panel (managers/admins, add-on only).
+  const [showMarketRec, setShowMarketRec] = useState(false);
+  const [mrQuery, setMrQuery] = useState("");
+  const [mrSuggest, setMrSuggest] = useState<string[]>([]);
+  const mrPicked = useRef(false);
+  const [mrBusy, setMrBusy] = useState(false);
+  const [mrSummary, setMrSummary] = useState("");
   // Save panel shown after an area is drawn: name it + assign it to a rep.
   const [savePanel, setSavePanel] = useState(false);
   const [drawName, setDrawName] = useState("");
@@ -164,6 +168,10 @@ export default function MapPage() {
   const solarAllowed = canManageAreas && !!company?.crmCompanyId;
   const solarAllowedRef = useRef(false);
   solarAllowedRef.current = solarAllowed;
+  // Market Recommendations: an opt-in add-on for managers/admins only. When on,
+  // they search a city/ZIP/address and see recent move-ins within a mile — no
+  // more auto-pulling movers across the whole map on zoom-out.
+  const marketRecAllowed = canManageAreas && hasFeature(company, "marketRec");
   const canDraw = !!profile; // reps can draw too — their areas become proposals
 
   async function fetchLeads(): Promise<Lead[]> {
@@ -241,7 +249,7 @@ export default function MapPage() {
   }
 
   // Type-ahead suggestions for the search box (Google Places, server-side).
-  const autocompleteFn = httpsCallable<{ input: string }, { predictions: string[] }>(functions, "addressAutocomplete");
+  const autocompleteFn = httpsCallable<{ input: string; types?: string }, { predictions: string[] }>(functions, "addressAutocomplete");
   async function fetchSuggestions(input: string) {
     try {
       const { data } = await autocompleteFn({ input });
@@ -255,6 +263,60 @@ export default function MapPage() {
     setAddrQuery(s);
     setAddrSuggest([]);
     void goToAddress(s);
+  }
+
+  // Market Recommendations (managers/admins, add-on only): geocode a city / ZIP /
+  // metro / address and show recent move-ins within 1 mile of it — a deliberate,
+  // scoped pull instead of auto-loading movers across the whole map.
+  async function fetchMrSuggestions(input: string) {
+    try {
+      const { data } = await autocompleteFn({ input, types: "geocode" }); // cities + ZIPs + addresses
+      setMrSuggest(Array.isArray(data?.predictions) ? data.predictions : []);
+    } catch {
+      setMrSuggest([]);
+    }
+  }
+  function pickMrSuggestion(s: string) {
+    mrPicked.current = true;
+    setMrQuery(s);
+    setMrSuggest([]);
+    void runMarketRec(s);
+  }
+  async function runMarketRec(place: string) {
+    const map = mapRef.current;
+    const q = place.trim();
+    if (!q || !map) return;
+    setMrBusy(true);
+    setMrSuggest([]);
+    setMrSummary("");
+    try {
+      const { data: g } = await geocodeAddressFn({ address: q });
+      if (!g.found || typeof g.lat !== "number" || typeof g.lng !== "number") {
+        setMrSummary("Couldn't find that place — check the spelling.");
+        return;
+      }
+      map.setView([g.lat, g.lng], 15, { animate: true });
+      // Pull recent move-ins within 1 mile of the searched place.
+      moverLayer.current.clearLayers();
+      moverKeys.current.clear();
+      const token = await auth.currentUser!.getIdToken();
+      const raw = await lookupMovers(g.lat, g.lng, 1, MOVER_DAYS, token);
+      let n = 0;
+      parseMovers(raw).forEach((m) => { if (addMoverMarker(m)) n += 1; });
+      const where = g.formatted || q;
+      setMrSummary(
+        n
+          ? `🏘️ ${n} recent move-in${n === 1 ? "" : "s"} within 1 mile of ${where} (last ${MOVER_DAYS} days).`
+          : `No recent move-ins within 1 mile of ${where} in the last ${MOVER_DAYS} days.`
+      );
+    } catch (e) {
+      const msg = String((e as Error)?.message || "");
+      setMrSummary(/PROVIDER_AUTH|temporarily unavailable|50\d/.test(msg)
+        ? "Market data is temporarily unavailable — try again in a bit."
+        : "Couldn't load market data — try again.");
+    } finally {
+      setMrBusy(false);
+    }
   }
 
   // Long-press a home → reverse-geocode the tapped point and open the knock form
@@ -470,46 +532,9 @@ export default function MapPage() {
     return true;
   }
 
-  async function fetchNearbyMovers(center: LatLng) {
-    const token = await auth.currentUser!.getIdToken();
-    const raw = await lookupMovers(center.lat, center.lng, 1, MOVER_DAYS, token);
-    parseMovers(raw).forEach((m) => addMoverMarker(m));
-  }
-
-  // Load movers. Assigned-area move-ins ALWAYS show. Move-ins outside the
-  // assigned area only show when "movers only" (🚚) is selected — otherwise the
-  // recent move-in pins stay hidden so they don't clutter the normal view.
-  async function loadMovers() {
-    const map = mapRef.current;
-    if (!map || !profile) return;
-    moverLayer.current.clearLayers();
-    moverKeys.current.clear();
-    try {
-      const token = await auth.currentUser!.getIdToken();
-      if (assigned.current.length) {
-        for (const t of assigned.current) {
-          const poly = t.polygon!;
-          const lats = poly.map((p) => p.lat);
-          const lngs = poly.map((p) => p.lng);
-          const center = { lat: (Math.min(...lats) + Math.max(...lats)) / 2, lng: (Math.min(...lngs) + Math.max(...lngs)) / 2 };
-          const radius = Math.min(
-            L.latLng(center.lat, center.lng).distanceTo(L.latLng(Math.max(...lats), Math.max(...lngs))) / 1609.34,
-            2
-          );
-          const raw = await lookupMovers(center.lat, center.lng, Math.max(0.1, +radius.toFixed(2)), MOVER_DAYS, token);
-          parseMovers(raw)
-            .filter((m) => inPolygon({ lat: m.lat, lng: m.lng }, poly))
-            .forEach((m) => addMoverMarker(m));
-        }
-      }
-      // Also auto-populate recent move-ins around where the rep is / is looking,
-      // not just inside an assigned area.
-      const c = myLoc.current || { lat: map.getCenter().lat, lng: map.getCenter().lng };
-      await fetchNearbyMovers(c);
-    } catch {
-      /* silent — movers are supplemental to the home pins */
-    }
-  }
+  // (Movers no longer auto-populate the map. Managers/admins with the Market
+  // Recommendations add-on pull them deliberately for a searched area via
+  // runMarketRec — see the panel below.)
 
   // Manual / initial load: assigned territory(ies) PLUS the homes around the
   // rep's current location/viewport, so pins always show where they're actually
@@ -564,42 +589,12 @@ export default function MapPage() {
     }
   }
 
-  // Auto-load as the rep moves: when the map center drifts past the threshold
-  // (and they're not drawing), pull homes around the new center and accumulate
-  // them — no manual refresh needed. Runs everywhere now, including for reps
-  // who have an assigned territory, so pins follow wherever they look/walk.
-  async function autoRoam() {
-    const map = mapRef.current;
-    if (!map || !profile || loadingRef.current) return;
-    if (modeRef.current === "draw") return;
-    const ctr = map.getCenter();
-    if (lastLoadCenter.current && ctr.distanceTo(lastLoadCenter.current) < ROAM_THRESHOLD_M) return;
-    loadingRef.current = true;
-    setLoadingHomes(true);
-    try {
-      if (moverLayer.current.getLayers().length > MOVER_CAP) {
-        moverLayer.current.clearLayers();
-        moverKeys.current.clear();
-      }
-      // We no longer auto-pull gray property pins as the rep pans — long-press a
-      // home to look it up instead. Recent move-ins DO auto-populate in whatever
-      // area they're viewing (no toggle button anymore).
-      await fetchNearbyMovers({ lat: ctr.lat, lng: ctr.lng });
-      lastLoadCenter.current = ctr;
-    } catch {
-      /* silent — keep what's already shown */
-    } finally {
-      loadingRef.current = false;
-      setLoadingHomes(false);
-    }
-  }
-
-  // Refresh button: recenter on the rep's live location, then reload movers,
-  // solar (if allowed), and pull nearby homes on demand.
+  // Refresh button: recenter on the rep's live location, then pull nearby homes
+  // and solar (if allowed) on demand. (Movers are pulled only via the Market
+  // Recommendations search, not on refresh.)
   async function refresh() {
     await recenterToMe();
     await loadHomes();
-    await loadMovers();
     void loadSolarPins();
   }
 
@@ -800,12 +795,6 @@ export default function MapPage() {
       ).addTo(map);
     });
 
-    // Auto-load homes as the rep pans / walks the map (debounced).
-    map.on("moveend", () => {
-      if (roamTimer.current) clearTimeout(roamTimer.current);
-      roamTimer.current = setTimeout(() => void autoRoam(), 700);
-    });
-
     // Long-press (touch) / right-click (desktop) any home to look it up on
     // demand — reverse-geocodes the point and opens the knock form. This is what
     // replaces the wall of pre-populated gray pins.
@@ -845,7 +834,6 @@ export default function MapPage() {
       await buildTerritories();
       await buildPins();
       applyTerritoryFocus(); // zoom to the focused territory (polygon → its homes → notice)
-      void loadMovers(); // drop recent move-in pins for the area / live location
       void loadSolarPins(); // drop ☀️/🔥 solar-scanner pins (CRM add-on)
     })();
 
@@ -871,7 +859,6 @@ export default function MapPage() {
     window.setTimeout(() => setStatus((s) => (s.startsWith("💡") ? "" : s)), 6000);
 
     return () => {
-      if (roamTimer.current) clearTimeout(roamTimer.current);
       if (watchId.current) { Geolocation.clearWatch({ id: watchId.current }).catch(() => {}); watchId.current = null; }
       container.removeEventListener("touchstart", onTouchStart);
       container.removeEventListener("touchmove", onTouchMove);
@@ -909,6 +896,16 @@ export default function MapPage() {
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [addrQuery]);
+
+  // Debounced type-ahead for the Market Recommendations search (city/ZIP/address).
+  useEffect(() => {
+    if (mrPicked.current) { mrPicked.current = false; return; }
+    const q = mrQuery.trim();
+    if (q.length < 3) { setMrSuggest([]); return; }
+    const t = setTimeout(() => void fetchMrSuggestions(q), 250);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mrQuery]);
 
   // Load the reps this manager/admin can assign areas to (their downstream).
   useEffect(() => {
@@ -1021,6 +1018,17 @@ export default function MapPage() {
         >
           🔍{filtersActive ? <span className="map-fab-badge">✓</span> : null}
         </button>
+        {/* Market Recommendations — managers/admins only, add-on only. Search a
+            city/ZIP/address to see recent move-ins within a mile. */}
+        {marketRecAllowed && (
+          <button
+            className={"map-fab" + (showMarketRec ? " active" : "")}
+            onClick={() => setShowMarketRec((s) => !s)}
+            aria-label="Market recommendations" title="Market recommendations — recent move-ins by area"
+          >
+            🏘️
+          </button>
+        )}
         {/* Live team locations — managers/admins see everyone online right now. */}
         {canManageAreas && (
           <button
@@ -1171,6 +1179,52 @@ export default function MapPage() {
               disabled={!filtersActive && !addrQuery.trim()}
             >Clear</button>
             <button className="btn primary sm" onClick={() => setShowFilters(false)}>Done</button>
+          </div>
+        </div>
+      )}
+
+      {/* Market Recommendations panel — managers/admins, add-on only. */}
+      {marketRecAllowed && showMarketRec && (
+        <div className="map-save-panel map-filter-panel">
+          <div className="msp-title">Market recommendations</div>
+          <label className="field">
+            <span>City, metro, ZIP or address</span>
+            <div className="row" style={{ gap: 6 }}>
+              <input
+                style={{ flex: 1, minWidth: 0 }}
+                type="text"
+                value={mrQuery}
+                onChange={(e) => setMrQuery(e.target.value)}
+                onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); void runMarketRec(mrQuery); } }}
+                placeholder="🏘️ Denver CO · 84042 · 631 S Main St"
+                autoComplete="off"
+                inputMode="search"
+                enterKeyHint="search"
+              />
+              <button type="button" className="btn primary sm" onClick={() => void runMarketRec(mrQuery)} disabled={mrBusy || !mrQuery.trim()}>
+                {mrBusy ? "…" : "Go"}
+              </button>
+            </div>
+            {mrSuggest.length > 0 && (
+              <div className="addr-suggest">
+                {mrSuggest.map((s) => (
+                  <button key={s} type="button" className="addr-suggest-item" onClick={() => pickMrSuggestion(s)}>
+                    📍 {s}
+                  </button>
+                ))}
+              </div>
+            )}
+          </label>
+          <div className="muted small" style={{ marginTop: 2 }}>
+            Shows recent move-ins within <strong>1 mile</strong> of the place you enter — a scoped pull, so zooming out won't load the whole map.
+          </div>
+          {mrSummary && <div className="muted small" style={{ marginTop: 8 }}>{mrSummary}</div>}
+          <div className="row end" style={{ marginTop: 8 }}>
+            <button
+              className="btn sm"
+              onClick={() => { setMrQuery(""); setMrSummary(""); setMrSuggest([]); moverLayer.current.clearLayers(); moverKeys.current.clear(); }}
+            >Clear</button>
+            <button className="btn primary sm" onClick={() => setShowMarketRec(false)}>Done</button>
           </div>
         </div>
       )}
