@@ -222,7 +222,7 @@ export default function DispositionModal({
     if (setterSelect && closers.length === 0) {
       listClosersFn({}).then((r) => setClosers(r.data.closers || [])).catch(() => {});
     }
-    if (autoEnrich && !target.enrichment) void enrich(target.address);
+    void resolveAddressThenEnrich(target);
     // Check how far the rep is from the home.
     if (target.lat != null && target.lng != null) void checkGeo(target.lat, target.lng);
     // Start recording the pitch (only once consent has been given).
@@ -290,6 +290,22 @@ export default function DispositionModal({
     } catch {
       setGeo({ ft: null, accFt: 0, verified: true, locating: false }); // no GPS → don't penalize
     }
+  }
+
+  // A lead logged from a map long-press or dropped pin can have coordinates but
+  // NO address (reverse-geocode missed at log time). When we reopen it with a
+  // blank address, fill the address from its coordinates first, then run the
+  // owner/property enrichment — otherwise it shows a blank card with no info.
+  async function resolveAddressThenEnrich(t: DispoInput) {
+    let address = (t.address || "").trim();
+    if (!address && typeof t.lat === "number" && typeof t.lng === "number") {
+      try {
+        const r = await httpsCallable<{ lat: number; lng: number }, { address?: string }>(functions, "reverseGeocode")({ lat: t.lat, lng: t.lng });
+        address = String(r.data?.address || "").trim();
+        if (address) setD((cur) => (cur ? { ...cur, address } : cur));
+      } catch { /* leave blank — the rep can still type it */ }
+    }
+    if (autoEnrich && !t.enrichment && address) void enrich(address);
   }
 
   async function enrich(address: string) {

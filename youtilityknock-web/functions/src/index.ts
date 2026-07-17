@@ -6515,8 +6515,17 @@ export const reverseGeocode = onCall(async (request) => {
   await refreshApiConfig();
   if (!GMAPS.key) throw new HttpsError("failed-precondition", "Address lookup isn't configured — ask your admin to add a Google Maps API key.");
   try {
-    const g: any = await (await fetch(`https://maps.googleapis.com/maps/api/geocode/json?latlng=${lat},${lng}&result_type=street_address&key=${GMAPS.key}`)).json();
-    const address = String(g?.results?.[0]?.formatted_address || "");
+    // Don't hard-filter to street_address — a rooftop tap often only resolves to
+    // a premise/subpremise/route, and filtering those out returned an empty
+    // address (leads then got logged with no address and couldn't enrich).
+    // Take the best rooftop-ish result, else the first result Google returns.
+    const g: any = await (await fetch(`https://maps.googleapis.com/maps/api/geocode/json?latlng=${lat},${lng}&key=${GMAPS.key}`)).json();
+    const results: any[] = Array.isArray(g?.results) ? g.results : [];
+    const rank = ["street_address", "premise", "subpremise", "route"];
+    const best =
+      rank.map((t) => results.find((r) => (r?.types || []).includes(t))).find(Boolean) ||
+      results[0];
+    const address = String(best?.formatted_address || "");
     return { address };
   } catch (e) {
     logger.warn("reverseGeocode failed", e);
