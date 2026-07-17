@@ -1911,6 +1911,33 @@ body.modal-open .chat-fab-global { display: none; }
 .map-save-panel .field { margin-bottom: 10px; }
 .map-save-panel .row.end { display: flex; justify-content: flex-end; gap: 8px; margin-top: 4px; }
 
+/* Long-press to look up a home: stop iOS from popping its image "callout"
+   menu on a press-and-hold over the map tiles, which would eat the gesture. */
+.leaflet-container { -webkit-touch-callout: none; }
+
+/* Address search type-ahead suggestions (map filter panel) */
+.addr-suggest {
+  display: flex;
+  flex-direction: column;
+  margin-top: 6px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  overflow: hidden;
+  background: rgba(10, 15, 26, 0.6);
+}
+.addr-suggest-item {
+  text-align: left;
+  padding: 9px 11px;
+  font-size: 13px;
+  color: var(--text, #e6eef8);
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid var(--line);
+  cursor: pointer;
+}
+.addr-suggest-item:last-child { border-bottom: none; }
+.addr-suggest-item:hover, .addr-suggest-item:active { background: rgba(56, 189, 248, 0.18); }
+
 /* Global floating Team Chat button (all pages, over the full-screen map too) */
 .chat-fab-global {
   position: fixed;
