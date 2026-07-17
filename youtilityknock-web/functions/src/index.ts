@@ -6459,6 +6459,29 @@ export const getHomeImagery = onCall({ timeoutSeconds: 60 }, async (request) => 
   return { streetView, satellite, hasStreetView: !!streetView, lat, lng };
 });
 
+// Forward-geocode a typed address → coordinates, so the map's address search
+// can fly straight to a property even when there's no lead pin there yet.
+export const geocodeAddress = onCall(async (request) => {
+  await getCaller(request);
+  const { address } = (request.data || {}) as { address?: string };
+  const q = String(address || "").trim();
+  if (!q) throw new HttpsError("invalid-argument", "Enter an address to search.");
+  await refreshApiConfig();
+  if (!GMAPS.key) throw new HttpsError("failed-precondition", "Address search isn't configured — ask your admin to add a Google Maps API key.");
+  try {
+    const g: any = await (await fetch(`https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(q)}&key=${GMAPS.key}`)).json();
+    const r = g?.results?.[0];
+    const loc = r?.geometry?.location;
+    if (!loc || typeof loc.lat !== "number" || typeof loc.lng !== "number") {
+      return { found: false as const };
+    }
+    return { found: true as const, lat: loc.lat, lng: loc.lng, formatted: r.formatted_address || q };
+  } catch (e) {
+    logger.warn("geocodeAddress failed", e);
+    throw new HttpsError("internal", "Couldn't look up that address — try again.");
+  }
+});
+
 // ════════════════════════════════════════════════════════════════════════════
 // STRIPE BILLING — checkout, billing portal, and a webhook that flips a
 // company's status from the live subscription state. Keys live in config/billing

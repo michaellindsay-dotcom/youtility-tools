@@ -107,6 +107,7 @@ export default function MapPage() {
   const loadingRef = useRef(false);
   const roamTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const youMarker = useRef<L.CircleMarker | null>(null);
+  const searchMarker = useRef<L.Marker | null>(null); // dropped where an address search lands
   const watchId = useRef<string | null>(null);
   // Live team locations: one layer + a per-uid marker map so positions update
   // in place as presence docs change. lastPub throttles our own location writes.
@@ -161,8 +162,8 @@ export default function MapPage() {
   const [fromDate, setFromDate] = useState(""); // yyyy-mm-dd
   const [toDate, setToDate] = useState("");
   const [dispoSel, setDispoSel] = useState<Set<string>>(new Set());
-  const [addrQuery, setAddrQuery] = useState(""); // free-text address search (input)
-  const [addrApplied, setAddrApplied] = useState(""); // debounced value actually filtered on
+  const [addrQuery, setAddrQuery] = useState(""); // free-text address search
+  const [addrBusy, setAddrBusy] = useState(false); // geocoding the typed address
   // Save panel shown after an area is drawn: name it + assign it to a rep.
   const [savePanel, setSavePanel] = useState(false);
   const [drawName, setDrawName] = useState("");
@@ -187,8 +188,7 @@ export default function MapPage() {
   // ── pin filters (date worked + disposition) ───────────────────────────────
   const fromMs = fromDate ? new Date(`${fromDate}T00:00:00`).getTime() : null;
   const toMs = toDate ? new Date(`${toDate}T23:59:59.999`).getTime() : null;
-  const addrNeedle = normAddr(addrApplied);
-  const filtersActive = dispoSel.size > 0 || !!fromDate || !!toDate || !!addrNeedle;
+  const filtersActive = dispoSel.size > 0 || !!fromDate || !!toDate;
   // When a filter is on we hide the auto-populated gray home pins and show only
   // the filtered lead pins. A ref so the map callbacks (addHomeMarker/autoRoam)
   // see the current value without being rebound.
@@ -203,7 +203,6 @@ export default function MapPage() {
   };
   const passesPinFilters = (lead: Lead): boolean => {
     if (dispoSel.size && !dispoSel.has(lead.status)) return false;
-    if (addrNeedle && !normAddr(lead.address).includes(addrNeedle)) return false;
     if (fromMs != null || toMs != null) {
       const t = leadActivityMs(lead);
       if (fromMs != null && t < fromMs) return false;
@@ -211,6 +210,42 @@ export default function MapPage() {
     }
     return true;
   };
+
+  // Address search: geocode the typed address and fly the map straight to that
+  // property — dropping a marker you can tap to knock — even when there's no
+  // lead pin there yet. (What "type an address → take me to the house" means.)
+  const geocodeAddressFn = httpsCallable<{ address: string }, { found: boolean; lat?: number; lng?: number; formatted?: string }>(functions, "geocodeAddress");
+  async function goToAddress(raw: string) {
+    const q = raw.trim();
+    const map = mapRef.current;
+    if (!q || !map) return;
+    setAddrBusy(true);
+    setStatus("");
+    try {
+      const { data } = await geocodeAddressFn({ address: q });
+      if (!data.found || typeof data.lat !== "number" || typeof data.lng !== "number") {
+        setStatus("Couldn't find that address — check the spelling.");
+        window.setTimeout(() => setStatus(""), 5000);
+        return;
+      }
+      const at: [number, number] = [data.lat, data.lng];
+      const label = data.formatted || q;
+      // Drop (or move) a distinct blue marker on the found home; tap it to knock.
+      if (searchMarker.current) map.removeLayer(searchMarker.current);
+      searchMarker.current = L.marker(at, { icon: homeIcon("#38BDF8"), zIndexOffset: 5000 })
+        .on("click", () => setDispoTarget({ address: label, lat: at[0], lng: at[1] }))
+        .addTo(map);
+      map.setView(at, 19, { animate: true });
+      setShowFilters(false); // clear the panel so the house is visible
+      setStatus(`📍 ${label} — tap the blue pin to knock`);
+      window.setTimeout(() => setStatus(""), 6000);
+    } catch (e) {
+      setStatus((e as Error)?.message || "Address search failed — try again.");
+      window.setTimeout(() => setStatus(""), 5000);
+    } finally {
+      setAddrBusy(false);
+    }
+  }
 
   async function buildPins() {
     leadLayer.current.clearLayers();
@@ -244,12 +279,9 @@ export default function MapPage() {
       if (c && lead.address) homeCoordByAddr.current.set(normAddr(lead.address), c);
     });
     // Draw only the pins passing the date + disposition filters.
-    const shown = leads.filter(passesPinFilters);
-    const matchCoords: L.LatLngExpression[] = [];
-    shown.forEach((lead) => {
+    leads.filter(passesPinFilters).forEach((lead) => {
       const c = validCoord(lead.lat, lead.lng);
       if (!c) return;
-      if (addrNeedle) matchCoords.push(c);
       L.marker(c, {
         icon: homeIcon(DISP_COLOR[lead.status] || "#94A3B8", lead.verified === false),
         zIndexOffset: 1000, // always above generic home pins
@@ -269,11 +301,6 @@ export default function MapPage() {
         })
         .addTo(leadLayer.current);
     });
-    // Address search: pan/zoom to whatever matched so the result is in view.
-    if (addrNeedle && matchCoords.length && mapRef.current) {
-      const b = L.latLngBounds(matchCoords).pad(0.2);
-      mapRef.current.fitBounds(b, { maxZoom: 17, animate: true });
-    }
   }
 
   async function buildTerritories() {
@@ -840,14 +867,7 @@ export default function MapPage() {
       void loadHomes();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [fromDate, toDate, dispoSel, addrApplied]);
-
-  // Debounce the address search so typing doesn't re-query Firestore on every
-  // keystroke — apply it ~300ms after the rep stops typing.
-  useEffect(() => {
-    const t = setTimeout(() => setAddrApplied(addrQuery.trim()), 300);
-    return () => clearTimeout(t);
-  }, [addrQuery]);
+  }, [fromDate, toDate, dispoSel]);
 
   // Load the reps this manager/admin can assign areas to (their downstream).
   useEffect(() => {
@@ -1049,15 +1069,23 @@ export default function MapPage() {
         <div className="map-save-panel map-filter-panel">
           <div className="msp-title">Filter pins</div>
           <label className="field">
-            <span>Search address</span>
-            <input
-              type="text"
-              value={addrQuery}
-              onChange={(e) => setAddrQuery(e.target.value)}
-              placeholder="🔍 Street, city or ZIP…"
-              autoComplete="off"
-              inputMode="search"
-            />
+            <span>Search address — jump to a home</span>
+            <div className="row" style={{ gap: 6 }}>
+              <input
+                style={{ flex: 1, minWidth: 0 }}
+                type="text"
+                value={addrQuery}
+                onChange={(e) => setAddrQuery(e.target.value)}
+                onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); void goToAddress(addrQuery); } }}
+                placeholder="🔍 123 Main St, City ST 00000"
+                autoComplete="off"
+                inputMode="search"
+                enterKeyHint="search"
+              />
+              <button type="button" className="btn primary sm" onClick={() => void goToAddress(addrQuery)} disabled={addrBusy || !addrQuery.trim()}>
+                {addrBusy ? "…" : "Go"}
+              </button>
+            </div>
           </label>
           <div className="row" style={{ gap: 8 }}>
             <label className="field" style={{ flex: 1, minWidth: 0 }}>
@@ -1098,7 +1126,14 @@ export default function MapPage() {
             </div>
           </div>
           <div className="row end">
-            <button className="btn sm" onClick={() => { setFromDate(""); setToDate(""); setDispoSel(new Set()); setAddrQuery(""); setAddrApplied(""); }} disabled={!filtersActive}>Clear</button>
+            <button
+              className="btn sm"
+              onClick={() => {
+                setFromDate(""); setToDate(""); setDispoSel(new Set()); setAddrQuery("");
+                if (searchMarker.current && mapRef.current) { mapRef.current.removeLayer(searchMarker.current); searchMarker.current = null; }
+              }}
+              disabled={!filtersActive && !addrQuery.trim()}
+            >Clear</button>
             <button className="btn primary sm" onClick={() => setShowFilters(false)}>Done</button>
           </div>
         </div>
