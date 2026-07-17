@@ -29,7 +29,6 @@
     "@capacitor/status-bar": "^6.0.3",
     "firebase": "^10.13.2",
     "leaflet": "^1.9.4",
-    "leaflet-rotate": "^0.2.8",
     "leaflet.markercluster": "^1.5.3",
     "lucide-react": "^1.23.0",
     "qrcode": "^1.5.4",
