@@ -4235,12 +4235,15 @@ export const roleLeaderboards = onCall(async (request) => {
 // from the stats buckets — the same sources as the leaderboards.
 export const getCompanyRollup = onCall(async (request) => {
   const caller = await getCaller(request);
-  const companyId = caller.companyId;
+  const reqData = (request.data || {}) as { period?: string; companyId?: string };
+  // Super-admins may target any company (drill-down from the console). Everyone
+  // else is locked to their own company.
+  const companyId = caller.isSuper && reqData.companyId ? reqData.companyId : caller.companyId;
   if (!companyId) throw new HttpsError("permission-denied", "No company.");
   if (!(caller.isSuper || caller.role === "admin" || caller.role === "manager")) {
     throw new HttpsError("permission-denied", "Managers and admins only.");
   }
-  const view = ((request.data as { period?: string } | undefined)?.period || "week") as string;
+  const view = (reqData.period || "week") as string;
   const kind = view === "month" || view === "year" ? view : "week";
   const startMs = apptPeriodStart(view);
 
