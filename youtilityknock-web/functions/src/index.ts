@@ -6526,7 +6526,13 @@ export const reverseGeocode = onCall(async (request) => {
       rank.map((t) => results.find((r) => (r?.types || []).includes(t))).find(Boolean) ||
       results[0];
     const address = String(best?.formatted_address || "");
-    return { address };
+    // Also hand back the matched address's rooftop/parcel coordinate so the
+    // caller can SNAP the pin onto the actual home instead of leaving it at the
+    // raw spot the rep tapped (which can be a yard, the street, or water).
+    const loc = best?.geometry?.location;
+    const snapLat = loc && typeof loc.lat === "number" ? loc.lat : null;
+    const snapLng = loc && typeof loc.lng === "number" ? loc.lng : null;
+    return { address, lat: snapLat, lng: snapLng };
   } catch (e) {
     logger.warn("reverseGeocode failed", e);
     throw new HttpsError("internal", "Couldn't look up that home — try again.");
