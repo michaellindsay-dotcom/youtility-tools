@@ -1305,6 +1305,9 @@ export default function BatteryTool() {
             backupDaysAchieved: system.backupDaysAchieved,
           },
           aiSummary: aiSummary || null,
+          // Full viewer payload so the proposal can be reopened exactly (e.g.
+          // double-clicked from the customer page) without an extra lookup.
+          payload: buildProposalPayload(),
           pricing: { pricePerUnit: Number(pricePerUnit) || 0, installAdder: Number(installAdder) || 0 },
           incentives: appliedIncentives,
           incentivesUtility: incReport?.utility || null,
