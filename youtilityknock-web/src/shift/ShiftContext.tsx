@@ -1,4 +1,5 @@
 import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import {
   addDoc,
   collection,
@@ -16,7 +17,7 @@ import { useAuth } from "../auth/AuthContext";
 import { bumpStats } from "../lib/stats";
 import type { Shift } from "../types";
 
-const IDLE_MS = 5 * 60 * 1000; // auto-stop after 5 min of inactivity
+const IDLE_MS = 30 * 60 * 1000; // auto-END the working shift after 30 idle minutes
 
 interface ShiftState {
   active: Shift | null;
@@ -27,6 +28,10 @@ interface ShiftState {
   stopShift: () => Promise<void>;
   recordKnock: (verified: boolean) => Promise<void>;
   bumpActivity: () => void;
+  // A shift was auto-ended for inactivity and the rep is active again — prompt
+  // them to start a new one. Cleared when they start a shift or dismiss it.
+  resumePrompt: boolean;
+  dismissResumePrompt: () => void;
 }
 
 const Ctx = createContext<ShiftState | undefined>(undefined);
@@ -39,6 +44,10 @@ export function ShiftProvider({ children }: { children: ReactNode }) {
   const lastActivity = useRef(Date.now());
   const activeRef = useRef<Shift | null>(null);
   activeRef.current = active;
+  // Set when a shift is auto-ended for inactivity; drives the "start a new
+  // shift?" prompt once the rep interacts with the app again.
+  const idleEnded = useRef(false);
+  const [resumePrompt, setResumePrompt] = useState(false);
 
   // Subscribe to my current active shift (enforces a single source of truth).
   useEffect(() => {
@@ -60,9 +69,13 @@ export function ShiftProvider({ children }: { children: ReactNode }) {
     return () => clearInterval(t);
   }, []);
 
-  // Track user activity for the inactivity auto-stop.
+  // Track user activity for the inactivity auto-stop. If a shift was just
+  // auto-ended for idle and the rep is interacting again, surface the prompt.
   useEffect(() => {
-    const mark = () => (lastActivity.current = Date.now());
+    const mark = () => {
+      lastActivity.current = Date.now();
+      if (idleEnded.current && !activeRef.current) setResumePrompt(true);
+    };
     window.addEventListener("pointerdown", mark);
     window.addEventListener("keydown", mark);
     return () => {
@@ -71,10 +84,12 @@ export function ShiftProvider({ children }: { children: ReactNode }) {
     };
   }, []);
 
-  // Inactivity check.
+  // Inactivity check: end the working shift after 30 idle minutes (the rep
+  // stays logged in — we just stop the shift and prompt to resume later).
   useEffect(() => {
     const t = setInterval(() => {
       if (activeRef.current && Date.now() - lastActivity.current > IDLE_MS) {
+        idleEnded.current = true;
         void stopShift();
       }
     }, 20000);
@@ -97,6 +112,9 @@ export function ShiftProvider({ children }: { children: ReactNode }) {
   }, []);
 
   async function startShift() {
+    // Starting a shift clears any pending "resume?" prompt from an idle-out.
+    idleEnded.current = false;
+    setResumePrompt(false);
     if (activeRef.current || !profile || !companyId) return;
     setStarting(true);
     try {
@@ -138,6 +156,8 @@ export function ShiftProvider({ children }: { children: ReactNode }) {
 
   const elapsedSec = active ? Math.max(0, Math.floor((now - active.startAt) / 1000)) : 0;
 
+  const dismissResumePrompt = () => { idleEnded.current = false; setResumePrompt(false); };
+
   const value: ShiftState = {
     active,
     elapsedSec,
@@ -147,8 +167,26 @@ export function ShiftProvider({ children }: { children: ReactNode }) {
     stopShift,
     recordKnock,
     bumpActivity: () => (lastActivity.current = Date.now()),
+    resumePrompt,
+    dismissResumePrompt,
   };
-  return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
+  return (
+    <Ctx.Provider value={value}>
+      {children}
+      {resumePrompt && createPortal(
+        <div className="shift-resume-toast" role="alert">
+          <span>⏸️ Your shift was ended after 30 minutes of inactivity.</span>
+          <div className="row" style={{ gap: 8 }}>
+            <button className="btn primary sm" disabled={starting} onClick={() => void startShift()}>
+              ▶ Start shift
+            </button>
+            <button className="btn ghost sm" onClick={dismissResumePrompt}>Dismiss</button>
+          </div>
+        </div>,
+        document.body,
+      )}
+    </Ctx.Provider>
+  );
 }
 
 // eslint-disable-next-line react-refresh/only-export-components
