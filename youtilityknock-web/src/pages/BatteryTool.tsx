@@ -998,6 +998,33 @@ export default function BatteryTool() {
     });
   }, [recs, company?.batteryPricing, system?.product.id, chosen?.product.id, pricePerUnit, installAdder, incentivesTotalUsd, bill.ratePerKWh, bill.dailyKWh, sizing]);
 
+  // The proposal shown/sent to the homeowner reflects ONLY the battery the rep
+  // selected, pinned to the quantity they chose — not the full multi-battery
+  // compare. (A single option makes SolarProposalShow skip the Compare slide,
+  // and locking unitOptions to the chosen count fixes the quantity.)
+  const chosenProposalOptions = useMemo<ProposalOption[]>(() => {
+    const sel = proposalOptions.find((o) => o.productId === system?.product.id) || proposalOptions[0];
+    if (!sel) return [];
+    const units = system?.units ?? sel.units;
+    const variant = (sel.unitOptions || []).find((v) => v.units === units);
+    return [{
+      ...sel,
+      units,
+      ...(variant
+        ? {
+            totalUsableKWh: variant.totalUsableKWh,
+            totalContinuousKW: variant.totalContinuousKW,
+            totalPeakKW: variant.totalPeakKW,
+            backupDaysAchieved: variant.backupDaysAchieved,
+            roi: variant.roi,
+          }
+        : {}),
+      unitOptions: variant ? [variant] : (sel.unitOptions || []),
+      maxUnits: units,
+      recommended: true,
+    }];
+  }, [proposalOptions, system?.product.id, system?.units]);
+
   // 7. Proposal
   const [aiSummary, setAiSummary] = useState("");
   const [aiLoading, setAiLoading] = useState(false);
@@ -1181,7 +1208,7 @@ export default function BatteryTool() {
         incentives: appliedIncentives.length ? appliedIncentives : incReport?.incentives ?? [],
         hasEv,
         hasExistingSolar: solar.hasSolar,
-        options: proposalOptions,
+        options: chosenProposalOptions,
         chosenProductId: system.product.id,
         depositUsd,
         sungageApplyUrl: company?.sungageApplyUrl,
@@ -1189,10 +1216,10 @@ export default function BatteryTool() {
         // homeImage intentionally omitted — too large to persist; the viewer
         // uses the photoreal scene.
       };
-      const { data } = await httpsCallable<{ to: string; payload: unknown }, { ok?: boolean; url?: string }>(
+      const { data } = await httpsCallable<{ to: string; payload: unknown; leadId?: string | null }, { ok?: boolean; url?: string; pid?: string }>(
         functions,
         "emailProposalToHomeowner"
-      )({ to: homeownerEmail, payload });
+      )({ to: homeownerEmail, payload, leadId: leadId || null });
       setPropEmailMsg(
         data?.ok ? { ok: true, text: `Sent to ${homeownerEmail}.` } : { ok: false, text: "Couldn't send the email." }
       );
@@ -2071,7 +2098,7 @@ export default function BatteryTool() {
         hasExistingSolar={solar.hasSolar}
         homeImage={homeImg || undefined}
         homeImageIsStreetView={homeIsSV}
-        options={proposalOptions}
+        options={chosenProposalOptions}
         chosenProductId={system?.product.id}
         depositUsd={depositUsd}
         sungageApplyUrl={company?.sungageApplyUrl}

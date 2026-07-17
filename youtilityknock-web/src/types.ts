@@ -223,7 +223,10 @@ export interface LeadEnrichment {
 // timeline (NH → NH1 → NI → Appointment → …) rather than just the latest.
 export interface LeadHistoryEntry {
   at: number;
-  status: LeadStatus;
+  // Knock/disposition entries carry a status; other kinds (e.g. a saved
+  // proposal) don't, so status is optional and `kind` distinguishes them.
+  status?: LeadStatus;
+  kind?: "proposal";
   notes?: string | null;
   byUid?: string;
   byName?: string | null;
@@ -231,6 +234,9 @@ export interface LeadHistoryEntry {
   distanceFt?: number | null;
   photoHomeUrl?: string | null;
   photoBillUrl?: string | null;
+  // Set on proposal entries — a reopenable ?pid= link to the saved proposal.
+  proposalPid?: string;
+  proposalUrl?: string;
 }
 
 export interface Lead {

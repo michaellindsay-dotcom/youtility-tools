@@ -204,10 +204,10 @@ export default function CustomerLead() {
         <div className="cust-timeline">
           {timeline.map((h, i) => (
             <div className="cust-tl-row card" key={`${h.at}-${i}`}>
-              <span className="cust-tl-dot" style={{ background: DISP_COLOR[h.status] || "#888" }} />
+              <span className="cust-tl-dot" style={{ background: h.kind === "proposal" ? "#7c3aed" : (h.status ? DISP_COLOR[h.status] : "#888") || "#888" }} />
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div className="row between" style={{ alignItems: "baseline", gap: 8 }}>
-                  <strong>{DISP_LABEL[h.status] || h.status}</strong>
+                  <strong>{h.kind === "proposal" ? "📄 Proposal created" : (h.status ? (DISP_LABEL[h.status] || h.status) : "—")}</strong>
                   <span className="muted small">{fmt(h.at)}</span>
                 </div>
                 <div className="muted small">
@@ -215,6 +215,11 @@ export default function CustomerLead() {
                   {h.verified === false ? " · ⚠ off-site" : ""}
                   {typeof h.distanceFt === "number" && h.verified !== false ? ` · ${h.distanceFt} ft` : ""}
                 </div>
+                {h.kind === "proposal" && h.proposalUrl && (
+                  <a className="btn ghost sm" style={{ marginTop: 6 }} href={h.proposalUrl} target="_blank" rel="noreferrer">
+                    ▶ Open proposal ↗
+                  </a>
+                )}
                 {h.notes && <div className="cust-notes">📝 {h.notes}</div>}
                 {(h.photoHomeUrl || h.photoBillUrl) && (
                   <div className="row" style={{ gap: 8, marginTop: 6 }}>
