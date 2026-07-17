@@ -6482,6 +6482,48 @@ export const geocodeAddress = onCall(async (request) => {
   }
 });
 
+// Type-ahead address suggestions for the map search box (Google Places
+// Autocomplete). Returns lightweight predictions; the client geocodes the one
+// the rep picks. Key stays server-side.
+export const addressAutocomplete = onCall(async (request) => {
+  await getCaller(request);
+  const { input } = (request.data || {}) as { input?: string };
+  const q = String(input || "").trim();
+  if (q.length < 3) return { predictions: [] as string[] };
+  await refreshApiConfig();
+  if (!GMAPS.key) return { predictions: [] as string[] };
+  try {
+    const u = `https://maps.googleapis.com/maps/api/place/autocomplete/json?input=${encodeURIComponent(q)}&types=address&components=country:us&key=${GMAPS.key}`;
+    const g: any = await (await fetch(u)).json();
+    const predictions = (g?.predictions || [])
+      .map((p: any) => String(p?.description || ""))
+      .filter(Boolean)
+      .slice(0, 5);
+    return { predictions };
+  } catch (e) {
+    logger.warn("addressAutocomplete failed", e);
+    return { predictions: [] as string[] };
+  }
+});
+
+// Reverse-geocode a map point → the nearest street address, so a long-press on
+// a home fills in its address (the disposition modal then pulls owner info).
+export const reverseGeocode = onCall(async (request) => {
+  await getCaller(request);
+  const { lat, lng } = (request.data || {}) as { lat?: number; lng?: number };
+  if (typeof lat !== "number" || typeof lng !== "number") throw new HttpsError("invalid-argument", "Need a map location.");
+  await refreshApiConfig();
+  if (!GMAPS.key) throw new HttpsError("failed-precondition", "Address lookup isn't configured — ask your admin to add a Google Maps API key.");
+  try {
+    const g: any = await (await fetch(`https://maps.googleapis.com/maps/api/geocode/json?latlng=${lat},${lng}&result_type=street_address&key=${GMAPS.key}`)).json();
+    const address = String(g?.results?.[0]?.formatted_address || "");
+    return { address };
+  } catch (e) {
+    logger.warn("reverseGeocode failed", e);
+    throw new HttpsError("internal", "Couldn't look up that home — try again.");
+  }
+});
+
 // ════════════════════════════════════════════════════════════════════════════
 // STRIPE BILLING — checkout, billing portal, and a webhook that flips a
 // company's status from the live subscription state. Keys live in config/billing

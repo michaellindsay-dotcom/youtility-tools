@@ -23,8 +23,7 @@ type MapMode = "view" | "draw" | "drop";
 
 const DEFAULT_CENTER: [number, number] = [40.34, -111.91];
 const NEAREST_N = 200;
-const ROAM_THRESHOLD_M = 450; // reload nearby homes once you've moved ~0.28 mi
-const HOME_CAP = 700; // accumulate up to this many roaming pins, then reset
+const ROAM_THRESHOLD_M = 450; // reload nearby movers once you've moved ~0.28 mi
 const MOVER_CAP = 500; // accumulate up to this many roaming mover pins, then reset
 
 const HOUSE_SVG =
@@ -108,6 +107,7 @@ export default function MapPage() {
   const roamTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const youMarker = useRef<L.CircleMarker | null>(null);
   const searchMarker = useRef<L.Marker | null>(null); // dropped where an address search lands
+  const lastLongPress = useRef(0); // de-dupe touch long-press vs desktop contextmenu
   const watchId = useRef<string | null>(null);
   // Live team locations: one layer + a per-uid marker map so positions update
   // in place as presence docs change. lastPub throttles our own location writes.
@@ -164,6 +164,8 @@ export default function MapPage() {
   const [dispoSel, setDispoSel] = useState<Set<string>>(new Set());
   const [addrQuery, setAddrQuery] = useState(""); // free-text address search
   const [addrBusy, setAddrBusy] = useState(false); // geocoding the typed address
+  const [addrSuggest, setAddrSuggest] = useState<string[]>([]); // type-ahead predictions
+  const pickedSuggest = useRef(false); // suppress the next autocomplete after a pick
   // Save panel shown after an area is drawn: name it + assign it to a rep.
   const [savePanel, setSavePanel] = useState(false);
   const [drawName, setDrawName] = useState("");
@@ -220,6 +222,7 @@ export default function MapPage() {
     const map = mapRef.current;
     if (!q || !map) return;
     setAddrBusy(true);
+    setAddrSuggest([]);
     setStatus("");
     try {
       const { data } = await geocodeAddressFn({ address: q });
@@ -244,6 +247,44 @@ export default function MapPage() {
       window.setTimeout(() => setStatus(""), 5000);
     } finally {
       setAddrBusy(false);
+    }
+  }
+
+  // Type-ahead suggestions for the search box (Google Places, server-side).
+  const autocompleteFn = httpsCallable<{ input: string }, { predictions: string[] }>(functions, "addressAutocomplete");
+  async function fetchSuggestions(input: string) {
+    try {
+      const { data } = await autocompleteFn({ input });
+      setAddrSuggest(Array.isArray(data?.predictions) ? data.predictions : []);
+    } catch {
+      setAddrSuggest([]);
+    }
+  }
+  function pickSuggestion(s: string) {
+    pickedSuggest.current = true; // don't re-open the dropdown for this programmatic change
+    setAddrQuery(s);
+    setAddrSuggest([]);
+    void goToAddress(s);
+  }
+
+  // Long-press a home → reverse-geocode the tapped point and open the knock form
+  // pre-filled with the address (which then pulls owner info). Lets a rep work
+  // any house on demand instead of relying on pre-populated pins.
+  const reverseGeocodeFn = httpsCallable<{ lat: number; lng: number }, { address: string }>(functions, "reverseGeocode");
+  async function handleLongPress(lat: number, lng: number) {
+    const now = Date.now();
+    if (now - lastLongPress.current < 800) return; // touch + contextmenu can both fire
+    lastLongPress.current = now;
+    if (modeRef.current !== "view") return; // don't hijack draw / drop-pin modes
+    setStatus("📍 Looking up this home…");
+    try {
+      const { data } = await reverseGeocodeFn({ lat, lng });
+      setStatus("");
+      // Open the knock form; a real address lets the modal auto-pull owner info.
+      setDispoTarget({ address: data?.address || "", lat, lng });
+    } catch {
+      setStatus("");
+      setDispoTarget({ address: "", lat, lng }); // still knockable; they can type it
     }
   }
 
@@ -546,16 +587,9 @@ export default function MapPage() {
         moverLayer.current.clearLayers();
         moverKeys.current.clear();
       }
-      // Skip the gray home pulls while isolating movers or filtering — the
-      // filtered map shows only lead pins, so there's nothing to repopulate.
-      if (!moversOnlyRef.current && !filtersActiveRef.current) {
-        if (homeLayer.current.getLayers().length > HOME_CAP) {
-          homeLayer.current.clearLayers();
-          homeKeys.current.clear();
-        }
-        await fetchNearby({ lat: ctr.lat, lng: ctr.lng });
-      }
-      // Move-ins outside the assigned area only roam in when isolating movers.
+      // We no longer auto-pull gray property pins as the rep pans — long-press a
+      // home to look it up instead. Move-ins outside the assigned area still
+      // roam in while isolating movers.
       if (moversOnlyRef.current) await fetchNearbyMovers({ lat: ctr.lat, lng: ctr.lng });
       lastLoadCenter.current = ctr;
     } catch {
@@ -813,6 +847,38 @@ export default function MapPage() {
       roamTimer.current = setTimeout(() => void autoRoam(), 700);
     });
 
+    // Long-press (touch) / right-click (desktop) any home to look it up on
+    // demand — reverse-geocodes the point and opens the knock form. This is what
+    // replaces the wall of pre-populated gray pins.
+    const container = map.getContainer();
+    let pressTimer: ReturnType<typeof setTimeout> | null = null;
+    let pressStart: { x: number; y: number } | null = null;
+    const clearPress = () => { if (pressTimer) { clearTimeout(pressTimer); pressTimer = null; } };
+    const onTouchStart = (ev: TouchEvent) => {
+      if (ev.touches.length !== 1 || modeRef.current !== "view") return;
+      const t = ev.touches[0];
+      pressStart = { x: t.clientX, y: t.clientY };
+      clearPress();
+      pressTimer = setTimeout(() => {
+        pressTimer = null;
+        if (!pressStart) return;
+        const rect = container.getBoundingClientRect();
+        const ll = map.containerPointToLatLng(L.point(pressStart.x - rect.left, pressStart.y - rect.top));
+        void handleLongPress(ll.lat, ll.lng);
+      }, 500);
+    };
+    const onTouchMove = (ev: TouchEvent) => {
+      if (!pressTimer || !pressStart) return;
+      const t = ev.touches[0];
+      if (Math.hypot(t.clientX - pressStart.x, t.clientY - pressStart.y) > 12) clearPress();
+    };
+    container.addEventListener("touchstart", onTouchStart, { passive: true });
+    container.addEventListener("touchmove", onTouchMove, { passive: true });
+    container.addEventListener("touchend", clearPress);
+    container.addEventListener("touchcancel", clearPress);
+    const onCtx = (e: L.LeafletMouseEvent) => void handleLongPress(e.latlng.lat, e.latlng.lng);
+    map.on("contextmenu", onCtx);
+
     // Load everything that DOESN'T need the GPS fix right away — the rep's own
     // lead pins and their territories paint immediately instead of the whole map
     // sitting empty for up to 8s while location resolves.
@@ -824,9 +890,9 @@ export default function MapPage() {
       void loadSolarPins(); // drop ☀️/🔥 solar-scanner pins (CRM add-on)
     })();
 
-    // Get the location fix in PARALLEL. When it lands, recenter on the rep and
-    // pull the gray home pins around them; if it never arrives, fall back to
-    // loading homes around whatever the map is currently showing.
+    // Get the location fix in PARALLEL and recenter on the rep when it lands.
+    // We no longer auto-pull the wall of gray property pins — the rep long-
+    // presses a home to look it up on demand instead (much faster, cleaner map).
     void (async () => {
       try {
         const pos = await Geolocation.getCurrentPosition({ enableHighAccuracy: true, timeout: 8000 });
@@ -835,18 +901,23 @@ export default function MapPage() {
         // territory — applyTerritoryFocus frames that area instead.
         if (!focusId) map.setView([myLoc.current.lat, myLoc.current.lng], 18);
         setYou(myLoc.current.lat, myLoc.current.lng);
-        // Instantly repaint homes we've cached nearby (no network), then refresh.
-        nearbyCachedHomes(myLoc.current.lat, myLoc.current.lng).forEach((h) => addHomeMarker(h));
       } catch {
         /* location denied / slow — fall back to the current map view */
       }
-      await loadHomes();
       void startWatching(); // track the "You" marker (recenters only in follow mode)
     })();
+
+    // One-time hint so reps discover the long-press lookup.
+    setStatus("💡 Press & hold any home to look it up and knock it.");
+    window.setTimeout(() => setStatus((s) => (s.startsWith("💡") ? "" : s)), 6000);
 
     return () => {
       if (roamTimer.current) clearTimeout(roamTimer.current);
       if (watchId.current) { Geolocation.clearWatch({ id: watchId.current }).catch(() => {}); watchId.current = null; }
+      container.removeEventListener("touchstart", onTouchStart);
+      container.removeEventListener("touchmove", onTouchMove);
+      container.removeEventListener("touchend", clearPress);
+      container.removeEventListener("touchcancel", clearPress);
       ro.disconnect();
       map.remove();
       mapRef.current = null;
@@ -854,20 +925,23 @@ export default function MapPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [companyId, profile, role]);
 
-  // Re-draw the lead pins whenever the date / disposition filters change. Only
-  // once the map exists (the initial build runs from the map-init effect). Also
-  // toggle the gray home pins: hide them while filtering, restore when cleared.
+  // Re-draw the lead pins whenever the date / disposition filters change (only
+  // once the map exists — the initial build runs from the map-init effect).
   useEffect(() => {
     if (!mapRef.current) return;
     void buildPins();
-    if (filtersActive) {
-      homeLayer.current.clearLayers();
-      homeKeys.current.clear();
-    } else {
-      void loadHomes();
-    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fromDate, toDate, dispoSel]);
+
+  // Debounced type-ahead suggestions for the address search box.
+  useEffect(() => {
+    if (pickedSuggest.current) { pickedSuggest.current = false; return; }
+    const q = addrQuery.trim();
+    if (q.length < 3) { setAddrSuggest([]); return; }
+    const t = setTimeout(() => void fetchSuggestions(q), 250);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [addrQuery]);
 
   // Load the reps this manager/admin can assign areas to (their downstream).
   useEffect(() => {
@@ -1086,6 +1160,20 @@ export default function MapPage() {
                 {addrBusy ? "…" : "Go"}
               </button>
             </div>
+            {addrSuggest.length > 0 && (
+              <div className="addr-suggest">
+                {addrSuggest.map((s) => (
+                  <button
+                    key={s}
+                    type="button"
+                    className="addr-suggest-item"
+                    onClick={() => pickSuggestion(s)}
+                  >
+                    📍 {s}
+                  </button>
+                ))}
+              </div>
+            )}
           </label>
           <div className="row" style={{ gap: 8 }}>
             <label className="field" style={{ flex: 1, minWidth: 0 }}>
