@@ -1178,44 +1178,51 @@ export default function BatteryTool() {
   // send a link to the no-login viewer (same data the "Present" overlay uses).
   const [propEmailing, setPropEmailing] = useState(false);
   const [propEmailMsg, setPropEmailMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  // The proposal payload the homeowner viewer renders — the SAME shape whether
+  // it's emailed or saved, so both open the identical single-battery proposal.
+  const buildProposalPayload = () => {
+    if (!system) return null;
+    return {
+      customerName: customerName || undefined,
+      address: address || undefined,
+      companyName: company?.name,
+      monthlyBill: bill.monthlyCost,
+      monthlyKWh: bill.monthlyKWh,
+      recommendation: {
+        brand: system.product.brand,
+        model: system.product.model,
+        units: system.units,
+        totalUsableKWh: system.totalUsableKWh,
+        backupDaysAchieved: system.backupDaysAchieved,
+      },
+      roi: roi
+        ? {
+            grossCost: roi.grossCost,
+            incentives: roi.incentives,
+            netCost: roi.netCost,
+            monthlySavings: roi.monthlySavings,
+            lifetimeSavings: roi.lifetimeSavings,
+          }
+        : null,
+      incentives: appliedIncentives.length ? appliedIncentives : incReport?.incentives ?? [],
+      hasEv,
+      hasExistingSolar: solar.hasSolar,
+      options: chosenProposalOptions,
+      chosenProductId: system.product.id,
+      depositUsd,
+      sungageApplyUrl: company?.sungageApplyUrl,
+      financeOptions: resolveFinanceOptions(company),
+      // homeImage intentionally omitted — too large to persist; the viewer
+      // uses the photoreal scene.
+    };
+  };
+
   const emailProposal = async () => {
     if (!system || !homeownerEmail) return;
     setPropEmailing(true);
     setPropEmailMsg(null);
     try {
-      const payload = {
-        customerName: customerName || undefined,
-        address: address || undefined,
-        companyName: company?.name,
-        monthlyBill: bill.monthlyCost,
-        monthlyKWh: bill.monthlyKWh,
-        recommendation: {
-          brand: system.product.brand,
-          model: system.product.model,
-          units: system.units,
-          totalUsableKWh: system.totalUsableKWh,
-          backupDaysAchieved: system.backupDaysAchieved,
-        },
-        roi: roi
-          ? {
-              grossCost: roi.grossCost,
-              incentives: roi.incentives,
-              netCost: roi.netCost,
-              monthlySavings: roi.monthlySavings,
-              lifetimeSavings: roi.lifetimeSavings,
-            }
-          : null,
-        incentives: appliedIncentives.length ? appliedIncentives : incReport?.incentives ?? [],
-        hasEv,
-        hasExistingSolar: solar.hasSolar,
-        options: chosenProposalOptions,
-        chosenProductId: system.product.id,
-        depositUsd,
-        sungageApplyUrl: company?.sungageApplyUrl,
-        financeOptions: resolveFinanceOptions(company),
-        // homeImage intentionally omitted — too large to persist; the viewer
-        // uses the photoreal scene.
-      };
+      const payload = buildProposalPayload();
       const { data } = await httpsCallable<{ to: string; payload: unknown; leadId?: string | null }, { ok?: boolean; url?: string; pid?: string }>(
         functions,
         "emailProposalToHomeowner"
@@ -1313,6 +1320,18 @@ export default function BatteryTool() {
           createdAt: Date.now(),
         })
       );
+      // Also store a reopenable proposal record and drop it into the homeowner's
+      // history (same as the email path), so a saved proposal can be pulled back
+      // up from the customer page for a follow-up or sale. Best-effort.
+      if (leadId) {
+        const payload = buildProposalPayload();
+        if (payload) {
+          await httpsCallable<{ payload: unknown; leadId?: string | null }, { pid?: string }>(
+            functions,
+            "saveProposalRecord"
+          )({ payload, leadId }).catch(() => {});
+        }
+      }
       setSaved(true);
     } catch (e) {
       setSaveError((e as Error).message || "Couldn't save the proposal. Try again.");

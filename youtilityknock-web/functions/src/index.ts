@@ -5810,6 +5810,24 @@ async function appendProposalToLeadHistory(
   await db.doc(`leads/${lid}`).set({ history: FieldValue.arrayUnion(entry), updatedAt: Date.now() }, { merge: true });
 }
 
+// Save a proposal (no email): create the reopenable shared record and, when a
+// leadId is given, drop it into the homeowner's history — same result as the
+// email path, for the "Save" button.
+export const saveProposalRecord = onCall(async (request) => {
+  const caller = await getCaller(request);
+  const d = (request.data || {}) as { payload?: Record<string, any>; leadId?: string };
+  const payload: Record<string, any> = { ...(d.payload || {}) };
+  if (typeof payload.homeImage === "string" && payload.homeImage.length > 300_000) delete payload.homeImage;
+  const id = crypto.randomUUID().replace(/-/g, "");
+  await db.doc(`sharedProposals/${id}`).set({
+    payload, to: null, companyId: caller.companyId || payload.companyId || null,
+    closerUid: caller.uid, createdAt: Date.now(),
+  });
+  const url = `${APP_URL}/app/?pid=${id}`;
+  await appendProposalToLeadHistory(caller, d.leadId, id, url, payload).catch((e) => logger.warn("proposal→lead history failed", e));
+  return { ok: true, url, pid: id };
+});
+
 // Public (no auth): fetch a shared proposal payload by its unguessable id so the
 // homeowner can open the interactive proposal from the emailed link.
 export const getSharedProposal = onCall(async (request) => {
