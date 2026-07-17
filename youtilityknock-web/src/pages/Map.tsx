@@ -270,7 +270,7 @@ export default function MapPage() {
   // Long-press a home → reverse-geocode the tapped point and open the knock form
   // pre-filled with the address (which then pulls owner info). Lets a rep work
   // any house on demand instead of relying on pre-populated pins.
-  const reverseGeocodeFn = httpsCallable<{ lat: number; lng: number }, { address: string }>(functions, "reverseGeocode");
+  const reverseGeocodeFn = httpsCallable<{ lat: number; lng: number }, { address: string; lat?: number | null; lng?: number | null }>(functions, "reverseGeocode");
   async function handleLongPress(lat: number, lng: number) {
     const now = Date.now();
     if (now - lastLongPress.current < 800) return; // touch + contextmenu can both fire
@@ -280,8 +280,13 @@ export default function MapPage() {
     try {
       const { data } = await reverseGeocodeFn({ lat, lng });
       setStatus("");
+      // Snap the pin to the matched home's rooftop coordinate (not the raw spot
+      // the rep pressed, which can land in a yard/street/water). Fall back to the
+      // tap point if the geocoder didn't return a location.
+      const snapLat = typeof data?.lat === "number" ? data.lat : lat;
+      const snapLng = typeof data?.lng === "number" ? data.lng : lng;
       // Open the knock form; a real address lets the modal auto-pull owner info.
-      setDispoTarget({ address: data?.address || "", lat, lng });
+      setDispoTarget({ address: data?.address || "", lat: snapLat, lng: snapLng });
     } catch {
       setStatus("");
       setDispoTarget({ address: "", lat, lng }); // still knockable; they can type it
