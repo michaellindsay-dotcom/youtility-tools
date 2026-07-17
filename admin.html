@@ -173,6 +173,75 @@
   .fn-bar span { display:block; height:100%; background:linear-gradient(90deg,var(--accent),var(--accent-2)); }
   .fn-rate { font-size:11px; color:var(--ink-dim); margin-top:4px; }
   .th-empty { color:var(--ink-dim); font-size:14px; padding:18px 4px; }
+  /* ── Success Reports ─────────────────────────────────────────────────── */
+  .rp-head { display:flex; align-items:center; justify-content:space-between; gap:14px; flex-wrap:wrap; margin-bottom:6px; }
+  .rp-periods { display:inline-flex; gap:6px; flex-wrap:wrap; }
+  .rp-hero { display:flex; align-items:center; gap:22px; flex-wrap:wrap; }
+  .rp-score { position:relative; width:118px; height:118px; border-radius:50%; flex:0 0 auto;
+    display:flex; flex-direction:column; align-items:center; justify-content:center; }
+  .rp-score b { font-family:'Space Grotesk',sans-serif; font-size:34px; line-height:1; }
+  .rp-score small { font-size:10px; letter-spacing:.6px; text-transform:uppercase; color:var(--ink-dim); margin-top:2px; }
+  .rp-hero-meta { flex:1 1 240px; min-width:220px; }
+  .rp-hero-meta h3 { font-family:'Space Grotesk',sans-serif; font-size:20px; margin:0 0 2px; }
+  .rp-grade { display:inline-block; font-size:12px; font-weight:700; letter-spacing:.4px; padding:3px 10px; border-radius:999px; }
+  /* Score chip (compact, used on tree rows) */
+  .rp-chip { display:inline-flex; align-items:center; justify-content:center; min-width:42px; font-variant-numeric:tabular-nums;
+    font-family:'Space Grotesk',sans-serif; font-weight:700; font-size:14px; padding:3px 8px; border-radius:9px; }
+  .rp-sc-a { color:#062616; background:rgba(52,211,153,.9); }   /* 85+  */
+  .rp-sc-b { color:#06210f; background:rgba(132,204,120,.85); } /* 70-84 */
+  .rp-sc-c { color:#2a1c02; background:rgba(245,158,11,.85); }  /* 55-69 */
+  .rp-sc-d { color:#2a0d0d; background:rgba(248,113,113,.9); }  /* <55  */
+  .rp-sc-x { color:var(--ink-dim); background:rgba(255,255,255,.06); } /* no data */
+  .rp-ring-a { background:conic-gradient(var(--good) var(--pct),rgba(255,255,255,.06) 0); }
+  .rp-ring-b { background:conic-gradient(#84cc78 var(--pct),rgba(255,255,255,.06) 0); }
+  .rp-ring-c { background:conic-gradient(var(--warn) var(--pct),rgba(255,255,255,.06) 0); }
+  .rp-ring-d { background:conic-gradient(var(--bad) var(--pct),rgba(255,255,255,.06) 0); }
+  .rp-ring-x { background:conic-gradient(rgba(255,255,255,.14) var(--pct),rgba(255,255,255,.06) 0); }
+  .rp-score::before { content:""; position:absolute; inset:9px; border-radius:50%; background:var(--bg-1); }
+  .rp-score b, .rp-score small { position:relative; z-index:1; }
+  /* Drill-down tree */
+  .rp-tree { display:flex; flex-direction:column; gap:7px; }
+  .rp-node { border:1px solid var(--line); border-radius:12px; background:rgba(255,255,255,.02); overflow:hidden; }
+  .rp-row { display:flex; align-items:center; gap:12px; padding:11px 13px; cursor:pointer; user-select:none; }
+  .rp-row:hover { background:rgba(255,255,255,.04); }
+  .rp-tw { width:14px; flex:0 0 auto; color:var(--ink-dim); font-size:12px; transition:transform .15s; }
+  .rp-tw.open { transform:rotate(90deg); }
+  .rp-nm { flex:1 1 auto; min-width:0; }
+  .rp-nm b { font-size:14px; font-weight:600; display:block; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .rp-nm .rp-sub { font-size:11px; color:var(--ink-dim); }
+  .rp-tag { font-size:10px; letter-spacing:.5px; text-transform:uppercase; color:var(--ink-dim); border:1px solid var(--line);
+    border-radius:6px; padding:1px 6px; flex:0 0 auto; }
+  .rp-mini { display:flex; gap:14px; flex:0 0 auto; }
+  .rp-mini div { text-align:center; }
+  .rp-mini .n { font-family:'Space Grotesk',sans-serif; font-weight:700; font-size:14px; font-variant-numeric:tabular-nums; }
+  .rp-mini .l { font-size:9px; letter-spacing:.4px; text-transform:uppercase; color:var(--ink-dim); }
+  .rp-kids { padding:0 10px 10px 30px; display:flex; flex-direction:column; gap:7px; }
+  .rp-open-rep { color:var(--accent-2); font-size:11px; font-weight:600; flex:0 0 auto; }
+  @media (max-width:640px){ .rp-mini{ display:none; } }
+  /* Recap panel */
+  .rp-recap { margin:2px 10px 12px 30px; border:1px solid var(--line); border-radius:12px; background:rgba(255,255,255,.02); padding:14px 16px; }
+  .rp-recap h4 { font-family:'Space Grotesk',sans-serif; font-size:12px; letter-spacing:.5px; text-transform:uppercase; margin:0 0 8px; color:var(--ink-mid); }
+  .rp-recap h4:not(:first-child) { margin-top:16px; }
+  .rp-recap ul { margin:0; padding-left:2px; list-style:none; display:flex; flex-direction:column; gap:7px; }
+  .rp-recap li { font-size:13px; line-height:1.5; display:flex; gap:9px; }
+  .rp-recap li .ic { flex:0 0 auto; }
+  .rp-recap li b { color:var(--ink); }
+  .rp-recap .muted { color:var(--ink-dim); }
+  .rp-metrics { display:grid; grid-template-columns:repeat(auto-fill,minmax(128px,1fr)); gap:10px; margin-top:10px; }
+  .rp-metric { border:1px solid var(--line); border-radius:10px; padding:9px 11px; background:rgba(255,255,255,.02); }
+  .rp-metric .n { font-family:'Space Grotesk',sans-serif; font-weight:700; font-size:17px; font-variant-numeric:tabular-nums; }
+  .rp-metric .l { font-size:10px; letter-spacing:.3px; text-transform:uppercase; color:var(--ink-dim); margin-top:2px; }
+  .rp-metric .g { font-size:10px; color:var(--ink-dim); margin-top:1px; }
+  .rp-metric.warn { border-color:rgba(245,158,11,.4); } .rp-metric.bad { border-color:rgba(248,113,113,.45); }
+  .rp-metric.good { border-color:rgba(52,211,153,.4); }
+  /* Rep deep-dive overlay */
+  .rp-ov { position:fixed; inset:0; z-index:1200; background:rgba(4,8,16,.72); backdrop-filter:blur(3px);
+    display:flex; align-items:flex-start; justify-content:center; padding:28px 16px; overflow:auto; }
+  .rp-ov-card { width:100%; max-width:820px; background:var(--bg-1); border:1px solid var(--line-hi); border-radius:18px; padding:22px; }
+  .rp-ov-close { float:right; }
+  .rp-print-btn { }
+  @media print { body * { visibility:hidden; } .rp-ov, .rp-ov * { visibility:visible; } .rp-ov { position:absolute; inset:0; background:#fff; }
+    .rp-ov-card { max-width:none; border:0; color:#000; } .rp-noprint { display:none !important; } }
 </style>
 <script src="https://js.stripe.com/v3/"></script>
 </head>
@@ -236,6 +305,7 @@
     <h2 style="margin:0 0 4px;">⚙️ Settings</h2>
     <p class="muted" style="margin:0 0 14px;font-size:13px;">Pick a section to manage it.</p>
     <div class="home-grid">
+      <button class="home-btn" data-card="reportsCard"><span class="hb-ico">📊</span><b>Success Reports</b><small>Production Score &amp; drill-down: company → region → team → rep, with a coaching recap at every level</small></button>
       <button class="home-btn" data-card="usersCard"><span class="hb-ico">👥</span><b>Accounts</b><small>Add people, set setter/closer function &amp; managers, reset passwords</small></button>
       <button class="home-btn" data-card="companySettingsCard"><span class="hb-ico">🛠️</span><b>Company settings</b><small>Company services baseline &amp; company options</small></button>
       <button class="home-btn" data-card="companyProfileCard"><span class="hb-ico">🏢</span><b>Company profile</b><small>Company name, phone, address &amp; email</small></button>
@@ -301,6 +371,24 @@
         <tbody id="thRankings"><tr><td colspan="7" class="th-empty">Loading rankings…</td></tr></tbody>
       </table>
     </div>
+  </section>
+
+  <!-- ── Success Reports: Production Score + company→region→team→rep drill-down ── -->
+  <section id="reportsCard" class="card hidden">
+    <div class="rp-head">
+      <div>
+        <h2 style="margin:0;">📊 Success Reports</h2>
+        <p class="muted" style="margin:2px 0 0;font-size:13px;" id="rpSubtitle">Who's producing, who isn't — and exactly what to do about it.</p>
+      </div>
+      <div class="rp-periods" id="rpPeriods">
+        <button class="pill" data-period="week">This week</button>
+        <button class="pill" data-period="month">This month</button>
+        <button class="pill" data-period="year">This year</button>
+        <button class="pill" data-period="alltime">All-time</button>
+        <button class="btn ghost sm rp-noprint" id="rpRefresh" style="margin-left:4px;">↻</button>
+      </div>
+    </div>
+    <div id="rpBody"><div class="th-empty">Loading reports…</div></div>
   </section>
 
   <!-- Console home: simple button hub to every settings area (super-admin) -->
@@ -374,6 +462,7 @@
     <h2 style="margin:0 0 4px;"><span id="superCompanyHubTitle">Company</span></h2>
     <p class="muted" style="margin:0 0 14px;font-size:13px;">Pick a section to manage it.</p>
     <div class="home-grid">
+      <button class="home-btn" data-card="reportsCard"><span class="hb-ico">📊</span><b>Success Reports</b><small>Production Score &amp; drill-down: company → region → team → rep, with a coaching recap at every level</small></button>
       <button class="home-btn" data-card="usersCard"><span class="hb-ico">👥</span><b>Accounts</b><small>Add people, set function &amp; managers, reset passwords</small></button>
       <button class="home-btn" data-card="teamsCard"><span class="hb-ico">🗂️</span><b>Teams</b><small>Group reps into teams</small></button>
       <button class="home-btn" data-card="companyServicesCard"><span class="hb-ico">🧩</span><b>Services</b><small>Turn tools on/off for this company &amp; set the price override</small></button>
@@ -1534,6 +1623,8 @@ const squareSaveOrgCardAndSubscribe = httpsCallable(fns, "squareSaveOrgCardAndSu
 const markInvoicePaid   = httpsCallable(fns, "markInvoicePaid");
 const getContractPdf    = httpsCallable(fns, "getContractPdf");
 const setCompanyContract = httpsCallable(fns, "setCompanyContract");
+const getCompanyRollup  = httpsCallable(fns, "getCompanyRollup");
+const getEmployeeReport = httpsCallable(fns, "getEmployeeReport");
 
 function banner(el, msg, kind="info") {
   el.className = "banner show " + kind;
@@ -1584,7 +1675,7 @@ function showLogin() {
 }
 // ── Tabs (super-admin) ────────────────────────────────────────────────────
 const TAB_CARDS = {
-  companies: ["companiesCard","companyServicesCard","companyProfileCard","companyBrandingCard","roleServicesCard","schedulingCard","companySettingsCard","batteryPricingCard","crmCompanyCard","rolesCard","teamsCard","rewardsCard","milestonesCard","redemptionsCard","outreachCard","companyBillingCard","usersCard"],
+  companies: ["companiesCard","reportsCard","companyServicesCard","companyProfileCard","companyBrandingCard","roleServicesCard","schedulingCard","companySettingsCard","batteryPricingCard","crmCompanyCard","rolesCard","teamsCard","rewardsCard","milestonesCard","redemptionsCard","outreachCard","companyBillingCard","usersCard"],
   orgs: ["orgsCard"],
   demos: ["demoRequestsCard"],
   payments: ["plansCard","billingCard"],
@@ -1593,7 +1684,7 @@ const TAB_CARDS = {
   apis: ["apiKeysCard","integrationsCard","crmCard"],
   account: ["myAccountCard"],
 };
-const COMPANY_ONLY = new Set(["companyServicesCard","companyProfileCard","companyBrandingCard","roleServicesCard","schedulingCard","companySettingsCard","batteryPricingCard","crmCompanyCard","rolesCard","teamsCard","rewardsCard","milestonesCard","redemptionsCard","outreachCard","companyBillingCard","usersCard"]);
+const COMPANY_ONLY = new Set(["reportsCard","companyServicesCard","companyProfileCard","companyBrandingCard","roleServicesCard","schedulingCard","companySettingsCard","batteryPricingCard","crmCompanyCard","rolesCard","teamsCard","rewardsCard","milestonesCard","redemptionsCard","outreachCard","companyBillingCard","usersCard"]);
 const ALL_TAB_CARDS = Object.values(TAB_CARDS).flat();
 
 function renderTab() {
@@ -1637,6 +1728,7 @@ function openSuperCompanyHub() {
 function openSuperSection(cardId) {
   state.superCompanyView = "section"; state.openSuperSection = cardId;
   renderSuperCompanyView(); window.scrollTo({ top: 0, behavior: "smooth" });
+  if (cardId === "reportsCard") loadReports(state.selectedCompany);
 }
 function backToCompanies() {
   state.superCompanyView = "list"; state.openSuperSection = null; state.selectedCompany = null;
@@ -1686,7 +1778,7 @@ function enterConsole() {
 }
 
 // ── Company-admin view toggle: Town Hall ⇄ Settings ───────────────────────
-const COMPANY_SETTINGS_CARDS = ["schedulingCard","companySettingsCard","companyProfileCard","companyBrandingCard","batteryPricingCard","rolesCard","teamsCard","rewardsCard","milestonesCard","redemptionsCard","outreachCard","companyBillingCard","usersCard"];
+const COMPANY_SETTINGS_CARDS = ["reportsCard","schedulingCard","companySettingsCard","companyProfileCard","companyBrandingCard","batteryPricingCard","rolesCard","teamsCard","rewardsCard","milestonesCard","redemptionsCard","outreachCard","companyBillingCard","usersCard"];
 function hideAllSettingCards() {
   COMPANY_SETTINGS_CARDS.forEach((id) => { const el = $(id); if (el) el.classList.add("hidden"); });
   const tabs = $("companySettingsTabs"); if (tabs) tabs.classList.add("hidden");
@@ -1751,6 +1843,7 @@ function openSetting(cardId) {
   COMPANY_SETTINGS_CARDS.forEach((id) => { const el = $(id); if (el) el.classList.toggle("hidden", id !== cardId); });
   $("settingBackBar").classList.remove("hidden");
   window.scrollTo({ top: 0, behavior: "smooth" });
+  if (cardId === "reportsCard") loadReports(state.selectedCompany);
 }
 $("adminViewToggle").addEventListener("click", (e) => { const t = e.target.closest(".tab"); if (t) showAdminView(t.dataset.view); });
 $("settingsHub").addEventListener("click", (e) => { const b = e.target.closest(".home-btn"); if (b) openSetting(b.dataset.card); });
@@ -1796,6 +1889,323 @@ async function selectCompany(companyId, companyName) {
   populateUserFormSelects();
   loadBilling(companyId, companyName);
 }
+
+// ══════════════════════════════════════════════════════════════════════════
+// ── Success Reports ───────────────────────────────────────────────────────
+// Starts simple (one Production Score for the company) and drills down through
+// region → team → rep, with a rule-based coaching recap at every level that
+// turns straight into a company / region / team / 1:1 meeting.
+//
+// The Production Score (0–100) blends the big levers into one comparable number:
+// door volume, appointments set, sit rate, close rate, closes, and how much of
+// the field conversation is actually being recorded for coaching.
+const RP_TARGETS = { doorsWk: 100, setsWk: 8, closesWk: 2 };  // per active rep, per week
+const RP_GOALS   = { sit: 65, close: 30, rec: 80 };           // quality-rate goals (%)
+const RP_MULT    = { week: 1, month: 4.3, year: 52, alltime: 52 }; // scale weekly targets to the period
+const RP_PLABEL  = { week: "this week", month: "this month", year: "this year", alltime: "all-time" };
+const RP_LEVEL_WORD = { company: "company", region: "regional", team: "team", rep: "1:1" };
+
+function rpStartOf(period) {
+  const d = new Date(); d.setHours(0, 0, 0, 0);
+  if (period === "week") { const day = (d.getDay() + 6) % 7; d.setDate(d.getDate() - day); return d.getTime(); }
+  if (period === "month") { d.setDate(1); return d.getTime(); }
+  if (period === "year") { d.setMonth(0, 1); return d.getTime(); }
+  return 0; // alltime
+}
+function rpClamp(v) { return Math.max(0, Math.min(100, v)); }
+// Weighted, self-normalizing composite. Components with no data drop out and the
+// remaining weights renormalize, so a setter-only team still scores fairly.
+function rpScore(m) {
+  const mult = RP_MULT[state.rpPeriod] || 1;
+  const parts = [];
+  const add = (v, w) => { if (v != null && isFinite(v)) parts.push([rpClamp(v), w]); };
+  const attain = (actual, perRep, reps) => { const t = reps * perRep * mult; return t > 0 ? (actual / t) * 100 : null; };
+  add(attain(m.doors, RP_TARGETS.doorsWk, m.reps), 15);
+  add(attain(m.setterAppts, RP_TARGETS.setsWk, m.reps), 15);
+  add(m.sitRate != null ? (m.sitRate / RP_GOALS.sit) * 100 : null, 20);
+  add(m.closeRate != null ? (m.closeRate / RP_GOALS.close) * 100 : null, 25);
+  add(attain(m.closes, RP_TARGETS.closesWk, m.closerReps || m.reps), 15);
+  add(m.recRate != null ? (m.recRate / RP_GOALS.rec) * 100 : null, 10);
+  if (!parts.length) return null;
+  const wsum = parts.reduce((a, p) => a + p[1], 0);
+  return Math.round(parts.reduce((a, p) => a + p[0] * p[1], 0) / wsum);
+}
+function rpGrade(s) {
+  if (s == null) return { k: "x", label: "No data", word: "Not enough activity this period to score." };
+  if (s >= 85) return { k: "a", label: "A · Elite", word: "Top-tier production." };
+  if (s >= 70) return { k: "b", label: "B · Strong", word: "Solid production with a couple of levers to pull." };
+  if (s >= 55) return { k: "c", label: "C · Building", word: "Producing, but with real gaps to close." };
+  return { k: "d", label: "D · Needs a plan", word: "Underproducing — this needs a game plan now." };
+}
+function rpChip(s) { const g = rpGrade(s); return `<span class="rp-chip rp-sc-${g.k}">${s == null ? "—" : s}</span>`; }
+const rpPct = (v) => (v == null ? "—" : v + "%");
+
+// Walk the rollup tree; attach each node's recorded-conversation rate, idle-rep
+// count and Production Score. pitchByUid = recorded pitches per rep this period.
+function rpAttach(node, pitchByUid, uidMap) {
+  let pc = 0, idle = 0;
+  if (node.type === "user") {
+    pc = pitchByUid[node.id] || 0;
+    if (!(node.doors || 0) && !(node.setterAppts || 0) && !(node.closes || 0)) idle = 1;
+    if (uidMap) uidMap[node.id] = node;
+  } else {
+    const kids = node.regions || node.teams || node.users || [];
+    for (const k of kids) { const r = rpAttach(k, pitchByUid, uidMap); pc += r.pc; idle += r.idle; }
+  }
+  node._pitches = pc;
+  const denom = node.setterPitched || node.setterSits || 0;
+  node.recRate = denom > 0 ? Math.min(100, Math.round((pc / denom) * 100)) : null;
+  node.idleReps = idle;
+  node.score = rpScore(node);
+  return { pc, idle };
+}
+
+// Rule-based recap: strengths, gaps, and a meeting agenda from the metrics.
+function rpRecap(m, level) {
+  const strengths = [], gaps = [], agenda = [];
+  const who = level === "rep" ? "This rep" : "The " + (level === "company" ? "company" : level);
+  // Door volume
+  const dScore = m.reps ? (m.doors / (m.reps * RP_TARGETS.doorsWk * (RP_MULT[state.rpPeriod] || 1))) * 100 : null;
+  if (dScore != null) {
+    if (dScore >= 90) strengths.push(`Door volume is strong — ${Math.round(dScore)}% of the activity target. The top of the funnel is healthy.`);
+    else if (dScore < 60) { gaps.push(`Activity is light — only ${Math.round(dScore)}% of the door target. The pipeline starts at the door and not enough are getting knocked.`); agenda.push("Set a daily door minimum and track it live — the constraint is at the top of the funnel."); }
+  }
+  // Appointments set
+  const sScore = m.reps ? (m.setterAppts / (m.reps * RP_TARGETS.setsWk * (RP_MULT[state.rpPeriod] || 1))) * 100 : null;
+  if (sScore != null && sScore < 60) { gaps.push(`Appointments set are low — ${Math.round(sScore)}% of target (${m.setterAppts} booked). Doors aren't converting into sits-to-be.`); agenda.push("Sharpen the door pitch and the ask — role-play the transition from conversation to booked appointment."); }
+  else if (sScore != null && sScore >= 90) strengths.push(`Setting engine is humming — ${m.setterAppts} appointments booked, ${Math.round(sScore)}% of target.`);
+  // Sit rate
+  if (m.sitRate != null) {
+    if (m.sitRate >= RP_GOALS.sit) strengths.push(`Sit rate is ${m.sitRate}% — at or above the ${RP_GOALS.sit}% goal. Booked appointments are sticking.`);
+    else if (m.sitRate < RP_GOALS.sit * 0.8) { gaps.push(`Sit rate is ${m.sitRate}% vs the ${RP_GOALS.sit}% goal — too many booked appointments never sit.`); agenda.push("Drill confirm-and-remind cadence and set quality: right person, right time, all decision-makers present."); }
+  }
+  // Close rate
+  if (m.closeRate != null) {
+    if (m.closeRate >= RP_GOALS.close) strengths.push(`Close rate is ${m.closeRate}% — beating the ${RP_GOALS.close}% goal. The presentation is converting.`);
+    else if (m.closeRate < RP_GOALS.close * 0.8) { gaps.push(`Close rate is ${m.closeRate}% vs the ${RP_GOALS.close}% goal — sits are happening but not converting. This is a presentation / objection-handling gap.`); agenda.push("Ride-along or role-play the close; review the offer and objection handling on every sat-but-not-closed deal."); }
+  }
+  // Turn-aways (unqualified sits)
+  if (m.closerSits > 4 && m.turnedAways / m.closerSits > 0.25) { gaps.push(`Turn-away rate is high (${Math.round((m.turnedAways / m.closerSits) * 100)}% of sits) — reps are running unqualified appointments.`); agenda.push("Tighten qualification at the set so closers spend time on real opportunities."); }
+  // Recorded conversations — coaching visibility
+  if (m.recRate != null) {
+    if (m.recRate >= RP_GOALS.rec) strengths.push(`${m.recRate}% of conversations are recorded — excellent coaching visibility.`);
+    else { gaps.push(`Only ${m.recRate}% of conversations are recorded (goal ${RP_GOALS.rec}%). Coaching is blind without recorded pitches — you can't fix what you can't hear.`); agenda.push("Make pitch recording non-negotiable and review one recorded pitch per rep every week."); }
+  } else {
+    gaps.push(`No recorded conversations ${RP_PLABEL[state.rpPeriod]} — recording is off, so none of this can be coached from the tape.`);
+    agenda.push("Turn on and enforce pitch recording so performance can actually be reviewed.");
+  }
+  // Idle reps (dead weight) — only for group levels
+  if (level !== "rep" && m.reps > 1 && m.idleReps > 0) {
+    gaps.push(`${m.idleReps} of ${m.reps} reps produced nothing ${RP_PLABEL[state.rpPeriod]} — no doors, no sets, no closes.`);
+    agenda.push(`Address the ${m.idleReps} non-producing rep${m.idleReps > 1 ? "s" : ""} directly: activity plan, ride-along, or a hard conversation.`);
+  }
+  return { strengths, gaps, agenda, who };
+}
+
+function rpMetricClass(v, goal) { if (v == null) return ""; if (v >= goal) return "good"; if (v >= goal * 0.7) return "warn"; return "bad"; }
+function rpMetricTiles(m) {
+  const t = [
+    { n: (m.doors || 0).toLocaleString(), l: "Doors" },
+    { n: m.setterAppts || 0, l: "Appts set" },
+    { n: m.setterSits || 0, l: "Sits" },
+    { n: rpPct(m.sitRate), l: "Sit rate", g: `goal ${RP_GOALS.sit}%`, c: rpMetricClass(m.sitRate, RP_GOALS.sit) },
+    { n: m.setterPitched || 0, l: "Pitched" },
+    { n: m.closes || 0, l: "Closes" },
+    { n: rpPct(m.closeRate), l: "Close rate", g: `goal ${RP_GOALS.close}%`, c: rpMetricClass(m.closeRate, RP_GOALS.close) },
+    { n: m.turnedAways || 0, l: "Turn-aways" },
+    { n: rpPct(m.recRate), l: "% Recorded", g: `${m._pitches || 0} of ${m.setterPitched || m.setterSits || 0} · goal ${RP_GOALS.rec}%`, c: rpMetricClass(m.recRate, RP_GOALS.rec) },
+    { n: m.score == null ? "—" : m.score, l: "Production", g: rpGrade(m.score).label },
+  ];
+  return `<div class="rp-metrics">${t.map((x) =>
+    `<div class="rp-metric ${x.c || ""}"><div class="n">${x.n}</div><div class="l">${x.l}</div>${x.g ? `<div class="g">${x.g}</div>` : ""}</div>`).join("")}</div>`;
+}
+function rpRecapHtml(m, level) {
+  const r = rpRecap(m, level);
+  const list = (arr, ic) => arr.length ? `<ul>${arr.map((x) => `<li><span class="ic">${ic}</span><span>${esc(x)}</span></li>`).join("")}</ul>` : `<p class="muted small" style="margin:0;">Nothing flagged.</p>`;
+  let html = "";
+  if (r.strengths.length) html += `<h4>✅ What's working</h4>${list(r.strengths, "✅")}`;
+  html += `<h4>⚠️ What's missing</h4>${r.gaps.length ? list(r.gaps, "⚠️") : `<p class="muted small" style="margin:0;">No red flags — solid across the board.</p>`}`;
+  const agenda = r.agenda.length ? r.agenda : ["Recognize the wins publicly and have top performers share exactly what's working so it spreads."];
+  html += `<h4>📋 Turn this into a ${RP_LEVEL_WORD[level]} meeting</h4>${list(agenda, "→")}`;
+  html += rpMetricTiles(m);
+  return html;
+}
+
+// One collapsible node in the drill-down tree.
+function rpNodeHtml(node) {
+  const key = node.type + ":" + (node.id || "");
+  const open = state.rpOpen.has(key);
+  const tag = { region: "Region", team: "Team", company: "Company" }[node.type] || "";
+  const isUser = node.type === "user";
+  const kids = node.regions || node.teams || node.users || [];
+  const mini = `<div class="rp-mini">
+      <div><div class="n">${(node.doors || 0).toLocaleString()}</div><div class="l">Doors</div></div>
+      <div><div class="n">${node.setterAppts || 0}</div><div class="l">Appts</div></div>
+      <div><div class="n">${rpPct(node.sitRate)}</div><div class="l">Sit</div></div>
+      <div><div class="n">${rpPct(node.closeRate)}</div><div class="l">Close</div></div>
+    </div>`;
+  if (isUser) {
+    const roleTag = node.isCloser ? "Closer" : "Setter";
+    return `<div class="rp-node"><div class="rp-row" data-uid="${esc(node.id)}">
+        <span class="rp-tw">👤</span>
+        <div class="rp-nm"><b>${esc(node.name)}</b><span class="rp-sub">${roleTag}${node.idleReps ? " · idle this period" : ""}</span></div>
+        <span class="rp-tag">${roleTag}</span>${mini}${rpChip(node.score)}
+        <span class="rp-open-rep">View rep →</span>
+      </div></div>`;
+  }
+  const sub = node.type === "company"
+    ? `${node.reps} rep${node.reps === 1 ? "" : "s"}`
+    : `${(node.type === "region" ? (node.teams || []).length + " team" + ((node.teams || []).length === 1 ? "" : "s") : (node.users || []).length + " rep" + ((node.users || []).length === 1 ? "" : "s"))}`;
+  let inner = "";
+  if (open) {
+    inner = `<div class="rp-kids"><div class="rp-recap">${rpRecapHtml(node, node.type)}</div>${kids.map(rpNodeHtml).join("") || `<p class="muted small">No sub-groups.</p>`}</div>`;
+  }
+  return `<div class="rp-node"><div class="rp-row" data-key="${esc(key)}">
+      <span class="rp-tw ${open ? "open" : ""}">▶</span>
+      <div class="rp-nm"><b>${esc(node.name)}</b><span class="rp-sub">${tag} · ${sub}</span></div>
+      <span class="rp-tag">${tag}</span>${mini}${rpChip(node.score)}
+    </div>${inner}</div>`;
+}
+
+function rpRender() {
+  const box = $("rpBody");
+  const co = state.rpTree;
+  if (!co) { box.innerHTML = `<div class="th-empty">No data.</div>`; return; }
+  const g = rpGrade(co.score);
+  const period = state.rpPeriod;
+  const scoped = state.rpScoped ? " · your downline only" : "";
+  const regions = co.regions || [];
+  box.innerHTML = `
+    <div class="rp-hero" style="margin-bottom:14px;">
+      <div class="rp-score rp-ring-${g.k}" style="--pct:${co.score || 0}%;"><b>${co.score == null ? "—" : co.score}</b><small>Score</small></div>
+      <div class="rp-hero-meta">
+        <h3>${esc(co.name)}</h3>
+        <span class="rp-grade rp-sc-${g.k}">${g.label}</span>
+        <p class="muted" style="margin:6px 0 0;font-size:13px;">${g.word}</p>
+        <div class="muted small" style="margin-top:4px;">${co.reps} active rep${co.reps === 1 ? "" : "s"} · ${RP_PLABEL[period]}${scoped}${co.idleReps ? ` · ${co.idleReps} not producing` : ""}</div>
+      </div>
+    </div>
+    <div class="rp-recap" style="margin:0 0 16px;">${rpRecapHtml(co, "company")}</div>
+    <h2 style="margin:18px 0 10px;">Drill down · region → team → rep</h2>
+    <p class="muted" style="margin:0 0 12px;font-size:12px;">Tap any level to expand its game plan and go deeper. Tap a rep to open their full report.</p>
+    <div class="rp-tree">${regions.length ? regions.map(rpNodeHtml).join("") : `<div class="th-empty">No regions or teams set up yet — add teams in the Teams section to unlock the drill-down.</div>`}</div>`;
+}
+
+async function loadReports(companyId) {
+  companyId = companyId || state.selectedCompany;
+  if (!companyId) { $("rpBody").innerHTML = `<div class="th-empty">Select a company first.</div>`; return; }
+  state.rpCompany = companyId;
+  state.rpPeriod = state.rpPeriod || "week";
+  state.rpOpen = state.rpOpen || new Set();
+  document.querySelectorAll("#rpPeriods .pill").forEach((b) => b.classList.toggle("active", b.dataset.period === state.rpPeriod));
+  $("rpBody").innerHTML = `<div class="th-empty">Crunching the numbers…</div>`;
+  try {
+    const start = rpStartOf(state.rpPeriod);
+    // Rollup tree + recorded-pitch counts run in parallel. Pitches power the
+    // "% of conversations recorded" metric; we count per rep for this period.
+    const [rollupRes, pitchDocs] = await Promise.all([
+      getCompanyRollup({ companyId, period: state.rpPeriod }),
+      (async () => {
+        try {
+          const q = start > 0
+            ? query(collection(db, "pitches"), where("companyId", "==", companyId), where("createdAt", ">=", start))
+            : query(collection(db, "pitches"), where("companyId", "==", companyId));
+          return (await getDocs(q)).docs;
+        } catch (err) {
+          console.warn("reports: pitches index missing, using company-wide fallback", err);
+          return (await getDocs(query(collection(db, "pitches"), where("companyId", "==", companyId)))).docs;
+        }
+      })(),
+    ]);
+    const pitchByUid = {};
+    pitchDocs.forEach((d) => {
+      const p = d.data();
+      if (start > 0 && (p.createdAt || 0) < start) return;
+      const uid = p.uid || p.repUid;
+      if (uid) pitchByUid[uid] = (pitchByUid[uid] || 0) + 1;
+    });
+    const data = rollupRes.data;
+    const uidMap = {};
+    rpAttach(data.company, pitchByUid, uidMap);
+    state.rpTree = data.company;
+    state.rpNodesByUid = uidMap;
+    state.rpScoped = data.scopedToDownline === true;
+    rpRender();
+  } catch (e) {
+    $("rpBody").innerHTML = `<div class="th-empty">Couldn't load reports: ${esc(e.message || "unknown error")}</div>`;
+  }
+}
+
+// Rep deep-dive overlay — pulls the full employee report and pairs it with the
+// same Production Score + recap engine used in the tree.
+async function openRepReport(uid) {
+  const node = (state.rpNodesByUid || {})[uid];
+  const ov = document.createElement("div");
+  ov.className = "rp-ov";
+  ov.innerHTML = `<div class="rp-ov-card"><div class="th-empty">Loading rep report…</div></div>`;
+  document.body.appendChild(ov);
+  const close = () => { ov.remove(); document.removeEventListener("keydown", onKey); };
+  const onKey = (e) => { if (e.key === "Escape") close(); };
+  document.addEventListener("keydown", onKey);
+  ov.addEventListener("click", (e) => { if (e.target === ov) close(); });
+  try {
+    const res = await getEmployeeReport({ repUid: uid });
+    const r = res.data;
+    const m = node || {};
+    const g = rpGrade(m.score);
+    const sm = r.sitMetrics || {};
+    const pitches = r.pitches || { count: 0 };
+    const recAllTime = sm.sits ? Math.min(100, Math.round((pitches.count / sm.sits) * 100)) : null;
+    const pitchLine = (p, lbl, field) => p ? `<div class="rp-metric"><div class="n">${p.score == null ? "—" : p.score}</div><div class="l">${lbl} pitch</div><div class="g">${esc((p[field] || p.address || "").slice(0, 60)) || "—"}</div></div>` : "";
+    const recap = rpRecapHtml(m, "rep");
+    ov.querySelector(".rp-ov-card").innerHTML = `
+      <button class="btn ghost sm rp-ov-close rp-noprint" id="rpOvClose">✕ Close</button>
+      <button class="btn ghost sm rp-noprint" id="rpOvPrint" style="float:right;margin-right:8px;">🖨 Print / PDF</button>
+      <div class="rp-hero" style="margin-bottom:14px;clear:both;padding-top:6px;">
+        <div class="rp-score rp-ring-${g.k}" style="--pct:${m.score || 0}%;"><b>${m.score == null ? "—" : m.score}</b><small>Score</small></div>
+        <div class="rp-hero-meta">
+          <h3>${esc(r.rep.displayName || r.rep.email || "Rep")}</h3>
+          <span class="rp-grade rp-sc-${g.k}">${g.label}</span>
+          <p class="muted" style="margin:6px 0 0;font-size:13px;">${esc(r.rep.title || (sm.isCloser ? "Closer" : "Setter"))} · ${RP_PLABEL[state.rpPeriod]}</p>
+          <div class="muted small" style="margin-top:4px;">Lifetime: ${r.lifetime.doors.toLocaleString()} doors · ${r.lifetime.appts} appts · ${r.lifetime.sold} sold · ${r.shiftHours.week}h on shift this week</div>
+        </div>
+      </div>
+      <div class="rp-recap" style="margin:0 0 14px;">${recap}</div>
+      <div class="rp-recap" style="margin:0;">
+        <h4>🎙 Recorded conversations (all-time)</h4>
+        <div class="rp-metrics">
+          <div class="rp-metric"><div class="n">${pitches.count}</div><div class="l">Pitches recorded</div></div>
+          <div class="rp-metric ${rpMetricClass(recAllTime, RP_GOALS.rec)}"><div class="n">${rpPct(recAllTime)}</div><div class="l">% of sits recorded</div><div class="g">${pitches.count} of ${sm.sits || 0} sits</div></div>
+          ${pitchLine(pitches.best, "Best", "highlight")}
+          ${pitchLine(pitches.worst, "Needs work", "lowlight")}
+        </div>
+        ${pitches.best && pitches.best.highlight ? `<p class="muted small" style="margin:10px 0 0;"><b>Best pitch highlight:</b> ${esc(pitches.best.highlight)}</p>` : ""}
+        ${pitches.worst && pitches.worst.lowlight ? `<p class="muted small" style="margin:6px 0 0;"><b>Coaching note:</b> ${esc(pitches.worst.lowlight)}</p>` : ""}
+      </div>`;
+    ov.querySelector("#rpOvClose").addEventListener("click", close);
+    ov.querySelector("#rpOvPrint").addEventListener("click", () => window.print());
+  } catch (e) {
+    ov.querySelector(".rp-ov-card").innerHTML = `<button class="btn ghost sm" id="rpOvClose">✕ Close</button><div class="th-empty">Couldn't load this rep: ${esc(e.message || "error")}</div>`;
+    const c = ov.querySelector("#rpOvClose"); if (c) c.addEventListener("click", close);
+  }
+}
+
+// Reports wiring: period switch, refresh, tree expand/collapse, rep open.
+$("rpPeriods").addEventListener("click", (e) => {
+  const b = e.target.closest(".pill"); if (!b) return;
+  state.rpPeriod = b.dataset.period; loadReports(state.rpCompany);
+});
+$("rpRefresh").addEventListener("click", () => loadReports(state.rpCompany));
+$("rpBody").addEventListener("click", (e) => {
+  const rep = e.target.closest(".rp-row[data-uid]");
+  if (rep) { openRepReport(rep.dataset.uid); return; }
+  const row = e.target.closest(".rp-row[data-key]");
+  if (row) {
+    const key = row.dataset.key;
+    if (state.rpOpen.has(key)) state.rpOpen.delete(key); else state.rpOpen.add(key);
+    rpRender();
+  }
+});
 
 // ── Town Hall (company owner's at-a-glance dashboard) ─────────────────────
 // A "conversation" is any door that turned into a real interaction (mirrors the
