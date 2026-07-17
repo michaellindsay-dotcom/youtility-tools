@@ -1911,6 +1911,30 @@ body.modal-open .chat-fab-global { display: none; }
 .map-save-panel .field { margin-bottom: 10px; }
 .map-save-panel .row.end { display: flex; justify-content: flex-end; gap: 8px; margin-top: 4px; }
 
+/* Map facing-direction indicator — shows N/NE/E/… at the top while the map is
+   rotated off true north (leaflet-rotate). Tap to snap back to north. */
+.map-heading {
+  position: absolute;
+  top: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 1200;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 11px;
+  border-radius: 999px;
+  background: rgba(10, 15, 26, 0.82);
+  border: 1px solid #2a3a55;
+  color: #e6eef8;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.4);
+}
+.map-heading-needle { color: #ef4444; font-size: 14px; line-height: 1; display: inline-block; }
+.map-heading-dir { min-width: 1.6em; text-align: left; }
+
 /* "Your shift ended for inactivity — start a new one?" prompt, shown when the
    rep is active again after a 30-min idle auto-end. Sits above the map chrome. */
 .shift-resume-toast {
