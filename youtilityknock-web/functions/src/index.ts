@@ -6493,16 +6493,33 @@ export const addressAutocomplete = onCall(async (request) => {
   await refreshApiConfig();
   if (!GMAPS.key) return { predictions: [] as string[] };
   try {
+    // Preferred: Google Places Autocomplete. This needs the *Places API* enabled
+    // on the key (separate from the Geocoding API the map's "Go"/reverse-geocode
+    // already use) — if it isn't, Google returns REQUEST_DENIED and no
+    // predictions, which is the usual reason the box shows nothing.
     const u = `https://maps.googleapis.com/maps/api/place/autocomplete/json?input=${encodeURIComponent(q)}&types=address&components=country:us&key=${GMAPS.key}`;
     const g: any = await (await fetch(u)).json();
-    const predictions = (g?.predictions || [])
+    if (g?.status && g.status !== "OK" && g.status !== "ZERO_RESULTS") {
+      logger.warn(`addressAutocomplete: Places status=${g.status}`, g?.error_message || "");
+    }
+    let predictions = (g?.predictions || [])
       .map((p: any) => String(p?.description || ""))
       .filter(Boolean)
       .slice(0, 5);
-    return { predictions };
+    // Fallback: if Places returned nothing (or is disabled on the key), derive
+    // suggestions from the Geocoding API — which is already enabled — so the box
+    // still helps even without the Places API turned on.
+    if (predictions.length === 0) {
+      const gu = `https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(q)}&components=country:US&key=${GMAPS.key}`;
+      const gc: any = await (await fetch(gu)).json();
+      predictions = Array.from(new Set(
+        (gc?.results || []).map((r: any) => String(r?.formatted_address || "")).filter(Boolean),
+      )).slice(0, 5) as string[];
+    }
+    return { predictions, status: String(g?.status || "") };
   } catch (e) {
     logger.warn("addressAutocomplete failed", e);
-    return { predictions: [] as string[] };
+    return { predictions: [] as string[], status: "ERROR" };
   }
 });
 
