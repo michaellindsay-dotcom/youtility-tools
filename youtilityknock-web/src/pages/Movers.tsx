@@ -83,7 +83,14 @@ export default function MoversPage() {
       setCount(n);
       setStatus(n ? `${n} move-in${n === 1 ? "" : "s"} in the last ${MOVER_DAYS} days` : `No move-ins in the last ${MOVER_DAYS} days here`);
     } catch (e: any) {
-      setStatus("Could not load movers: " + (e?.message || ""));
+      // The property-data provider occasionally rejects auth / is down
+      // (PROVIDER_AUTH / 5xx). Show a friendly note instead of a raw JSON dump.
+      const msg = String(e?.message || "");
+      setStatus(
+        /PROVIDER_AUTH|temporarily unavailable|50\d/.test(msg)
+          ? "Move-in data is temporarily unavailable — try again in a bit."
+          : "Couldn't load move-ins right now."
+      );
     } finally {
       setLoading(false);
     }
