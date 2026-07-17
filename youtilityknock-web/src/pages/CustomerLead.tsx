@@ -10,10 +10,19 @@ import { APPT_LABEL, APPT_COLOR, isDispositioned } from "../lib/closerDispositio
 import DispositionModal, { type DispoInput } from "../components/DispositionModal";
 import CloserDispositionModal from "../components/CloserDispositionModal";
 import EditLeadModal from "../components/EditLeadModal";
+import SolarProposalShow from "./SolarProposalShow";
 import type { Lead, LeadHistoryEntry, ScheduleEvent } from "../types";
 
 interface PitchRow { id: string; createdAt: number; status: string; score: number | null; feedback: string; audioPath?: string; address?: string }
-interface ProposalRow { id: string; createdAt: number; status?: string; address?: string; pdfUrl?: string; systemKw?: number }
+interface ProposalRow {
+  id: string; createdAt: number; status?: string; address?: string; pdfUrl?: string; systemKw?: number;
+  // Full viewer payload (new saves) so it can be reopened exactly; older docs
+  // fall back to the stored recommendation/roi.
+  payload?: Record<string, unknown>;
+  recommendation?: Record<string, unknown>;
+  roi?: Record<string, unknown> | null;
+  incentives?: unknown[];
+}
 
 const fmt = (ms: number) => new Date(ms).toLocaleString([], { weekday: "short", month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit" });
 const summarize = (e?: Lead["enrichment"]) => !e ? "" : [
@@ -25,8 +34,10 @@ const summarize = (e?: Lead["enrichment"]) => !e ? "" : [
 export default function CustomerLead() {
   const { leadId } = useParams();
   const navigate = useNavigate();
-  const { profile, role } = useAuth();
+  const { profile, role, company } = useAuth();
   const [lead, setLead] = useState<Lead | null>(null);
+  // A saved proposal opened (double-clicked) from the Proposals list.
+  const [openProposal, setOpenProposal] = useState<Record<string, unknown> | null>(null);
   const [events, setEvents] = useState<ScheduleEvent[]>([]);
   const [pitches, setPitches] = useState<PitchRow[]>([]);
   const [proposals, setProposals] = useState<ProposalRow[]>([]);
@@ -130,6 +141,20 @@ export default function CustomerLead() {
     (lead?.history || []).forEach((h) => { if (h.photoHomeUrl) urls.add(h.photoHomeUrl); if (h.photoBillUrl) urls.add(h.photoBillUrl); });
     return [...urls];
   }, [lead]);
+
+  // Pull a saved proposal back up in the interactive viewer. New saves carry the
+  // full viewer payload; older ones fall back to the stored recommendation/roi.
+  function openSavedProposal(p: ProposalRow) {
+    if (p.payload && typeof p.payload === "object") { setOpenProposal(p.payload); return; }
+    setOpenProposal({
+      customerName: lead?.ownerName || undefined,
+      address: lead?.address || undefined,
+      companyName: company?.name,
+      recommendation: p.recommendation || undefined,
+      roi: p.roi ?? null,
+      incentives: Array.isArray(p.incentives) ? p.incentives : [],
+    });
+  }
 
   const dispoTarget: DispoInput | null = lead ? {
     leadId: lead.id, address: lead.address, lat: lead.lat, lng: lead.lng, status: lead.status,
@@ -319,15 +344,25 @@ export default function CustomerLead() {
       {proposals.length > 0 && (
         <>
           <h2 className="section-h">📄 Proposals <span className="muted small">({proposals.length})</span></h2>
+          <div className="muted small" style={{ marginTop: -6, marginBottom: 8 }}>Double-tap a proposal to pull it back up.</div>
           <div className="cust-timeline">
             {[...proposals].sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0)).map((p) => (
-              <div className="cust-tl-row card" key={p.id}>
+              <div
+                className="cust-tl-row card"
+                key={p.id}
+                style={{ cursor: "pointer" }}
+                onDoubleClick={() => openSavedProposal(p)}
+                title="Double-tap to open this proposal"
+              >
                 <div style={{ flex: 1 }} className="row between">
                   <div>
                     <strong>{p.systemKw ? `${p.systemKw} kW system` : "Proposal"}</strong>
                     <div className="muted small">{p.createdAt ? fmt(p.createdAt) : ""}{p.status ? ` · ${p.status}` : ""}</div>
                   </div>
-                  {p.pdfUrl && <a className="btn ghost sm" href={p.pdfUrl} target="_blank" rel="noreferrer">Open PDF ↗</a>}
+                  <div className="row" style={{ gap: 8 }}>
+                    <button className="btn ghost sm" onClick={() => openSavedProposal(p)}>▶ Open</button>
+                    {p.pdfUrl && <a className="btn ghost sm" href={p.pdfUrl} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()}>PDF ↗</a>}
+                  </div>
                 </div>
               </div>
             ))}
@@ -353,6 +388,10 @@ export default function CustomerLead() {
       />
 
       {editOpen && <EditLeadModal lead={lead} onClose={() => setEditOpen(false)} />}
+
+      {openProposal && (
+        <SolarProposalShow open onClose={() => setOpenProposal(null)} {...(openProposal as Record<string, never>)} />
+      )}
     </div>
   );
 }
