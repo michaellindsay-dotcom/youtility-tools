@@ -6487,17 +6487,20 @@ export const geocodeAddress = onCall(async (request) => {
 // the rep picks. Key stays server-side.
 export const addressAutocomplete = onCall(async (request) => {
   await getCaller(request);
-  const { input } = (request.data || {}) as { input?: string };
+  const { input, types } = (request.data || {}) as { input?: string; types?: string };
   const q = String(input || "").trim();
   if (q.length < 3) return { predictions: [] as string[] };
   await refreshApiConfig();
   if (!GMAPS.key) return { predictions: [] as string[] };
+  // "address" (default) = street addresses only, for the pin search. "geocode"
+  // = addresses + cities + ZIP codes, for the market-recommendations search.
+  const t = types === "geocode" ? "geocode" : "address";
   try {
     // Preferred: Google Places Autocomplete. This needs the *Places API* enabled
     // on the key (separate from the Geocoding API the map's "Go"/reverse-geocode
     // already use) — if it isn't, Google returns REQUEST_DENIED and no
     // predictions, which is the usual reason the box shows nothing.
-    const u = `https://maps.googleapis.com/maps/api/place/autocomplete/json?input=${encodeURIComponent(q)}&types=address&components=country:us&key=${GMAPS.key}`;
+    const u = `https://maps.googleapis.com/maps/api/place/autocomplete/json?input=${encodeURIComponent(q)}&types=${t}&components=country:us&key=${GMAPS.key}`;
     const g: any = await (await fetch(u)).json();
     if (g?.status && g.status !== "OK" && g.status !== "ZERO_RESULTS") {
       logger.warn(`addressAutocomplete: Places status=${g.status}`, g?.error_message || "");
