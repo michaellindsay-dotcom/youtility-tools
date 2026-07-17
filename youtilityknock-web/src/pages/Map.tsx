@@ -5,6 +5,7 @@ import "leaflet/dist/leaflet.css";
 import "leaflet.markercluster";
 import "leaflet.markercluster/dist/MarkerCluster.css";
 import "leaflet.markercluster/dist/MarkerCluster.Default.css";
+import "leaflet-rotate"; // adds map rotation (2-finger twist) + setBearing/getBearing
 import { initials, avatarColor } from "../lib/points";
 import { addDoc, collection, doc, getDocs, onSnapshot, query, setDoc, where } from "firebase/firestore";
 import { httpsCallable } from "firebase/functions";
@@ -63,6 +64,13 @@ function validCoord(lat: unknown, lng: unknown): [number, number] | null {
 // feed) can be snapped onto the exact home/lead pin at the same address.
 function normAddr(addr?: string): string {
   return (addr || "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+}
+
+// 8-point compass label for the direction at the TOP of the (rotated) map.
+const COMPASS_8 = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"];
+function compassLabel(headingDeg: number): string {
+  const d = ((headingDeg % 360) + 360) % 360;
+  return COMPASS_8[Math.round(d / 45) % 8];
 }
 
 function inPolygon(pt: LatLng, poly: LatLng[]): boolean {
@@ -137,12 +145,11 @@ export default function MapPage() {
   // online right now, shown at their last-published GPS position.
   const [showTeam, setShowTeam] = useState(false);
   const [teamCount, setTeamCount] = useState(0);
-  // Follow mode: when ON (compass button), the map recenters on the rep's live
-  // location as they move. OFF (default) lets them pan/zoom freely. The ref lets
-  // the geolocation watch read the current toggle without re-subscribing.
-  const [following, setFollowing] = useState(false);
-  const followRef = useRef(false);
-  followRef.current = following;
+  // Map rotation: the compass button snaps to the rep's location + true north
+  // (bearing 0); between taps they can 2-finger twist to face any direction and
+  // one-finger drag to pan. `bearing` (deg, 0 = north up) drives the on-screen
+  // compass indicator; it is NOT a follow lock.
+  const [bearing, setBearing] = useState(0);
   const [dispoTarget, setDispoTarget] = useState<DispoInput | null>(null);
 
   // Pin filters — narrow the lead pins by the date they were worked and/or by
@@ -649,13 +656,13 @@ export default function MapPage() {
     map.setView([loc.lat, loc.lng], Math.max(map.getZoom(), 18), { animate: true });
   }
 
-  // Compass button: jump to the rep's exact location and follow them until they
-  // tap it again. While off, the map stays wherever they panned/zoomed.
-  async function toggleFollow() {
-    const next = !following;
-    setFollowing(next);
-    followRef.current = next;
-    if (next) await recenterToMe();
+  // Compass button: snap to the rep's exact location and reset to true north.
+  // Not a lock — afterward they can 2-finger twist to face any direction and
+  // one-finger pan; tapping again re-centers and re-norths.
+  async function goToMeAndNorth() {
+    const map = mapRef.current;
+    if (map) { try { map.setBearing(0); } catch { /* rotation unavailable */ } }
+    await recenterToMe();
   }
 
   function setYou(lat: number, lng: number) {
@@ -692,9 +699,6 @@ export default function MapPage() {
         const lat = pos.coords.latitude, lng = pos.coords.longitude;
         myLoc.current = { lat, lng };
         setYou(lat, lng);
-        const map = mapRef.current;
-        if (followRef.current && map && map.getCenter().distanceTo(L.latLng(lat, lng)) > 12)
-          map.panTo([lat, lng], { animate: true });
       });
     } catch {
       /* location unavailable — map just won't follow */
@@ -770,7 +774,15 @@ export default function MapPage() {
       maxZoom: MAX_ZOOM, maxNativeZoom: 19, attribution: "© OpenStreetMap",
     });
 
-    const map = L.map(elRef.current, { center: DEFAULT_CENTER, zoom: 14, maxZoom: MAX_ZOOM, layers: [gSat], zoomControl: false });
+    const map = L.map(elRef.current, {
+      center: DEFAULT_CENTER, zoom: 14, maxZoom: MAX_ZOOM, layers: [gSat], zoomControl: false,
+      // Rotation (leaflet-rotate): 2-finger twist changes the facing direction;
+      // one finger still pans. Starts at true north (bearing 0), no built-in
+      // control (we drive it from the compass button + a heading indicator).
+      rotate: true, touchRotate: true, rotateControl: false, bearing: 0,
+    });
+    // Mirror the map's bearing into React so the heading indicator updates live.
+    map.on("rotate", () => { try { setBearing(map.getBearing()); } catch { /* no-op */ } });
     L.control.zoom({ position: "topright" }).addTo(map);
     L.control.layers({ "Google satellite": gSat, "Esri satellite": hybrid, Street: street }, undefined, { position: "topright" }).addTo(map);
     territoryLayer.current.addTo(map);
@@ -1004,12 +1016,13 @@ export default function MapPage() {
         <button className="map-fab" onClick={refresh} disabled={loadingHomes} aria-label="Refresh homes" title="Refresh homes & movers">
           {loadingHomes ? "…" : "⟳"}
         </button>
-        {/* Compass: jump to my exact location and follow me until tapped again. */}
+        {/* Compass: snap to my exact location + true north. 2-finger twist to
+            face any direction; tap again to re-center & re-north. */}
         <button
-          className={"map-fab" + (following ? " active" : "")}
-          onClick={toggleFollow}
-          aria-label={following ? "Stop following my location" : "Go to my location"}
-          title={following ? "Following you — tap to stop" : "Go to my location & follow"}
+          className="map-fab"
+          onClick={() => void goToMeAndNorth()}
+          aria-label="Go to my location and face north"
+          title="Go to my location & true north (twist with two fingers to rotate)"
         >
           🧭
         </button>
@@ -1045,6 +1058,21 @@ export default function MapPage() {
           </button>
         )}
       </div>
+
+      {/* Heading indicator — appears once the map is twisted off true north so
+          the rep knows which way the map is facing. Tap it to snap back to N. */}
+      {Math.round(((bearing % 360) + 360) % 360) !== 0 && (
+        <button
+          type="button"
+          className="map-heading"
+          onClick={() => { const m = mapRef.current; if (m) { try { m.setBearing(0); } catch { /* no-op */ } } }}
+          title="Facing direction — tap to reset to north"
+          aria-label="Map facing direction — tap to reset to north"
+        >
+          <span className="map-heading-needle" style={{ transform: `rotate(${bearing}deg)` }}>▲</span>
+          <span className="map-heading-dir">{compassLabel((360 - bearing))}</span>
+        </button>
+      )}
 
       {/* Top-center: status pill */}
       {status && <div className="map-status-pill">{status}</div>}
