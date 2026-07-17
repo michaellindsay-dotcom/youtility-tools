@@ -1911,6 +1911,29 @@ body.modal-open .chat-fab-global { display: none; }
 .map-save-panel .field { margin-bottom: 10px; }
 .map-save-panel .row.end { display: flex; justify-content: flex-end; gap: 8px; margin-top: 4px; }
 
+/* "Your shift ended for inactivity — start a new one?" prompt, shown when the
+   rep is active again after a 30-min idle auto-end. Sits above the map chrome. */
+.shift-resume-toast {
+  position: fixed;
+  left: 50%;
+  transform: translateX(-50%);
+  top: calc(env(safe-area-inset-top) + 64px);
+  z-index: 2600;
+  max-width: min(92vw, 460px);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: #14233b;
+  border: 1px solid #2a3a55;
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.5);
+  color: #e6eef8;
+  font-size: 14px;
+}
+
 /* Long-press to look up a home: stop iOS from popping its image "callout"
    menu on a press-and-hold over the map tiles, which would eat the gesture. */
 .leaflet-container { -webkit-touch-callout: none; }
