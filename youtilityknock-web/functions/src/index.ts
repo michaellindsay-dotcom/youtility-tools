@@ -5712,7 +5712,7 @@ export const emailIncentivesToHomeowner = onCall(async (request) => {
 // HTML summary fallback.
 export const emailProposalToHomeowner = onCall(async (request) => {
   const caller = await getCaller(request);
-  const d = (request.data || {}) as { to?: string; payload?: Record<string, any> };
+  const d = (request.data || {}) as { to?: string; payload?: Record<string, any>; leadId?: string };
   if (!d.to || !/.+@.+\..+/.test(d.to)) throw new HttpsError("invalid-argument", "A valid homeowner email is required.");
   const payload: Record<string, any> = { ...(d.payload || {}) };
   // A home-photo data URI can be hundreds of KB — drop it so the saved doc stays
@@ -5725,6 +5725,9 @@ export const emailProposalToHomeowner = onCall(async (request) => {
     closerUid: caller.uid, createdAt: Date.now(),
   });
   const url = `${APP_URL}/app/?pid=${id}`;
+  // Save the proposal to the homeowner's history so it can be reopened for a
+  // follow-up or sale (a reopenable ?pid= link on their customer page).
+  await appendProposalToLeadHistory(caller, d.leadId, id, url, payload).catch((e) => logger.warn("proposal→lead history failed", e));
 
   const money = (n: any) => (typeof n === "number" && isFinite(n) ? `$${Math.round(n).toLocaleString()}` : "—");
   const rec = payload.recommendation as any;
@@ -5772,8 +5775,40 @@ export const emailProposalToHomeowner = onCall(async (request) => {
   const cfg = await getNotifyConfig();
   const r = await sendEmailDetailed(cfg, d.to, subject, text, undefined, html);
   if (!r.ok) throw new HttpsError("failed-precondition", r.detail);
-  return { ok: true, url };
+  return { ok: true, url, pid: id };
 });
+
+// Append a "proposal created" entry to a lead's history timeline so the rep can
+// reopen it from the homeowner's customer page in a follow-up or sale. Verifies
+// the lead is in the caller's company; a failure never blocks the proposal.
+async function appendProposalToLeadHistory(
+  caller: { uid: string; companyId?: string | null; isSuper?: boolean },
+  leadId: string | undefined,
+  pid: string,
+  url: string,
+  payload: Record<string, any>,
+): Promise<void> {
+  const lid = String(leadId || "").trim();
+  if (!lid) return;
+  const snap = await db.doc(`leads/${lid}`).get();
+  if (!snap.exists) return;
+  const lead = snap.data() as any;
+  if (!caller.isSuper && lead.companyId && lead.companyId !== caller.companyId) return;
+  const rec = payload.recommendation as any;
+  const label = rec ? `${rec.units}× ${rec.brand} ${rec.model}` : "battery system";
+  let byName: string | null = null;
+  try { byName = ((await db.doc(`users/${caller.uid}`).get()).data() as any)?.displayName || null; } catch { /* best effort */ }
+  const entry = {
+    at: Date.now(),
+    kind: "proposal",
+    notes: `Battery proposal created — ${label}`,
+    byUid: caller.uid,
+    byName,
+    proposalPid: pid,
+    proposalUrl: url,
+  };
+  await db.doc(`leads/${lid}`).set({ history: FieldValue.arrayUnion(entry), updatedAt: Date.now() }, { merge: true });
+}
 
 // Public (no auth): fetch a shared proposal payload by its unguessable id so the
 // homeowner can open the interactive proposal from the emailed link.
