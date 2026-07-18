@@ -4122,7 +4122,7 @@ export const companyFunnelRankings = onCall(async (request) => {
 // free. Windowed by when it was SET (createdAt). Sit % denominator = sits +
 // no-shows (turn-aways and closer-no-shows excluded). Keyed by uid for the
 // setter and, separately, the closer.
-async function computeApptMetrics(companyId: string, startMs: number): Promise<{
+async function computeApptMetrics(companyId: string, startMs: number, endMs: number = Number.MAX_SAFE_INTEGER): Promise<{
   setters: Record<string, { appts: number; sits: number; pitched: number; noShow: number; upcoming: number; undispositioned: number; other: number }>;
   closers: Record<string, { appts: number; sits: number; closes: number; turnedAways: number; due: number; dispositioned: number }>;
 }> {
@@ -4135,7 +4135,7 @@ async function computeApptMetrics(companyId: string, startMs: number): Promise<{
     const ev = d.data() as any;
     if (ev.followUpForEventId) continue; // a reschedule's follow-up isn't a new appointment
     const setAt = Number(ev.createdAt) || Number(ev.startAt) || 0;
-    if (setAt < startMs) continue;
+    if (setAt < startMs || setAt >= endMs) continue;
     const st = (ev.apptStatus as string) || "scheduled";
     const isSit = CLOSER_SIT_STATUSES.has(st);
     // Routed appt: setterUid is the setter, userId the closer. Self-gen appt
@@ -4250,38 +4250,35 @@ export const roleLeaderboards = onCall(async (request) => {
 // downline (setter and closer chains). Drives the field Town Hall card and the
 // drill-down report. Metrics are event-based (computeApptMetrics), doors come
 // from the stats buckets — the same sources as the leaderboards.
-export const getCompanyRollup = onCall(async (request) => {
-  const caller = await getCaller(request);
-  const reqData = (request.data || {}) as { period?: string; companyId?: string };
-  // Super-admins may target any company (drill-down from the console). Everyone
-  // else is locked to their own company.
-  const companyId = caller.isSuper && reqData.companyId ? reqData.companyId : caller.companyId;
-  if (!companyId) throw new HttpsError("permission-denied", "No company.");
-  if (!(caller.isSuper || caller.role === "admin" || caller.role === "manager")) {
-    throw new HttpsError("permission-denied", "Managers and admins only.");
-  }
-  const view = (reqData.period || "week") as string;
+// Shared rollup builder — used by the getCompanyRollup callable AND the weekly /
+// on-demand report emails, so the emailed numbers match the console exactly.
+// scopeUid === null → the whole company; a uid → only that manager's downline.
+export async function computeRollup(companyId: string, view: string, scopeUid: string | null, range?: { startMs: number; endMs: number }): Promise<{ period: string; scopedToDownline: boolean; company: any }> {
   const kind = view === "month" || view === "year" ? view : "week";
-  const startMs = apptPeriodStart(view);
+  // range overrides the view's window (used by on-demand emails: previous day,
+  // week-to-date, month-to-date). endMs is exclusive.
+  const startMs = range ? range.startMs : apptPeriodStart(view);
+  const endMs = range ? range.endMs : Number.MAX_SAFE_INTEGER;
+  const isAllTime = view === "alltime" && !range;
 
-  // Active users, scoped to the caller's downline for managers.
+  // Active users, scoped to the given manager's downline (or all).
   const usersSnap = await db.collection("users").where("companyId", "==", companyId).get();
-  const seeAll = caller.isSuper || caller.role === "admin";
+  const seeAll = scopeUid === null;
   type U = { uid: string; name: string; isCloser: boolean; teamId: string | null };
   const users: U[] = [];
   usersSnap.forEach((d) => {
     const u = d.data() as any;
     if (u.disabled === true) return;
     const inDownline = seeAll
-      || d.id === caller.uid
-      || (Array.isArray(u.managerPath) && u.managerPath.includes(caller.uid))
-      || (Array.isArray(u.closerManagerPath) && u.closerManagerPath.includes(caller.uid));
+      || d.id === scopeUid
+      || (Array.isArray(u.managerPath) && u.managerPath.includes(scopeUid as string))
+      || (Array.isArray(u.closerManagerPath) && u.closerManagerPath.includes(scopeUid as string));
     if (!inDownline) return;
     users.push({ uid: d.id, name: u.displayName || u.email || "Rep", isCloser: u.isCloser === true, teamId: (u.teamId as string) || null });
   });
 
   // Per-user setter/closer metrics (event-based) + doors from the stats buckets.
-  const { setters: sm, closers: cm } = await computeApptMetrics(companyId, startMs);
+  const { setters: sm, closers: cm } = await computeApptMetrics(companyId, startMs, endMs);
   // Doors: live count of leads knocked in the window (attributed to the rep who
   // owns the door), so "today" reflects the day's activity — the same
   // leads-based counting the admin Town Hall uses. All-time uses the lifetime
@@ -4292,7 +4289,7 @@ export const getCompanyRollup = onCall(async (request) => {
   const ROLLUP_CONVO = new Set(["pipeline", "appointment", "not_interested", "sold"]);
   const doorsByUid: Record<string, number> = {};
   const convosByUid: Record<string, number> = {};
-  if (view === "alltime") {
+  if (isAllTime) {
     (await db.collection("userStats").where("companyId", "==", companyId).get())
       .forEach((d) => {
         const s = d.data() as any; if (!s.uid) return;
@@ -4307,6 +4304,7 @@ export const getCompanyRollup = onCall(async (request) => {
       leadsSnap.forEach((d) => {
         const l = d.data() as any;
         if (l.deleted) return;
+        if ((Number(l.knockedAt) || 0) >= endMs) return; // upper bound for a fixed window
         const uid = (l.assignedTo as string) || (l.createdBy as string);
         if (!uid) return;
         doorsByUid[uid] = (doorsByUid[uid] || 0) + 1;
@@ -4316,7 +4314,7 @@ export const getCompanyRollup = onCall(async (request) => {
       // Missing composite index → fall back to the season buckets (weekly/monthly
       // only; a daily view just shows appt-derived metrics until the index builds).
       logger.warn("rollup doors: knockedAt query failed, falling back to season stats", e);
-      if (view !== "day") {
+      if (view !== "day" && !range) {
         (await db.collection("seasonStats").where("companyId", "==", companyId).where("period", "==", rPeriodKey(kind)).get())
           .forEach((d) => {
             const s = d.data() as any; if (!(s.kind === kind && s.uid)) return;
@@ -4338,11 +4336,31 @@ export const getCompanyRollup = onCall(async (request) => {
       const p = d.data() as any;
       if ((p.kind || "door") !== "door") return;       // no practice pitches
       if (p.atLocation !== true) return;                // must be GPS-verified at the home
-      if (startMs > 0 && (Number(p.createdAt) || 0) < startMs) return;
+      const pc = Number(p.createdAt) || 0;
+      if ((startMs > 0 && pc < startMs) || pc >= endMs) return;
       if (p.uid) recordedByUid[p.uid] = (recordedByUid[p.uid] || 0) + 1;
     });
   } catch (e) {
     logger.warn("rollup: pitches query failed", e);
+  }
+
+  // Field time (hours on shift) per rep in the window — the honest activity input
+  // (doors-per-hour vary by rep, so hours on the doors is what we coach to).
+  const shiftMsByUid: Record<string, number> = {};
+  try {
+    const now = Date.now();
+    (await db.collection("shifts").where("companyId", "==", companyId).get()).forEach((d) => {
+      const s = d.data() as any;
+      const st = Number(s.startAt) || 0;
+      if (!st || (startMs > 0 && st < startMs) || st >= endMs) return;
+      const uid = (s.userId as string) || (s.uid as string);
+      if (!uid) return;
+      // Clamp the shift's end to the window so a fixed range (e.g. yesterday)
+      // doesn't count hours spilling past it.
+      shiftMsByUid[uid] = (shiftMsByUid[uid] || 0) + Math.max(0, Math.min(Number(s.endAt) || now, endMs) - st);
+    });
+  } catch (e) {
+    logger.warn("rollup: shifts query failed", e);
   }
 
   // Teams + regions (a region is a team with kind==="region"; a team joins a
@@ -4358,13 +4376,14 @@ export const getCompanyRollup = onCall(async (request) => {
     teamMeta[t.id] = { name: d.name || "Team", regionId: parent && regionName[parent] ? parent : null };
   });
 
-  const blank = () => ({ doors: 0, convos: 0, recorded: 0, setterAppts: 0, setterSits: 0, setterPitched: 0, setterNoShows: 0, setterUpcoming: 0, setterUndispositioned: 0, setterOther: 0, closerAppts: 0, closerSits: 0, closes: 0, turnedAways: 0, closerDue: 0, closerDispositioned: 0, reps: 0, closerReps: 0 });
+  const blank = () => ({ doors: 0, convos: 0, recorded: 0, shiftMs: 0, setterAppts: 0, setterSits: 0, setterPitched: 0, setterNoShows: 0, setterUpcoming: 0, setterUndispositioned: 0, setterOther: 0, closerAppts: 0, closerSits: 0, closes: 0, turnedAways: 0, closerDue: 0, closerDispositioned: 0, reps: 0, closerReps: 0 });
   type M = ReturnType<typeof blank>;
   const add = (a: M, u: U) => {
     const s = sm[u.uid]; const c = cm[u.uid];
     a.doors += doorsByUid[u.uid] || 0;
     a.convos += convosByUid[u.uid] || 0;
     a.recorded += recordedByUid[u.uid] || 0;
+    a.shiftMs += shiftMsByUid[u.uid] || 0;
     a.setterAppts += s?.appts || 0; a.setterSits += s?.sits || 0; a.setterPitched += s?.pitched || 0;
     a.setterNoShows += s?.noShow || 0; a.setterUpcoming += s?.upcoming || 0; a.setterUndispositioned += s?.undispositioned || 0; a.setterOther += s?.other || 0;
     a.closerAppts += c?.appts || 0; a.closerSits += c?.sits || 0; a.closes += c?.closes || 0; a.turnedAways += c?.turnedAways || 0;
@@ -4382,6 +4401,7 @@ export const getCompanyRollup = onCall(async (request) => {
     closeRate: rate(m.closes, m.closerSits),
     dispoRate: rate(m.closerDispositioned, m.closerDue), // % of due appts the closer dispositioned
     recRate: rate(m.recorded, m.convos), // % of door conversations that were recorded
+    fieldHours: Math.round((m.shiftMs / 3600000) * 10) / 10, // hours in the field this period
     ...extra,
   });
   const sumOf = (arr: U[]) => { const m = blank(); for (const u of arr) add(m, u); return m; };
@@ -4425,6 +4445,318 @@ export const getCompanyRollup = onCall(async (request) => {
   const companyName = (await db.doc(`companies/${companyId}`).get()).data()?.name || "Company";
   const company = node(sumOf(users), companyName, "company", companyId, { regions });
   return { period: view, scopedToDownline: !seeAll, company };
+}
+
+// getCompanyRollup — the callable wrapper around computeRollup (auth + scoping).
+export const getCompanyRollup = onCall(async (request) => {
+  const caller = await getCaller(request);
+  const reqData = (request.data || {}) as { period?: string; companyId?: string };
+  // Super-admins may target any company (drill-down from the console). Everyone
+  // else is locked to their own company.
+  const companyId = caller.isSuper && reqData.companyId ? reqData.companyId : caller.companyId;
+  if (!companyId) throw new HttpsError("permission-denied", "No company.");
+  if (!(caller.isSuper || caller.role === "admin" || caller.role === "manager")) {
+    throw new HttpsError("permission-denied", "Managers and admins only.");
+  }
+  const view = (reqData.period || "week") as string;
+  const seeAll = caller.isSuper || caller.role === "admin";
+  return computeRollup(companyId, view, seeAll ? null : caller.uid);
+});
+
+// ════════════════════════════════════════════════════════════════════════════
+// SUCCESS REPORT EMAILS — the drill-down report, emailed. On-demand (to the
+// company admins) and an automated Saturday-night send to admins (company),
+// managers (their team + their reps) and reps (their own). Mirrors the console's
+// Production Score + coaching recap exactly (shared computeRollup), with the
+// field-time coaching tone.
+// ════════════════════════════════════════════════════════════════════════════
+const RREP_TARGETS = { doorsWk: 100, setsWk: 8, closesWk: 2 };
+const RREP_GOALS = { sit: 50, close: 30, rec: 80, dispo: 90 };
+const RREP_MULT: Record<string, number> = { day: 1 / 7, week: 1, month: 4.3, year: 52, alltime: 52 };
+const RREP_LEVEL_WORD: Record<string, string> = { company: "company", region: "regional", team: "team", rep: "1:1" };
+
+function rrepPureCloser(m: any): boolean {
+  return m.type === "user" && m.isCloser && !((m.doors || 0) > 0 || (m.setterAppts || 0) > 0);
+}
+function rrepScore(m: any, period: string): number | null {
+  const mult = RREP_MULT[period] || 1;
+  const parts: [number, number][] = [];
+  const clamp = (v: number) => Math.max(0, Math.min(100, v));
+  const add = (v: number | null, w: number) => { if (v != null && isFinite(v)) parts.push([clamp(v), w]); };
+  const attain = (actual: number, perRep: number, reps: number) => { const t = reps * perRep * mult; return t > 0 ? (actual / t) * 100 : null; };
+  const hasCloseLane = m.type !== "user" || (m.closerAppts || 0) > 0 || (m.closes || 0) > 0 || m.isCloser;
+  if (!rrepPureCloser(m)) {
+    add(attain(m.doors, RREP_TARGETS.doorsWk, m.reps), 15);
+    add(attain(m.setterAppts, RREP_TARGETS.setsWk, m.reps), 15);
+  }
+  add(m.sitRate != null ? (m.sitRate / RREP_GOALS.sit) * 100 : null, 15);
+  add(m.closeRate != null ? (m.closeRate / RREP_GOALS.close) * 100 : null, 25);
+  if (hasCloseLane) add(attain(m.closes, RREP_TARGETS.closesWk, m.closerReps || m.reps), 15);
+  add(m.dispoRate != null ? (m.dispoRate / RREP_GOALS.dispo) * 100 : null, 10);
+  add(m.recRate != null ? (m.recRate / RREP_GOALS.rec) * 100 : null, 10);
+  if (!parts.length) return null;
+  const wsum = parts.reduce((a, p) => a + p[1], 0);
+  return Math.round(parts.reduce((a, p) => a + p[0] * p[1], 0) / wsum);
+}
+function rrepGrade(s: number | null): { label: string; word: string; color: string } {
+  if (s == null) return { label: "No data", word: "Not enough activity this period to score.", color: "#64748B" };
+  if (s >= 85) return { label: "A · Elite", word: "Top-tier production.", color: "#22C55E" };
+  if (s >= 70) return { label: "B · Strong", word: "Solid production with a couple of levers to pull.", color: "#84CC78" };
+  if (s >= 55) return { label: "C · Building", word: "Producing, but with real gaps to close.", color: "#F59E0B" };
+  return { label: "D · Needs a plan", word: "Underproducing — this needs a game plan now.", color: "#F87171" };
+}
+function rrepIdle(node: any): number {
+  if (node.type === "user") return (!(node.doors || 0) && !(node.setterAppts || 0) && !(node.closerAppts || 0) && !(node.closes || 0)) ? 1 : 0;
+  const kids = node.regions || node.teams || node.users || [];
+  return kids.reduce((a: number, k: any) => a + rrepIdle(k), 0);
+}
+// The coaching recap — a faithful server port of the console's engine, same
+// field-time tone (manage to hours in the field, not a door quota).
+function rrepRecap(m: any, level: string, period: string, plabel: string): { strengths: string[]; gaps: string[]; agenda: string[] } {
+  const strengths: string[] = [], gaps: string[] = [], agenda: string[] = [];
+  const isUser = level === "rep";
+  const mult = RREP_MULT[period] || 1;
+  if (!rrepPureCloser(m)) {
+    const dScore = m.reps ? (m.doors / (m.reps * RREP_TARGETS.doorsWk * mult)) * 100 : null;
+    if (dScore != null) {
+      if (dScore >= 90) strengths.push(`Field activity is strong — ${Math.round(dScore)}% of target (${(m.doors || 0).toLocaleString()} doors, ${m.fieldHours || 0}h in the field). The hours are being put in, and that's exactly why there's anything in the pipeline.`);
+      else if (dScore < 60) { gaps.push(`Not enough time in the field — activity is at ${Math.round(dScore)}% of target (${(m.doors || 0).toLocaleString()} doors, ${m.fieldHours || 0}h). Here's the reality: this isn't a door-quota problem, because everyone's doors-per-hour is different. It's an hours-on-the-doors problem. Nothing downstream can grow while the top of the funnel is starved of time.`); agenda.push("Manage to TIME in the field, not a door count. Set a weekly field-hours expectation per rep and track it live — hours on the doors is the one input that reliably grows everything else."); }
+    }
+    const sScore = m.reps ? (m.setterAppts / (m.reps * RREP_TARGETS.setsWk * mult)) * 100 : null;
+    if (sScore != null && sScore < 60) { gaps.push(`Appointments set are low — ${Math.round(sScore)}% of target (${m.setterAppts} booked). The conversations are happening but the ask at the door isn't landing.`); agenda.push("Sharpen the door pitch and the ask — role-play the transition from conversation to booked appointment until it's automatic."); }
+    else if (sScore != null && sScore >= 90) strengths.push(`Setting engine is humming — ${m.setterAppts} appointments booked, ${Math.round(sScore)}% of target.`);
+  }
+  if (m.sitRate != null) {
+    if (m.sitRate >= RREP_GOALS.sit) strengths.push(`Sit rate is ${m.sitRate}% — at or above the ${RREP_GOALS.sit}% goal (${m.setterSits} sat of ${m.setterAppts} set).`);
+    else if (m.sitRate < RREP_GOALS.sit * 0.8) { gaps.push(`Sit rate is ${m.sitRate}% — only ${m.setterSits} of ${m.setterAppts} set appointments sat. Heavy fallout between set and sit (no-shows, cancels, reschedules).`); agenda.push("Drill confirm-and-remind cadence and set quality: right person, right time, all decision-makers present, tight time window."); }
+  }
+  if ((m.setterUndispositioned || 0) > 0 && (m.setterAppts || 0) > 0 && (m.setterUndispositioned / m.setterAppts) >= 0.2) {
+    gaps.push(`${m.setterUndispositioned} of ${m.setterAppts} set appointments are past-due with no recorded outcome — the real sit rate can't be trusted until they're dispositioned.`);
+    agenda.push("Close out every past-due appointment: the undispositioned pile is hiding the team's true results.");
+  }
+  if (m.closeRate != null) {
+    if (m.closeRate >= RREP_GOALS.close) strengths.push(`Close rate is ${m.closeRate}% — beating the ${RREP_GOALS.close}% goal (${m.closes} of ${m.closerSits} sits).`);
+    else if (m.closeRate < RREP_GOALS.close * 0.8) { gaps.push(`Close rate is ${m.closeRate}% vs the ${RREP_GOALS.close}% goal — sits aren't converting. Presentation / objection-handling gap.`); agenda.push("Ride-along or role-play the close; review objection handling on every sat-but-not-closed deal."); }
+  }
+  if (m.dispoRate != null) {
+    const undone = (m.closerDue || 0) - (m.closerDispositioned || 0);
+    if (m.dispoRate >= RREP_GOALS.dispo) strengths.push(`Disposition rate is ${m.dispoRate}% — appointments get closed out promptly, so setters see real outcomes.`);
+    else { gaps.push(`Disposition rate is ${m.dispoRate}% (goal ${RREP_GOALS.dispo}%+): ${undone} of ${m.closerDue || 0} due appointments were never marked. Below 90% the team's production is understated, and setters get demotivated when they never learn what happened to the appointments they set.`); agenda.push("Require every appointment to be dispositioned same-day — make it a daily accountability."); }
+  }
+  if (m.closerSits > 4 && m.turnedAways / m.closerSits > 0.25) { gaps.push(`Turn-away rate is high (${Math.round((m.turnedAways / m.closerSits) * 100)}% of sits) — unqualified appointments are being run.`); agenda.push("Tighten qualification at the set so closers spend time on real opportunities."); }
+  if (m.recRate != null) {
+    if (m.recRate >= RREP_GOALS.rec) strengths.push(`${m.recRate}% of on-site conversations are recorded — great coaching visibility.`);
+    else { gaps.push(`Only ${m.recRate}% of on-site conversations are recorded (goal ${RREP_GOALS.rec}%; ${m.recorded || 0} of ${m.convos || 0}). Coaching is blind without the tape.`); agenda.push("Make at-the-door pitch recording non-negotiable and review one recorded pitch per rep each week."); }
+  } else if (!rrepPureCloser(m) && (m.convos || 0) > 0) {
+    gaps.push(`None of ${m.convos} on-site conversations were recorded ${plabel} — nothing to coach from the tape.`);
+    agenda.push("Turn on and enforce at-the-door pitch recording so real conversations can be reviewed.");
+  }
+  if (!isUser && m.reps > 1 && (m.idleReps || 0) > 0) {
+    gaps.push(`${m.idleReps} of ${m.reps} reps produced nothing ${plabel} — zero doors, sets, appointments or closes. They're on the roster but not in the field, dragging the team's numbers down.`);
+    agenda.push(`Have the direct conversation with the ${m.idleReps} non-producing rep${m.idleReps > 1 ? "s" : ""}: a real activity plan with a field-hours commitment, a ride-along, or a decision about fit.`);
+  }
+  return { strengths, gaps, agenda };
+}
+
+const rrepEsc = (s: unknown) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c] as string));
+const rrepPct = (v: number | null | undefined) => (v == null ? "—" : v + "%");
+
+// Full HTML email for one node (company / team / rep).
+function rrepReportHtml(node: any, level: string, period: string, plabel: string, companyName: string): string {
+  node.idleReps = rrepIdle(node);
+  const score = rrepScore(node, period);
+  const g = rrepGrade(score);
+  const r = rrepRecap(node, level, period, plabel);
+  const li = (arr: string[], ic: string) => arr.length ? `<ul style="margin:4px 0 0;padding-left:18px;color:#334155;">${arr.map((x) => `<li style="margin:6px 0;">${ic} ${rrepEsc(x)}</li>`).join("")}</ul>` : `<p style="margin:4px 0 0;color:#64748B;">Nothing flagged.</p>`;
+  const agenda = r.agenda.length ? r.agenda : ["Recognize the wins publicly and have top performers share exactly what's working so it spreads."];
+  const metric = (label: string, val: string, sub?: string) =>
+    `<td style="padding:8px 10px;border:1px solid #e2e8f0;vertical-align:top;"><div style="font:700 16px system-ui;color:#0f1727;">${val}</div><div style="font:11px system-ui;color:#64748B;text-transform:uppercase;letter-spacing:.3px;">${label}</div>${sub ? `<div style="font:11px system-ui;color:#94a3b8;">${sub}</div>` : ""}</td>`;
+  const setterRow = `<tr>${metric("Field hours", String(node.fieldHours || 0))}${metric("Doors", (node.doors || 0).toLocaleString())}${metric("Appts set", String(node.setterAppts || 0))}${metric("Sat", String(node.setterSits || 0))}${metric("Sit rate", rrepPct(node.sitRate), "goal 50%")}</tr>`;
+  const closerRow = `<tr>${metric("Appts (for/by)", String(node.closerAppts || 0))}${metric("Closes", String(node.closes || 0))}${metric("Close rate", rrepPct(node.closeRate), "goal 30%")}${metric("Disposition", rrepPct(node.dispoRate), "goal 90%")}${metric("% recorded", rrepPct(node.recRate), "goal 80%")}</tr>`;
+  // Child summary table (teams under a company/region; reps under a team).
+  const kids = (node.regions || node.teams || node.users || []) as any[];
+  let childTable = "";
+  if (kids.length) {
+    const rows = kids.map((k) => {
+      const ks = rrepScore(k, period);
+      const kg = rrepGrade(ks);
+      return `<tr>
+        <td style="padding:6px 10px;border-bottom:1px solid #eef2f7;">${rrepEsc(k.name)}</td>
+        <td style="padding:6px 10px;border-bottom:1px solid #eef2f7;text-align:center;"><span style="display:inline-block;min-width:30px;padding:2px 6px;border-radius:6px;background:${kg.color};color:#fff;font:700 12px system-ui;">${ks == null ? "—" : ks}</span></td>
+        <td style="padding:6px 10px;border-bottom:1px solid #eef2f7;text-align:center;">${k.fieldHours || 0}h</td>
+        <td style="padding:6px 10px;border-bottom:1px solid #eef2f7;text-align:center;">${(k.doors || 0).toLocaleString()}</td>
+        <td style="padding:6px 10px;border-bottom:1px solid #eef2f7;text-align:center;">${k.setterAppts || 0}</td>
+        <td style="padding:6px 10px;border-bottom:1px solid #eef2f7;text-align:center;">${rrepPct(k.sitRate)}</td>
+        <td style="padding:6px 10px;border-bottom:1px solid #eef2f7;text-align:center;">${k.closes || 0}</td>
+        <td style="padding:6px 10px;border-bottom:1px solid #eef2f7;text-align:center;">${rrepPct(k.closeRate)}</td>
+      </tr>`;
+    }).join("");
+    const kLabel = node.regions ? "Region" : node.teams ? "Team" : "Rep";
+    childTable = `<h3 style="font:700 14px system-ui;color:#0f1727;margin:22px 0 6px;">${kLabel} breakdown</h3>
+      <table style="border-collapse:collapse;width:100%;font:13px system-ui;">
+        <thead><tr style="color:#64748B;text-transform:uppercase;font-size:11px;">
+          <th style="text-align:left;padding:6px 10px;">${kLabel}</th><th style="padding:6px 10px;">Score</th><th style="padding:6px 10px;">Hours</th><th style="padding:6px 10px;">Doors</th><th style="padding:6px 10px;">Appts</th><th style="padding:6px 10px;">Sit%</th><th style="padding:6px 10px;">Closes</th><th style="padding:6px 10px;">Close%</th>
+        </tr></thead><tbody>${rows}</tbody></table>`;
+  }
+  const title = level === "company" ? rrepEsc(companyName)
+    : level === "rep" ? rrepEsc(node.name)
+    : rrepEsc(node.name);
+  const sub = level === "company" ? "Company report" : level === "rep" ? "Your report" : "Team report";
+  return `<div style="max-width:680px;margin:0 auto;font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;color:#0f1727;">
+    <div style="padding:18px 20px;background:#0f1727;border-radius:14px 14px 0 0;color:#fff;">
+      <div style="font:12px system-ui;color:#93c5fd;text-transform:uppercase;letter-spacing:.6px;">${sub} · ${rrepEsc(plabel)}</div>
+      <div style="font:800 22px system-ui;margin-top:2px;">${title}</div>
+      <div style="margin-top:8px;display:inline-block;padding:4px 12px;border-radius:999px;background:${g.color};color:#06121f;font:800 14px system-ui;">Production Score ${score == null ? "—" : score} · ${g.label}</div>
+      <div style="font:13px system-ui;color:#cbd5e1;margin-top:8px;">${g.word} · ${node.reps || 0} active rep${(node.reps || 0) === 1 ? "" : "s"}${node.idleReps ? ` · ${node.idleReps} not producing` : ""}</div>
+    </div>
+    <div style="padding:18px 20px;background:#fff;border:1px solid #e2e8f0;border-top:0;border-radius:0 0 14px 14px;">
+      <h3 style="font:700 13px system-ui;color:#16a34a;margin:0 0 2px;text-transform:uppercase;">✅ What's working</h3>${li(r.strengths, "✅")}
+      <h3 style="font:700 13px system-ui;color:#b45309;margin:18px 0 2px;text-transform:uppercase;">⚠️ What's missing</h3>${li(r.gaps, "⚠️")}
+      <h3 style="font:700 13px system-ui;color:#334155;margin:18px 0 2px;text-transform:uppercase;">📋 Turn this into a ${RREP_LEVEL_WORD[level]} meeting</h3>${li(agenda, "→")}
+      <h3 style="font:700 14px system-ui;color:#0f1727;margin:22px 0 6px;">The numbers</h3>
+      <table style="border-collapse:collapse;width:100%;"><tbody>${setterRow}${closerRow}</tbody></table>
+      ${childTable}
+      <p style="font:12px system-ui;color:#94a3b8;margin:22px 0 0;">Open the full drill-down in the admin console → Success Reports.</p>
+    </div>
+  </div>`;
+}
+function rrepReportText(node: any, level: string, period: string, plabel: string, companyName: string): string {
+  const score = rrepScore(node, period);
+  const r = rrepRecap(node, level, period, plabel);
+  const name = level === "company" ? companyName : node.name;
+  const lines = [`${name} — ${plabel} — Production Score ${score == null ? "—" : score}`, ""];
+  if (r.strengths.length) { lines.push("WORKING:"); r.strengths.forEach((s) => lines.push(" - " + s)); lines.push(""); }
+  lines.push("MISSING:"); r.gaps.forEach((s) => lines.push(" - " + s)); lines.push("");
+  lines.push("MEETING:"); (r.agenda.length ? r.agenda : ["Recognize the wins and have top performers share what's working."]).forEach((s) => lines.push(" - " + s));
+  return lines.join("\n");
+}
+
+// Walk a computed rollup tree, collecting the company node + team nodes (by id) +
+// user nodes (by uid) so we can route each to the right recipients.
+function rrepIndex(company: any): { company: any; teams: Record<string, any>; users: Record<string, any> } {
+  const teams: Record<string, any> = {};
+  const users: Record<string, any> = {};
+  (company.regions || []).forEach((region: any) => {
+    (region.teams || []).forEach((team: any) => {
+      if (team.id) teams[team.id] = team;
+      (team.users || []).forEach((u: any) => { if (u.id) users[u.id] = u; });
+    });
+  });
+  return { company, teams, users };
+}
+
+// Send one company's full Saturday report set: admins → company; managers →
+// their team(s) + their reps; reps → their own. Returns how many emails went out.
+async function sendCompanyReports(cfg: NotifyConfig, companyId: string, view: string, plabel: string, audience: string = "all", range?: { startMs: number; endMs: number }): Promise<number> {
+  const rollup = await computeRollup(companyId, view, null, range);
+  const companyName = rollup.company.name || "Company";
+  const idx = rrepIndex(rollup.company);
+
+  const usersSnap = await db.collection("users").where("companyId", "==", companyId).get();
+  type U = { uid: string; email: string; role: string; position: string; teamId: string | null; managedTeamIds: string[]; disabled: boolean };
+  const roster: U[] = usersSnap.docs.map((d) => {
+    const u = d.data() as any;
+    return { uid: d.id, email: (u.email as string) || "", role: (u.role as string) || "user", position: (u.position as string) || "", teamId: (u.teamId as string) || null, managedTeamIds: Array.isArray(u.managedTeamIds) ? u.managedTeamIds : [], disabled: u.disabled === true };
+  }).filter((u) => !u.disabled && u.email);
+
+  let sent = 0;
+  const send = async (to: string, subject: string, node: any, level: string) => {
+    const html = rrepReportHtml(node, level, view, plabel, companyName);
+    const text = rrepReportText(node, level, view, plabel, companyName);
+    const res = await sendEmailDetailed(cfg, to, subject, text, undefined, html).catch(() => ({ ok: false, detail: "" }));
+    if (res.ok) sent++;
+  };
+  const per = plabel;
+
+  for (const u of roster) {
+    const isAdmin = u.role === "admin" || u.role === "superadmin";
+    const isManager = u.role === "manager" || u.managedTeamIds.length > 0 || u.position.includes("manager");
+    if (isAdmin) {
+      if (audience === "all" || audience === "admins")
+        await send(u.email, `📊 ${companyName} — company report (${per})`, idx.company, "company");
+    } else if (isManager) {
+      if (audience === "all" || audience === "managers") {
+        const teamIds = u.managedTeamIds.length ? u.managedTeamIds : (u.teamId ? [u.teamId] : []);
+        for (const tid of teamIds) { const t = idx.teams[tid]; if (t) await send(u.email, `📊 ${t.name} — team report (${per})`, t, "team"); }
+      }
+    } else {
+      if (audience === "all" || audience === "reps") {
+        const un = idx.users[u.uid];
+        if (un) await send(u.email, `📊 Your report (${per})`, un, "rep");
+      }
+    }
+  }
+  return sent;
+}
+
+// Maps a chooseable period to a rollup window: previous day (bounded), or an
+// open-ended today / week-to-date / month-to-date / year / all-time.
+function reportWindow(period: string): { view: string; plabel: string; range?: { startMs: number; endMs: number } } {
+  const d = new Date(); d.setHours(0, 0, 0, 0); const startToday = d.getTime();
+  switch (period) {
+    case "today": return { view: "day", plabel: "today" };
+    case "yesterday": return { view: "day", plabel: "yesterday", range: { startMs: startToday - 86400000, endMs: startToday } };
+    case "week": return { view: "week", plabel: "week to date" };
+    case "month": return { view: "month", plabel: "month to date" };
+    case "year": return { view: "year", plabel: "year to date" };
+    case "alltime": return { view: "alltime", plabel: "all-time" };
+    default: return { view: "week", plabel: "week to date" };
+  }
+}
+
+// emailSuccessReport — on-demand: an admin picks a window (today / yesterday /
+// week-to-date / month-to-date / year / all-time) and an audience, and sends the
+// report out anytime — to themselves (test), all admins, managers (their team +
+// reps, for shout-outs / coaching to relay), reps (their own), or everyone.
+export const emailSuccessReport = onCall(async (request) => {
+  const caller = await getCaller(request);
+  const reqData = (request.data || {}) as { period?: string; companyId?: string; audience?: string };
+  const companyId = caller.isSuper && reqData.companyId ? reqData.companyId : caller.companyId;
+  if (!companyId) throw new HttpsError("permission-denied", "No company.");
+  if (!(caller.isSuper || caller.role === "admin")) throw new HttpsError("permission-denied", "Admins only.");
+  const { view, plabel, range } = reportWindow(reqData.period || "week");
+  const audience = reqData.audience || "me";
+  const cfg = await getNotifyConfig();
+  if (!cfg.sendgridKey && !(cfg.smtpHost && cfg.smtpUser)) {
+    throw new HttpsError("failed-precondition", "Email isn't configured — set up SendGrid or SMTP under Notifications first.");
+  }
+
+  if (audience === "me") {
+    const callerEmail = ((await db.doc(`users/${caller.uid}`).get()).data()?.email as string) || "";
+    if (!callerEmail) throw new HttpsError("failed-precondition", "Your account has no email address.");
+    const rollup = await computeRollup(companyId, view, null, range);
+    const companyName = rollup.company.name || "Company";
+    const res = await sendEmailDetailed(
+      cfg, callerEmail, `📊 ${companyName} — company report (${plabel})`,
+      rrepReportText(rollup.company, "company", view, plabel, companyName), undefined,
+      rrepReportHtml(rollup.company, "company", view, plabel, companyName)
+    );
+    if (!res.ok) throw new HttpsError("failed-precondition", res.detail || "Send failed.");
+    return { sent: 1, recipients: 1 };
+  }
+
+  const sent = await sendCompanyReports(cfg, companyId, view, plabel, audience, range);
+  if (!sent) throw new HttpsError("failed-precondition", "Nothing was sent — check that recipients have email addresses and email is configured.");
+  return { sent };
+});
+
+// weeklySuccessReports — every Saturday 11:59 PM Eastern (DST-aware), send each
+// company its report set (admins → company, managers → team + reps, reps → own).
+export const weeklySuccessReports = onSchedule({ schedule: "59 23 * * 6", timeZone: "America/New_York" }, async () => {
+  const cfg = await getNotifyConfig();
+  if (!cfg.sendgridKey && !(cfg.smtpHost && cfg.smtpUser)) {
+    logger.warn("weeklySuccessReports: no email provider configured — skipping.");
+    return;
+  }
+  const companies = await db.collection("companies").get();
+  for (const co of companies.docs) {
+    try {
+      const n = await sendCompanyReports(cfg, co.id, "week", "this week", "all");
+      logger.info(`weeklySuccessReports: ${co.id} → ${n} emails`);
+    } catch (e) {
+      logger.warn(`weeklySuccessReports failed for ${co.id}`, e);
+    }
+  }
 });
 
 // ════════════════════════════════════════════════════════════════════════════

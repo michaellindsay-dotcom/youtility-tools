@@ -395,6 +395,7 @@
         <button class="pill" data-period="year">This year</button>
         <button class="pill" data-period="alltime">All-time</button>
         <button class="btn ghost sm rp-noprint" id="rpDownload" style="margin-left:4px;" title="Download / print this report as a PDF">⬇ PDF</button>
+        <button class="btn ghost sm rp-noprint" id="rpEmail" title="Email this report — pick a window & who gets it">✉ Email</button>
         <button class="btn ghost sm rp-noprint" id="rpRefresh">↻</button>
       </div>
     </div>
@@ -1635,6 +1636,7 @@ const getContractPdf    = httpsCallable(fns, "getContractPdf");
 const setCompanyContract = httpsCallable(fns, "setCompanyContract");
 const getCompanyRollup  = httpsCallable(fns, "getCompanyRollup");
 const getEmployeeReport = httpsCallable(fns, "getEmployeeReport");
+const emailSuccessReport = httpsCallable(fns, "emailSuccessReport");
 
 function banner(el, msg, kind="info") {
   el.className = "banner show " + kind;
@@ -2255,6 +2257,60 @@ $("rpDownload").addEventListener("click", () => {
     state.rpOpen = prev;
     rpRender();
   }, 200);
+});
+// Email the report — pick a window (today / previous day / week-to-date /
+// month-to-date / …) and who receives it (test to me, admins, managers + their
+// reps, reps, or everyone), then send on demand.
+$("rpEmail").addEventListener("click", () => {
+  const ov = document.createElement("div");
+  ov.className = "rp-ov";
+  ov.innerHTML = `<div class="rp-ov-card" style="max-width:460px;">
+    <h3 style="margin:0 0 4px;font-family:'Space Grotesk',sans-serif;">✉ Email Success Report</h3>
+    <p class="muted small" style="margin:0 0 14px;">Pick the window and who gets it. Managers receive their team + their reps' reports (to shout out or coach); reps get their own.</p>
+    <div class="field"><span>Window</span><select id="rpEmPeriod">
+      <option value="today">Today</option>
+      <option value="yesterday">Previous day</option>
+      <option value="week" selected>Week to date</option>
+      <option value="month">Month to date</option>
+      <option value="year">Year to date</option>
+      <option value="alltime">All-time</option>
+    </select></div>
+    <div class="field"><span>Send to</span><select id="rpEmAud">
+      <option value="me">Just me (test send)</option>
+      <option value="admins">All company admins</option>
+      <option value="managers">Managers — their team + reps</option>
+      <option value="reps">Reps — each gets their own</option>
+      <option value="all">Everyone (admins, managers, reps)</option>
+    </select></div>
+    <div id="rpEmMsg" class="muted small" style="margin:8px 0;min-height:16px;"></div>
+    <div class="row" style="justify-content:flex-end;gap:8px;">
+      <button class="btn ghost sm" id="rpEmCancel">Cancel</button>
+      <button class="btn primary sm" id="rpEmSend">Send</button>
+    </div>
+  </div>`;
+  document.body.appendChild(ov);
+  const close = () => ov.remove();
+  ov.addEventListener("click", (e) => { if (e.target === ov) close(); });
+  ov.querySelector("#rpEmCancel").addEventListener("click", close);
+  ov.querySelector("#rpEmSend").addEventListener("click", async () => {
+    const btn = ov.querySelector("#rpEmSend"), msg = ov.querySelector("#rpEmMsg");
+    btn.disabled = true; msg.style.color = "var(--ink-mid)"; msg.textContent = "Sending…";
+    try {
+      const res = await emailSuccessReport({
+        period: ov.querySelector("#rpEmPeriod").value,
+        audience: ov.querySelector("#rpEmAud").value,
+        companyId: state.rpCompany || undefined,
+      });
+      const n = res.data?.sent ?? 0;
+      msg.style.color = "var(--good)";
+      msg.textContent = `Sent ${n} email${n === 1 ? "" : "s"}. ✓`;
+      setTimeout(close, 1500);
+    } catch (e) {
+      msg.style.color = "var(--bad)";
+      msg.textContent = e.message || "Send failed.";
+      btn.disabled = false;
+    }
+  });
 });
 $("rpBody").addEventListener("click", (e) => {
   const rep = e.target.closest(".rp-row[data-uid]");
