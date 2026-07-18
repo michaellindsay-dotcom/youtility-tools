@@ -342,10 +342,12 @@ workflows:
 
           android {
               defaultConfig {
-                  versionCode (System.getenv("BUILD_NUMBER") ?: "1").toInteger() + 1
+                  // AGP 8.6 requires property assignment (versionCode = N), not the
+                  // old method-call style (versionCode N).
+                  versionCode = (System.getenv("BUILD_NUMBER") ?: "1").toInteger() + 1
                   // Auto-incrementing patch (major.minor from VERSION_NAME) so the
                   // versionName always rises without a manual bump each release.
-                  versionName (System.getenv("VERSION_NAME") ?: "1.0") + "." + (System.getenv("BUILD_NUMBER") ?: "0")
+                  versionName = (System.getenv("VERSION_NAME") ?: "1.0") + "." + (System.getenv("BUILD_NUMBER") ?: "0")
               }
               signingConfigs {
                   release {
