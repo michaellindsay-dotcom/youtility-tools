@@ -249,13 +249,17 @@ workflows:
       tag_patterns:
         - pattern: 'v*'
           include: true
-    instance_type: linux_x2
+    # Build on the same macOS M2 machine as iOS — it's on the free plan (Linux
+    # instances need a paid plan). Android builds fine on macOS; the text edits
+    # below use perl so they behave the same on macOS and Linux.
+    instance_type: mac_mini_m2
     max_build_duration: 60
     environment:
       android_signing:
         - youtilityknock_keystore
-      groups:
-        - google_play          # provides GCLOUD_SERVICE_ACCOUNT_CREDENTIALS
+      # google_play group (GCLOUD_SERVICE_ACCOUNT_CREDENTIALS) is only needed for
+      # auto-publishing to Play. Re-add it once the first .aab is uploaded manually
+      # and the service account is configured (see the publishing note below).
       vars:
         VERSION_NAME: "1.5"    # keep in sync with the iOS workflow above
       node: 20
@@ -285,8 +289,9 @@ workflows:
           fi
           echo "$GOOGLE_SERVICES_JSON" | base64 --decode > android/app/google-services.json
           # Apply the Google Services gradle plugin so the json is processed.
+          # perl (portable) replaces only the FIRST `dependencies {`.
           grep -q "com.google.gms:google-services" android/build.gradle || \
-            sed -i "0,/dependencies {/s//dependencies {\n        classpath 'com.google.gms:google-services:4.4.2'/" android/build.gradle
+            perl -i -pe 'if(!$d && s{dependencies \{}{dependencies {\n        classpath "com.google.gms:google-services:4.4.2"}){$d=1}' android/build.gradle
           grep -q "com.google.gms.google-services" android/app/build.gradle || \
             echo "apply plugin: 'com.google.gms.google-services'" >> android/app/build.gradle
           echo "Android push config injected."
@@ -303,30 +308,30 @@ workflows:
           # silently fails on Android.
           MANIFEST=youtilityknock-web/android/app/src/main/AndroidManifest.xml
           grep -q 'ACCESS_FINE_LOCATION' "$MANIFEST" || \
-            sed -i 's#</manifest>#    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />\n    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />\n</manifest>#' "$MANIFEST"
+            perl -i -pe 's{</manifest>}{    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />\n    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />\n</manifest>}' "$MANIFEST"
           # Pitch coaching records audio via getUserMedia; without RECORD_AUDIO
           # the WebView denies the mic and recording silently never happens.
           grep -q 'RECORD_AUDIO' "$MANIFEST" || \
-            sed -i 's#</manifest>#    <uses-permission android:name="android.permission.RECORD_AUDIO" />\n    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />\n</manifest>#' "$MANIFEST"
+            perl -i -pe 's{</manifest>}{    <uses-permission android:name="android.permission.RECORD_AUDIO" />\n    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />\n</manifest>}' "$MANIFEST"
           # Lock MainActivity to portrait (field app — no rotation).
           grep -q 'android:screenOrientation' "$MANIFEST" || \
-            sed -i 's#android:name=".MainActivity"#android:name=".MainActivity"\n            android:screenOrientation="portrait"#' "$MANIFEST"
+            perl -i -pe 's{android:name="\.MainActivity"}{android:name=".MainActivity"\n            android:screenOrientation="portrait"}' "$MANIFEST"
           # Register the us.youtility.knock:// deep link so calendar OAuth can
           # hand the auth code back from the browser into the app (Google won't
           # accept the WebView origin as a redirect URI). Added as its own
           # intent-filter on MainActivity.
           grep -q 'android:scheme="us.youtility.knock"' "$MANIFEST" || \
-            sed -i 's#</activity>#    <intent-filter>\n                <action android:name="android.intent.action.VIEW" />\n                <category android:name="android.intent.category.DEFAULT" />\n                <category android:name="android.intent.category.BROWSABLE" />\n                <data android:scheme="us.youtility.knock" />\n            </intent-filter>\n        </activity>#' "$MANIFEST"
+            perl -i -pe 's{</activity>}{    <intent-filter>\n                <action android:name="android.intent.action.VIEW" />\n                <category android:name="android.intent.category.DEFAULT" />\n                <category android:name="android.intent.category.BROWSABLE" />\n                <data android:scheme="us.youtility.knock" />\n            </intent-filter>\n        </activity>}' "$MANIFEST"
       - name: Target Android 15 (API 35) for Play compliance
         script: |
           # Google Play requires new apps to target API 35. Bump the SDK levels
           # and the Gradle/AGP toolchain that supports compiling against 35.
           VARS=youtilityknock-web/android/variables.gradle
-          sed -i 's/compileSdkVersion = 34/compileSdkVersion = 35/' "$VARS"
-          sed -i 's/targetSdkVersion = 34/targetSdkVersion = 35/' "$VARS"
-          sed -i "s#com.android.tools.build:gradle:8.2.1#com.android.tools.build:gradle:8.6.1#" \
+          perl -i -pe 's/compileSdkVersion = 34/compileSdkVersion = 35/' "$VARS"
+          perl -i -pe 's/targetSdkVersion = 34/targetSdkVersion = 35/' "$VARS"
+          perl -i -pe 's#com\.android\.tools\.build:gradle:8\.2\.1#com.android.tools.build:gradle:8.6.1#' \
             youtilityknock-web/android/build.gradle
-          sed -i "s#gradle-8.2.1-all.zip#gradle-8.9-all.zip#" \
+          perl -i -pe 's#gradle-8\.2\.1-all\.zip#gradle-8.9-all.zip#' \
             youtilityknock-web/android/gradle/wrapper/gradle-wrapper.properties
       - name: Configure release signing & version
         script: |
@@ -365,8 +370,13 @@ workflows:
     artifacts:
       - youtilityknock-web/android/app/build/outputs/**/*.aab
       - youtilityknock-web/android/app/build/outputs/**/mapping.txt
-    publishing:
-      google_play:
-        credentials: $GCLOUD_SERVICE_ACCOUNT_CREDENTIALS
-        track: internal
-        submit_as_draft: true
+    # Auto-publish disabled for the FIRST release: Google requires the very first
+    # .aab to be uploaded to Play manually (download it from this build's Artifacts
+    # → Test and release → Internal testing → Create new release). Once that's done
+    # and the google_play service account is set, re-enable by restoring:
+    #   environment.groups: [google_play]
+    #   publishing:
+    #     google_play:
+    #       credentials: $GCLOUD_SERVICE_ACCOUNT_CREDENTIALS
+    #       track: internal
+    #       submit_as_draft: true
