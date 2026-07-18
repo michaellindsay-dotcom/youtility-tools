@@ -19,6 +19,7 @@ import { moverIcon, moverColor, moverPopupHtml, daysAgo, MOVER_DAYS } from "../l
 import { getTile, putTile, nearbyCachedHomes } from "../lib/homeCache";
 import { fetchSolarPins, solarIcon, solarPopupHtml } from "../lib/solar";
 import DispositionModal, { type DispoInput } from "../components/DispositionModal";
+import MapGL from "./MapGL";
 import type { Lead, Territory, LatLng, UserProfile } from "../types";
 
 type MapMode = "view" | "draw" | "drop";
@@ -75,7 +76,14 @@ function inPolygon(pt: LatLng, poly: LatLng[]): boolean {
   return inside;
 }
 
+// Engine switch: ?map=gl opts into the new MapLibre map (rotation-safe pins);
+// everyone else keeps the current Leaflet map until it's proven in the field.
 export default function MapPage() {
+  const [params] = useSearchParams();
+  return params.get("map") === "gl" ? <MapGL /> : <MapLeaflet />;
+}
+
+function MapLeaflet() {
   const { profile, role, companyId, company } = useAuth();
   const elRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<L.Map | null>(null);
