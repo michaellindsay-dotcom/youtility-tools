@@ -9,6 +9,7 @@ import { initials, avatarColor } from "../lib/points";
 import { addDoc, collection, doc, getDocs, onSnapshot, query, setDoc, where } from "firebase/firestore";
 import { httpsCallable } from "firebase/functions";
 import { Geolocation } from "@capacitor/geolocation";
+import { Capacitor } from "@capacitor/core";
 import { db, auth, functions } from "../firebase";
 import { useAuth } from "../auth/AuthContext";
 import { DISP_COLOR, DISPOSITIONS } from "../lib/dispositions";
@@ -150,6 +151,9 @@ export default function MapPage() {
   // Market Recommendations panel (managers/admins, add-on only).
   const [showMarketRec, setShowMarketRec] = useState(false);
   const [mrQuery, setMrQuery] = useState("");
+  // The left-edge controls collapse into a single ☰ button so the map is
+  // unobstructed; tap it to reveal the tools.
+  const [toolsOpen, setToolsOpen] = useState(false);
   const [mrSuggest, setMrSuggest] = useState<string[]>([]);
   const mrPicked = useRef(false);
   const [mrBusy, setMrBusy] = useState(false);
@@ -589,13 +593,19 @@ export default function MapPage() {
     }
   }
 
-  // Refresh button: recenter on the rep's live location, then pull nearby homes
-  // and solar (if allowed) on demand. (Movers are pulled only via the Market
-  // Recommendations search, not on refresh.)
+  // Refresh button: recenter on the rep's live location and re-pull the WORKED
+  // pins (leads/dispositions) so newly worked doors show up — WITHOUT reloading
+  // the gray ATTOM home pins (that reload flashes the whole map and isn't needed;
+  // the homes already loaded at startup and stay put). Movers/solar keep their
+  // own layers untouched too.
   async function refresh() {
-    await recenterToMe();
-    await loadHomes();
-    void loadSolarPins();
+    setLoadingHomes(true);
+    try {
+      await recenterToMe();
+      await buildPins();
+    } finally {
+      setLoadingHomes(false);
+    }
   }
 
   // ── Solar Scanner pins (CRM add-on) ─────────────────────────────────────────
@@ -753,7 +763,10 @@ export default function MapPage() {
     });
 
     const map = L.map(elRef.current, { center: DEFAULT_CENTER, zoom: 14, maxZoom: MAX_ZOOM, layers: [gSat], zoomControl: false });
-    L.control.zoom({ position: "topright" }).addTo(map);
+    // On the native apps you pinch to zoom, so the +/- buttons are just clutter —
+    // keep them only on the web build. The layers ("map views") control then sits
+    // in the top-right corner by itself.
+    if (!Capacitor.isNativePlatform()) L.control.zoom({ position: "topright" }).addTo(map);
     L.control.layers({ "Google satellite": gSat, "Esri satellite": hybrid, Street: street }, undefined, { position: "topright" }).addTo(map);
     territoryLayer.current.addTo(map);
     homeLayer.current.addTo(map);
@@ -983,62 +996,76 @@ export default function MapPage() {
     <div className="map-screen">
       <div ref={elRef} className="map-canvas-full" />
 
-      {/* Top-left: menu + controls */}
+      {/* Top-left: a single ☰ toggle that expands the tool column, so the map is
+          unobstructed by default. Active tools stay highlighted even when
+          collapsed via the badge dot on the toggle. */}
       <div className="map-overlay map-tl">
-        <button className="map-fab" onClick={refresh} disabled={loadingHomes} aria-label="Refresh homes" title="Refresh homes & movers">
-          {loadingHomes ? "…" : "⟳"}
-        </button>
-        {/* Compass: snap to my exact location + true north. 2-finger twist to
-            face any direction; tap again to re-center & re-north. */}
         <button
-          className="map-fab"
-          onClick={() => void goToMeAndNorth()}
-          aria-label="Go to my location and face north"
-          title="Go to my location & true north (twist with two fingers to rotate)"
+          className={"map-fab" + (toolsOpen ? " active" : "")}
+          onClick={() => setToolsOpen((o) => !o)}
+          aria-label={toolsOpen ? "Hide map tools" : "Show map tools"}
+          title="Map tools"
         >
-          🧭
+          {toolsOpen ? "✕" : "☰"}
+          {!toolsOpen && (filtersActive || showTeam || showMarketRec || mode === "draw")
+            ? <span className="map-fab-badge">•</span> : null}
         </button>
-        {/* Long-press a home to look it up + knock it — no drop-pin button. */}
-        {canDraw && (
-          <button
-            className={"map-fab" + (mode === "draw" ? " active" : "")}
-            onClick={() => setMode(mode === "draw" ? "view" : "draw")}
-            aria-label="Draw area" title="Draw area"
-          >
-            ✏
-          </button>
-        )}
-        {/* Movers auto-populate in-area now; solar pins auto-load for CRM
-            managers/admins — both no longer have a toggle button. */}
-        {/* Filter: narrow the lead pins by date worked and/or disposition. */}
-        <button
-          className={"map-fab" + (showFilters ? " active" : "")}
-          onClick={() => setShowFilters((s) => !s)}
-          aria-label="Filter pins" title="Search & filter pins by address, date & disposition"
-        >
-          🔍{filtersActive ? <span className="map-fab-badge">✓</span> : null}
-        </button>
-        {/* Market Recommendations — managers/admins only, add-on only. Search a
-            city/ZIP/address to see recent move-ins within a mile. */}
-        {marketRecAllowed && (
-          <button
-            className={"map-fab" + (showMarketRec ? " active" : "")}
-            onClick={() => setShowMarketRec((s) => !s)}
-            aria-label="Market recommendations" title="Market recommendations — recent move-ins by area"
-          >
-            🏘️
-          </button>
-        )}
-        {/* Live team locations — managers/admins see everyone online right now. */}
-        {canManageAreas && (
-          <button
-            className={"map-fab" + (showTeam ? " active" : "")}
-            onClick={() => setShowTeam((s) => !s)}
-            aria-label="Show live team locations"
-            title={showTeam ? `Live team — ${teamCount} online` : "Show live team locations"}
-          >
-            👥{showTeam && teamCount > 0 ? <span className="map-fab-badge">{teamCount}</span> : null}
-          </button>
+        {toolsOpen && (
+          <>
+            {/* Compass: snap to my exact location & true north. */}
+            <button
+              className="map-fab"
+              onClick={() => void goToMeAndNorth()}
+              aria-label="Go to my location and face north"
+              title="Go to my location & true north (twist with two fingers to rotate)"
+            >
+              🧭
+            </button>
+            {/* Filter: narrow the lead pins by date worked and/or disposition. */}
+            <button
+              className={"map-fab" + (showFilters ? " active" : "")}
+              onClick={() => setShowFilters((s) => !s)}
+              aria-label="Filter pins" title="Search & filter pins by address, date & disposition"
+            >
+              🔍{filtersActive ? <span className="map-fab-badge">✓</span> : null}
+            </button>
+            {/* Long-press a home to look it up + knock it — no drop-pin button. */}
+            {canDraw && (
+              <button
+                className={"map-fab" + (mode === "draw" ? " active" : "")}
+                onClick={() => setMode(mode === "draw" ? "view" : "draw")}
+                aria-label="Draw area" title="Draw area"
+              >
+                ✏
+              </button>
+            )}
+            {/* Market Recommendations — managers/admins only, add-on only. */}
+            {marketRecAllowed && (
+              <button
+                className={"map-fab" + (showMarketRec ? " active" : "")}
+                onClick={() => setShowMarketRec((s) => !s)}
+                aria-label="Market recommendations" title="Market recommendations — recent move-ins by area"
+              >
+                🏘️
+              </button>
+            )}
+            {/* Live team locations — managers/admins see everyone online right now. */}
+            {canManageAreas && (
+              <button
+                className={"map-fab" + (showTeam ? " active" : "")}
+                onClick={() => setShowTeam((s) => !s)}
+                aria-label="Show live team locations"
+                title={showTeam ? `Live team — ${teamCount} online` : "Show live team locations"}
+              >
+                👥{showTeam && teamCount > 0 ? <span className="map-fab-badge">{teamCount}</span> : null}
+              </button>
+            )}
+            {/* Recenter + reload my worked pins (leads). Does NOT reload the gray
+                property homes, so the map doesn't flash. */}
+            <button className="map-fab" onClick={refresh} disabled={loadingHomes} aria-label="Recenter and refresh my pins" title="Recenter & refresh my pins">
+              {loadingHomes ? "…" : "⟳"}
+            </button>
+          </>
         )}
       </div>
 
