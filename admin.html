@@ -1902,7 +1902,8 @@ async function selectCompany(companyId, companyName) {
 // door volume, appointments set, sit rate, close rate, closes, and how much of
 // the field conversation is actually being recorded for coaching.
 const RP_TARGETS = { doorsWk: 100, setsWk: 8, closesWk: 2 };  // per active rep, per week
-const RP_GOALS   = { sit: 65, close: 30, rec: 80, dispo: 90 }; // quality-rate goals (%)
+// Sit rate here = sits ÷ ALL appointments set (true conversion), goal 50%.
+const RP_GOALS   = { sit: 50, close: 30, rec: 80, dispo: 90 }; // quality-rate goals (%)
 const RP_MULT    = { week: 1, month: 4.3, year: 52, alltime: 52 }; // scale weekly targets to the period
 const RP_PLABEL  = { week: "this week", month: "this month", year: "this year", alltime: "all-time" };
 const RP_LEVEL_WORD = { company: "company", region: "regional", team: "team", rep: "1:1" };
@@ -1979,15 +1980,16 @@ function rpRecap(m, level) {
     if (sScore != null && sScore < 60) { gaps.push(`Appointments set are low — ${Math.round(sScore)}% of target (${m.setterAppts} booked). Doors aren't converting into sits.`); agenda.push("Sharpen the door pitch and the ask — role-play the transition from conversation to booked appointment."); }
     else if (sScore != null && sScore >= 90) strengths.push(`Setting engine is humming — ${m.setterAppts} appointments booked, ${Math.round(sScore)}% of target.`);
   }
-  // Show rate (of kept appointments, how many actually sat)
+  // Sit rate = sits ÷ all appointments set (true conversion)
   if (m.sitRate != null) {
-    if (m.sitRate >= RP_GOALS.sit) strengths.push(`Show rate is ${m.sitRate}% — at or above the ${RP_GOALS.sit}% goal (${m.setterSits} sat of ${m.setterPitched} kept).`);
-    else if (m.sitRate < RP_GOALS.sit * 0.8) { gaps.push(`Show rate is ${m.sitRate}% vs the ${RP_GOALS.sit}% goal — ${m.noShows || 0} of ${m.setterPitched || 0} kept appointments no-showed.`); agenda.push("Drill confirm-and-remind cadence and set quality: right person, right time, all decision-makers present."); }
+    if (m.sitRate >= RP_GOALS.sit) strengths.push(`Sit rate is ${m.sitRate}% — at or above the ${RP_GOALS.sit}% goal (${m.setterSits} sat of ${m.setterAppts} set).`);
+    else if (m.sitRate < RP_GOALS.sit * 0.8) { gaps.push(`Sit rate is ${m.sitRate}% — only ${m.setterSits} of ${m.setterAppts} set appointments sat. Heavy fallout between set and sit (no-shows, cancels, reschedules).`); agenda.push("Drill confirm-and-remind cadence and set quality: right person, right time, all decision-makers present, tight time window."); }
   }
-  // Set → sat fallout (cancels/reschedules eating the pipeline)
-  if (m.setToSitRate != null && (m.setterAppts || 0) >= 5 && m.setToSitRate < 40) {
-    gaps.push(`Only ${m.setToSitRate}% of booked appointments actually sit (${m.setterSits} of ${m.setterAppts}) — heavy fallout between set and sit.`);
-    agenda.push("Audit where sets die (cancels, reschedules, bad times) and tighten booking quality at the door.");
+  // Undispositioned appointments — the true sit rate is unknowable until these
+  // are closed out, and they're usually the answer to "where did the sets go?"
+  if ((m.setterUndispositioned || 0) > 0 && (m.setterAppts || 0) > 0 && (m.setterUndispositioned / m.setterAppts) >= 0.2) {
+    gaps.push(`${m.setterUndispositioned} of ${m.setterAppts} set appointments are past-due with no recorded outcome — the real sit rate can't be trusted until they're dispositioned.`);
+    agenda.push("Close out every past-due appointment: the undispositioned pile is hiding the team's true results.");
   }
   // Close rate (closer lane)
   if (m.closeRate != null) {
@@ -2032,9 +2034,11 @@ function rpMetricTiles(m, level) {
     { n: (m.doors || 0).toLocaleString(), l: "Doors" },
     { n: m.setterAppts || 0, l: "Appts set" },
     { n: m.setterSits || 0, l: "Sat" },
+    { n: rpPct(m.sitRate), l: "Sit rate", g: `${m.setterSits || 0} of ${m.setterAppts || 0} set · goal ${RP_GOALS.sit}%`, c: rpMetricClass(m.sitRate, RP_GOALS.sit) },
     { n: m.noShows || 0, l: "No-shows" },
-    { n: rpPct(m.sitRate), l: "Show rate", g: `${m.setterSits || 0} of ${m.setterPitched || 0} kept · goal ${RP_GOALS.sit}%`, c: rpMetricClass(m.sitRate, RP_GOALS.sit) },
-    { n: rpPct(m.setToSitRate), l: "Set → sat", g: `${m.setterSits || 0} of ${m.setterAppts || 0} booked` },
+    { n: m.setterUpcoming || 0, l: "Upcoming", g: "still on the calendar" },
+    { n: m.setterUndispositioned || 0, l: "Undispositioned", g: "past-due · no outcome", c: (m.setterUndispositioned || 0) > 0 ? "warn" : "" },
+    { n: m.setterOther || 0, l: "Resched / other", g: "moved, cancelled, turned away" },
   ];
   const closerTiles = [
     { n: m.closerAppts || 0, l: "Appts (set for/by)" },
@@ -2072,9 +2076,9 @@ function rpMini(node) {
   if (rpPureCloser(node)) {
     cells = [[node.closerAppts || 0, "Appts"], [node.closerSits || 0, "Sat"], [rpPct(node.closeRate), "Close"], [rpPct(node.dispoRate), "Dispo"]];
   } else if (node.type === "user" && !node.isCloser) {
-    cells = [[(node.doors || 0).toLocaleString(), "Doors"], [node.setterAppts || 0, "Appts"], [rpPct(node.sitRate), "Show"], [node.setterSits || 0, "Sat"]];
+    cells = [[(node.doors || 0).toLocaleString(), "Doors"], [node.setterAppts || 0, "Appts"], [node.setterSits || 0, "Sat"], [rpPct(node.sitRate), "Sit%"]];
   } else {
-    cells = [[(node.doors || 0).toLocaleString(), "Doors"], [node.setterAppts || 0, "Appts"], [rpPct(node.sitRate), "Show"], [rpPct(node.closeRate), "Close"]];
+    cells = [[(node.doors || 0).toLocaleString(), "Doors"], [node.setterAppts || 0, "Appts"], [rpPct(node.sitRate), "Sit%"], [rpPct(node.closeRate), "Close"]];
   }
   return `<div class="rp-mini">${cells.map((c) => `<div><div class="n">${c[0]}</div><div class="l">${c[1]}</div></div>`).join("")}</div>`;
 }
