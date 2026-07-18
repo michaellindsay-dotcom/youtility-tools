@@ -4689,6 +4689,47 @@ async function sendCompanyReports(cfg: NotifyConfig, companyId: string, view: st
   return sent;
 }
 
+// Send a single team's report: to the caller (test), the team's manager(s),
+// and/or each rep on the team (their own). Returns how many emails went out.
+async function sendTeamReport(cfg: NotifyConfig, companyId: string, view: string, plabel: string, teamId: string, audience: string, range: { startMs: number; endMs: number } | undefined, callerUid: string): Promise<number> {
+  const rollup = await computeRollup(companyId, view, null, range);
+  const companyName = rollup.company.name || "Company";
+  const idx = rrepIndex(rollup.company);
+  const team = idx.teams[teamId];
+  if (!team) throw new HttpsError("not-found", "That team wasn't found in the current rollup.");
+
+  let sent = 0;
+  const send = async (to: string, subject: string, node: any, level: string) => {
+    const html = rrepReportHtml(node, level, view, plabel, companyName);
+    const text = rrepReportText(node, level, view, plabel, companyName);
+    const res = await sendEmailDetailed(cfg, to, subject, text, undefined, html).catch(() => ({ ok: false, detail: "" }));
+    if (res.ok) sent++;
+  };
+
+  if (audience === "me") {
+    const email = ((await db.doc(`users/${callerUid}`).get()).data()?.email as string) || "";
+    if (!email) throw new HttpsError("failed-precondition", "Your account has no email address.");
+    await send(email, `📊 ${team.name} — team report (${plabel})`, team, "team");
+    return sent;
+  }
+
+  const usersSnap = await db.collection("users").where("companyId", "==", companyId).get();
+  const roster = usersSnap.docs.map((d) => {
+    const u = d.data() as any;
+    return { uid: d.id, email: (u.email as string) || "", role: (u.role as string) || "user", position: (u.position as string) || "", teamId: (u.teamId as string) || null, managedTeamIds: Array.isArray(u.managedTeamIds) ? u.managedTeamIds : [], disabled: u.disabled === true };
+  }).filter((u) => !u.disabled && u.email);
+
+  for (const u of roster) {
+    const managesTeam = u.managedTeamIds.includes(teamId) || (u.teamId === teamId && (u.role === "manager" || u.position.includes("manager")));
+    if (managesTeam) {
+      if (audience === "all" || audience === "managers") await send(u.email, `📊 ${team.name} — team report (${plabel})`, team, "team");
+    } else if (u.teamId === teamId) {
+      if (audience === "all" || audience === "reps") { const un = idx.users[u.uid]; if (un) await send(u.email, `📊 Your report (${plabel})`, un, "rep"); }
+    }
+  }
+  return sent;
+}
+
 // Maps a chooseable period to a rollup window: previous day (bounded), or an
 // open-ended today / week-to-date / month-to-date / year / all-time.
 function reportWindow(period: string): { view: string; plabel: string; range?: { startMs: number; endMs: number } } {
@@ -4710,7 +4751,7 @@ function reportWindow(period: string): { view: string; plabel: string; range?: {
 // reps, for shout-outs / coaching to relay), reps (their own), or everyone.
 export const emailSuccessReport = onCall(async (request) => {
   const caller = await getCaller(request);
-  const reqData = (request.data || {}) as { period?: string; companyId?: string; audience?: string };
+  const reqData = (request.data || {}) as { period?: string; companyId?: string; audience?: string; teamId?: string };
   const companyId = caller.isSuper && reqData.companyId ? reqData.companyId : caller.companyId;
   if (!companyId) throw new HttpsError("permission-denied", "No company.");
   if (!(caller.isSuper || caller.role === "admin")) throw new HttpsError("permission-denied", "Admins only.");
@@ -4719,6 +4760,13 @@ export const emailSuccessReport = onCall(async (request) => {
   const cfg = await getNotifyConfig();
   if (!cfg.sendgridKey && !(cfg.smtpHost && cfg.smtpUser)) {
     throw new HttpsError("failed-precondition", "Email isn't configured — set up SendGrid or SMTP under Notifications first.");
+  }
+
+  // Single-team send: report scoped to one team (test to caller, its manager(s), or its reps).
+  if (reqData.teamId) {
+    const sent = await sendTeamReport(cfg, companyId, view, plabel, reqData.teamId, audience, range, caller.uid);
+    if (!sent) throw new HttpsError("failed-precondition", "Nothing was sent — check that recipients have email addresses and email is configured.");
+    return { sent };
   }
 
   if (audience === "me") {
