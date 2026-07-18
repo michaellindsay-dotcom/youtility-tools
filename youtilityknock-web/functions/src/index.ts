@@ -4123,13 +4123,13 @@ export const companyFunnelRankings = onCall(async (request) => {
 // no-shows (turn-aways and closer-no-shows excluded). Keyed by uid for the
 // setter and, separately, the closer.
 async function computeApptMetrics(companyId: string, startMs: number): Promise<{
-  setters: Record<string, { appts: number; sits: number; pitched: number }>;
+  setters: Record<string, { appts: number; sits: number; pitched: number; noShow: number; upcoming: number; undispositioned: number; other: number }>;
   closers: Record<string, { appts: number; sits: number; closes: number; turnedAways: number; due: number; dispositioned: number }>;
 }> {
   const snap = await db.collection("events")
     .where("companyId", "==", companyId).where("type", "==", "appointment").get();
   const nowMs = Date.now();
-  const setters: Record<string, { appts: number; sits: number; pitched: number }> = {};
+  const setters: Record<string, { appts: number; sits: number; pitched: number; noShow: number; upcoming: number; undispositioned: number; other: number }> = {};
   const closers: Record<string, { appts: number; sits: number; closes: number; turnedAways: number; due: number; dispositioned: number }> = {};
   for (const d of snap.docs) {
     const ev = d.data() as any;
@@ -4147,10 +4147,16 @@ async function computeApptMetrics(companyId: string, startMs: number): Promise<{
     // never counted for both the setter and a separate closer (no double count).
     const closerUid = (ev.closerUid as string) || setterUid;
     if (setterUid) {
-      const s = (setters[setterUid] ??= { appts: 0, sits: 0, pitched: 0 });
+      const s = (setters[setterUid] ??= { appts: 0, sits: 0, pitched: 0, noShow: 0, upcoming: 0, undispositioned: 0, other: 0 });
       s.appts++;
+      const startAt = Number(ev.startAt) || 0;
+      // Full outcome breakdown so every set appointment is accounted for:
+      // sat, no-showed, still upcoming, past-due-but-never-dispositioned, or
+      // otherwise closed out (rescheduled / turned away / cancelled).
       if (isSit) { s.sits++; s.pitched++; }
-      else if (st === "no_show") s.pitched++;
+      else if (st === "no_show") { s.noShow++; s.pitched++; }
+      else if (st === "scheduled") { if (startAt > 0 && startAt < nowMs) s.undispositioned++; else s.upcoming++; }
+      else s.other++;
     }
     if (closerUid) {
       const c = (closers[closerUid] ??= { appts: 0, sits: 0, closes: 0, turnedAways: 0, due: 0, dispositioned: 0 });
@@ -4352,7 +4358,7 @@ export const getCompanyRollup = onCall(async (request) => {
     teamMeta[t.id] = { name: d.name || "Team", regionId: parent && regionName[parent] ? parent : null };
   });
 
-  const blank = () => ({ doors: 0, convos: 0, recorded: 0, setterAppts: 0, setterSits: 0, setterPitched: 0, closerAppts: 0, closerSits: 0, closes: 0, turnedAways: 0, closerDue: 0, closerDispositioned: 0, reps: 0, closerReps: 0 });
+  const blank = () => ({ doors: 0, convos: 0, recorded: 0, setterAppts: 0, setterSits: 0, setterPitched: 0, setterNoShows: 0, setterUpcoming: 0, setterUndispositioned: 0, setterOther: 0, closerAppts: 0, closerSits: 0, closes: 0, turnedAways: 0, closerDue: 0, closerDispositioned: 0, reps: 0, closerReps: 0 });
   type M = ReturnType<typeof blank>;
   const add = (a: M, u: U) => {
     const s = sm[u.uid]; const c = cm[u.uid];
@@ -4360,6 +4366,7 @@ export const getCompanyRollup = onCall(async (request) => {
     a.convos += convosByUid[u.uid] || 0;
     a.recorded += recordedByUid[u.uid] || 0;
     a.setterAppts += s?.appts || 0; a.setterSits += s?.sits || 0; a.setterPitched += s?.pitched || 0;
+    a.setterNoShows += s?.noShow || 0; a.setterUpcoming += s?.upcoming || 0; a.setterUndispositioned += s?.undispositioned || 0; a.setterOther += s?.other || 0;
     a.closerAppts += c?.appts || 0; a.closerSits += c?.sits || 0; a.closes += c?.closes || 0; a.turnedAways += c?.turnedAways || 0;
     a.closerDue += c?.due || 0; a.closerDispositioned += c?.dispositioned || 0;
     a.reps += 1; if (u.isCloser) a.closerReps += 1;
@@ -4367,11 +4374,11 @@ export const getCompanyRollup = onCall(async (request) => {
   const rate = (n: number, d: number) => (d > 0 ? Math.min(100, Math.round((n / d) * 100)) : null);
   const node = (m: M, name: string, type: string, id: string | null, extra?: Record<string, unknown>) => ({
     type, id, name, ...m,
-    // sitRate = show rate: of appointments that were kept (sat or no-showed), how
-    // many actually sat. showRate is the same value under a clearer name.
-    sitRate: rate(m.setterSits, m.setterPitched),
-    setToSitRate: rate(m.setterSits, m.setterAppts), // booked → actually sat
-    noShows: Math.max(0, m.setterPitched - m.setterSits),
+    // Sit rate = sits ÷ ALL appointments set (the true, complete conversion). The
+    // appointment breakdown (noShows / upcoming / undispositioned / other) accounts
+    // for every set appointment, so nothing hides in a small denominator.
+    sitRate: rate(m.setterSits, m.setterAppts),
+    noShows: m.setterNoShows,
     closeRate: rate(m.closes, m.closerSits),
     dispoRate: rate(m.closerDispositioned, m.closerDue), // % of due appts the closer dispositioned
     recRate: rate(m.recorded, m.convos), // % of door conversations that were recorded
@@ -5217,7 +5224,7 @@ export const getEmployeeReport = onCall(async (request) => {
   // matches what actually happened. Sit rate = sits ÷ pitched appointments
   // (sits + no-shows; excludes turn-aways).
   const { setters: sm, closers: cm } = await computeApptMetrics(rep.companyId, 0);
-  const sMet = sm[repUid] || { appts: 0, sits: 0, pitched: 0 };
+  const sMet = sm[repUid] || { appts: 0, sits: 0, pitched: 0, noShow: 0, upcoming: 0, undispositioned: 0, other: 0 };
   const cMet = cm[repUid] || { appts: 0, sits: 0, closes: 0, turnedAways: 0, due: 0, dispositioned: 0 };
   const rate = (n: number, d: number) => (d > 0 ? Math.min(100, Math.round((n / d) * 100)) : null);
   const sitMetrics = {
