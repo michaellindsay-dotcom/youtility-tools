@@ -2757,8 +2757,12 @@ body.modal-open .chat-fab-global { display: none; }
   max-width: 900px;
   display: flex;
   flex-direction: column;
-  height: calc(100dvh - 84px); /* almost the whole screen, under the app header */
-  min-height: 420px;
+  /* Fill the already-sized scroll container (.app-content) instead of guessing a
+     viewport offset. The old calc(100dvh - 84px) ignored the safe-area inset, the
+     app header height AND .app-content's own padding, so the column ran taller
+     than the space available and the compose bar / picker fell off-screen. */
+  height: 100%;
+  min-height: 0;
 }
 .chat-topbar {
   display: flex;
@@ -2782,6 +2786,7 @@ body.modal-open .chat-fab-global { display: none; }
 }
 .chat-picker-toggle {
   flex: 1;
+  min-width: 0; /* let a long team-name title shrink+ellipsis instead of overflowing */
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -2793,7 +2798,7 @@ body.modal-open .chat-fab-global { display: none; }
   color: var(--ink);
   cursor: pointer;
 }
-.chat-topbar-title { font-size: 16px; font-weight: 700; }
+.chat-topbar-title { font-size: 16px; font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .chat-caret { transition: transform 0.2s ease; color: var(--ink-mid); }
 .chat-caret.open { transform: rotate(180deg); }
 
@@ -2806,7 +2811,8 @@ body.modal-open .chat-fab-global { display: none; }
   border-right: 1px solid var(--line);
 }
 .chat-picker.open {
-  max-height: 62vh;
+  /* Cap so the topbar + open picker + compose bar always fit together. */
+  max-height: min(58vh, 55%);
   overflow-y: auto;
   border-bottom: 1px solid var(--line);
 }

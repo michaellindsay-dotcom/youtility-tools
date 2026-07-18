@@ -146,10 +146,13 @@ export default function Rewards() {
       const mine = fresh.filter((r) => r.audience === "individual");
       if (mine.length && companyId) {
         const names = mine.map((r) => `"${r.name}"`).join(", ");
-        addDoc(collection(db, "chat"), {
-          companyId, userId: profile.uid, userName: profile.displayName,
-          text: `🎉 ${profile.displayName} just unlocked ${names}! 🔥 Who's next?`, createdAt: Date.now(),
-        }).catch(() => {});
+        // Reward brags belong in the rep's TEAM chat, not the company-wide
+        // channel (which is for company-wide updates only). No team → company.
+        const text = `🎉 ${profile.displayName} just unlocked ${names}! 🔥 Who's next?`;
+        const post = profile.teamId
+          ? addDoc(collection(db, "teamChat"), { companyId, teamId: profile.teamId, userId: profile.uid, userName: profile.displayName, text, createdAt: Date.now() })
+          : addDoc(collection(db, "chat"), { companyId, userId: profile.uid, userName: profile.displayName, text, createdAt: Date.now() });
+        post.catch(() => {});
       }
       persist();
     }

@@ -42,11 +42,21 @@ export default function WhosWorkingPanel() {
 
   const active = [...shifts].sort((a, b) => (b.doorsKnocked ?? 0) - (a.doorsKnocked ?? 0));
 
+  // Shout-outs / rally post to the poster's TEAM chat (not the company channel),
+  // so hype stays with the crew it's about. Reps with no team fall back to the
+  // company channel so nothing is silently dropped.
   async function postChat(text: string) {
     if (!profile || !companyId) return;
-    await addDoc(collection(db, "chat"), {
-      companyId, userId: profile.uid, userName: profile.displayName, text, createdAt: Date.now(),
-    });
+    const teamId = profile.teamId || null;
+    if (teamId) {
+      await addDoc(collection(db, "teamChat"), {
+        companyId, teamId, userId: profile.uid, userName: profile.displayName, text, createdAt: Date.now(),
+      });
+    } else {
+      await addDoc(collection(db, "chat"), {
+        companyId, userId: profile.uid, userName: profile.displayName, text, createdAt: Date.now(),
+      });
+    }
   }
 
   async function shout(s: Shift) {
