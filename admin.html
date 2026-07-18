@@ -2257,6 +2257,22 @@ function rpMini(node) {
   return `<div class="rp-mini">${cells.map((c) => `<div><div class="n">${c[0]}</div><div class="l">${c[1]}</div></div>`).join("")}</div>`;
 }
 
+// Render a group node's children. A team's roster is split into Setters and
+// Closers (a Setter · Closer appears in both, each list ranked by score); other
+// levels list their children as-is. Shared by the on-screen tree and the
+// single-team / single-region PDF so both stay consistent.
+function rpKidsHtml(node) {
+  const kids = node.regions || node.teams || node.users || [];
+  if (node.type === "team") {
+    const byScore = (a, b) => (b.score || 0) - (a.score || 0);
+    const setters = kids.filter((k) => !rpPureCloser(k)).sort(byScore);
+    const closers = kids.filter((k) => k.isCloser).sort(byScore);
+    const section = (label, arr) => arr.length ? `<div class="rp-lane-h">${label}</div>${arr.map(rpNodeHtml).join("")}` : "";
+    return (section("🚪 Setters", setters) + section("🤝 Closers", closers)) || `<p class="muted small">No reps.</p>`;
+  }
+  return kids.map(rpNodeHtml).join("") || `<p class="muted small">No sub-groups.</p>`;
+}
+
 // One collapsible node in the drill-down tree.
 function rpNodeHtml(node) {
   const key = node.type + ":" + (node.id || "");
@@ -2279,19 +2295,7 @@ function rpNodeHtml(node) {
     : `${(node.type === "region" ? (node.teams || []).length + " team" + ((node.teams || []).length === 1 ? "" : "s") : (node.users || []).length + " rep" + ((node.users || []).length === 1 ? "" : "s"))}`;
   let inner = "";
   if (open) {
-    let body;
-    if (node.type === "team") {
-      // Split the roster into setters and closers so each role reads on its own;
-      // a rep titled as both (Setter · Closer) appears in both lists, ranked by score.
-      const byScore = (a, b) => (b.score || 0) - (a.score || 0);
-      const setters = kids.filter((k) => !rpPureCloser(k)).sort(byScore);
-      const closers = kids.filter((k) => k.isCloser).sort(byScore);
-      const section = (label, arr) => arr.length ? `<div class="rp-lane-h">${label}</div>${arr.map(rpNodeHtml).join("")}` : "";
-      body = (section("🚪 Setters", setters) + section("🤝 Closers", closers)) || `<p class="muted small">No reps.</p>`;
-    } else {
-      body = kids.map(rpNodeHtml).join("") || `<p class="muted small">No sub-groups.</p>`;
-    }
-    inner = `<div class="rp-kids"><div class="rp-recap">${rpRecapHtml(node, node.type)}</div>${body}</div>`;
+    inner = `<div class="rp-kids"><div class="rp-recap">${rpRecapHtml(node, node.type)}</div>${rpKidsHtml(node)}</div>`;
   }
   // Teams get their own download / email buttons so a manager's single team can
   // be printed or sent on its own.
@@ -2518,7 +2522,7 @@ function rpPrintNode(node) {
     </div>
     <div class="rp-recap" style="margin:0 0 16px;">${rpRecapHtml(node, node.type)}</div>
     <h2 style="margin:18px 0 10px;">${kidLabel}</h2>
-    <div class="rp-tree">${kids.map(rpNodeHtml).join("") || `<div class="th-empty">No members yet.</div>`}</div>`;
+    <div class="rp-tree">${kids.length ? rpKidsHtml(node) : `<div class="th-empty">No members yet.</div>`}</div>`;
   rpFillBanner(node);
   rpDoPrint(() => { state.rpOpen = prevOpen; rpRender(); });
 }
