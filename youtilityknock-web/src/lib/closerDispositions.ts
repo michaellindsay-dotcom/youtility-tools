@@ -69,6 +69,28 @@ export function isUndispositionedPast(
   return isCloserAppt(e) && !isDispositioned(e) && e.startAt < now;
 }
 
+// Grace period after an appointment's scheduled END before a disposition becomes
+// mandatory — in case the closer runs long in the appointment.
+export const DISPO_GRACE_MS = 2 * 60 * 60 * 1000; // 2 hours
+
+// The scheduled end of an appointment: explicit endAt if set, else start + the
+// planned duration (default 60 min when none is recorded).
+export function apptEndAt(e: Pick<ScheduleEvent, "startAt" | "endAt" | "durationMin">): number {
+  if (typeof e.endAt === "number" && e.endAt > 0) return e.endAt;
+  const durMin = typeof e.durationMin === "number" && e.durationMin > 0 ? e.durationMin : 60;
+  return e.startAt + durMin * 60000;
+}
+
+// An overdue disposition: a closer appointment still un-dispositioned whose END
+// plus the 2-hour grace buffer has fully passed. This is the HARD-GATE set — the
+// closer can't use the app until every one of these is closed out.
+export function isDispositionOverdue(
+  e: Pick<ScheduleEvent, "type" | "closerUid" | "apptStatus" | "startAt" | "endAt" | "durationMin">,
+  now = Date.now()
+): boolean {
+  return isCloserAppt(e) && !isDispositioned(e) && apptEndAt(e) + DISPO_GRACE_MS < now;
+}
+
 // "On the spot" = closed out AT the appointment (on-site, right then), not later
 // from the calendar. New dispositions store the flag; for legacy events we infer
 // it — on-site AND recorded the same calendar day as the appointment.

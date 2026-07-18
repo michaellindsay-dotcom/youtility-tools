@@ -4,6 +4,7 @@ import Sidebar from "./Sidebar";
 import Topbar from "./Topbar";
 import ChatFab from "./ChatFab";
 import LocationGate from "./LocationGate";
+import CloserDispositionGate from "./CloserDispositionGate";
 import { usePresenceHeartbeat } from "../lib/presence";
 import { NavContext } from "./NavContext";
 
@@ -37,6 +38,7 @@ export default function Layout() {
         </div>
         <ChatFab />
         <LocationGate />
+        <CloserDispositionGate />
       </div>
     </NavContext.Provider>
   );
