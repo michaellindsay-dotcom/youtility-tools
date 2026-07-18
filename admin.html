@@ -227,7 +227,9 @@
   .rp-recap li .ic { flex:0 0 auto; }
   .rp-recap li b { color:var(--ink); }
   .rp-recap .muted { color:var(--ink-dim); }
-  .rp-metrics { display:grid; grid-template-columns:repeat(auto-fill,minmax(128px,1fr)); gap:10px; margin-top:10px; }
+  .rp-lane-h { font-size:11px; letter-spacing:.5px; text-transform:uppercase; color:var(--ink-dim); font-weight:700; margin:14px 0 2px; }
+  .rp-lane-h:first-child { margin-top:6px; }
+  .rp-metrics { display:grid; grid-template-columns:repeat(auto-fill,minmax(128px,1fr)); gap:10px; margin-top:8px; }
   .rp-metric { border:1px solid var(--line); border-radius:10px; padding:9px 11px; background:rgba(255,255,255,.02); }
   .rp-metric .n { font-family:'Space Grotesk',sans-serif; font-weight:700; font-size:17px; font-variant-numeric:tabular-nums; }
   .rp-metric .l { font-size:10px; letter-spacing:.3px; text-transform:uppercase; color:var(--ink-dim); margin-top:2px; }
@@ -1900,32 +1902,33 @@ async function selectCompany(companyId, companyName) {
 // door volume, appointments set, sit rate, close rate, closes, and how much of
 // the field conversation is actually being recorded for coaching.
 const RP_TARGETS = { doorsWk: 100, setsWk: 8, closesWk: 2 };  // per active rep, per week
-const RP_GOALS   = { sit: 65, close: 30, rec: 80 };           // quality-rate goals (%)
+const RP_GOALS   = { sit: 65, close: 30, rec: 80, dispo: 90 }; // quality-rate goals (%)
 const RP_MULT    = { week: 1, month: 4.3, year: 52, alltime: 52 }; // scale weekly targets to the period
 const RP_PLABEL  = { week: "this week", month: "this month", year: "this year", alltime: "all-time" };
 const RP_LEVEL_WORD = { company: "company", region: "regional", team: "team", rep: "1:1" };
 
-function rpStartOf(period) {
-  const d = new Date(); d.setHours(0, 0, 0, 0);
-  if (period === "week") { const day = (d.getDay() + 6) % 7; d.setDate(d.getDate() - day); return d.getTime(); }
-  if (period === "month") { d.setDate(1); return d.getTime(); }
-  if (period === "year") { d.setMonth(0, 1); return d.getTime(); }
-  return 0; // alltime
-}
 function rpClamp(v) { return Math.max(0, Math.min(100, v)); }
-// Weighted, self-normalizing composite. Components with no data drop out and the
-// remaining weights renormalize, so a setter-only team still scores fairly.
+// True when a node represents a rep who only closes (no door/setting activity) —
+// door/set targets shouldn't be held against a pure closer, and vice-versa.
+function rpPureCloser(m) { return m.type === "user" && m.isCloser && !((m.doors || 0) > 0 || (m.setterAppts || 0) > 0); }
+function rpHasCloseLane(m) { return m.type !== "user" || (m.closerAppts || 0) > 0 || (m.closes || 0) > 0 || m.isCloser; }
+// Weighted, self-normalizing, role-aware composite. Components with no data (or
+// that don't apply to this rep's role) drop out and the remaining weights
+// renormalize — so a pure setter and a pure closer are each scored on their lane.
 function rpScore(m) {
   const mult = RP_MULT[state.rpPeriod] || 1;
   const parts = [];
   const add = (v, w) => { if (v != null && isFinite(v)) parts.push([rpClamp(v), w]); };
   const attain = (actual, perRep, reps) => { const t = reps * perRep * mult; return t > 0 ? (actual / t) * 100 : null; };
-  add(attain(m.doors, RP_TARGETS.doorsWk, m.reps), 15);
-  add(attain(m.setterAppts, RP_TARGETS.setsWk, m.reps), 15);
-  add(m.sitRate != null ? (m.sitRate / RP_GOALS.sit) * 100 : null, 20);
-  add(m.closeRate != null ? (m.closeRate / RP_GOALS.close) * 100 : null, 25);
-  add(attain(m.closes, RP_TARGETS.closesWk, m.closerReps || m.reps), 15);
-  add(m.recRate != null ? (m.recRate / RP_GOALS.rec) * 100 : null, 10);
+  if (!rpPureCloser(m)) {                                   // setter lane
+    add(attain(m.doors, RP_TARGETS.doorsWk, m.reps), 15);
+    add(attain(m.setterAppts, RP_TARGETS.setsWk, m.reps), 15);
+  }
+  add(m.sitRate != null ? (m.sitRate / RP_GOALS.sit) * 100 : null, 15);       // show rate
+  add(m.closeRate != null ? (m.closeRate / RP_GOALS.close) * 100 : null, 25); // closer lane
+  if (rpHasCloseLane(m)) add(attain(m.closes, RP_TARGETS.closesWk, m.closerReps || m.reps), 15);
+  add(m.dispoRate != null ? (m.dispoRate / RP_GOALS.dispo) * 100 : null, 10); // closer accountability
+  add(m.recRate != null ? (m.recRate / RP_GOALS.rec) * 100 : null, 10);       // coaching visibility
   if (!parts.length) return null;
   const wsum = parts.reduce((a, p) => a + p[1], 0);
   return Math.round(parts.reduce((a, p) => a + p[0] * p[1], 0) / wsum);
@@ -1940,84 +1943,116 @@ function rpGrade(s) {
 function rpChip(s) { const g = rpGrade(s); return `<span class="rp-chip rp-sc-${g.k}">${s == null ? "—" : s}</span>`; }
 const rpPct = (v) => (v == null ? "—" : v + "%");
 
-// Walk the rollup tree; attach each node's recorded-conversation rate, idle-rep
-// count and Production Score. pitchByUid = recorded pitches per rep this period.
-function rpAttach(node, pitchByUid, uidMap) {
-  let pc = 0, idle = 0;
+// Walk the rollup tree; count idle reps and score every node. Recorded-conversation
+// rate + all lane metrics already come computed per node from getCompanyRollup.
+function rpAttach(node, uidMap) {
+  let idle = 0;
   if (node.type === "user") {
-    pc = pitchByUid[node.id] || 0;
-    if (!(node.doors || 0) && !(node.setterAppts || 0) && !(node.closes || 0)) idle = 1;
+    const producedNothing = !(node.doors || 0) && !(node.setterAppts || 0) && !(node.closerAppts || 0) && !(node.closes || 0);
+    if (producedNothing) idle = 1;
     if (uidMap) uidMap[node.id] = node;
   } else {
     const kids = node.regions || node.teams || node.users || [];
-    for (const k of kids) { const r = rpAttach(k, pitchByUid, uidMap); pc += r.pc; idle += r.idle; }
+    for (const k of kids) idle += rpAttach(k, uidMap).idle;
   }
-  node._pitches = pc;
-  const denom = node.setterPitched || node.setterSits || 0;
-  node.recRate = denom > 0 ? Math.min(100, Math.round((pc / denom) * 100)) : null;
   node.idleReps = idle;
   node.score = rpScore(node);
-  return { pc, idle };
+  return { idle };
 }
 
 // Rule-based recap: strengths, gaps, and a meeting agenda from the metrics.
+// Role-aware — a pure closer isn't dinged for door volume, and disposition
+// accountability is surfaced for anyone running appointments.
 function rpRecap(m, level) {
   const strengths = [], gaps = [], agenda = [];
-  const who = level === "rep" ? "This rep" : "The " + (level === "company" ? "company" : level);
-  // Door volume
-  const dScore = m.reps ? (m.doors / (m.reps * RP_TARGETS.doorsWk * (RP_MULT[state.rpPeriod] || 1))) * 100 : null;
-  if (dScore != null) {
-    if (dScore >= 90) strengths.push(`Door volume is strong — ${Math.round(dScore)}% of the activity target. The top of the funnel is healthy.`);
-    else if (dScore < 60) { gaps.push(`Activity is light — only ${Math.round(dScore)}% of the door target. The pipeline starts at the door and not enough are getting knocked.`); agenda.push("Set a daily door minimum and track it live — the constraint is at the top of the funnel."); }
+  const isUser = level === "rep";
+  const mult = RP_MULT[state.rpPeriod] || 1;
+  if (!rpPureCloser(m)) {
+    // Door volume
+    const dScore = m.reps ? (m.doors / (m.reps * RP_TARGETS.doorsWk * mult)) * 100 : null;
+    if (dScore != null) {
+      if (dScore >= 90) strengths.push(`Door volume is strong — ${Math.round(dScore)}% of the activity target (${(m.doors || 0).toLocaleString()} doors). Top of the funnel is healthy.`);
+      else if (dScore < 60) { gaps.push(`Activity is light — only ${Math.round(dScore)}% of the door target (${(m.doors || 0).toLocaleString()} doors). The pipeline starts at the door.`); agenda.push("Set a daily door minimum and track it live — the constraint is at the top of the funnel."); }
+    }
+    // Appointments set (setter lane)
+    const sScore = m.reps ? (m.setterAppts / (m.reps * RP_TARGETS.setsWk * mult)) * 100 : null;
+    if (sScore != null && sScore < 60) { gaps.push(`Appointments set are low — ${Math.round(sScore)}% of target (${m.setterAppts} booked). Doors aren't converting into sits.`); agenda.push("Sharpen the door pitch and the ask — role-play the transition from conversation to booked appointment."); }
+    else if (sScore != null && sScore >= 90) strengths.push(`Setting engine is humming — ${m.setterAppts} appointments booked, ${Math.round(sScore)}% of target.`);
   }
-  // Appointments set
-  const sScore = m.reps ? (m.setterAppts / (m.reps * RP_TARGETS.setsWk * (RP_MULT[state.rpPeriod] || 1))) * 100 : null;
-  if (sScore != null && sScore < 60) { gaps.push(`Appointments set are low — ${Math.round(sScore)}% of target (${m.setterAppts} booked). Doors aren't converting into sits-to-be.`); agenda.push("Sharpen the door pitch and the ask — role-play the transition from conversation to booked appointment."); }
-  else if (sScore != null && sScore >= 90) strengths.push(`Setting engine is humming — ${m.setterAppts} appointments booked, ${Math.round(sScore)}% of target.`);
-  // Sit rate
+  // Show rate (of kept appointments, how many actually sat)
   if (m.sitRate != null) {
-    if (m.sitRate >= RP_GOALS.sit) strengths.push(`Sit rate is ${m.sitRate}% — at or above the ${RP_GOALS.sit}% goal. Booked appointments are sticking.`);
-    else if (m.sitRate < RP_GOALS.sit * 0.8) { gaps.push(`Sit rate is ${m.sitRate}% vs the ${RP_GOALS.sit}% goal — too many booked appointments never sit.`); agenda.push("Drill confirm-and-remind cadence and set quality: right person, right time, all decision-makers present."); }
+    if (m.sitRate >= RP_GOALS.sit) strengths.push(`Show rate is ${m.sitRate}% — at or above the ${RP_GOALS.sit}% goal (${m.setterSits} sat of ${m.setterPitched} kept).`);
+    else if (m.sitRate < RP_GOALS.sit * 0.8) { gaps.push(`Show rate is ${m.sitRate}% vs the ${RP_GOALS.sit}% goal — ${m.noShows || 0} of ${m.setterPitched || 0} kept appointments no-showed.`); agenda.push("Drill confirm-and-remind cadence and set quality: right person, right time, all decision-makers present."); }
   }
-  // Close rate
+  // Set → sat fallout (cancels/reschedules eating the pipeline)
+  if (m.setToSitRate != null && (m.setterAppts || 0) >= 5 && m.setToSitRate < 40) {
+    gaps.push(`Only ${m.setToSitRate}% of booked appointments actually sit (${m.setterSits} of ${m.setterAppts}) — heavy fallout between set and sit.`);
+    agenda.push("Audit where sets die (cancels, reschedules, bad times) and tighten booking quality at the door.");
+  }
+  // Close rate (closer lane)
   if (m.closeRate != null) {
-    if (m.closeRate >= RP_GOALS.close) strengths.push(`Close rate is ${m.closeRate}% — beating the ${RP_GOALS.close}% goal. The presentation is converting.`);
-    else if (m.closeRate < RP_GOALS.close * 0.8) { gaps.push(`Close rate is ${m.closeRate}% vs the ${RP_GOALS.close}% goal — sits are happening but not converting. This is a presentation / objection-handling gap.`); agenda.push("Ride-along or role-play the close; review the offer and objection handling on every sat-but-not-closed deal."); }
+    if (m.closeRate >= RP_GOALS.close) strengths.push(`Close rate is ${m.closeRate}% — beating the ${RP_GOALS.close}% goal (${m.closes} of ${m.closerSits} sits).`);
+    else if (m.closeRate < RP_GOALS.close * 0.8) { gaps.push(`Close rate is ${m.closeRate}% vs the ${RP_GOALS.close}% goal — sits aren't converting. Presentation / objection-handling gap.`); agenda.push("Ride-along or role-play the close; review objection handling on every sat-but-not-closed deal."); }
+  }
+  // Disposition accountability — closers closing out their appointments
+  if (m.dispoRate != null) {
+    const undone = (m.closerDue || 0) - (m.closerDispositioned || 0);
+    if (m.dispoRate >= RP_GOALS.dispo) strengths.push(`Disposition rate is ${m.dispoRate}% — appointments get closed out promptly, so setters see real outcomes and the numbers reflect true production.`);
+    else { gaps.push(`Disposition rate is ${m.dispoRate}% (goal ${RP_GOALS.dispo}%+): ${undone} of ${m.closerDue || 0} due appointment${(m.closerDue || 0) === 1 ? "" : "s"} were never marked. Below 90% the whole team's production is understated, and setters get demotivated when they never learn what happened to the appointments they set.`); agenda.push("Require every appointment to be dispositioned same-day. Un-dispositioned appointments hide real results and erode setter trust — make it a daily accountability."); }
   }
   // Turn-aways (unqualified sits)
-  if (m.closerSits > 4 && m.turnedAways / m.closerSits > 0.25) { gaps.push(`Turn-away rate is high (${Math.round((m.turnedAways / m.closerSits) * 100)}% of sits) — reps are running unqualified appointments.`); agenda.push("Tighten qualification at the set so closers spend time on real opportunities."); }
-  // Recorded conversations — coaching visibility
+  if (m.closerSits > 4 && m.turnedAways / m.closerSits > 0.25) { gaps.push(`Turn-away rate is high (${Math.round((m.turnedAways / m.closerSits) * 100)}% of sits) — unqualified appointments are being run.`); agenda.push("Tighten qualification at the set so closers spend time on real opportunities."); }
+  // Recorded conversations — coaching visibility (setter/door lane)
   if (m.recRate != null) {
-    if (m.recRate >= RP_GOALS.rec) strengths.push(`${m.recRate}% of conversations are recorded — excellent coaching visibility.`);
-    else { gaps.push(`Only ${m.recRate}% of conversations are recorded (goal ${RP_GOALS.rec}%). Coaching is blind without recorded pitches — you can't fix what you can't hear.`); agenda.push("Make pitch recording non-negotiable and review one recorded pitch per rep every week."); }
-  } else {
-    gaps.push(`No recorded conversations ${RP_PLABEL[state.rpPeriod]} — recording is off, so none of this can be coached from the tape.`);
-    agenda.push("Turn on and enforce pitch recording so performance can actually be reviewed.");
+    if (m.recRate >= RP_GOALS.rec) strengths.push(`${m.recRate}% of on-site conversations are recorded — great coaching visibility.`);
+    else { gaps.push(`Only ${m.recRate}% of on-site conversations are recorded (goal ${RP_GOALS.rec}%; ${m.recorded || 0} of ${m.convos || 0}). Coaching is blind without the tape.`); agenda.push("Make at-the-door pitch recording non-negotiable and review one recorded pitch per rep each week."); }
+  } else if (!rpPureCloser(m) && (m.convos || 0) > 0) {
+    gaps.push(`None of ${m.convos} on-site conversation${m.convos === 1 ? "" : "s"} were recorded ${RP_PLABEL[state.rpPeriod]} — nothing to coach from the tape.`);
+    agenda.push("Turn on and enforce at-the-door pitch recording so real conversations can be reviewed.");
   }
-  // Idle reps (dead weight) — only for group levels
-  if (level !== "rep" && m.reps > 1 && m.idleReps > 0) {
-    gaps.push(`${m.idleReps} of ${m.reps} reps produced nothing ${RP_PLABEL[state.rpPeriod]} — no doors, no sets, no closes.`);
+  // Idle reps (dead weight) — group levels only
+  if (!isUser && m.reps > 1 && m.idleReps > 0) {
+    gaps.push(`${m.idleReps} of ${m.reps} reps produced nothing ${RP_PLABEL[state.rpPeriod]} — no doors, no sets, no appointments, no closes.`);
     agenda.push(`Address the ${m.idleReps} non-producing rep${m.idleReps > 1 ? "s" : ""} directly: activity plan, ride-along, or a hard conversation.`);
   }
-  return { strengths, gaps, agenda, who };
+  return { strengths, gaps, agenda };
 }
 
 function rpMetricClass(v, goal) { if (v == null) return ""; if (v >= goal) return "good"; if (v >= goal * 0.7) return "warn"; return "bad"; }
-function rpMetricTiles(m) {
-  const t = [
+function rpTilesRow(tiles) {
+  return `<div class="rp-metrics">${tiles.map((x) =>
+    `<div class="rp-metric ${x.c || ""}"><div class="n">${x.n}</div><div class="l">${x.l}</div>${x.g ? `<div class="g">${x.g}</div>` : ""}</div>`).join("")}</div>`;
+}
+// Full detail grid, split into the lanes that apply to this node/role.
+function rpMetricTiles(m, level) {
+  const isUser = level === "rep";
+  const showSetter = !isUser || !m.isCloser || (m.doors || 0) > 0 || (m.setterAppts || 0) > 0;
+  const showCloser = !isUser || m.isCloser || (m.closerAppts || 0) > 0 || (m.closes || 0) > 0;
+  const setterTiles = [
     { n: (m.doors || 0).toLocaleString(), l: "Doors" },
     { n: m.setterAppts || 0, l: "Appts set" },
-    { n: m.setterSits || 0, l: "Sits" },
-    { n: rpPct(m.sitRate), l: "Sit rate", g: `goal ${RP_GOALS.sit}%`, c: rpMetricClass(m.sitRate, RP_GOALS.sit) },
-    { n: m.setterPitched || 0, l: "Pitched" },
+    { n: m.setterSits || 0, l: "Sat" },
+    { n: m.noShows || 0, l: "No-shows" },
+    { n: rpPct(m.sitRate), l: "Show rate", g: `${m.setterSits || 0} of ${m.setterPitched || 0} kept · goal ${RP_GOALS.sit}%`, c: rpMetricClass(m.sitRate, RP_GOALS.sit) },
+    { n: rpPct(m.setToSitRate), l: "Set → sat", g: `${m.setterSits || 0} of ${m.setterAppts || 0} booked` },
+  ];
+  const closerTiles = [
+    { n: m.closerAppts || 0, l: "Appts (set for/by)" },
+    { n: m.closerSits || 0, l: "Sat" },
     { n: m.closes || 0, l: "Closes" },
-    { n: rpPct(m.closeRate), l: "Close rate", g: `goal ${RP_GOALS.close}%`, c: rpMetricClass(m.closeRate, RP_GOALS.close) },
+    { n: rpPct(m.closeRate), l: "Close rate", g: `${m.closes || 0} of ${m.closerSits || 0} sits · goal ${RP_GOALS.close}%`, c: rpMetricClass(m.closeRate, RP_GOALS.close) },
     { n: m.turnedAways || 0, l: "Turn-aways" },
-    { n: rpPct(m.recRate), l: "% Recorded", g: `${m._pitches || 0} of ${m.setterPitched || m.setterSits || 0} · goal ${RP_GOALS.rec}%`, c: rpMetricClass(m.recRate, RP_GOALS.rec) },
+    { n: rpPct(m.dispoRate), l: "Disposition", g: `${m.closerDispositioned || 0} of ${m.closerDue || 0} due · goal ${RP_GOALS.dispo}%`, c: rpMetricClass(m.dispoRate, RP_GOALS.dispo) },
+  ];
+  const sharedTiles = [
+    { n: rpPct(m.recRate), l: "% Recorded", g: `${m.recorded || 0} of ${m.convos || 0} convos · goal ${RP_GOALS.rec}%`, c: rpMetricClass(m.recRate, RP_GOALS.rec) },
     { n: m.score == null ? "—" : m.score, l: "Production", g: rpGrade(m.score).label },
   ];
-  return `<div class="rp-metrics">${t.map((x) =>
-    `<div class="rp-metric ${x.c || ""}"><div class="n">${x.n}</div><div class="l">${x.l}</div>${x.g ? `<div class="g">${x.g}</div>` : ""}</div>`).join("")}</div>`;
+  let html = "";
+  if (showSetter) html += `<div class="rp-lane-h">🚪 Setting</div>` + rpTilesRow(setterTiles);
+  if (showCloser) html += `<div class="rp-lane-h">🤝 Closing &amp; accountability</div>` + rpTilesRow(closerTiles);
+  html += `<div class="rp-lane-h">🎙 Coaching &amp; score</div>` + rpTilesRow(sharedTiles);
+  return html;
 }
 function rpRecapHtml(m, level) {
   const r = rpRecap(m, level);
@@ -2027,8 +2062,21 @@ function rpRecapHtml(m, level) {
   html += `<h4>⚠️ What's missing</h4>${r.gaps.length ? list(r.gaps, "⚠️") : `<p class="muted small" style="margin:0;">No red flags — solid across the board.</p>`}`;
   const agenda = r.agenda.length ? r.agenda : ["Recognize the wins publicly and have top performers share exactly what's working so it spreads."];
   html += `<h4>📋 Turn this into a ${RP_LEVEL_WORD[level]} meeting</h4>${list(agenda, "→")}`;
-  html += rpMetricTiles(m);
+  html += rpMetricTiles(m, level);
   return html;
+}
+
+// Compact role-aware mini stats on a tree row.
+function rpMini(node) {
+  let cells;
+  if (rpPureCloser(node)) {
+    cells = [[node.closerAppts || 0, "Appts"], [node.closerSits || 0, "Sat"], [rpPct(node.closeRate), "Close"], [rpPct(node.dispoRate), "Dispo"]];
+  } else if (node.type === "user" && !node.isCloser) {
+    cells = [[(node.doors || 0).toLocaleString(), "Doors"], [node.setterAppts || 0, "Appts"], [rpPct(node.sitRate), "Show"], [node.setterSits || 0, "Sat"]];
+  } else {
+    cells = [[(node.doors || 0).toLocaleString(), "Doors"], [node.setterAppts || 0, "Appts"], [rpPct(node.sitRate), "Show"], [rpPct(node.closeRate), "Close"]];
+  }
+  return `<div class="rp-mini">${cells.map((c) => `<div><div class="n">${c[0]}</div><div class="l">${c[1]}</div></div>`).join("")}</div>`;
 }
 
 // One collapsible node in the drill-down tree.
@@ -2038,14 +2086,10 @@ function rpNodeHtml(node) {
   const tag = { region: "Region", team: "Team", company: "Company" }[node.type] || "";
   const isUser = node.type === "user";
   const kids = node.regions || node.teams || node.users || [];
-  const mini = `<div class="rp-mini">
-      <div><div class="n">${(node.doors || 0).toLocaleString()}</div><div class="l">Doors</div></div>
-      <div><div class="n">${node.setterAppts || 0}</div><div class="l">Appts</div></div>
-      <div><div class="n">${rpPct(node.sitRate)}</div><div class="l">Sit</div></div>
-      <div><div class="n">${rpPct(node.closeRate)}</div><div class="l">Close</div></div>
-    </div>`;
+  const mini = rpMini(node);
   if (isUser) {
-    const roleTag = node.isCloser ? "Closer" : "Setter";
+    const hybrid = node.isCloser && ((node.doors || 0) > 0 || (node.setterAppts || 0) > 0);
+    const roleTag = hybrid ? "Setter · Closer" : node.isCloser ? "Closer" : "Setter";
     return `<div class="rp-node"><div class="rp-row" data-uid="${esc(node.id)}">
         <span class="rp-tw">👤</span>
         <div class="rp-nm"><b>${esc(node.name)}</b><span class="rp-sub">${roleTag}${node.idleReps ? " · idle this period" : ""}</span></div>
@@ -2100,33 +2144,13 @@ async function loadReports(companyId) {
   document.querySelectorAll("#rpPeriods .pill").forEach((b) => b.classList.toggle("active", b.dataset.period === state.rpPeriod));
   $("rpBody").innerHTML = `<div class="th-empty">Crunching the numbers…</div>`;
   try {
-    const start = rpStartOf(state.rpPeriod);
-    // Rollup tree + recorded-pitch counts run in parallel. Pitches power the
-    // "% of conversations recorded" metric; we count per rep for this period.
-    const [rollupRes, pitchDocs] = await Promise.all([
-      getCompanyRollup({ companyId, period: state.rpPeriod }),
-      (async () => {
-        try {
-          const q = start > 0
-            ? query(collection(db, "pitches"), where("companyId", "==", companyId), where("createdAt", ">=", start))
-            : query(collection(db, "pitches"), where("companyId", "==", companyId));
-          return (await getDocs(q)).docs;
-        } catch (err) {
-          console.warn("reports: pitches index missing, using company-wide fallback", err);
-          return (await getDocs(query(collection(db, "pitches"), where("companyId", "==", companyId)))).docs;
-        }
-      })(),
-    ]);
-    const pitchByUid = {};
-    pitchDocs.forEach((d) => {
-      const p = d.data();
-      if (start > 0 && (p.createdAt || 0) < start) return;
-      const uid = p.uid || p.repUid;
-      if (uid) pitchByUid[uid] = (pitchByUid[uid] || 0) + 1;
-    });
+    // The rollup already returns every lane metric per node — doors, setter &
+    // closer funnels, disposition and recorded-conversation rates — so the client
+    // just scores + renders.
+    const rollupRes = await getCompanyRollup({ companyId, period: state.rpPeriod });
     const data = rollupRes.data;
     const uidMap = {};
-    rpAttach(data.company, pitchByUid, uidMap);
+    rpAttach(data.company, uidMap);
     state.rpTree = data.company;
     state.rpNodesByUid = uidMap;
     state.rpScoped = data.scopedToDownline === true;
@@ -2154,8 +2178,8 @@ async function openRepReport(uid) {
     const m = node || {};
     const g = rpGrade(m.score);
     const sm = r.sitMetrics || {};
-    const pitches = r.pitches || { count: 0 };
-    const recAllTime = sm.sits ? Math.min(100, Math.round((pitches.count / sm.sits) * 100)) : null;
+    const pitches = r.pitches || { count: 0, recordedCount: 0 };
+    const roleWord = (m.isCloser && ((m.doors || 0) > 0 || (m.setterAppts || 0) > 0)) ? "Setter · Closer" : sm.isCloser ? "Closer" : "Setter";
     const pitchLine = (p, lbl, field) => p ? `<div class="rp-metric"><div class="n">${p.score == null ? "—" : p.score}</div><div class="l">${lbl} pitch</div><div class="g">${esc((p[field] || p.address || "").slice(0, 60)) || "—"}</div></div>` : "";
     const recap = rpRecapHtml(m, "rep");
     ov.querySelector(".rp-ov-card").innerHTML = `
@@ -2166,20 +2190,21 @@ async function openRepReport(uid) {
         <div class="rp-hero-meta">
           <h3>${esc(r.rep.displayName || r.rep.email || "Rep")}</h3>
           <span class="rp-grade rp-sc-${g.k}">${g.label}</span>
-          <p class="muted" style="margin:6px 0 0;font-size:13px;">${esc(r.rep.title || (sm.isCloser ? "Closer" : "Setter"))} · ${RP_PLABEL[state.rpPeriod]}</p>
+          <p class="muted" style="margin:6px 0 0;font-size:13px;">${esc(r.rep.title || roleWord)} · ${RP_PLABEL[state.rpPeriod]}</p>
           <div class="muted small" style="margin-top:4px;">Lifetime: ${r.lifetime.doors.toLocaleString()} doors · ${r.lifetime.appts} appts · ${r.lifetime.sold} sold · ${r.shiftHours.week}h on shift this week</div>
         </div>
       </div>
       <div class="rp-recap" style="margin:0 0 14px;">${recap}</div>
       <div class="rp-recap" style="margin:0;">
-        <h4>🎙 Recorded conversations (all-time)</h4>
+        <h4>🎙 Recorded on-site conversations</h4>
         <div class="rp-metrics">
-          <div class="rp-metric"><div class="n">${pitches.count}</div><div class="l">Pitches recorded</div></div>
-          <div class="rp-metric ${rpMetricClass(recAllTime, RP_GOALS.rec)}"><div class="n">${rpPct(recAllTime)}</div><div class="l">% of sits recorded</div><div class="g">${pitches.count} of ${sm.sits || 0} sits</div></div>
+          <div class="rp-metric ${rpMetricClass(m.recRate, RP_GOALS.rec)}"><div class="n">${rpPct(m.recRate)}</div><div class="l">% recorded ${RP_PLABEL[state.rpPeriod]}</div><div class="g">${m.recorded || 0} of ${m.convos || 0} convos · goal ${RP_GOALS.rec}%</div></div>
+          <div class="rp-metric"><div class="n">${pitches.recordedCount || 0}</div><div class="l">Recorded all-time</div><div class="g">at-home, GPS-verified</div></div>
           ${pitchLine(pitches.best, "Best", "highlight")}
           ${pitchLine(pitches.worst, "Needs work", "lowlight")}
         </div>
-        ${pitches.best && pitches.best.highlight ? `<p class="muted small" style="margin:10px 0 0;"><b>Best pitch highlight:</b> ${esc(pitches.best.highlight)}</p>` : ""}
+        <p class="muted small" style="margin:10px 0 0;">Only real customer pitches recorded at the home (GPS-confirmed) count — practice pitches and off-location recordings are excluded.</p>
+        ${pitches.best && pitches.best.highlight ? `<p class="muted small" style="margin:8px 0 0;"><b>Best pitch highlight:</b> ${esc(pitches.best.highlight)}</p>` : ""}
         ${pitches.worst && pitches.worst.lowlight ? `<p class="muted small" style="margin:6px 0 0;"><b>Coaching note:</b> ${esc(pitches.worst.lowlight)}</p>` : ""}
       </div>`;
     ov.querySelector("#rpOvClose").addEventListener("click", close);

@@ -453,9 +453,14 @@ export default function DispositionModal({
       void recordKnock(geo.verified); // counts toward the active shift if on-site
 
       // Stop + upload the recorded pitch (best-effort; never blocks the save).
+      // A pitch only counts as a "recorded conversation" in reporting when GPS
+      // actually confirmed the rep at the home (a measured distance inside the
+      // geofence) — not merely the lenient default when GPS/home coords are absent.
+      const atLocation = geo.ft != null && geo.verified;
       if (pitchOn) void pitch.stopAndUpload({
         companyId: companyId as string, uid: profile.uid, userName: profile.displayName,
         managerPath: profile.managerPath ?? [], leadId, address: d.address,
+        atLocation, distanceFt: geo.ft,
       });
 
       // On-the-spot scheduling. Non-blocking: the lead is already saved, so a
