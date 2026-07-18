@@ -244,6 +244,13 @@
   .rp-print-btn { }
   @media print { body * { visibility:hidden; } .rp-ov, .rp-ov * { visibility:visible; } .rp-ov { position:absolute; inset:0; background:#fff; }
     .rp-ov-card { max-width:none; border:0; color:#000; } .rp-noprint { display:none !important; } }
+  /* Download / print the whole Success Reports card as a PDF. */
+  @media print {
+    body.rp-printing * { visibility:hidden !important; }
+    body.rp-printing #reportsCard, body.rp-printing #reportsCard * { visibility:visible !important; }
+    body.rp-printing #reportsCard { position:absolute; left:0; top:0; width:100%; margin:0; border:0; }
+    body.rp-printing .rp-noprint { display:none !important; }
+  }
 </style>
 <script src="https://js.stripe.com/v3/"></script>
 </head>
@@ -387,7 +394,8 @@
         <button class="pill" data-period="month">This month</button>
         <button class="pill" data-period="year">This year</button>
         <button class="pill" data-period="alltime">All-time</button>
-        <button class="btn ghost sm rp-noprint" id="rpRefresh" style="margin-left:4px;">↻</button>
+        <button class="btn ghost sm rp-noprint" id="rpDownload" style="margin-left:4px;" title="Download / print this report as a PDF">⬇ PDF</button>
+        <button class="btn ghost sm rp-noprint" id="rpRefresh">↻</button>
       </div>
     </div>
     <div id="rpBody"><div class="th-empty">Loading reports…</div></div>
@@ -1969,15 +1977,16 @@ function rpRecap(m, level) {
   const isUser = level === "rep";
   const mult = RP_MULT[state.rpPeriod] || 1;
   if (!rpPureCloser(m)) {
-    // Door volume
+    // Activity — framed as TIME in the field, not a door quota. Doors-per-hour
+    // vary by rep, so the honest input to manage is hours on the doors.
     const dScore = m.reps ? (m.doors / (m.reps * RP_TARGETS.doorsWk * mult)) * 100 : null;
     if (dScore != null) {
-      if (dScore >= 90) strengths.push(`Door volume is strong — ${Math.round(dScore)}% of the activity target (${(m.doors || 0).toLocaleString()} doors). Top of the funnel is healthy.`);
-      else if (dScore < 60) { gaps.push(`Activity is light — only ${Math.round(dScore)}% of the door target (${(m.doors || 0).toLocaleString()} doors). The pipeline starts at the door.`); agenda.push("Set a daily door minimum and track it live — the constraint is at the top of the funnel."); }
+      if (dScore >= 90) strengths.push(`Field activity is strong — ${Math.round(dScore)}% of target (${(m.doors || 0).toLocaleString()} doors). The hours are being put in, and that's exactly why there's anything in the pipeline.`);
+      else if (dScore < 60) { gaps.push(`Not enough time in the field — activity is at ${Math.round(dScore)}% of target (${(m.doors || 0).toLocaleString()} doors). Here's the reality: this isn't a door-quota problem, because everyone's doors-per-hour is different. It's an hours-on-the-doors problem. Nothing downstream — sets, sits, closes — can grow while the top of the funnel is starved of time.`); agenda.push("Manage to TIME in the field, not a door count. Set a weekly field-hours expectation per rep and track it live. Hours on the doors is the one input that reliably grows everything else — the reps who win just put in more time."); }
     }
     // Appointments set (setter lane)
     const sScore = m.reps ? (m.setterAppts / (m.reps * RP_TARGETS.setsWk * mult)) * 100 : null;
-    if (sScore != null && sScore < 60) { gaps.push(`Appointments set are low — ${Math.round(sScore)}% of target (${m.setterAppts} booked). Doors aren't converting into sits.`); agenda.push("Sharpen the door pitch and the ask — role-play the transition from conversation to booked appointment."); }
+    if (sScore != null && sScore < 60) { gaps.push(`Appointments set are low — ${Math.round(sScore)}% of target (${m.setterAppts} booked). The conversations are happening but the ask at the door isn't landing, so they're not turning into sits.`); agenda.push("Sharpen the door pitch and the ask — role-play the transition from conversation to booked appointment until it's automatic."); }
     else if (sScore != null && sScore >= 90) strengths.push(`Setting engine is humming — ${m.setterAppts} appointments booked, ${Math.round(sScore)}% of target.`);
   }
   // Sit rate = sits ÷ all appointments set (true conversion)
@@ -2012,10 +2021,10 @@ function rpRecap(m, level) {
     gaps.push(`None of ${m.convos} on-site conversation${m.convos === 1 ? "" : "s"} were recorded ${RP_PLABEL[state.rpPeriod]} — nothing to coach from the tape.`);
     agenda.push("Turn on and enforce at-the-door pitch recording so real conversations can be reviewed.");
   }
-  // Idle reps (dead weight) — group levels only
+  // Idle reps — group levels only
   if (!isUser && m.reps > 1 && m.idleReps > 0) {
-    gaps.push(`${m.idleReps} of ${m.reps} reps produced nothing ${RP_PLABEL[state.rpPeriod]} — no doors, no sets, no appointments, no closes.`);
-    agenda.push(`Address the ${m.idleReps} non-producing rep${m.idleReps > 1 ? "s" : ""} directly: activity plan, ride-along, or a hard conversation.`);
+    gaps.push(`${m.idleReps} of ${m.reps} reps produced nothing ${RP_PLABEL[state.rpPeriod]} — zero doors, zero sets, zero appointments, zero closes. They're on the roster but not in the field, and they're dragging the whole team's numbers down.`);
+    agenda.push(`Have the direct conversation with the ${m.idleReps} non-producing rep${m.idleReps > 1 ? "s" : ""} this week: a real activity plan with a field-hours commitment, a ride-along, or a decision about whether they're a fit. Carrying non-producers isn't fair to the reps grinding.`);
   }
   return { strengths, gaps, agenda };
 }
@@ -2225,6 +2234,28 @@ $("rpPeriods").addEventListener("click", (e) => {
   state.rpPeriod = b.dataset.period; loadReports(state.rpCompany);
 });
 $("rpRefresh").addEventListener("click", () => loadReports(state.rpCompany));
+// Download / print: expand every level so the PDF is the complete report, print,
+// then restore the on-screen expand state.
+function rpAllKeys(node, acc) {
+  (node.regions || node.teams || node.users || []).forEach((k) => {
+    if (k.type === "region" || k.type === "team") acc.add(k.type + ":" + (k.id || ""));
+    rpAllKeys(k, acc);
+  });
+  return acc;
+}
+$("rpDownload").addEventListener("click", () => {
+  if (!state.rpTree) return;
+  const prev = state.rpOpen;
+  state.rpOpen = rpAllKeys(state.rpTree, new Set());
+  rpRender();
+  document.body.classList.add("rp-printing");
+  setTimeout(() => {
+    window.print();
+    document.body.classList.remove("rp-printing");
+    state.rpOpen = prev;
+    rpRender();
+  }, 200);
+});
 $("rpBody").addEventListener("click", (e) => {
   const rep = e.target.closest(".rp-row[data-uid]");
   if (rep) { openRepReport(rep.dataset.uid); return; }
