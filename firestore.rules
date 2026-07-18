@@ -22,6 +22,7 @@ service cloud.firestore {
     function isSuper()    { return isSignedIn() && request.auth.token.superAdmin == true; }
     function me()         { return get(/databases/$(database)/documents/users/$(request.auth.uid)).data; }
     function myCompany()  { return isSignedIn() ? me().companyId : null; }
+    function myTeam()     { return isSignedIn() ? me().teamId : null; }
     function myRole()     { return isSignedIn() ? me().role : 'none'; }
     function isCompanyAdmin()  { return myRole() == 'admin'; }
     function isManagerOrAdmin() { return myRole() == 'admin' || myRole() == 'manager'; }
@@ -170,9 +171,12 @@ service cloud.firestore {
 
     // ── shifts (downstream-scoped, same visibilityPath pattern) ──────────
     match /shifts/{shiftId} {
+      // Own shift, or (in-company) super/admin, downline via visibilityPath, or a
+      // TEAMMATE on the same team — powers the team-scoped "Who's Working" board.
       allow read: if (isSignedIn() && resource.data.userId == request.auth.uid)
                   || (inMyCompany(resource.data.companyId)
-                      && (isSuper() || isCompanyAdmin() || inPath(resource.data.visibilityPath)));
+                      && (isSuper() || isCompanyAdmin() || inPath(resource.data.visibilityPath)
+                          || (resource.data.teamId != null && resource.data.teamId == myTeam())));
       allow create: if isSignedIn()
                     && request.resource.data.companyId == myCompany()
                     && request.auth.uid in request.resource.data.visibilityPath;

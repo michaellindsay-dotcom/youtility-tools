@@ -4775,14 +4775,48 @@ export const weeklyRecap = onSchedule({ schedule: "0 17 * * 5", timeZone: "Ameri
     }
 
     const medals = ["🥇", "🥈", "🥉"];
-    let msg = "🏆 Weekly Recap — the board resets, fresh season starts now!\n\nThis week's top performers:\n";
-    top.forEach((t, i) => { msg += `${medals[i]} ${t.name} — ${t.points.toLocaleString()} pts\n`; });
-    if (climber) msg += `\n🚀 Most improved: ${climber.name} (+${climber.delta.toLocaleString()} pts vs last week)`;
-    msg += "\n\nNew week, clean slate — let's get out there and run it back! 💪";
+    const recapText = (label: string, rows: { uid: string; name: string; points: number }[], climb: { name: string; delta: number } | null) => {
+      let m = `🏆 Weekly Recap — ${label}\n\nThis week's top performers:\n`;
+      rows.slice(0, 3).forEach((t, i) => { m += `${medals[i]} ${t.name} — ${t.points.toLocaleString()} pts\n`; });
+      if (climb) m += `\n🚀 Most improved: ${climb.name} (+${climb.delta.toLocaleString()} pts vs last week)`;
+      m += "\n\nNew week, clean slate — let's get out there and run it back! 💪";
+      return m;
+    };
 
+    // Company-wide recap → the company channel (this is genuinely company-wide info).
     await db.collection("chat").add({
-      companyId, userId: "system", userName: "🏆 Weekly Recap", text: msg, createdAt: Date.now(),
+      companyId, userId: "system", userName: "🏆 Weekly Recap",
+      text: recapText("the board resets, fresh season starts now!", top, climber), createdAt: Date.now(),
     });
+
+    // Per-team recaps → each team's Team Chat, so a rep sees THEIR team's board
+    // (not just the company-wide one). Group reps by their team via the users
+    // roster, since seasonStats has no teamId.
+    try {
+      const usersSnap = await db.collection("users").where("companyId", "==", companyId).get();
+      const teamOf: Record<string, string> = {};
+      usersSnap.forEach((u) => { const d = u.data() as any; if (d.teamId) teamOf[u.id] = d.teamId as string; });
+      const byTeam: Record<string, { uid: string; name: string; points: number }[]> = {};
+      for (const [uid, v] of cur.entries()) {
+        const tid = teamOf[uid];
+        if (!tid || v.points <= 0) continue;
+        (byTeam[tid] ??= []).push({ uid, ...v });
+      }
+      for (const [teamId, rows] of Object.entries(byTeam)) {
+        rows.sort((a, b) => b.points - a.points);
+        let teamClimber: { name: string; delta: number } | null = null;
+        for (const r of rows) {
+          const delta = r.points - (prev.get(r.uid)?.points || 0);
+          if (delta > 0 && (!teamClimber || delta > teamClimber.delta)) teamClimber = { name: r.name, delta };
+        }
+        await db.collection("teamChat").add({
+          companyId, teamId, userId: "system", userName: "🏆 Weekly Recap",
+          text: recapText("your team's week", rows, teamClimber), createdAt: Date.now(),
+        });
+      }
+    } catch (e) {
+      logger.warn(`per-team recap failed for ${companyId}`, e);
+    }
     logger.info(`weekly recap posted for ${companyId}`);
   }
 });

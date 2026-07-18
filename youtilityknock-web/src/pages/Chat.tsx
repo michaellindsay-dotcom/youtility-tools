@@ -24,7 +24,11 @@ function dmId(a: string, b: string): string {
   return [a, b].sort().join("__");
 }
 
-type Conversation = { kind: "channel" } | { kind: "team" } | { kind: "working" } | { kind: "dm"; other: UserProfile };
+type Conversation =
+  | { kind: "channel" }
+  | { kind: "team"; teamId: string; teamName: string }
+  | { kind: "working" }
+  | { kind: "dm"; other: UserProfile };
 
 export default function Chat() {
   const { profile, role, companyId } = useAuth();
@@ -35,20 +39,43 @@ export default function Chat() {
   const [text, setText] = useState("");
   const [sending, setSending] = useState(false);
   const [pickerOpen, setPickerOpen] = useState(false);
-  const [teamName, setTeamName] = useState("");
+  const [teamNames, setTeamNames] = useState<Record<string, string>>({});
   const fileRef = useRef<HTMLInputElement>(null);
   const endRef = useRef<HTMLDivElement>(null);
-  const teamId = profile?.teamId || null;
 
-  // Team name for the "Team" channel label (only when the rep is on a team).
+  // Company-wide channel is for company-wide updates only — managers/admins post
+  // there; everyone can read. Team-specific chatter lives in Team Chat.
+  const pos = profile?.position || "";
+  const isManager =
+    role === "admin" || role === "manager" || role === "superadmin" || pos.includes("manager") || pos === "admin";
+
+  // Every team this user belongs to or manages, so a regional manager gets one
+  // channel per team (their team chats land in the right team, not company chat).
+  const myTeamIds = useMemo(() => {
+    const ids: string[] = [];
+    if (profile?.teamId) ids.push(profile.teamId);
+    (profile?.managedTeamIds || []).forEach((id) => { if (id && !ids.includes(id)) ids.push(id); });
+    return ids;
+  }, [profile?.teamId, profile?.managedTeamIds]);
+
+  // Resolve each team's display name for its channel label.
   useEffect(() => {
-    if (!companyId || !teamId) { setTeamName(""); return; }
+    if (!companyId || myTeamIds.length === 0) { setTeamNames({}); return; }
     let live = true;
-    getDoc(doc(db, "companies", companyId, "teams", teamId))
-      .then((s) => { if (live) setTeamName((s.data()?.name as string) || "My team"); })
-      .catch(() => { if (live) setTeamName("My team"); });
+    Promise.all(
+      myTeamIds.map((id) =>
+        getDoc(doc(db, "companies", companyId, "teams", id))
+          .then((s) => [id, (s.data()?.name as string) || "Team"] as const)
+          .catch(() => [id, "Team"] as const)
+      )
+    ).then((pairs) => { if (live) setTeamNames(Object.fromEntries(pairs)); });
     return () => { live = false; };
-  }, [companyId, teamId]);
+  }, [companyId, myTeamIds]);
+
+  const teamChannels = useMemo(
+    () => myTeamIds.map((id) => ({ id, name: teamNames[id] || "Team" })),
+    [myTeamIds, teamNames]
+  );
 
   // Load teammates for the DM list (same scope as the Team page).
   useEffect(() => {
@@ -90,11 +117,10 @@ export default function Chat() {
       );
     }
     if (conv.kind === "team") {
-      if (!teamId) { setMessages([]); return; }
       const q = query(
         collection(db, "teamChat"),
         where("companyId", "==", companyId),
-        where("teamId", "==", teamId),
+        where("teamId", "==", conv.teamId),
         orderBy("createdAt", "asc"),
         limit(200)
       );
@@ -118,11 +144,11 @@ export default function Chat() {
       conv.kind === "channel"
         ? "Company Chat"
         : conv.kind === "team"
-        ? (teamName || "Team") + " Chat"
+        ? conv.teamName + " Chat"
         : conv.kind === "working"
         ? "Who's Working"
         : conv.other.displayName,
-    [conv, teamName]
+    [conv]
   );
 
   async function send(imageUrl?: string) {
@@ -141,10 +167,10 @@ export default function Chat() {
       if (conv.kind === "working") {
         return; // no message stream — the compose bar isn't shown here anyway
       } else if (conv.kind === "channel") {
+        if (!isManager) return; // company channel is announcements-only for reps
         await addDoc(collection(db, "chat"), { companyId, ...base });
       } else if (conv.kind === "team") {
-        if (!teamId) return;
-        await addDoc(collection(db, "teamChat"), { companyId, teamId, ...base });
+        await addDoc(collection(db, "teamChat"), { companyId, teamId: conv.teamId, ...base });
       } else {
         const cid = dmId(profile.uid, conv.other.uid);
         // Ensure the channel doc exists (members + last-message preview).
@@ -208,20 +234,26 @@ export default function Chat() {
           <div className="chat-rail-label muted small">Company</div>
           <button className={"chat-conv" + (conv.kind === "channel" ? " active" : "")} onClick={() => choose({ kind: "channel" })}>
             <span className="chat-conv-ico">#</span>
-            <div><div className="chat-conv-name">Company Chat</div><div className="muted small">Everyone in your company</div></div>
+            <div><div className="chat-conv-name">Company Chat</div><div className="muted small">Company-wide updates{isManager ? "" : " · read only"}</div></div>
           </button>
           <button className={"chat-conv" + (conv.kind === "working" ? " active" : "")} onClick={() => choose({ kind: "working" })}>
             <span className="chat-conv-ico">🔥</span>
             <div><div className="chat-conv-name">Who's Working</div><div className="muted small">Live shifts &amp; shout-outs</div></div>
           </button>
 
-          {teamId && (
+          {teamChannels.length > 0 && (
             <>
-              <div className="chat-rail-label muted small">Team</div>
-              <button className={"chat-conv" + (conv.kind === "team" ? " active" : "")} onClick={() => choose({ kind: "team" })}>
-                <span className="chat-conv-ico">👥</span>
-                <div><div className="chat-conv-name">{teamName || "My team"} Chat</div><div className="muted small">Just your team</div></div>
-              </button>
+              <div className="chat-rail-label muted small">{teamChannels.length > 1 ? "Teams" : "Team"}</div>
+              {teamChannels.map((t) => (
+                <button
+                  key={t.id}
+                  className={"chat-conv" + (conv.kind === "team" && conv.teamId === t.id ? " active" : "")}
+                  onClick={() => choose({ kind: "team", teamId: t.id, teamName: t.name })}
+                >
+                  <span className="chat-conv-ico">👥</span>
+                  <div><div className="chat-conv-name">{t.name} Chat</div><div className="muted small">{profile?.teamId === t.id ? "Your team" : "Team you manage"}</div></div>
+                </button>
+              ))}
             </>
           )}
 
@@ -282,6 +314,13 @@ export default function Chat() {
             )}
             <div ref={endRef} />
           </div>
+          {conv.kind === "channel" && !isManager ? (
+            <div className="chat-compose" style={{ justifyContent: "center" }}>
+              <span className="muted small" style={{ textAlign: "center" }}>
+                📢 Company Chat is for company-wide updates. Post to your <strong>Team Chat</strong> to reach your crew.
+              </span>
+            </div>
+          ) : (
           <form
             className="chat-compose"
             onSubmit={(e) => {
@@ -316,6 +355,7 @@ export default function Chat() {
               Send
             </button>
           </form>
+          )}
           </>
           )}
         </section>

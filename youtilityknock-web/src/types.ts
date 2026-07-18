@@ -342,6 +342,7 @@ export interface Shift {
   companyId: string;
   userId: string;
   userName?: string;
+  teamId?: string | null; // the rep's team when the shift started (team-scoped board)
   visibilityPath: string[]; // [owner, ...managers]
   status: "active" | "ended";
   startAt: number;
