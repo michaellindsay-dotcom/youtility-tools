@@ -1415,7 +1415,8 @@ export const setUserPhoneRouting = onCall(async (request) => {
   if (!uid) throw new HttpsError("invalid-argument", "uid required.");
   const snap = await db.doc(`users/${uid}`).get();
   if (!snap.exists) throw new HttpsError("not-found", "User not found.");
-  authorizeForCompany(caller, (snap.data() as any).companyId);
+  // A rep may manage their own texting/forwarding; otherwise a company admin.
+  if (caller.uid !== uid) authorizeForCompany(caller, (snap.data() as any).companyId);
   const update: Record<string, unknown> = {};
   if (typeof smsNumber === "string") update.smsNumber = smsNumber.trim();
   if (typeof smsForwardTo === "string") update.smsForwardTo = smsForwardTo.trim();
@@ -4264,7 +4265,7 @@ export async function computeRollup(companyId: string, view: string, scopeUid: s
   // Active users, scoped to the given manager's downline (or all).
   const usersSnap = await db.collection("users").where("companyId", "==", companyId).get();
   const seeAll = scopeUid === null;
-  type U = { uid: string; name: string; isCloser: boolean; teamId: string | null };
+  type U = { uid: string; name: string; isCloser: boolean; isSetter: boolean; teamId: string | null };
   const users: U[] = [];
   usersSnap.forEach((d) => {
     const u = d.data() as any;
@@ -4274,7 +4275,9 @@ export async function computeRollup(companyId: string, view: string, scopeUid: s
       || (Array.isArray(u.managerPath) && u.managerPath.includes(scopeUid as string))
       || (Array.isArray(u.closerManagerPath) && u.closerManagerPath.includes(scopeUid as string));
     if (!inDownline) return;
-    users.push({ uid: d.id, name: u.displayName || u.email || "Rep", isCloser: u.isCloser === true, teamId: (u.teamId as string) || null });
+    // isSetter/isCloser are the explicit lane flags (kept in sync with position);
+    // default isSetter true for legacy docs that predate the flag.
+    users.push({ uid: d.id, name: u.displayName || u.email || "Rep", isCloser: u.isCloser === true, isSetter: u.isSetter !== false, teamId: (u.teamId as string) || null });
   });
 
   // Per-user setter/closer metrics (event-based) + doors from the stats buckets.
@@ -4368,12 +4371,12 @@ export async function computeRollup(companyId: string, view: string, scopeUid: s
   const teamsSnap = await db.collection(`companies/${companyId}/teams`).get();
   const regionName: Record<string, string> = {};
   teamsSnap.forEach((t) => { const d = t.data() as any; if (d.kind === "region") regionName[t.id] = d.name || "Region"; });
-  const teamMeta: Record<string, { name: string; regionId: string | null }> = {};
+  const teamMeta: Record<string, { name: string; regionId: string | null; logoUrl: string | null }> = {};
   teamsSnap.forEach((t) => {
     const d = t.data() as any;
     if (d.kind === "region") return;
     const parent = (d.parentTeamId as string) || null;
-    teamMeta[t.id] = { name: d.name || "Team", regionId: parent && regionName[parent] ? parent : null };
+    teamMeta[t.id] = { name: d.name || "Team", regionId: parent && regionName[parent] ? parent : null, logoUrl: (d.logoUrl as string) || null };
   });
 
   const blank = () => ({ doors: 0, convos: 0, recorded: 0, shiftMs: 0, setterAppts: 0, setterSits: 0, setterPitched: 0, setterNoShows: 0, setterUpcoming: 0, setterUndispositioned: 0, setterOther: 0, closerAppts: 0, closerSits: 0, closes: 0, turnedAways: 0, closerDue: 0, closerDispositioned: 0, reps: 0, closerReps: 0 });
@@ -4420,10 +4423,10 @@ export async function computeRollup(companyId: string, view: string, scopeUid: s
     if (rid) (teamsByRegion[rid] ??= []).push(tid);
     else noRegionTeams.push(tid);
   }
-  const buildUser = (u: U) => node(sumOf([u]), u.name, "user", u.uid, { isCloser: u.isCloser });
+  const buildUser = (u: U) => node(sumOf([u]), u.name, "user", u.uid, { isCloser: u.isCloser, isSetter: u.isSetter });
   const byClose = (a: { closes: number; setterSits: number }, b: { closes: number; setterSits: number }) => b.closes - a.closes || b.setterSits - a.setterSits;
   const buildTeam = (tid: string, name: string, roster: U[]) =>
-    node(sumOf(roster), name, "team", tid, { users: roster.map(buildUser).sort(byClose) });
+    node(sumOf(roster), name, "team", tid, { users: roster.map(buildUser).sort(byClose), logoUrl: teamMeta[tid]?.logoUrl || null });
 
   const regions: unknown[] = [];
   for (const rid of Object.keys(teamsByRegion)) {
@@ -4442,8 +4445,9 @@ export async function computeRollup(companyId: string, view: string, scopeUid: s
   }
   (regions as { closes: number; setterSits: number }[]).sort(byClose);
 
-  const companyName = (await db.doc(`companies/${companyId}`).get()).data()?.name || "Company";
-  const company = node(sumOf(users), companyName, "company", companyId, { regions });
+  const companyDoc = (await db.doc(`companies/${companyId}`).get()).data() || {};
+  const companyName = companyDoc.name || "Company";
+  const company = node(sumOf(users), companyName, "company", companyId, { regions, logoUrl: (companyDoc.logoUrl as string) || null });
   return { period: view, scopedToDownline: !seeAll, company };
 }
 

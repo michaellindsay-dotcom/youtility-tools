@@ -229,6 +229,9 @@
   .rp-recap .muted { color:var(--ink-dim); }
   .rp-lane-h { font-size:11px; letter-spacing:.5px; text-transform:uppercase; color:var(--ink-dim); font-weight:700; margin:14px 0 2px; }
   .rp-lane-h:first-child { margin-top:6px; }
+  /* Role sub-header inside a recap (Setters / Closers / Team-wide) */
+  .rp-role-h { font-family:'Space Grotesk',sans-serif; font-size:11px; letter-spacing:.5px; font-weight:700; color:var(--ink-mid); margin:12px 0 5px; }
+  .rp-recap h4 + .rp-role-h, .rp-role-h:first-child { margin-top:2px; }
   .rp-metrics { display:grid; grid-template-columns:repeat(auto-fill,minmax(128px,1fr)); gap:10px; margin-top:8px; }
   .rp-metric { border:1px solid var(--line); border-radius:10px; padding:9px 11px; background:rgba(255,255,255,.02); }
   .rp-metric .n { font-family:'Space Grotesk',sans-serif; font-weight:700; font-size:17px; font-variant-numeric:tabular-nums; }
@@ -257,22 +260,36 @@
   .rp-ov-card { width:100%; max-width:820px; background:var(--bg-1); border:1px solid var(--line-hi); border-radius:18px; padding:22px; }
   .rp-ov-close { float:right; }
   .rp-print-btn { }
-  /* ── Print / PDF: branded cover banner (screen-hidden, shown only on print) ── */
-  #rpPrintHeader { display:none; align-items:center; gap:20px; padding:26px 30px; margin-bottom:22px;
-    border-radius:16px; color:#00131f; background:linear-gradient(120deg,#0EA5E9,#38BDF8 52%,#22D3EE); }
-  .rp-ph-brand { display:flex; align-items:center; gap:14px; flex:1 1 auto; min-width:0; }
-  .rp-ph-logo { width:48px; height:48px; border-radius:13px; flex:0 0 auto; background:rgba(255,255,255,.92); color:#0284C7;
-    font-family:'Space Grotesk',sans-serif; font-weight:800; font-size:27px; display:flex; align-items:center; justify-content:center; }
-  .rp-ph-eyebrow { font-size:11px; letter-spacing:2.5px; font-weight:700; opacity:.72; }
-  .rp-ph-co { font-family:'Space Grotesk',sans-serif; font-size:27px; font-weight:700; line-height:1.12; margin-top:1px; }
+  /* ── Print / PDF: branded cover masthead (screen-hidden, shown only on print) ── */
+  #rpPrintHeader { display:none; flex-direction:column; gap:17px; padding:30px 34px 28px; margin-bottom:24px;
+    border-radius:20px; color:#fff; position:relative; overflow:hidden;
+    background:linear-gradient(125deg,#0B4F8A 0%,#0EA5E9 46%,#22D3EE 100%); box-shadow:0 14px 44px rgba(2,32,54,.30); }
+  #rpPrintHeader::after { content:""; position:absolute; right:-70px; top:-90px; width:280px; height:280px; border-radius:50%;
+    background:radial-gradient(circle,rgba(255,255,255,.18),transparent 70%); pointer-events:none; }
+  .rp-ph-top { display:flex; align-items:center; justify-content:space-between; gap:16px; position:relative; z-index:1;
+    padding-bottom:15px; border-bottom:1px solid rgba(255,255,255,.24); }
+  .rp-ph-brandmark { display:flex; align-items:center; gap:11px; font-weight:700; font-size:14px; letter-spacing:.3px; min-width:0; }
+  .rp-ph-brandmark img { height:30px; max-width:158px; object-fit:contain; }
+  .rp-ph-brandmark span { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .rp-ph-mono { width:34px; height:34px; border-radius:9px; flex:0 0 auto; background:rgba(255,255,255,.94); color:#0284C7;
+    font-family:'Space Grotesk',sans-serif; font-weight:800; font-size:18px; display:flex; align-items:center; justify-content:center; }
   .rp-ph-meta { text-align:right; flex:0 0 auto; }
   .rp-ph-period { font-family:'Space Grotesk',sans-serif; font-weight:700; font-size:15px; }
-  .rp-ph-date { font-size:11px; opacity:.78; margin-top:3px; }
-  .rp-ph-score { position:relative; width:88px; height:88px; border-radius:50%; flex:0 0 auto; text-align:center;
-    display:flex; flex-direction:column; align-items:center; justify-content:center; background:rgba(255,255,255,.94);
-    color:#0284C7; box-shadow:0 6px 18px rgba(2,32,54,.18); }
-  .rp-ph-score b { font-family:'Space Grotesk',sans-serif; font-weight:800; font-size:31px; line-height:1; }
-  .rp-ph-score small { font-size:9px; letter-spacing:.6px; text-transform:uppercase; margin-top:3px; font-weight:700; opacity:.85; }
+  .rp-ph-date { font-size:11px; opacity:.8; margin-top:2px; }
+  .rp-ph-main { display:flex; align-items:center; justify-content:space-between; gap:20px; position:relative; z-index:1; }
+  .rp-ph-title { display:flex; align-items:center; gap:18px; min-width:0; }
+  .rp-ph-avatar { width:66px; height:66px; border-radius:17px; flex:0 0 auto; object-fit:cover; background:rgba(255,255,255,.92);
+    border:2px solid rgba(255,255,255,.6); box-shadow:0 7px 20px rgba(2,32,54,.28); }
+  .rp-ph-avatar-mono { display:flex; align-items:center; justify-content:center; color:#0284C7;
+    font-family:'Space Grotesk',sans-serif; font-weight:800; font-size:29px; }
+  .rp-ph-eyebrow { font-size:11px; letter-spacing:3px; font-weight:700; opacity:.8; }
+  .rp-ph-co { font-family:'Space Grotesk',sans-serif; font-size:31px; font-weight:700; line-height:1.08; margin-top:2px;
+    white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:560px; }
+  .rp-ph-score { position:relative; width:96px; height:96px; border-radius:50%; flex:0 0 auto; text-align:center;
+    display:flex; flex-direction:column; align-items:center; justify-content:center; background:#fff;
+    color:#0284C7; box-shadow:0 8px 22px rgba(2,32,54,.30); }
+  .rp-ph-score b { font-family:'Space Grotesk',sans-serif; font-weight:800; font-size:35px; line-height:1; }
+  .rp-ph-score small { font-size:8.5px; letter-spacing:.5px; text-transform:uppercase; margin-top:3px; font-weight:700; opacity:.9; padding:0 6px; }
   .rp-ph-foot { display:none; margin-top:22px; padding-top:12px; border-top:1px solid #e2e8f0; text-align:center;
     font-size:10px; letter-spacing:1px; text-transform:uppercase; color:#94a3b8; }
 
@@ -307,7 +324,7 @@
     body.rp-printing #reportsCard .muted, body.rp-printing #reportsCard .rp-sub,
     body.rp-printing #reportsCard .rp-mini .l, body.rp-printing #reportsCard .rp-metric .l,
     body.rp-printing #reportsCard .rp-metric .g { color:#64748b !important; }
-    body.rp-printing #reportsCard h2 { color:#0f1727 !important; }
+    body.rp-printing #reportsCard h2 { color:#0f1727 !important; font-size:16px; padding-bottom:7px; margin-bottom:12px !important; border-bottom:2px solid #e2e8f0; }
     /* Card surfaces: crisp white with hairline borders. */
     body.rp-printing #reportsCard .rp-node, body.rp-printing #reportsCard .rp-recap,
     body.rp-printing #reportsCard .rp-metric { background:#fff !important; border-color:#e2e8f0 !important; }
@@ -325,12 +342,13 @@
     body.rp-printing #reportsCard .rp-ring-x { background:conic-gradient(#cbd5e1 var(--pct),#e9eef5 0) !important; }
     body.rp-printing #reportsCard .rp-score::before { background:#fff !important; }
     body.rp-printing #reportsCard .fn-bar { background:#e9eef5 !important; }
-    /* Keep blocks intact across page breaks. */
-    body.rp-printing #reportsCard .rp-node, body.rp-printing #reportsCard .rp-recap,
+    /* Keep small blocks intact across page breaks — but let the big recap and
+       node containers flow, so a page is never left half-empty. */
     body.rp-printing #reportsCard .rp-metric, body.rp-printing #reportsCard .rp-hero,
-    body.rp-printing #reportsCard .rp-recap li { break-inside:avoid; }
+    body.rp-printing #reportsCard .rp-row, body.rp-printing #reportsCard .rp-recap li,
+    body.rp-printing #reportsCard .rp-ranks li { break-inside:avoid; }
     body.rp-printing #reportsCard h2, body.rp-printing #reportsCard .rp-lane-h,
-    body.rp-printing #reportsCard .rp-recap h4 { break-after:avoid; }
+    body.rp-printing #reportsCard .rp-role-h, body.rp-printing #reportsCard .rp-recap h4 { break-after:avoid; }
   }
 </style>
 <script src="https://js.stripe.com/v3/"></script>
@@ -2002,9 +2020,22 @@ const RP_PLABEL  = { week: "this week", month: "this month", year: "this year", 
 const RP_LEVEL_WORD = { company: "company", region: "regional", team: "team", rep: "1:1" };
 
 function rpClamp(v) { return Math.max(0, Math.min(100, v)); }
-// True when a node represents a rep who only closes (no door/setting activity) —
-// door/set targets shouldn't be held against a pure closer, and vice-versa.
-function rpPureCloser(m) { return m.type === "user" && m.isCloser && !((m.doors || 0) > 0 || (m.setterAppts || 0) > 0); }
+// Setter/closer lane membership is driven by the rep's explicit function flags
+// (isSetter / isCloser, set from their position or the Function control), NOT by
+// door activity — so a closer who knocks a few doors isn't mislabeled a setter.
+// Legacy nodes without the flag fall back to the old activity heuristic.
+function rpIsSetterRole(m) {
+  if (m.type !== "user") return true;
+  if (typeof m.isSetter === "boolean") return m.isSetter;
+  return !m.isCloser || (m.doors || 0) > 0 || (m.setterAppts || 0) > 0;
+}
+function rpRoleTag(m) {
+  const s = rpIsSetterRole(m), c = !!m.isCloser;
+  return s && c ? "Setter · Closer" : c ? "Closer" : "Setter";
+}
+// True when a node represents a rep who only closes — door/set targets shouldn't
+// be held against a pure closer, and vice-versa.
+function rpPureCloser(m) { return m.type === "user" && !!m.isCloser && !rpIsSetterRole(m); }
 function rpHasCloseLane(m) { return m.type !== "user" || (m.closerAppts || 0) > 0 || (m.closes || 0) > 0 || m.isCloser; }
 // Weighted, self-normalizing, role-aware composite. Components with no data (or
 // that don't apply to this rep's role) drop out and the remaining weights
@@ -2061,55 +2092,61 @@ function rpRecap(m, level) {
   const strengths = [], gaps = [], agenda = [];
   const isUser = level === "rep";
   const mult = RP_MULT[state.rpPeriod] || 1;
+  // Each item is tagged with the role lane it speaks to — "set" (setter/door),
+  // "close" (closer), or "team" (whole group) — so the recap can group coaching
+  // by role and each lane's meeting/outreach reflects that role specifically.
+  const S = (t, lane) => strengths.push([t, lane]);
+  const G = (t, lane) => gaps.push([t, lane]);
+  const A = (t, lane) => agenda.push([t, lane]);
   if (!rpPureCloser(m)) {
     // Activity — framed as TIME in the field, not a door quota. Doors-per-hour
     // vary by rep, so the honest input to manage is hours on the doors.
     const dScore = m.reps ? (m.doors / (m.reps * RP_TARGETS.doorsWk * mult)) * 100 : null;
     if (dScore != null) {
-      if (dScore >= 90) strengths.push(`Field activity is strong — ${Math.round(dScore)}% of target (${(m.doors || 0).toLocaleString()} doors). The hours are being put in, and that's exactly why there's anything in the pipeline.`);
-      else if (dScore < 60) { gaps.push(`Not enough time in the field — activity is at ${Math.round(dScore)}% of target (${(m.doors || 0).toLocaleString()} doors). Here's the reality: this isn't a door-quota problem, because everyone's doors-per-hour is different. It's an hours-on-the-doors problem. Nothing downstream — sets, sits, closes — can grow while the top of the funnel is starved of time.`); agenda.push("Manage to TIME in the field, not a door count. Set a weekly field-hours expectation per rep and track it live. Hours on the doors is the one input that reliably grows everything else — the reps who win just put in more time."); }
+      if (dScore >= 90) S(`Field activity is strong — ${Math.round(dScore)}% of target (${(m.doors || 0).toLocaleString()} doors). The hours are being put in, and that's exactly why there's anything in the pipeline.`, "set");
+      else if (dScore < 60) { G(`Not enough time in the field — activity is at ${Math.round(dScore)}% of target (${(m.doors || 0).toLocaleString()} doors). Here's the reality: this isn't a door-quota problem, because everyone's doors-per-hour is different. It's an hours-on-the-doors problem. Nothing downstream — sets, sits, closes — can grow while the top of the funnel is starved of time.`, "set"); A("Manage to TIME in the field, not a door count. Set a weekly field-hours expectation per rep and track it live. Hours on the doors is the one input that reliably grows everything else — the reps who win just put in more time.", "set"); }
     }
     // Appointments set (setter lane)
     const sScore = m.reps ? (m.setterAppts / (m.reps * RP_TARGETS.setsWk * mult)) * 100 : null;
-    if (sScore != null && sScore < 60) { gaps.push(`Appointments set are low — ${Math.round(sScore)}% of target (${m.setterAppts} booked). The conversations are happening but the ask at the door isn't landing, so they're not turning into sits.`); agenda.push("Sharpen the door pitch and the ask — role-play the transition from conversation to booked appointment until it's automatic."); }
-    else if (sScore != null && sScore >= 90) strengths.push(`Setting engine is humming — ${m.setterAppts} appointments booked, ${Math.round(sScore)}% of target.`);
+    if (sScore != null && sScore < 60) { G(`Appointments set are low — ${Math.round(sScore)}% of target (${m.setterAppts} booked). The conversations are happening but the ask at the door isn't landing, so they're not turning into sits.`, "set"); A("Sharpen the door pitch and the ask — role-play the transition from conversation to booked appointment until it's automatic.", "set"); }
+    else if (sScore != null && sScore >= 90) S(`Setting engine is humming — ${m.setterAppts} appointments booked, ${Math.round(sScore)}% of target.`, "set");
   }
-  // Sit rate = sits ÷ all appointments set (true conversion)
+  // Sit rate = sits ÷ all appointments set (true conversion) — setter/set-quality lane
   if (m.sitRate != null) {
-    if (m.sitRate >= RP_GOALS.sit) strengths.push(`Sit rate is ${m.sitRate}% — at or above the ${RP_GOALS.sit}% goal (${m.setterSits} sat of ${m.setterAppts} set).`);
-    else if (m.sitRate < RP_GOALS.sit * 0.8) { gaps.push(`Sit rate is ${m.sitRate}% — only ${m.setterSits} of ${m.setterAppts} set appointments sat. Heavy fallout between set and sit (no-shows, cancels, reschedules).`); agenda.push("Drill confirm-and-remind cadence and set quality: right person, right time, all decision-makers present, tight time window."); }
+    if (m.sitRate >= RP_GOALS.sit) S(`Sit rate is ${m.sitRate}% — at or above the ${RP_GOALS.sit}% goal (${m.setterSits} sat of ${m.setterAppts} set).`, "set");
+    else if (m.sitRate < RP_GOALS.sit * 0.8) { G(`Sit rate is ${m.sitRate}% — only ${m.setterSits} of ${m.setterAppts} set appointments sat. Heavy fallout between set and sit (no-shows, cancels, reschedules).`, "set"); A("Drill confirm-and-remind cadence and set quality: right person, right time, all decision-makers present, tight time window.", "set"); }
   }
-  // Undispositioned appointments — the true sit rate is unknowable until these
-  // are closed out, and they're usually the answer to "where did the sets go?"
+  // Undispositioned appointments — closer accountability (whoever runs the appt
+  // marks the outcome). Usually the answer to "where did the sets go?"
   if ((m.setterUndispositioned || 0) > 0 && (m.setterAppts || 0) > 0 && (m.setterUndispositioned / m.setterAppts) >= 0.2) {
-    gaps.push(`${m.setterUndispositioned} of ${m.setterAppts} set appointments are past-due with no recorded outcome — the real sit rate can't be trusted until they're dispositioned.`);
-    agenda.push("Close out every past-due appointment: the undispositioned pile is hiding the team's true results.");
+    G(`${m.setterUndispositioned} of ${m.setterAppts} set appointments are past-due with no recorded outcome — the real sit rate can't be trusted until they're dispositioned.`, "close");
+    A("Close out every past-due appointment: the undispositioned pile is hiding the team's true results.", "close");
   }
   // Close rate (closer lane)
   if (m.closeRate != null) {
-    if (m.closeRate >= RP_GOALS.close) strengths.push(`Close rate is ${m.closeRate}% — beating the ${RP_GOALS.close}% goal (${m.closes} of ${m.closerSits} sits).`);
-    else if (m.closeRate < RP_GOALS.close * 0.8) { gaps.push(`Close rate is ${m.closeRate}% vs the ${RP_GOALS.close}% goal — sits aren't converting. Presentation / objection-handling gap.`); agenda.push("Ride-along or role-play the close; review objection handling on every sat-but-not-closed deal."); }
+    if (m.closeRate >= RP_GOALS.close) S(`Close rate is ${m.closeRate}% — beating the ${RP_GOALS.close}% goal (${m.closes} of ${m.closerSits} sits).`, "close");
+    else if (m.closeRate < RP_GOALS.close * 0.8) { G(`Close rate is ${m.closeRate}% vs the ${RP_GOALS.close}% goal — sits aren't converting. Presentation / objection-handling gap.`, "close"); A("Ride-along or role-play the close; review objection handling on every sat-but-not-closed deal.", "close"); }
   }
   // Disposition accountability — closers closing out their appointments
   if (m.dispoRate != null) {
     const undone = (m.closerDue || 0) - (m.closerDispositioned || 0);
-    if (m.dispoRate >= RP_GOALS.dispo) strengths.push(`Disposition rate is ${m.dispoRate}% — appointments get closed out promptly, so setters see real outcomes and the numbers reflect true production.`);
-    else { gaps.push(`Disposition rate is ${m.dispoRate}% (goal ${RP_GOALS.dispo}%+): ${undone} of ${m.closerDue || 0} due appointment${(m.closerDue || 0) === 1 ? "" : "s"} were never marked. Below 90% the whole team's production is understated, and setters get demotivated when they never learn what happened to the appointments they set.`); agenda.push("Require every appointment to be dispositioned same-day. Un-dispositioned appointments hide real results and erode setter trust — make it a daily accountability."); }
+    if (m.dispoRate >= RP_GOALS.dispo) S(`Disposition rate is ${m.dispoRate}% — appointments get closed out promptly, so setters see real outcomes and the numbers reflect true production.`, "close");
+    else { G(`Disposition rate is ${m.dispoRate}% (goal ${RP_GOALS.dispo}%+): ${undone} of ${m.closerDue || 0} due appointment${(m.closerDue || 0) === 1 ? "" : "s"} were never marked. Below 90% the whole team's production is understated, and setters get demotivated when they never learn what happened to the appointments they set.`, "close"); A("Require every appointment to be dispositioned same-day. Un-dispositioned appointments hide real results and erode setter trust — make it a daily accountability.", "close"); }
   }
-  // Turn-aways (unqualified sits)
-  if (m.closerSits > 4 && m.turnedAways / m.closerSits > 0.25) { gaps.push(`Turn-away rate is high (${Math.round((m.turnedAways / m.closerSits) * 100)}% of sits) — unqualified appointments are being run.`); agenda.push("Tighten qualification at the set so closers spend time on real opportunities."); }
+  // Turn-aways (unqualified sits) — closer lane
+  if (m.closerSits > 4 && m.turnedAways / m.closerSits > 0.25) { G(`Turn-away rate is high (${Math.round((m.turnedAways / m.closerSits) * 100)}% of sits) — unqualified appointments are being run.`, "close"); A("Tighten qualification at the set so closers spend time on real opportunities.", "close"); }
   // Recorded conversations — coaching visibility (setter/door lane)
   if (m.recRate != null) {
-    if (m.recRate >= RP_GOALS.rec) strengths.push(`${m.recRate}% of on-site conversations are recorded — great coaching visibility.`);
-    else { gaps.push(`Only ${m.recRate}% of on-site conversations are recorded (goal ${RP_GOALS.rec}%; ${m.recorded || 0} of ${m.convos || 0}). Coaching is blind without the tape.`); agenda.push("Make at-the-door pitch recording non-negotiable and review one recorded pitch per rep each week."); }
+    if (m.recRate >= RP_GOALS.rec) S(`${m.recRate}% of on-site conversations are recorded — great coaching visibility.`, "set");
+    else { G(`Only ${m.recRate}% of on-site conversations are recorded (goal ${RP_GOALS.rec}%; ${m.recorded || 0} of ${m.convos || 0}). Coaching is blind without the tape.`, "set"); A("Make at-the-door pitch recording non-negotiable and review one recorded pitch per rep each week.", "set"); }
   } else if (!rpPureCloser(m) && (m.convos || 0) > 0) {
-    gaps.push(`None of ${m.convos} on-site conversation${m.convos === 1 ? "" : "s"} were recorded ${RP_PLABEL[state.rpPeriod]} — nothing to coach from the tape.`);
-    agenda.push("Turn on and enforce at-the-door pitch recording so real conversations can be reviewed.");
+    G(`None of ${m.convos} on-site conversation${m.convos === 1 ? "" : "s"} were recorded ${RP_PLABEL[state.rpPeriod]} — nothing to coach from the tape.`, "set");
+    A("Turn on and enforce at-the-door pitch recording so real conversations can be reviewed.", "set");
   }
-  // Idle reps — group levels only
+  // Idle reps — whole-group accountability
   if (!isUser && m.reps > 1 && m.idleReps > 0) {
-    gaps.push(`${m.idleReps} of ${m.reps} reps produced nothing ${RP_PLABEL[state.rpPeriod]} — zero doors, zero sets, zero appointments, zero closes. They're on the roster but not in the field, and they're dragging the whole team's numbers down.`);
-    agenda.push(`Have the direct conversation with the ${m.idleReps} non-producing rep${m.idleReps > 1 ? "s" : ""} this week: a real activity plan with a field-hours commitment, a ride-along, or a decision about whether they're a fit. Carrying non-producers isn't fair to the reps grinding.`);
+    G(`${m.idleReps} of ${m.reps} reps produced nothing ${RP_PLABEL[state.rpPeriod]} — zero doors, zero sets, zero appointments, zero closes. They're on the roster but not in the field, and they're dragging the whole team's numbers down.`, "team");
+    A(`Have the direct conversation with the ${m.idleReps} non-producing rep${m.idleReps > 1 ? "s" : ""} this week: a real activity plan with a field-hours commitment, a ride-along, or a decision about whether they're a fit. Carrying non-producers isn't fair to the reps grinding.`, "team");
   }
   return { strengths, gaps, agenda };
 }
@@ -2122,8 +2159,8 @@ function rpTilesRow(tiles) {
 // Full detail grid, split into the lanes that apply to this node/role.
 function rpMetricTiles(m, level) {
   const isUser = level === "rep";
-  const showSetter = !isUser || !m.isCloser || (m.doors || 0) > 0 || (m.setterAppts || 0) > 0;
-  const showCloser = !isUser || m.isCloser || (m.closerAppts || 0) > 0 || (m.closes || 0) > 0;
+  const showSetter = !isUser || rpIsSetterRole(m) || (m.doors || 0) > 0 || (m.setterAppts || 0) > 0;
+  const showCloser = !isUser || !!m.isCloser || (m.closerAppts || 0) > 0 || (m.closes || 0) > 0;
   const setterTiles = [
     { n: (m.doors || 0).toLocaleString(), l: "Doors" },
     { n: m.setterAppts || 0, l: "Appts set" },
@@ -2159,32 +2196,48 @@ function rpCollectUsers(node, acc) {
   (node.regions || node.teams || node.users || []).forEach((k) => rpCollectUsers(k, acc));
   return acc;
 }
-// Top setter & closer leaderboards for a company / region / team node.
+// Top setter & closer leaderboards for a company / region / team node — ranked
+// by each rep's Production Score (not raw set/close counts). A rep titled as
+// both (Setter · Closer) is ranked in BOTH sections; a pure closer only appears
+// under closers, a pure setter only under setters.
 function rpLeadersHtml(node) {
   const users = rpCollectUsers(node);
   if (users.length < 2) return "";
   const medal = (i) => ["🥇", "🥈", "🥉"][i] || (i + 1) + ".";
-  const setters = users.filter((u) => (u.setterAppts || 0) > 0)
-    .sort((a, b) => (b.setterAppts || 0) - (a.setterAppts || 0) || (b.setterSits || 0) - (a.setterSits || 0)).slice(0, 5);
-  const closers = users.filter((u) => (u.closes || 0) > 0)
-    .sort((a, b) => (b.closes || 0) - (a.closes || 0) || (b.closeRate || 0) - (a.closeRate || 0)).slice(0, 5);
-  const row = (u, i, main, sub) =>
-    `<li><span class="rp-rk-m">${medal(i)}</span><span class="rp-rk-nm">${esc(u.name)}</span><span class="rp-rk-v">${main}</span><span class="rp-rk-s">${sub}</span></li>`;
+  const scored = (u) => u.score != null && u.score > 0;
+  const setters = users.filter((u) => scored(u) && !rpPureCloser(u))
+    .sort((a, b) => b.score - a.score || (b.setterAppts || 0) - (a.setterAppts || 0)).slice(0, 5);
+  const closers = users.filter((u) => scored(u) && u.isCloser)
+    .sort((a, b) => b.score - a.score || (b.closes || 0) - (a.closes || 0)).slice(0, 5);
+  const row = (u, i, sub) =>
+    `<li><span class="rp-rk-m">${medal(i)}</span><span class="rp-rk-nm">${esc(u.name)}</span>${rpChip(u.score)}<span class="rp-rk-s">${sub}</span></li>`;
   const col = (title, icon, arr, fmt) =>
     `<div><h5>${icon} ${title}</h5>${arr.length ? `<ul>${arr.map((u, i) => fmt(u, i)).join("")}</ul>` : `<p class="muted small" style="margin:0;">No activity yet.</p>`}</div>`;
   return `<div class="rp-ranks">
-    ${col("Top setters", "🚪", setters, (u, i) => row(u, i, (u.setterAppts || 0) + " set", `${u.setterSits || 0} sat · ${rpPct(u.sitRate)} sit`))}
-    ${col("Top closers", "🤝", closers, (u, i) => row(u, i, (u.closes || 0) + " closed", `${rpPct(u.closeRate)} close · ${u.closerSits || 0} sat`))}
+    ${col("Top setters", "🚪", setters, (u, i) => row(u, i, `${u.setterAppts || 0} set · ${u.setterSits || 0} sat · ${rpPct(u.sitRate)} sit`))}
+    ${col("Top closers", "🤝", closers, (u, i) => row(u, i, `${u.closes || 0} closed · ${rpPct(u.closeRate)} close · ${u.closerSits || 0} sat`))}
   </div>`;
 }
 function rpRecapHtml(m, level) {
   const r = rpRecap(m, level);
-  const list = (arr, ic) => arr.length ? `<ul>${arr.map((x) => `<li><span class="ic">${ic}</span><span>${esc(x)}</span></li>`).join("")}</ul>` : `<p class="muted small" style="margin:0;">Nothing flagged.</p>`;
+  const isUser = level === "rep";
+  const genLabel = isUser ? "👤 Overall" : "👥 Team-wide";
+  const LANES = [["set", "🚪 Setters"], ["close", "🤝 Closers"], ["team", genLabel]];
+  // Strengths stay one list; gaps and the meeting agenda split by role lane so
+  // the coaching and outreach is specific to setters vs closers.
+  const flat = (arr, ic) => arr.length ? `<ul>${arr.map(([t]) => `<li><span class="ic">${ic}</span><span>${esc(t)}</span></li>`).join("")}</ul>` : "";
+  const split = (arr, ic, emptyMsg) => {
+    const groups = LANES.map(([lane, label]) => {
+      const items = arr.filter(([, l]) => l === lane);
+      return items.length ? `<h5 class="rp-role-h">${label}</h5><ul>${items.map(([t]) => `<li><span class="ic">${ic}</span><span>${esc(t)}</span></li>`).join("")}</ul>` : "";
+    }).join("");
+    return groups || (emptyMsg ? `<p class="muted small" style="margin:0;">${emptyMsg}</p>` : "");
+  };
   let html = "";
-  if (r.strengths.length) html += `<h4>✅ What's working</h4>${list(r.strengths, "✅")}`;
-  html += `<h4>⚠️ What's missing</h4>${r.gaps.length ? list(r.gaps, "⚠️") : `<p class="muted small" style="margin:0;">No red flags — solid across the board.</p>`}`;
-  const agenda = r.agenda.length ? r.agenda : ["Recognize the wins publicly and have top performers share exactly what's working so it spreads."];
-  html += `<h4>📋 Turn this into a ${RP_LEVEL_WORD[level]} meeting</h4>${list(agenda, "→")}`;
+  if (r.strengths.length) html += `<h4>✅ What's working</h4>${flat(r.strengths, "✅")}`;
+  html += `<h4>⚠️ What's missing</h4>${split(r.gaps, "⚠️", "No red flags — solid across the board.")}`;
+  const agenda = r.agenda.length ? r.agenda : [["Recognize the wins publicly and have top performers share exactly what's working so it spreads.", "team"]];
+  html += `<h4>📋 Turn this into a ${RP_LEVEL_WORD[level]} meeting</h4>${split(agenda, "→", "")}`;
   // Setter & closer rankings — company / region / team only.
   if (level !== "rep") { const lead = rpLeadersHtml(m); if (lead) html += `<h4>🏆 Top performers — setters &amp; closers</h4>${lead}`; }
   html += rpMetricTiles(m, level);
@@ -2213,8 +2266,7 @@ function rpNodeHtml(node) {
   const kids = node.regions || node.teams || node.users || [];
   const mini = rpMini(node);
   if (isUser) {
-    const hybrid = node.isCloser && ((node.doors || 0) > 0 || (node.setterAppts || 0) > 0);
-    const roleTag = hybrid ? "Setter · Closer" : node.isCloser ? "Closer" : "Setter";
+    const roleTag = rpRoleTag(node);
     return `<div class="rp-node"><div class="rp-row" data-uid="${esc(node.id)}">
         <span class="rp-tw">👤</span>
         <div class="rp-nm"><b>${esc(node.name)}</b><span class="rp-sub">${roleTag}${node.idleReps ? " · idle this period" : ""}</span></div>
@@ -2227,7 +2279,19 @@ function rpNodeHtml(node) {
     : `${(node.type === "region" ? (node.teams || []).length + " team" + ((node.teams || []).length === 1 ? "" : "s") : (node.users || []).length + " rep" + ((node.users || []).length === 1 ? "" : "s"))}`;
   let inner = "";
   if (open) {
-    inner = `<div class="rp-kids"><div class="rp-recap">${rpRecapHtml(node, node.type)}</div>${kids.map(rpNodeHtml).join("") || `<p class="muted small">No sub-groups.</p>`}</div>`;
+    let body;
+    if (node.type === "team") {
+      // Split the roster into setters and closers so each role reads on its own;
+      // a rep titled as both (Setter · Closer) appears in both lists, ranked by score.
+      const byScore = (a, b) => (b.score || 0) - (a.score || 0);
+      const setters = kids.filter((k) => !rpPureCloser(k)).sort(byScore);
+      const closers = kids.filter((k) => k.isCloser).sort(byScore);
+      const section = (label, arr) => arr.length ? `<div class="rp-lane-h">${label}</div>${arr.map(rpNodeHtml).join("")}` : "";
+      body = (section("🚪 Setters", setters) + section("🤝 Closers", closers)) || `<p class="muted small">No reps.</p>`;
+    } else {
+      body = kids.map(rpNodeHtml).join("") || `<p class="muted small">No sub-groups.</p>`;
+    }
+    inner = `<div class="rp-kids"><div class="rp-recap">${rpRecapHtml(node, node.type)}</div>${body}</div>`;
   }
   // Teams get their own download / email buttons so a manager's single team can
   // be printed or sent on its own.
@@ -2311,7 +2375,7 @@ async function openRepReport(uid) {
     const g = rpGrade(m.score);
     const sm = r.sitMetrics || {};
     const pitches = r.pitches || { count: 0, recordedCount: 0 };
-    const roleWord = (m.isCloser && ((m.doors || 0) > 0 || (m.setterAppts || 0) > 0)) ? "Setter · Closer" : sm.isCloser ? "Closer" : "Setter";
+    const roleWord = m.type === "user" ? rpRoleTag(m) : (sm.isCloser ? "Closer" : "Setter");
     const pitchLine = (p, lbl, field) => p ? `<div class="rp-metric"><div class="n">${p.score == null ? "—" : p.score}</div><div class="l">${lbl} pitch</div><div class="g">${esc((p[field] || p.address || "").slice(0, 60)) || "—"}</div></div>` : "";
     const recap = rpRecapHtml(m, "rep");
     ov.querySelector(".rp-ov-card").innerHTML = `
@@ -2362,25 +2426,57 @@ function rpAllKeys(node, acc) {
   });
   return acc;
 }
-// Populate the branded print cover banner for a given node (company/region/team).
+// Populate the branded print cover masthead for a given node. Shows the company
+// logo + name as the brand (from the company root), the report subject with its
+// own logo when it's a team, the period/date, and a grade-colored score badge.
 function rpFillBanner(node) {
+  const co = state.rpTree || node;
   const g = rpGrade(node.score);
+  const gradeCol = { a: "#059669", b: "#4d9e3f", c: "#d97706", d: "#dc2626", x: "#475569" }[g.k] || "#0284C7";
   const dateStr = new Date().toLocaleDateString(undefined, { month: "long", day: "numeric", year: "numeric" });
-  const mono = ((node.name || "Y").trim().charAt(0) || "Y").toUpperCase();
-  const kind = { company: "SUCCESS REPORT", region: "REGION REPORT", team: "TEAM REPORT" }[node.type] || "SUCCESS REPORT";
+  const kind = { company: "COMPANY REPORT", region: "REGION REPORT", team: "TEAM REPORT" }[node.type] || "SUCCESS REPORT";
+  const monoOf = (n) => ((n || "Y").trim().charAt(0) || "Y").toUpperCase();
+  const brand = co.logoUrl
+    ? `<img src="${esc(co.logoUrl)}" alt="${esc(co.name || "")}" onerror="this.replaceWith(Object.assign(document.createElement('span'),{className:'rp-ph-mono',textContent:'${esc(monoOf(co.name))}'}))"/><span>${esc(co.name || "Company")}</span>`
+    : `<span class="rp-ph-mono">${esc(monoOf(co.name))}</span><span>${esc(co.name || "Company")}</span>`;
+  // Hero avatar for a specific team/region — its own logo makes the report feel
+  // personal. The company report shows no avatar (the masthead brand is the company).
+  let avatar = "";
+  if (node.type !== "company") {
+    avatar = node.logoUrl
+      ? `<img class="rp-ph-avatar" src="${esc(node.logoUrl)}" alt="" onerror="this.replaceWith(Object.assign(document.createElement('div'),{className:'rp-ph-avatar rp-ph-avatar-mono',textContent:'${esc(monoOf(node.name))}'}))"/>`
+      : `<div class="rp-ph-avatar rp-ph-avatar-mono">${esc(monoOf(node.name))}</div>`;
+  }
   $("rpPrintHeader").innerHTML = `
-    <div class="rp-ph-brand">
-      <div class="rp-ph-logo">${esc(mono)}</div>
-      <div>
-        <div class="rp-ph-eyebrow">YOUTILITY · ${kind}</div>
-        <div class="rp-ph-co">${esc(node.name || "Company")}</div>
+    <div class="rp-ph-top">
+      <div class="rp-ph-brandmark">${brand}</div>
+      <div class="rp-ph-meta">
+        <div class="rp-ph-period">${esc(RP_PLABEL[state.rpPeriod] || "")}</div>
+        <div class="rp-ph-date">Generated ${esc(dateStr)}</div>
       </div>
     </div>
-    <div class="rp-ph-meta">
-      <div class="rp-ph-period">${esc(RP_PLABEL[state.rpPeriod] || "")}</div>
-      <div class="rp-ph-date">Generated ${esc(dateStr)}</div>
-    </div>
-    <div class="rp-ph-score"><b>${node.score == null ? "—" : node.score}</b><small>${esc(g.label)}</small></div>`;
+    <div class="rp-ph-main">
+      <div class="rp-ph-title">
+        ${avatar}
+        <div>
+          <div class="rp-ph-eyebrow">${kind}</div>
+          <div class="rp-ph-co">${esc(node.name || "Company")}</div>
+        </div>
+      </div>
+      <div class="rp-ph-score" style="color:${gradeCol};"><b>${node.score == null ? "—" : node.score}</b><small>${esc(g.label)}</small></div>
+    </div>`;
+}
+// Wait for any banner logos to finish loading (so they render in the PDF), then
+// print. A short timeout guarantees a slow/broken logo never blocks the print.
+function rpDoPrint(restore) {
+  document.body.classList.add("rp-printing");
+  const imgs = Array.from(document.querySelectorAll("#rpPrintHeader img"));
+  let pending = imgs.length, fired = false;
+  const go = () => { if (fired) return; fired = true; window.print(); document.body.classList.remove("rp-printing"); restore(); };
+  const tick = () => { if (--pending <= 0) setTimeout(go, 80); };
+  if (!pending) { setTimeout(go, 140); return; }
+  imgs.forEach((im) => { if (im.complete) tick(); else { im.addEventListener("load", tick); im.addEventListener("error", tick); } });
+  setTimeout(go, 2000); // hard fallback
 }
 // Find any node in the live tree by its "type:id" key.
 function rpFindByKey(key) {
@@ -2398,13 +2494,7 @@ $("rpDownload").addEventListener("click", () => {
   state.rpOpen = rpAllKeys(state.rpTree, new Set());
   rpRender();
   rpFillBanner(state.rpTree);
-  document.body.classList.add("rp-printing");
-  setTimeout(() => {
-    window.print();
-    document.body.classList.remove("rp-printing");
-    state.rpOpen = prev;
-    rpRender();
-  }, 200);
+  rpDoPrint(() => { state.rpOpen = prev; rpRender(); });
 });
 // Print / PDF just one node (a single team or region) — a focused report with
 // its own cover banner, then restore the full on-screen view.
@@ -2430,13 +2520,7 @@ function rpPrintNode(node) {
     <h2 style="margin:18px 0 10px;">${kidLabel}</h2>
     <div class="rp-tree">${kids.map(rpNodeHtml).join("") || `<div class="th-empty">No members yet.</div>`}</div>`;
   rpFillBanner(node);
-  document.body.classList.add("rp-printing");
-  setTimeout(() => {
-    window.print();
-    document.body.classList.remove("rp-printing");
-    state.rpOpen = prevOpen;
-    rpRender();
-  }, 200);
+  rpDoPrint(() => { state.rpOpen = prevOpen; rpRender(); });
 }
 // Email just one team — window + team-scoped audience (test / manager / reps).
 function rpEmailNode(node) {
@@ -5603,6 +5687,13 @@ function renderProfileBody(uid, ov) {
 
     <h4 style="margin:16px 0 6px;font-size:13px;border-top:1px solid #21314a;padding-top:14px;">Role &amp; position</h4>
     <div class="field"><span>Position</span><select class="posSel">${posOptions}</select></div>
+    <div class="field"><span>Function <span class="muted small">— which lanes they work; overrides the position default</span></span>
+      <select class="fnSel">
+        <option value="setter" ${!u.isCloser ? "selected" : ""}>Setter</option>
+        <option value="closer" ${u.isCloser && u.isSetter === false ? "selected" : ""}>Closer</option>
+        <option value="both" ${u.isCloser && u.isSetter !== false ? "selected" : ""}>Both (Setter · Closer)</option>
+      </select>
+    </div>
     <div class="roleCustomWrap field"><span>Title</span>
       ${usingCustomTitle
         ? `<select class="roleSel">${roleOptions}</select>`
@@ -5679,6 +5770,11 @@ function renderProfileBody(uid, ov) {
     if (!v) return;
     const nextRole = usingCustomTitle ? null : state.roles.find((r) => (r.title || "").trim().toLowerCase() === (POSITION_LABEL[v] || "").toLowerCase());
     try { await assignUserHierarchy({ uid: u.id, position: v, ...(nextRole ? { roleId: nextRole.id } : {}) }); pbanner("Position updated.", "good"); await refresh(); }
+    catch (e) { pbanner(e.message, "error"); }
+  });
+  pb.querySelector(".fnSel").addEventListener("change", async (ev) => {
+    const v = ev.target.value; // setter | closer | both
+    try { await setUserFunction({ uid: u.id, isSetter: v === "setter" || v === "both", isCloser: v === "closer" || v === "both" }); pbanner("Function updated.", "good"); await refresh(); }
     catch (e) { pbanner(e.message, "error"); }
   });
   pb.querySelector(".myTeamSel").addEventListener("change", async (ev) => {
