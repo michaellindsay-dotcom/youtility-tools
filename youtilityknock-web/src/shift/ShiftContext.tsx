@@ -127,6 +127,9 @@ export function ShiftProvider({ children }: { children: ReactNode }) {
         companyId,
         userId: profile.uid,
         userName: profile.displayName,
+        // Team stamp powers the team-scoped "Who's Working" board (a rep sees
+        // their whole team, not just their downline).
+        teamId: profile.teamId ?? null,
         visibilityPath: [profile.uid, ...(profile.managerPath ?? [])],
         status: "active",
         startAt: Date.now(),

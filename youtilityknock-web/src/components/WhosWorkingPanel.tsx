@@ -1,5 +1,5 @@
-import { useEffect, useState } from "react";
-import { addDoc, collection, onSnapshot, query, where } from "firebase/firestore";
+import { useEffect, useMemo, useState } from "react";
+import { addDoc, collection, doc, getDoc, onSnapshot, query, where } from "firebase/firestore";
 import { db } from "../firebase";
 import { useAuth } from "../auth/AuthContext";
 import { fmtElapsed } from "../shift/ShiftContext";
@@ -9,38 +9,75 @@ import type { Shift } from "../types";
 // The live "who's on shift right now" board, plus the shout-out / rally-the-team
 // actions that post into Team Chat. Shared by the standalone Who's Working page
 // and the Chat page (where it lives as a rail view).
+//
+// Scope: admins see the whole company; managers see their downline across every
+// team they run (with a team filter); a plain rep sees only their own team.
 export default function WhosWorkingPanel() {
   const { profile, role, companyId } = useAuth();
   const [shifts, setShifts] = useState<Shift[]>([]);
   const [now, setNow] = useState(Date.now());
   const [shouted, setShouted] = useState<Set<string>>(new Set());
   const [rallySent, setRallySent] = useState(false);
+  const [teamFilter, setTeamFilter] = useState<string>(""); // "" = all my teams
+  const [teamNames, setTeamNames] = useState<Record<string, string>>({});
+
+  const isAdmin = role === "admin" || role === "superadmin";
+  const managedTeamIds = useMemo(() => {
+    const ids: string[] = [];
+    (profile?.managedTeamIds || []).forEach((id) => { if (id && !ids.includes(id)) ids.push(id); });
+    return ids;
+  }, [profile?.managedTeamIds]);
+  // A manager runs a downline (possibly across several teams); a plain rep does not.
+  const isManager =
+    !isAdmin && (role === "manager" || managedTeamIds.length > 0 || (profile?.position || "").includes("manager"));
+
+  // Names for the manager's team filter dropdown.
+  useEffect(() => {
+    if (!companyId || !isManager || managedTeamIds.length === 0) { setTeamNames({}); return; }
+    let live = true;
+    Promise.all(
+      managedTeamIds.map((id) =>
+        getDoc(doc(db, "companies", companyId, "teams", id))
+          .then((s) => [id, (s.data()?.name as string) || "Team"] as const)
+          .catch(() => [id, "Team"] as const)
+      )
+    ).then((pairs) => { if (live) setTeamNames(Object.fromEntries(pairs)); });
+    return () => { live = false; };
+  }, [companyId, isManager, managedTeamIds]);
 
   useEffect(() => {
     if (!profile || !companyId) return;
     const base = collection(db, "shifts");
-    const q =
-      role === "admin"
-        ? query(base, where("companyId", "==", companyId), where("status", "==", "active"))
-        : query(
-            base,
-            where("companyId", "==", companyId),
-            where("status", "==", "active"),
-            where("visibilityPath", "array-contains", profile.uid)
-          );
+    let q;
+    if (isAdmin) {
+      // Whole company.
+      q = query(base, where("companyId", "==", companyId), where("status", "==", "active"));
+    } else if (isManager) {
+      // Downline across all their teams (filtered by team client-side below).
+      q = query(base, where("companyId", "==", companyId), where("status", "==", "active"), where("visibilityPath", "array-contains", profile.uid));
+    } else if (profile.teamId) {
+      // Plain rep: just their team.
+      q = query(base, where("companyId", "==", companyId), where("status", "==", "active"), where("teamId", "==", profile.teamId));
+    } else {
+      // No team → only what they can see of themselves.
+      q = query(base, where("companyId", "==", companyId), where("status", "==", "active"), where("visibilityPath", "array-contains", profile.uid));
+    }
     return onSnapshot(
       q,
       (snap) => setShifts(snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<Shift, "id">) }))),
       (e) => console.error("working query", e)
     );
-  }, [profile, role, companyId]);
+  }, [profile, isAdmin, isManager, companyId]);
 
   useEffect(() => {
     const t = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(t);
   }, []);
 
-  const active = [...shifts].sort((a, b) => (b.doorsKnocked ?? 0) - (a.doorsKnocked ?? 0));
+  const active = useMemo(() => {
+    const list = isManager && teamFilter ? shifts.filter((s) => s.teamId === teamFilter) : shifts;
+    return [...list].sort((a, b) => (b.doorsKnocked ?? 0) - (a.doorsKnocked ?? 0));
+  }, [shifts, isManager, teamFilter]);
 
   // Shout-outs / rally post to the poster's TEAM chat (not the company channel),
   // so hype stays with the crew it's about. Reps with no team fall back to the
@@ -85,7 +122,17 @@ export default function WhosWorkingPanel() {
             {active.length === 0 ? "No one is on shift right now." : `${active.length} rep${active.length === 1 ? "" : "s"} out putting in work right now.`}
           </p>
         </div>
-        <button className="btn primary sm" onClick={rally}>{rallySent ? "Sent to chat ✓" : "📣 Rally the team"}</button>
+        <div className="row" style={{ gap: 8, alignItems: "center" }}>
+          {isManager && managedTeamIds.length > 1 && (
+            <select className="input sm" value={teamFilter} onChange={(e) => setTeamFilter(e.target.value)} title="Filter by team">
+              <option value="">All my teams</option>
+              {managedTeamIds.map((id) => (
+                <option key={id} value={id}>{teamNames[id] || "Team"}</option>
+              ))}
+            </select>
+          )}
+          <button className="btn primary sm" onClick={rally}>{rallySent ? "Sent to chat ✓" : "📣 Rally the team"}</button>
+        </div>
       </div>
 
       {active.length === 0 ? (
