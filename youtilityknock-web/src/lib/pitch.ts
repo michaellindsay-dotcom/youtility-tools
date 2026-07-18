@@ -22,6 +22,11 @@ interface PitchMeta {
   // "door" (default) = a real pitch at a door; "certification" = a practice/role-play
   // pitch that, if it scores high enough, certifies the rep for full-credit knocks.
   kind?: "door" | "certification";
+  // GPS-confirmed that the rep was physically at the home when recording (within
+  // the on-site geofence). Only geo-verified door pitches count as "recorded
+  // conversations" in reporting — never practice pitches or off-location recordings.
+  atLocation?: boolean;
+  distanceFt?: number | null;
 }
 
 // Records the rep's door pitch while the disposition flow is open, then uploads
@@ -103,6 +108,9 @@ export function usePitchRecorder() {
         audioPath: path,
         durationMs,
         kind: meta.kind || "door",
+        // Geo-verification of a real at-the-home customer pitch (see PitchMeta).
+        atLocation: meta.atLocation === true,
+        distanceFt: meta.distanceFt ?? null,
         status: "recorded",
         createdAt: Date.now(),
       });

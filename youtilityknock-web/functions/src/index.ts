@@ -4124,12 +4124,13 @@ export const companyFunnelRankings = onCall(async (request) => {
 // setter and, separately, the closer.
 async function computeApptMetrics(companyId: string, startMs: number): Promise<{
   setters: Record<string, { appts: number; sits: number; pitched: number }>;
-  closers: Record<string, { appts: number; sits: number; closes: number; turnedAways: number }>;
+  closers: Record<string, { appts: number; sits: number; closes: number; turnedAways: number; due: number; dispositioned: number }>;
 }> {
   const snap = await db.collection("events")
     .where("companyId", "==", companyId).where("type", "==", "appointment").get();
+  const nowMs = Date.now();
   const setters: Record<string, { appts: number; sits: number; pitched: number }> = {};
-  const closers: Record<string, { appts: number; sits: number; closes: number; turnedAways: number }> = {};
+  const closers: Record<string, { appts: number; sits: number; closes: number; turnedAways: number; due: number; dispositioned: number }> = {};
   for (const d of snap.docs) {
     const ev = d.data() as any;
     if (ev.followUpForEventId) continue; // a reschedule's follow-up isn't a new appointment
@@ -4140,7 +4141,11 @@ async function computeApptMetrics(companyId: string, startMs: number): Promise<{
     // Routed appt: setterUid is the setter, userId the closer. Self-gen appt
     // (no closer routing): the setter is userId.
     const setterUid = (ev.setterUid as string) || (ev.userId as string) || null;
-    const closerUid = (ev.closerUid as string) || null;
+    // Closer of record: the routed closer if there is one, otherwise the setter
+    // runs and closes their OWN self-gen appointment — so they are the closer for
+    // it. Each appointment is attributed to exactly one closer here, so a close is
+    // never counted for both the setter and a separate closer (no double count).
+    const closerUid = (ev.closerUid as string) || setterUid;
     if (setterUid) {
       const s = (setters[setterUid] ??= { appts: 0, sits: 0, pitched: 0 });
       s.appts++;
@@ -4148,11 +4153,17 @@ async function computeApptMetrics(companyId: string, startMs: number): Promise<{
       else if (st === "no_show") s.pitched++;
     }
     if (closerUid) {
-      const c = (closers[closerUid] ??= { appts: 0, sits: 0, closes: 0, turnedAways: 0 });
-      c.appts++;
+      const c = (closers[closerUid] ??= { appts: 0, sits: 0, closes: 0, turnedAways: 0, due: 0, dispositioned: 0 });
+      c.appts++;                               // appointments set FOR or BY this closer
       if (isSit) c.sits++;
       if (st === "closed_won") c.closes++;
       if (st === "turned_away") c.turnedAways++;
+      // Disposition accountability: once an appointment's time has passed it is
+      // "due" and the closer must mark an outcome. Still "scheduled" past its time
+      // = not dispositioned. A low disposition rate strands setters (they never
+      // learn what happened to the appointment they set) and hides real results.
+      const startAt = Number(ev.startAt) || 0;
+      if (startAt > 0 && startAt < nowMs) { c.due++; if (st !== "scheduled") c.dispositioned++; }
     }
   }
   return { setters, closers };
@@ -4269,10 +4280,20 @@ export const getCompanyRollup = onCall(async (request) => {
   // owns the door), so "today" reflects the day's activity — the same
   // leads-based counting the admin Town Hall uses. All-time uses the lifetime
   // door counter instead of scanning every lead ever.
+  // A "conversation" = a door that turned into a real interaction (matches the
+  // rest of the app). Recorded-pitch coverage is measured against THIS, not
+  // against appointment sits.
+  const ROLLUP_CONVO = new Set(["pipeline", "appointment", "not_interested", "sold"]);
   const doorsByUid: Record<string, number> = {};
+  const convosByUid: Record<string, number> = {};
   if (view === "alltime") {
     (await db.collection("userStats").where("companyId", "==", companyId).get())
-      .forEach((d) => { const s = d.data() as any; if (s.uid) doorsByUid[s.uid] = Number(s.doorsKnocked) || 0; });
+      .forEach((d) => {
+        const s = d.data() as any; if (!s.uid) return;
+        doorsByUid[s.uid] = Number(s.doorsKnocked) || 0;
+        // leadsCreated is the lifetime "conversations" counter the app already keeps.
+        convosByUid[s.uid] = Number(s.leadsCreated) || 0;
+      });
   } else {
     try {
       const leadsSnap = await db.collection("leads")
@@ -4281,7 +4302,9 @@ export const getCompanyRollup = onCall(async (request) => {
         const l = d.data() as any;
         if (l.deleted) return;
         const uid = (l.assignedTo as string) || (l.createdBy as string);
-        if (uid) doorsByUid[uid] = (doorsByUid[uid] || 0) + 1;
+        if (!uid) return;
+        doorsByUid[uid] = (doorsByUid[uid] || 0) + 1;
+        if (l.verified !== false && ROLLUP_CONVO.has(l.status)) convosByUid[uid] = (convosByUid[uid] || 0) + 1;
       });
     } catch (e) {
       // Missing composite index → fall back to the season buckets (weekly/monthly
@@ -4289,9 +4312,31 @@ export const getCompanyRollup = onCall(async (request) => {
       logger.warn("rollup doors: knockedAt query failed, falling back to season stats", e);
       if (view !== "day") {
         (await db.collection("seasonStats").where("companyId", "==", companyId).where("period", "==", rPeriodKey(kind)).get())
-          .forEach((d) => { const s = d.data() as any; if (s.kind === kind && s.uid) doorsByUid[s.uid] = Number(s.doorsKnocked) || 0; });
+          .forEach((d) => {
+            const s = d.data() as any; if (!(s.kind === kind && s.uid)) return;
+            doorsByUid[s.uid] = Number(s.doorsKnocked) || 0;
+            convosByUid[s.uid] = Number(s.leadsCreated) || 0;
+          });
       }
     }
+  }
+
+  // Recorded pitches per rep for the window — only real customer pitches recorded
+  // AT the home, GPS-confirmed inside the on-site geofence (atLocation). Practice /
+  // certification role-plays and off-location recordings are excluded, so
+  // "% recorded" reflects actual field conversations captured for coaching.
+  const recordedByUid: Record<string, number> = {};
+  try {
+    const pitchSnap = await db.collection("pitches").where("companyId", "==", companyId).get();
+    pitchSnap.forEach((d) => {
+      const p = d.data() as any;
+      if ((p.kind || "door") !== "door") return;       // no practice pitches
+      if (p.atLocation !== true) return;                // must be GPS-verified at the home
+      if (startMs > 0 && (Number(p.createdAt) || 0) < startMs) return;
+      if (p.uid) recordedByUid[p.uid] = (recordedByUid[p.uid] || 0) + 1;
+    });
+  } catch (e) {
+    logger.warn("rollup: pitches query failed", e);
   }
 
   // Teams + regions (a region is a team with kind==="region"; a team joins a
@@ -4307,18 +4352,30 @@ export const getCompanyRollup = onCall(async (request) => {
     teamMeta[t.id] = { name: d.name || "Team", regionId: parent && regionName[parent] ? parent : null };
   });
 
-  const blank = () => ({ doors: 0, setterAppts: 0, setterSits: 0, setterPitched: 0, closerAppts: 0, closerSits: 0, closes: 0, turnedAways: 0, reps: 0, closerReps: 0 });
+  const blank = () => ({ doors: 0, convos: 0, recorded: 0, setterAppts: 0, setterSits: 0, setterPitched: 0, closerAppts: 0, closerSits: 0, closes: 0, turnedAways: 0, closerDue: 0, closerDispositioned: 0, reps: 0, closerReps: 0 });
   type M = ReturnType<typeof blank>;
   const add = (a: M, u: U) => {
     const s = sm[u.uid]; const c = cm[u.uid];
     a.doors += doorsByUid[u.uid] || 0;
+    a.convos += convosByUid[u.uid] || 0;
+    a.recorded += recordedByUid[u.uid] || 0;
     a.setterAppts += s?.appts || 0; a.setterSits += s?.sits || 0; a.setterPitched += s?.pitched || 0;
     a.closerAppts += c?.appts || 0; a.closerSits += c?.sits || 0; a.closes += c?.closes || 0; a.turnedAways += c?.turnedAways || 0;
+    a.closerDue += c?.due || 0; a.closerDispositioned += c?.dispositioned || 0;
     a.reps += 1; if (u.isCloser) a.closerReps += 1;
   };
   const rate = (n: number, d: number) => (d > 0 ? Math.min(100, Math.round((n / d) * 100)) : null);
   const node = (m: M, name: string, type: string, id: string | null, extra?: Record<string, unknown>) => ({
-    type, id, name, ...m, sitRate: rate(m.setterSits, m.setterPitched), closeRate: rate(m.closes, m.closerSits), ...extra,
+    type, id, name, ...m,
+    // sitRate = show rate: of appointments that were kept (sat or no-showed), how
+    // many actually sat. showRate is the same value under a clearer name.
+    sitRate: rate(m.setterSits, m.setterPitched),
+    setToSitRate: rate(m.setterSits, m.setterAppts), // booked → actually sat
+    noShows: Math.max(0, m.setterPitched - m.setterSits),
+    closeRate: rate(m.closes, m.closerSits),
+    dispoRate: rate(m.closerDispositioned, m.closerDue), // % of due appts the closer dispositioned
+    recRate: rate(m.recorded, m.convos), // % of door conversations that were recorded
+    ...extra,
   });
   const sumOf = (arr: U[]) => { const m = blank(); for (const u of arr) add(m, u); return m; };
 
@@ -5161,7 +5218,7 @@ export const getEmployeeReport = onCall(async (request) => {
   // (sits + no-shows; excludes turn-aways).
   const { setters: sm, closers: cm } = await computeApptMetrics(rep.companyId, 0);
   const sMet = sm[repUid] || { appts: 0, sits: 0, pitched: 0 };
-  const cMet = cm[repUid] || { appts: 0, sits: 0, closes: 0, turnedAways: 0 };
+  const cMet = cm[repUid] || { appts: 0, sits: 0, closes: 0, turnedAways: 0, due: 0, dispositioned: 0 };
   const rate = (n: number, d: number) => (d > 0 ? Math.min(100, Math.round((n / d) * 100)) : null);
   const sitMetrics = {
     isCloser: rep.isCloser === true,
@@ -5170,13 +5227,21 @@ export const getEmployeeReport = onCall(async (request) => {
     sits: sMet.sits,
     pitchedAppts: sMet.pitched,
     sitRate: rate(sMet.sits, sMet.pitched),
-    // Closer lane
+    // Closer lane — appts set FOR or BY this closer, dispositioned off outcomes
     closerAppts: cMet.appts,
     closerSits: cMet.sits,
     closerCloses: cMet.closes,
     closeRate: rate(cMet.closes, cMet.sits),
     turnedAways: cMet.turnedAways,
+    closerDue: cMet.due,
+    closerDispositioned: cMet.dispositioned,
+    dispoRate: rate(cMet.dispositioned, cMet.due),
   };
+  // Recorded conversations = geo-verified real door pitches only (never practice
+  // certifications or off-location recordings).
+  const recordedCount = pitchSnap.docs.filter((d) => {
+    const p = d.data() as any; return (p.kind || "door") === "door" && p.atLocation === true;
+  }).length;
   return {
     rep: { uid: rep.uid, displayName: rep.displayName || "", email: rep.email || "", title: rep.title || rep.role || "", role: rep.role || "" },
     funnel: { today: rFunnel(leads, today), week: rFunnel(leads, week), month: rFunnel(leads, month), all },
@@ -5190,7 +5255,7 @@ export const getEmployeeReport = onCall(async (request) => {
       .sort((a, b) => rKnock(b) - rKnock(a))
       .slice(0, 200)
       .map((l) => ({ id: l.id, address: l.address || "", status: l.status, knockedAt: rKnock(l), soldAt: l.soldAt || null })),
-    pitches: { recent: pitches.slice(0, 30), best, worst, count: pitches.length },
+    pitches: { recent: pitches.slice(0, 30), best, worst, count: pitches.length, recordedCount },
   };
 });
 
