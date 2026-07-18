@@ -4368,12 +4368,12 @@ export async function computeRollup(companyId: string, view: string, scopeUid: s
   const teamsSnap = await db.collection(`companies/${companyId}/teams`).get();
   const regionName: Record<string, string> = {};
   teamsSnap.forEach((t) => { const d = t.data() as any; if (d.kind === "region") regionName[t.id] = d.name || "Region"; });
-  const teamMeta: Record<string, { name: string; regionId: string | null }> = {};
+  const teamMeta: Record<string, { name: string; regionId: string | null; logoUrl: string | null }> = {};
   teamsSnap.forEach((t) => {
     const d = t.data() as any;
     if (d.kind === "region") return;
     const parent = (d.parentTeamId as string) || null;
-    teamMeta[t.id] = { name: d.name || "Team", regionId: parent && regionName[parent] ? parent : null };
+    teamMeta[t.id] = { name: d.name || "Team", regionId: parent && regionName[parent] ? parent : null, logoUrl: (d.logoUrl as string) || null };
   });
 
   const blank = () => ({ doors: 0, convos: 0, recorded: 0, shiftMs: 0, setterAppts: 0, setterSits: 0, setterPitched: 0, setterNoShows: 0, setterUpcoming: 0, setterUndispositioned: 0, setterOther: 0, closerAppts: 0, closerSits: 0, closes: 0, turnedAways: 0, closerDue: 0, closerDispositioned: 0, reps: 0, closerReps: 0 });
@@ -4423,7 +4423,7 @@ export async function computeRollup(companyId: string, view: string, scopeUid: s
   const buildUser = (u: U) => node(sumOf([u]), u.name, "user", u.uid, { isCloser: u.isCloser });
   const byClose = (a: { closes: number; setterSits: number }, b: { closes: number; setterSits: number }) => b.closes - a.closes || b.setterSits - a.setterSits;
   const buildTeam = (tid: string, name: string, roster: U[]) =>
-    node(sumOf(roster), name, "team", tid, { users: roster.map(buildUser).sort(byClose) });
+    node(sumOf(roster), name, "team", tid, { users: roster.map(buildUser).sort(byClose), logoUrl: teamMeta[tid]?.logoUrl || null });
 
   const regions: unknown[] = [];
   for (const rid of Object.keys(teamsByRegion)) {
@@ -4442,8 +4442,9 @@ export async function computeRollup(companyId: string, view: string, scopeUid: s
   }
   (regions as { closes: number; setterSits: number }[]).sort(byClose);
 
-  const companyName = (await db.doc(`companies/${companyId}`).get()).data()?.name || "Company";
-  const company = node(sumOf(users), companyName, "company", companyId, { regions });
+  const companyDoc = (await db.doc(`companies/${companyId}`).get()).data() || {};
+  const companyName = companyDoc.name || "Company";
+  const company = node(sumOf(users), companyName, "company", companyId, { regions, logoUrl: (companyDoc.logoUrl as string) || null });
   return { period: view, scopedToDownline: !seeAll, company };
 }
 
