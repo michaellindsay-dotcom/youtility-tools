@@ -342,6 +342,12 @@ workflows:
 
           android {
               defaultConfig {
+                  // Android published package MUST match the existing Play Console
+                  // app (youtilityknock.web.app). Overriding applicationId here
+                  // changes ONLY the Android bundle — iOS keeps us.youtility.knock,
+                  // and the Android namespace (internal R class) stays as Capacitor
+                  // set it, which is fine (namespace and applicationId may differ).
+                  applicationId = "youtilityknock.web.app"
                   // AGP 8.6 requires property assignment (versionCode = N), not the
                   // old method-call style (versionCode N).
                   versionCode = (System.getenv("BUILD_NUMBER") ?: "1").toInteger() + 1
