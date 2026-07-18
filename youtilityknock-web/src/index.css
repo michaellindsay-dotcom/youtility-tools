@@ -3141,3 +3141,12 @@ body.modal-open .chat-fab-global { display: none; }
   padding: 0 4px; border-radius: 8px; background: #22c55e; color: #06121f;
   font-size: 10px; font-weight: 800; line-height: 16px; text-align: center;
 }
+
+/* ── GL map (MapLibre, ?map=gl beta) ─────────────────────────────────────── */
+.mgl-you {
+  width: 16px; height: 16px; border-radius: 50%;
+  background: #0EA5E9; border: 3px solid #fff;
+  box-shadow: 0 0 0 2px rgba(14, 165, 233, 0.4), 0 1px 4px rgba(0, 0, 0, 0.5);
+  cursor: default;
+}
+.maplibregl-popup-content { border-radius: 10px; padding: 10px 12px; }
