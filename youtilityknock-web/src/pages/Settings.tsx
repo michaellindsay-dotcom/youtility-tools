@@ -13,6 +13,10 @@ export default function Settings() {
   // Calendar connect logic lives in a shared hook (also used by the one-tap
   // connect banner on the dashboard/schedule).
   const { cfg, cal, busy, msg: calMsg, connect, disconnect } = useCalendarConnect();
+  const [smsNumber, setSmsNumber] = useState(profile?.smsNumber || "");
+  const [smsForwardTo, setSmsForwardTo] = useState(profile?.smsForwardTo || "");
+  const [savingSms, setSavingSms] = useState(false);
+  const [smsMsg, setSmsMsg] = useState("");
   const [curPw, setCurPw] = useState("");
   const [newPw, setNewPw] = useState("");
   const [newPw2, setNewPw2] = useState("");
@@ -45,7 +49,23 @@ export default function Settings() {
 
   useEffect(() => {
     setPhone(profile?.phone || "");
+    setSmsNumber(profile?.smsNumber || "");
+    setSmsForwardTo(profile?.smsForwardTo || "");
   }, [profile]);
+
+  async function saveSms() {
+    if (!profile?.uid) return;
+    setSavingSms(true);
+    setSmsMsg("");
+    try {
+      await httpsCallable(functions, "setUserPhoneRouting")({ uid: profile.uid, smsNumber, smsForwardTo });
+      setSmsMsg("Saved ✓");
+    } catch (e) {
+      setSmsMsg((e as Error).message || "Save failed.");
+    } finally {
+      setSavingSms(false);
+    }
+  }
 
   async function savePhone() {
     setSavingPhone(true);
@@ -139,6 +159,42 @@ export default function Settings() {
             {savingPhone ? "Saving…" : "Save"}
           </button>
           {phoneMsg && <span className="muted small">{phoneMsg}</span>}
+        </div>
+      </div>
+
+      <div className="card">
+        <h3 style={{ marginBottom: 4 }}>Texting &amp; calls</h3>
+        <p className="muted small" style={{ marginBottom: 12 }}>
+          Your ported business line for texting and calling customers, and where inbound
+          calls to that number should ring you.
+        </p>
+        <div className="fields" style={{ display: "grid", gap: 12 }}>
+          <div>
+            <div className="muted small" style={{ marginBottom: 4 }}>Ported texting/calling number</div>
+            <input
+              className="input"
+              style={{ maxWidth: 240 }}
+              placeholder="+1…"
+              value={smsNumber}
+              onChange={(e) => setSmsNumber(e.target.value)}
+            />
+          </div>
+          <div>
+            <div className="muted small" style={{ marginBottom: 4 }}>Forward calls to</div>
+            <input
+              className="input"
+              style={{ maxWidth: 240 }}
+              placeholder="+1…"
+              value={smsForwardTo}
+              onChange={(e) => setSmsForwardTo(e.target.value)}
+            />
+          </div>
+        </div>
+        <div className="row" style={{ marginTop: 10, alignItems: "center" }}>
+          <button className="btn primary sm" onClick={saveSms} disabled={savingSms}>
+            {savingSms ? "Saving…" : "Save"}
+          </button>
+          {smsMsg && <span className="muted small">{smsMsg}</span>}
         </div>
       </div>
 

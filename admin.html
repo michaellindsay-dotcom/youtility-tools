@@ -2020,9 +2020,22 @@ const RP_PLABEL  = { week: "this week", month: "this month", year: "this year", 
 const RP_LEVEL_WORD = { company: "company", region: "regional", team: "team", rep: "1:1" };
 
 function rpClamp(v) { return Math.max(0, Math.min(100, v)); }
-// True when a node represents a rep who only closes (no door/setting activity) —
-// door/set targets shouldn't be held against a pure closer, and vice-versa.
-function rpPureCloser(m) { return m.type === "user" && m.isCloser && !((m.doors || 0) > 0 || (m.setterAppts || 0) > 0); }
+// Setter/closer lane membership is driven by the rep's explicit function flags
+// (isSetter / isCloser, set from their position or the Function control), NOT by
+// door activity — so a closer who knocks a few doors isn't mislabeled a setter.
+// Legacy nodes without the flag fall back to the old activity heuristic.
+function rpIsSetterRole(m) {
+  if (m.type !== "user") return true;
+  if (typeof m.isSetter === "boolean") return m.isSetter;
+  return !m.isCloser || (m.doors || 0) > 0 || (m.setterAppts || 0) > 0;
+}
+function rpRoleTag(m) {
+  const s = rpIsSetterRole(m), c = !!m.isCloser;
+  return s && c ? "Setter · Closer" : c ? "Closer" : "Setter";
+}
+// True when a node represents a rep who only closes — door/set targets shouldn't
+// be held against a pure closer, and vice-versa.
+function rpPureCloser(m) { return m.type === "user" && !!m.isCloser && !rpIsSetterRole(m); }
 function rpHasCloseLane(m) { return m.type !== "user" || (m.closerAppts || 0) > 0 || (m.closes || 0) > 0 || m.isCloser; }
 // Weighted, self-normalizing, role-aware composite. Components with no data (or
 // that don't apply to this rep's role) drop out and the remaining weights
@@ -2146,8 +2159,8 @@ function rpTilesRow(tiles) {
 // Full detail grid, split into the lanes that apply to this node/role.
 function rpMetricTiles(m, level) {
   const isUser = level === "rep";
-  const showSetter = !isUser || !m.isCloser || (m.doors || 0) > 0 || (m.setterAppts || 0) > 0;
-  const showCloser = !isUser || m.isCloser || (m.closerAppts || 0) > 0 || (m.closes || 0) > 0;
+  const showSetter = !isUser || rpIsSetterRole(m) || (m.doors || 0) > 0 || (m.setterAppts || 0) > 0;
+  const showCloser = !isUser || !!m.isCloser || (m.closerAppts || 0) > 0 || (m.closes || 0) > 0;
   const setterTiles = [
     { n: (m.doors || 0).toLocaleString(), l: "Doors" },
     { n: m.setterAppts || 0, l: "Appts set" },
@@ -2253,8 +2266,7 @@ function rpNodeHtml(node) {
   const kids = node.regions || node.teams || node.users || [];
   const mini = rpMini(node);
   if (isUser) {
-    const hybrid = node.isCloser && ((node.doors || 0) > 0 || (node.setterAppts || 0) > 0);
-    const roleTag = hybrid ? "Setter · Closer" : node.isCloser ? "Closer" : "Setter";
+    const roleTag = rpRoleTag(node);
     return `<div class="rp-node"><div class="rp-row" data-uid="${esc(node.id)}">
         <span class="rp-tw">👤</span>
         <div class="rp-nm"><b>${esc(node.name)}</b><span class="rp-sub">${roleTag}${node.idleReps ? " · idle this period" : ""}</span></div>
@@ -2363,7 +2375,7 @@ async function openRepReport(uid) {
     const g = rpGrade(m.score);
     const sm = r.sitMetrics || {};
     const pitches = r.pitches || { count: 0, recordedCount: 0 };
-    const roleWord = (m.isCloser && ((m.doors || 0) > 0 || (m.setterAppts || 0) > 0)) ? "Setter · Closer" : sm.isCloser ? "Closer" : "Setter";
+    const roleWord = m.type === "user" ? rpRoleTag(m) : (sm.isCloser ? "Closer" : "Setter");
     const pitchLine = (p, lbl, field) => p ? `<div class="rp-metric"><div class="n">${p.score == null ? "—" : p.score}</div><div class="l">${lbl} pitch</div><div class="g">${esc((p[field] || p.address || "").slice(0, 60)) || "—"}</div></div>` : "";
     const recap = rpRecapHtml(m, "rep");
     ov.querySelector(".rp-ov-card").innerHTML = `
@@ -5675,6 +5687,13 @@ function renderProfileBody(uid, ov) {
 
     <h4 style="margin:16px 0 6px;font-size:13px;border-top:1px solid #21314a;padding-top:14px;">Role &amp; position</h4>
     <div class="field"><span>Position</span><select class="posSel">${posOptions}</select></div>
+    <div class="field"><span>Function <span class="muted small">— which lanes they work; overrides the position default</span></span>
+      <select class="fnSel">
+        <option value="setter" ${!u.isCloser ? "selected" : ""}>Setter</option>
+        <option value="closer" ${u.isCloser && u.isSetter === false ? "selected" : ""}>Closer</option>
+        <option value="both" ${u.isCloser && u.isSetter !== false ? "selected" : ""}>Both (Setter · Closer)</option>
+      </select>
+    </div>
     <div class="roleCustomWrap field"><span>Title</span>
       ${usingCustomTitle
         ? `<select class="roleSel">${roleOptions}</select>`
@@ -5751,6 +5770,11 @@ function renderProfileBody(uid, ov) {
     if (!v) return;
     const nextRole = usingCustomTitle ? null : state.roles.find((r) => (r.title || "").trim().toLowerCase() === (POSITION_LABEL[v] || "").toLowerCase());
     try { await assignUserHierarchy({ uid: u.id, position: v, ...(nextRole ? { roleId: nextRole.id } : {}) }); pbanner("Position updated.", "good"); await refresh(); }
+    catch (e) { pbanner(e.message, "error"); }
+  });
+  pb.querySelector(".fnSel").addEventListener("change", async (ev) => {
+    const v = ev.target.value; // setter | closer | both
+    try { await setUserFunction({ uid: u.id, isSetter: v === "setter" || v === "both", isCloser: v === "closer" || v === "both" }); pbanner("Function updated.", "good"); await refresh(); }
     catch (e) { pbanner(e.message, "error"); }
   });
   pb.querySelector(".myTeamSel").addEventListener("change", async (ev) => {
