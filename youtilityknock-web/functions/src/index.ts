@@ -1,5 +1,5 @@
 import { onRequest, onCall, HttpsError, CallableRequest } from "firebase-functions/v2/https";
-import { onDocumentCreated, onDocumentWritten } from "firebase-functions/v2/firestore";
+import { onDocumentCreated, onDocumentDeleted, onDocumentWritten } from "firebase-functions/v2/firestore";
 import { onSchedule } from "firebase-functions/v2/scheduler";
 import * as logger from "firebase-functions/logger";
 import { initializeApp } from "firebase-admin/app";
@@ -8744,6 +8744,22 @@ export const onEventSync = onDocumentWritten("events/{id}", async (event) => {
   const after = event.data?.after?.data();
   if (!after?.companyId) return;
   await pushToCrm("event", after.companyId, event.params.id, after);
+});
+
+// When an appointment is removed from a rep's schedule (the event doc is
+// deleted, by any path), also pull the invite off their linked Google/Outlook
+// calendar so it never lingers there. cancelAppointment / reassign already clean
+// up their own paths; this is the catch-all for direct deletes. Deleting an
+// already-gone external event just 404s (caught), so double-cleanup is harmless.
+export const onEventDeletedRemoveCalendar = onDocumentDeleted("events/{id}", async (event) => {
+  const ev = event.data?.data();
+  if (!ev) return;
+  if (ev.userId && (ev.googleEventId || ev.microsoftEventId)) {
+    await deleteExternalEvent(ev.userId as string, {
+      googleEventId: ev.googleEventId as string | undefined,
+      microsoftEventId: ev.microsoftEventId as string | undefined,
+    }).catch((e) => logger.warn("event delete: external calendar remove failed", e));
+  }
 });
 
 // Rewards & contests sync to the CRM in real time (and skip CRM-originated ones
