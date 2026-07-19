@@ -4586,7 +4586,7 @@ export async function computeRollup(companyId: string, view: string, scopeUid: s
 // getCompanyRollup — the callable wrapper around computeRollup (auth + scoping).
 export const getCompanyRollup = onCall(async (request) => {
   const caller = await getCaller(request);
-  const reqData = (request.data || {}) as { period?: string; companyId?: string };
+  const reqData = (request.data || {}) as { period?: string; companyId?: string; range?: { startMs?: number; endMs?: number } };
   // Super-admins may target any company (drill-down from the console). Everyone
   // else is locked to their own company.
   const companyId = caller.isSuper && reqData.companyId ? reqData.companyId : caller.companyId;
@@ -4596,7 +4596,12 @@ export const getCompanyRollup = onCall(async (request) => {
   }
   const view = (reqData.period || "week") as string;
   const seeAll = caller.isSuper || caller.role === "admin";
-  return computeRollup(companyId, view, seeAll ? null : caller.uid);
+  // Custom date range (from the report's calendar picker): a bounded window that
+  // overrides the view's default period. endMs is exclusive.
+  let range: { startMs: number; endMs: number } | undefined;
+  const rs = Number(reqData.range?.startMs), re = Number(reqData.range?.endMs);
+  if (Number.isFinite(rs) && Number.isFinite(re) && re > rs) range = { startMs: rs, endMs: re };
+  return computeRollup(companyId, view, seeAll ? null : caller.uid, range);
 });
 
 // ════════════════════════════════════════════════════════════════════════════
