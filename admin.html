@@ -249,6 +249,9 @@
   .rp-rk-nm { font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
   .rp-rk-v { font-family:'Space Grotesk',sans-serif; font-weight:700; font-variant-numeric:tabular-nums; white-space:nowrap; color:var(--ink); }
   .rp-rk-s { grid-column:2 / 4; font-size:11px; color:var(--ink-dim); margin-top:-3px; }
+  /* Flash a Role services row when deep-linked from "Edit permissions" */
+  @keyframes rsFlash { 0%,100% { background:transparent; } 25% { background:rgba(14,165,233,.28); } }
+  .rs-flash { animation:rsFlash 1.3s ease-in-out 2; }
   /* Per-team download / email buttons on a tree row */
   .rp-acts { display:inline-flex; gap:4px; flex:0 0 auto; }
   .rp-act { font-family:inherit; font-size:13px; line-height:1; padding:6px 9px; border-radius:8px; cursor:pointer;
@@ -1153,7 +1156,10 @@
   <!-- Roles (titles on a base tier) -->
   <section id="rolesCard" class="card hidden">
     <h2><span id="rolesTitle">Roles &amp; titles</span>
-      <button id="newRoleBtn" class="btn primary sm">+ New role</button>
+      <span style="display:inline-flex;gap:8px;">
+        <button id="editPermsBtn" class="btn sm" title="Toggle what each role can see and do">🔐 Edit permissions</button>
+        <button id="newRoleBtn" class="btn primary sm">+ New role</button>
+      </span>
     </h2>
     <p class="muted small" style="margin:-6px 0 12px;">Every company starts with <strong>Manager</strong> and <strong>User</strong>. Add custom titles mapped to a base tier; rank orders the hierarchy (higher = more senior).</p>
     <div id="roleForm" class="hidden" style="margin-bottom:16px;">
@@ -1891,7 +1897,7 @@ function enterConsole() {
 }
 
 // ── Company-admin view toggle: Town Hall ⇄ Settings ───────────────────────
-const COMPANY_SETTINGS_CARDS = ["reportsCard","schedulingCard","companySettingsCard","companyProfileCard","companyBrandingCard","batteryPricingCard","rolesCard","teamsCard","rewardsCard","milestonesCard","redemptionsCard","outreachCard","companyBillingCard","usersCard"];
+const COMPANY_SETTINGS_CARDS = ["reportsCard","schedulingCard","companySettingsCard","companyProfileCard","companyBrandingCard","batteryPricingCard","rolesCard","roleServicesCard","teamsCard","rewardsCard","milestonesCard","redemptionsCard","outreachCard","companyBillingCard","usersCard"];
 function hideAllSettingCards() {
   COMPANY_SETTINGS_CARDS.forEach((id) => { const el = $(id); if (el) el.classList.add("hidden"); });
   const tabs = $("companySettingsTabs"); if (tabs) tabs.classList.add("hidden");
@@ -1960,6 +1966,18 @@ function openSetting(cardId) {
 }
 $("adminViewToggle").addEventListener("click", (e) => { const t = e.target.closest(".tab"); if (t) showAdminView(t.dataset.view); });
 $("settingsHub").addEventListener("click", (e) => { const b = e.target.closest(".home-btn"); if (b) openSetting(b.dataset.card); });
+// Open the Role services permission grid (works in both the super-admin and the
+// company-admin nav). Optionally flash + scroll to one role's row.
+async function openRoleServices(highlightPos) {
+  if (state.isSuper) openSuperSection("roleServicesCard");
+  else openSetting("roleServicesCard");
+  try { await loadRoleServices(state.selectedCompany); } catch {}
+  if (highlightPos) {
+    const chk = document.querySelector(`#roleServicesGrid .rsChk[data-pos="${highlightPos}"]`);
+    const row = chk && chk.closest("tr");
+    if (row) { row.classList.add("rs-flash"); row.scrollIntoView({ behavior: "smooth", block: "center" }); setTimeout(() => row.classList.remove("rs-flash"), 2600); }
+  }
+}
 $("companySettingsTabs").addEventListener("click", (e) => { const b = e.target.closest("[data-tab]"); if (b) openCompanySettings(b.dataset.tab); });
 $("settingBack").addEventListener("click", showSettingsHub);
 $("thRefresh").addEventListener("click", () => loadTownHall(state.selectedCompany));
@@ -4993,6 +5011,7 @@ $("roleServicesSave").addEventListener("click", async () => {
 
 // ── Roles & titles ───────────────────────────────────────────────────────
 $("newRoleBtn").addEventListener("click", () => $("roleForm").classList.toggle("hidden"));
+$("editPermsBtn").addEventListener("click", () => openRoleServices());
 $("roleCancel").addEventListener("click", () => $("roleForm").classList.add("hidden"));
 $("roleSave").addEventListener("click", async () => {
   const title = $("roleTitle").value.trim();
@@ -5037,11 +5056,15 @@ async function loadRoles() {
     if (!state.roles.length) { body.innerHTML = `<tr><td colspan="4" class="muted">No roles.</td></tr>`; return; }
     body.innerHTML = "";
     state.roles.forEach((r) => {
+      // Map a title back to a structural position so "Edit permissions" can jump
+      // straight to that role's row in the Role services grid.
+      const posForRole = Object.keys(POSITION_LABEL).find((p) => POSITION_LABEL[p].toLowerCase() === (r.title || "").trim().toLowerCase()) || "";
       const tr = document.createElement("tr");
       tr.innerHTML = `<td><strong class="roleOpen" style="cursor:pointer;color:#0EA5E9;" title="Double-click to see who's assigned">${esc(r.title)}</strong>${r.isDefault?' <span class="badge">default</span>':''}</td>
         <td><span class="badge ${r.baseTier==='manager'?'manager':''}">${esc(r.baseTier)}</span></td>
         <td>${r.rank}</td>
-        <td>${r.isDefault?'':'<button class="btn sm danger">Delete</button>'}</td>`;
+        <td style="white-space:nowrap;"><button class="btn sm editPerms">🔐 Edit permissions</button>${r.isDefault?'':' <button class="btn sm danger">Delete</button>'}</td>`;
+      tr.querySelector(".editPerms").addEventListener("click", () => openRoleServices(posForRole));
       const del = tr.querySelector(".danger");
       if (del) del.addEventListener("click", async () => {
         try { await deleteRole({ companyId: state.selectedCompany, roleId: r.id }); await loadRoles(); populateUserFormSelects(); }
@@ -5057,7 +5080,10 @@ async function loadRoles() {
         const assignees = state.users.filter((u) => u.roleId === r.id);
         const company = {}; // services resolved per position from the Role services grid
         const list = assignees.length ? assignees.map((u) => {
-          const pos = POSITION_LABEL[u.position] || (u.role === "admin" ? "Company Admin" : "—");
+          // Prefer the structural position label; otherwise fall back to the role
+          // they're assigned to (or their function flags) so a name never shows "—".
+          const pos = POSITION_LABEL[u.position]
+            || (u.role === "admin" ? "Company Admin" : (r.title || (u.isCloser ? "Closer" : "Setter")));
           return `<div style="padding:6px 0;border-bottom:1px solid #21314a;"><strong>${esc(u.displayName || u.email)}</strong>
             <span class="muted small" style="float:right;">${esc(pos)}</span></div>`;
         }).join("") : '<div class="muted small">No accounts have this role yet.</div>';
