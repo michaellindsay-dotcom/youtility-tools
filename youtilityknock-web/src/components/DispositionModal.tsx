@@ -129,7 +129,10 @@ export default function DispositionModal({
   onClose: () => void;
   onSaved?: () => void;
 }) {
-  const { profile, companyId, company } = useAuth();
+  const { profile, companyId, company, role } = useAuth();
+  // Only closers (and admins/managers) mark a deal Sold — a setter's job is to
+  // set the appointment; the closer closes it and that flips the pin to sold.
+  const canMarkSold = role === "admin" || role === "manager" || profile?.isCloser === true;
   const { active: onShift, startShift, recordKnock } = useShift();
   // Pitch coaching: record the rep's pitch while this modal is open, upload on
   // save, and let the AI pipeline grade it. Opt-in feature + one-time consent.
@@ -346,6 +349,12 @@ export default function DispositionModal({
 
   async function save() {
     if (!profile || !companyId || !d) return;
+    // A setter can't newly mark a deal sold — only a closer/manager/admin does,
+    // via the appointment disposition (which flips the pin to sold).
+    if (d.status === "sold" && target?.status !== "sold" && !canMarkSold) {
+      setErr("Only a closer, manager, or admin can mark a deal sold.");
+      return;
+    }
     // Require a closer up-front (setter_select) so we never save the lead +
     // count the appointment, then bail before routing — which would double-count
     // the setter's appointment when they re-save with a closer chosen.
@@ -559,7 +568,7 @@ export default function DispositionModal({
     <>
       <div className="field-label">Disposition</div>
       <div className="dispo-grid">
-        {DISPOSITIONS.map((opt) => (
+        {DISPOSITIONS.filter((opt) => opt.value !== "sold" || canMarkSold).map((opt) => (
           <button
             key={opt.value}
             type="button"
