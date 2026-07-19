@@ -5782,6 +5782,22 @@ export const getEmployeeReport = onCall(async (request) => {
   const worst = scored.length ? scored.reduce((a, b) => (b.score! < a.score! ? b : a)) : null;
 
   const all = rFunnel(leads, 0);
+  // Per-window CLOSER funnel (appointments assigned → sat → closed), from the
+  // appointment events routed to this rep as a closer. The self-gen funnel above
+  // is empty for a pure closer, so this is what makes their report match reality.
+  const closerEvSnap = await db.collection("events").where("closerUid", "==", repUid).get();
+  const CLOSER_SIT = new Set(["pitched_pending", "pitched_not_interested", "pitched_failed_credit", "closed_won"]);
+  const cEvents = closerEvSnap.docs.map((d) => d.data() as any).filter((e) => e.type === "appointment");
+  const rCloserFunnel = (since: number) => {
+    let appt = 0, sat = 0, closed = 0;
+    for (const e of cEvents) {
+      if ((Number(e.startAt) || 0) < since) continue;
+      appt++;
+      if (CLOSER_SIT.has(e.apptStatus)) sat++;
+      if (e.apptStatus === "closed_won") closed++;
+    }
+    return { appt, sat, closed };
+  };
   // Sit % (setter) and close % (closer), computed all-time from the appointment
   // EVENTS (authoritative) rather than the drifting stat counters — so the report
   // matches what actually happened. Sit rate = sits ÷ pitched appointments
@@ -5815,6 +5831,7 @@ export const getEmployeeReport = onCall(async (request) => {
   return {
     rep: { uid: rep.uid, displayName: rep.displayName || "", email: rep.email || "", title: rep.title || rep.role || "", role: rep.role || "" },
     funnel: { today: rFunnel(leads, today), week: rFunnel(leads, week), month: rFunnel(leads, month), all },
+    closerFunnel: { today: rCloserFunnel(today), week: rCloserFunnel(week), month: rCloserFunnel(month), all: rCloserFunnel(0) },
     stats: statSnap.exists ? statSnap.data() : {},
     sitMetrics,
     // Lifetime totals derived from the SAME lead set as the funnel, so the

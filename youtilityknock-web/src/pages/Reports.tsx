@@ -7,6 +7,7 @@ import { CompanyDrilldown } from "../components/CompanyReport";
 import type { UserProfile } from "../types";
 
 interface Funnel { doors: number; conv: number; appt: number; closed: number }
+interface CloserFunnel { appt: number; sat: number; closed: number }
 interface ReportLead { id: string; address: string; status: string; knockedAt: number; soldAt: number | null }
 interface PitchItem {
   id: string; address: string; createdAt: number; status: string;
@@ -21,6 +22,7 @@ interface SitMetrics {
 interface Report {
   rep: { uid: string; displayName: string; email: string; title: string; role: string };
   funnel: { today: Funnel; week: Funnel; month: Funnel; all: Funnel };
+  closerFunnel?: { today: CloserFunnel; week: CloserFunnel; month: CloserFunnel; all: CloserFunnel };
   stats: { sales?: number; appointments?: number; doorsKnocked?: number; shifts?: number };
   sitMetrics?: SitMetrics;
   lifetime?: { sold: number; appts: number; doors: number };
@@ -89,6 +91,13 @@ export default function Reports() {
     () => report ? ([["Today", report.funnel.today], ["This week", report.funnel.week], ["This month", report.funnel.month], ["All time", report.funnel.all]] as [string, Funnel][]) : [],
     [report]
   );
+  // A pure closer has no self-gen door/appt funnel — show their closer funnel
+  // (appointments assigned → sat → closed) so the numbers match their production.
+  const pureCloser = !!report?.sitMetrics?.isCloser && report.funnel.all.doors === 0 && report.funnel.all.appt === 0;
+  const closerWindows = useMemo(
+    () => (report?.closerFunnel ? ([["Today", report.closerFunnel.today], ["This week", report.closerFunnel.week], ["This month", report.closerFunnel.month], ["All time", report.closerFunnel.all]] as [string, CloserFunnel][]) : []),
+    [report]
+  );
 
   return (
     <div className="page-body">
@@ -124,24 +133,38 @@ export default function Reports() {
             <h2>{report.rep.displayName || report.rep.email}</h2>
             <div className="muted small" style={{ marginTop: -6 }}>{report.rep.title || report.rep.role} · {report.rep.email}</div>
 
-            <h3 className="section-h" style={{ marginTop: 16 }}>Funnel</h3>
+            <h3 className="section-h" style={{ marginTop: 16 }}>Funnel{pureCloser ? " · closer" : ""}</h3>
             <div style={{ overflowX: "auto" }}>
-              <table className="rep-funnel">
-                <thead>
-                  <tr><th></th>{windows.map(([label]) => <th key={label}>{label}</th>)}</tr>
-                </thead>
-                <tbody>
-                  <tr><td>🚪 Doors</td>{windows.map(([l, f]) => <td key={l}>{f.doors}</td>)}</tr>
-                  <tr><td>💬 Conversations</td>{windows.map(([l, f]) => <td key={l}>{f.conv}</td>)}</tr>
-                  <tr><td>📅 Appointments</td>{windows.map(([l, f]) => <td key={l}>{f.appt}</td>)}</tr>
-                  <tr><td>💰 Closed</td>{windows.map(([l, f]) => <td key={l}>{f.closed}</td>)}</tr>
-                  <tr className="muted"><td>Close rate</td>{windows.map(([l, f]) => <td key={l}>{pct(f.closed, f.appt)}%</td>)}</tr>
-                </tbody>
-              </table>
+              {pureCloser && report.closerFunnel ? (
+                <table className="rep-funnel">
+                  <thead>
+                    <tr><th></th>{closerWindows.map(([label]) => <th key={label}>{label}</th>)}</tr>
+                  </thead>
+                  <tbody>
+                    <tr><td>📅 Appointments</td>{closerWindows.map(([l, f]) => <td key={l}>{f.appt}</td>)}</tr>
+                    <tr><td>🪑 Sat</td>{closerWindows.map(([l, f]) => <td key={l}>{f.sat}</td>)}</tr>
+                    <tr><td>💰 Closed</td>{closerWindows.map(([l, f]) => <td key={l}>{f.closed}</td>)}</tr>
+                    <tr className="muted"><td>Close rate</td>{closerWindows.map(([l, f]) => <td key={l}>{pct(f.closed, f.sat)}%</td>)}</tr>
+                  </tbody>
+                </table>
+              ) : (
+                <table className="rep-funnel">
+                  <thead>
+                    <tr><th></th>{windows.map(([label]) => <th key={label}>{label}</th>)}</tr>
+                  </thead>
+                  <tbody>
+                    <tr><td>🚪 Doors</td>{windows.map(([l, f]) => <td key={l}>{f.doors}</td>)}</tr>
+                    <tr><td>💬 Conversations</td>{windows.map(([l, f]) => <td key={l}>{f.conv}</td>)}</tr>
+                    <tr><td>📅 Appointments</td>{windows.map(([l, f]) => <td key={l}>{f.appt}</td>)}</tr>
+                    <tr><td>💰 Closed</td>{windows.map(([l, f]) => <td key={l}>{f.closed}</td>)}</tr>
+                    <tr className="muted"><td>Close rate</td>{windows.map(([l, f]) => <td key={l}>{pct(f.closed, f.appt)}%</td>)}</tr>
+                  </tbody>
+                </table>
+              )}
             </div>
 
             <div className="muted small" style={{ marginTop: 12 }}>
-              Lifetime: {report.lifetime?.sold ?? report.funnel.all.closed} sold · {report.lifetime?.appts ?? report.funnel.all.appt} appts · {report.lifetime?.doors ?? report.funnel.all.doors} doors ·
+              Lifetime: {pureCloser && report.closerFunnel ? report.closerFunnel.all.closed : (report.lifetime?.sold ?? report.funnel.all.closed)} {pureCloser ? "closed" : "sold"} · {pureCloser && report.closerFunnel ? report.closerFunnel.all.appt : (report.lifetime?.appts ?? report.funnel.all.appt)} appts{pureCloser ? "" : ` · ${report.lifetime?.doors ?? report.funnel.all.doors} doors`} ·
               {" "}{report.shiftHours.week}h on shift this week
             </div>
           </div>
