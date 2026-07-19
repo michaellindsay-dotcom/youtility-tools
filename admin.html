@@ -2624,9 +2624,10 @@ function rpEmailNode(node) {
     <h3 style="margin:0 0 4px;font-family:'Space Grotesk',sans-serif;">✉ Email — ${esc(node.name)}</h3>
     <p class="muted small" style="margin:0 0 14px;">Send just this team's report. Pick the window and who receives it.</p>
     <div class="field"><span>Window</span><select id="rpTmPeriod">
+      <option value="current" selected>Current filter (${esc(rpPlabel())})</option>
       <option value="today">Today</option>
       <option value="yesterday">Previous day</option>
-      <option value="week" selected>Week to date</option>
+      <option value="week">Week to date</option>
       <option value="month">Month to date</option>
       <option value="year">Year to date</option>
       <option value="alltime">All-time</option>
@@ -2653,7 +2654,7 @@ function rpEmailNode(node) {
     btn.disabled = true; msg.style.color = "var(--ink-mid)"; msg.textContent = "Sending…";
     try {
       const res = await emailSuccessReport({
-        period: ov.querySelector("#rpTmPeriod").value,
+        ...rpEmailWindow(ov.querySelector("#rpTmPeriod").value),
         audience: ov.querySelector("#rpTmAud").value,
         teamId: node.id,
         companyId: state.rpCompany || undefined,
@@ -2672,6 +2673,15 @@ function rpEmailNode(node) {
 // Email the report — pick a window (today / previous day / week-to-date /
 // month-to-date / …) and who receives it (test to me, admins, managers + their
 // reps, reps, or everyone), then send on demand.
+// Map an email-window select value into emailSuccessReport args. "current" means
+// "whatever the report is filtered to right now", including a custom date range.
+function rpEmailWindow(sel) {
+  if (sel === "current") {
+    if (state.rpPeriod === "custom" && state.rpRange) return { period: "custom", range: state.rpRange, plabel: state.rpRangeLabel };
+    return { period: state.rpPeriod || "week" };
+  }
+  return { period: sel };
+}
 $("rpEmail").addEventListener("click", () => {
   const ov = document.createElement("div");
   ov.className = "rp-ov";
@@ -2679,9 +2689,10 @@ $("rpEmail").addEventListener("click", () => {
     <h3 style="margin:0 0 4px;font-family:'Space Grotesk',sans-serif;">✉ Email Success Report</h3>
     <p class="muted small" style="margin:0 0 14px;">Pick the window and who gets it. Managers receive their team + their reps' reports (to shout out or coach); reps get their own.</p>
     <div class="field"><span>Window</span><select id="rpEmPeriod">
+      <option value="current" selected>Current filter (${esc(rpPlabel())})</option>
       <option value="today">Today</option>
       <option value="yesterday">Previous day</option>
-      <option value="week" selected>Week to date</option>
+      <option value="week">Week to date</option>
       <option value="month">Month to date</option>
       <option value="year">Year to date</option>
       <option value="alltime">All-time</option>
@@ -2708,7 +2719,7 @@ $("rpEmail").addEventListener("click", () => {
     btn.disabled = true; msg.style.color = "var(--ink-mid)"; msg.textContent = "Sending…";
     try {
       const res = await emailSuccessReport({
-        period: ov.querySelector("#rpEmPeriod").value,
+        ...rpEmailWindow(ov.querySelector("#rpEmPeriod").value),
         audience: ov.querySelector("#rpEmAud").value,
         companyId: state.rpCompany || undefined,
       });
