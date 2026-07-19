@@ -7,7 +7,7 @@ import { CompanyDrilldown } from "../components/CompanyReport";
 import type { UserProfile } from "../types";
 
 interface Funnel { doors: number; conv: number; appt: number; closed: number }
-interface CloserFunnel { appt: number; sat: number; closed: number }
+interface CloserFunnel { appt: number; sat: number; closed: number; due: number; dispositioned: number }
 interface ReportLead { id: string; address: string; status: string; knockedAt: number; soldAt: number | null }
 interface PitchItem {
   id: string; address: string; createdAt: number; status: string;
@@ -18,6 +18,7 @@ interface SitMetrics {
   apptsSet: number; sits: number; pitchedAppts: number; sitRate: number | null;
   closerAppts: number; closerSits: number; closerCloses: number; closeRate: number | null;
   turnedAways: number;
+  closerDue?: number; closerDispositioned?: number; dispoRate?: number | null;
 }
 interface Report {
   rep: { uid: string; displayName: string; email: string; title: string; role: string };
@@ -145,6 +146,7 @@ export default function Reports() {
                     <tr><td>🪑 Sat</td>{closerWindows.map(([l, f]) => <td key={l}>{f.sat}</td>)}</tr>
                     <tr><td>💰 Closed</td>{closerWindows.map(([l, f]) => <td key={l}>{f.closed}</td>)}</tr>
                     <tr className="muted"><td>Close rate</td>{closerWindows.map(([l, f]) => <td key={l}>{pct(f.closed, f.sat)}%</td>)}</tr>
+                    <tr className="muted"><td>📋 Dispositioned</td>{closerWindows.map(([l, f]) => <td key={l}>{f.due === 0 ? "—" : `${f.dispositioned}/${f.due} · ${pct(f.dispositioned, f.due)}%`}</td>)}</tr>
                   </tbody>
                 </table>
               ) : (
@@ -200,7 +202,13 @@ export default function Reports() {
                       <div className="stat-cell"><div className="stat-num">{m.closerCloses}</div><div className="muted small">Closed</div></div>
                       <div className="stat-cell"><div className="stat-num">{m.closeRate == null ? "—" : `${m.closeRate}%`}</div><div className="muted small">Close rate</div></div>
                       <div className="stat-cell"><div className="stat-num">{m.turnedAways}</div><div className="muted small">Turned away</div></div>
+                      <div className="stat-cell"><div className="stat-num">{m.dispoRate == null ? "—" : `${m.dispoRate}%`}</div><div className="muted small">Dispositioned</div></div>
                     </div>
+                    {(m.closerDue ?? 0) > (m.closerDispositioned ?? 0) && (
+                      <div className="muted small" style={{ marginTop: 6 }}>
+                        {(m.closerDue ?? 0) - (m.closerDispositioned ?? 0)} of {m.closerDue} past-due appointment{(m.closerDue ?? 0) - (m.closerDispositioned ?? 0) === 1 ? "" : "s"} still need an outcome.
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
