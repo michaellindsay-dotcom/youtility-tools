@@ -4813,8 +4813,11 @@ async function sendTeamReport(cfg: NotifyConfig, companyId: string, view: string
   }).filter((u) => !u.disabled && u.email);
 
   for (const u of roster) {
+    const isAdmin = u.role === "admin" || u.role === "superadmin";
     const managesTeam = u.managedTeamIds.includes(teamId) || (u.teamId === teamId && (u.role === "manager" || u.position.includes("manager")));
-    if (managesTeam) {
+    if (audience === "admins" && isAdmin) {
+      await send(u.email, `📊 ${team.name} — team report (${plabel})`, team, "team");
+    } else if (managesTeam) {
       if (audience === "all" || audience === "managers") await send(u.email, `📊 ${team.name} — team report (${plabel})`, team, "team");
     } else if (u.teamId === teamId) {
       if (audience === "all" || audience === "reps") { const un = idx.users[u.uid]; if (un) await send(u.email, `📊 Your report (${plabel})`, un, "rep"); }
