@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { collection, doc, getDoc, getDocs, limit, orderBy, query, where } from "firebase/firestore";
+import { collection, doc, getDoc, getDocs, limit, onSnapshot, orderBy, query, where } from "firebase/firestore";
 import { db } from "../firebase";
 import { useAuth } from "../auth/AuthContext";
 import { hasFeature } from "../lib/features";
 import { computePoints } from "../lib/points";
+import { periodKey } from "../lib/season";
 import { isUndispositionedPast } from "../lib/closerDispositions";
 import CalendarBanner from "../components/CalendarBanner";
 import BizCardHero from "../components/BizCardHero";
@@ -66,9 +67,21 @@ export default function Dashboard() {
   // Sold leads are fetched separately (all-time, not just this month) so a deal
   // closed in a window still counts even if the lead was created earlier.
   const [soldLeads, setSoldLeads] = useState<Lead[]>([]);
-  const [top, setTop] = useState<UserStats[]>([]);
   const [myStats, setMyStats] = useState<UserStats | null>(null);
+  // Podium rows = the SAME source the full leaderboard shows by default (this
+  // week, company-wide), so the dashboard Top Performers previews exactly what
+  // "View full leaderboard" opens to.
+  const [podiumRows, setPodiumRows] = useState<UserStats[]>([]);
   const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    if (!profile?.companyId) { setPodiumRows([]); return; }
+    return onSnapshot(
+      query(collection(db, "seasonStats"), where("companyId", "==", profile.companyId), where("period", "==", periodKey("week"))),
+      (snap) => setPodiumRows(snap.docs.map((d) => ({ uid: d.id, ...(d.data() as Omit<UserStats, "uid">) }))),
+      (err) => console.warn("dashboard podium query failed", err)
+    );
+  }, [profile?.companyId]);
 
   useEffect(() => {
     if (!profile) return;
@@ -137,8 +150,6 @@ export default function Dashboard() {
         setLeads(leadSnap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<Lead, "id">) })));
         setShifts(shiftSnap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<Shift, "id">) })));
         setSoldLeads(soldDocs.map((d) => ({ id: d.id, ...(d.data() as Omit<Lead, "id">) })));
-        topRows.sort((a, b) => (b.sales ?? 0) - (a.sales ?? 0));
-        setTop(topRows.slice(0, 5));
         setMyStats(topRows.find((r) => r.uid === profile.uid) ?? null);
         setLoading(false);
       } catch (e) {
@@ -177,11 +188,12 @@ export default function Dashboard() {
     return { today: since(windows.today), week: since(windows.week), month: since(windows.month) };
   }, [leads, shifts, soldLeads]);
 
-  // Top-3 for the dashboard podium, ranked by leaderboard points (closes,
-  // appointments, shifts, …) so it previews the all-time leaderboard podium.
+  // Top-3 for the dashboard podium, ranked by leaderboard points across the WHOLE
+  // company (this week) — the same ranking the full leaderboard uses. Previously
+  // this ranked only the top-5-by-sales, which dropped high-points reps.
   const podiumTop = useMemo(
-    () => [...top].sort((a, b) => computePoints(b) - computePoints(a)).slice(0, 3),
-    [top]
+    () => [...podiumRows].sort((a, b) => computePoints(b) - computePoints(a)).slice(0, 3),
+    [podiumRows]
   );
 
   // Success planner — what they need to hit goals at current pace.
