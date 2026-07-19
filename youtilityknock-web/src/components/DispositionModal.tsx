@@ -163,7 +163,7 @@ export default function DispositionModal({
   const closersOn = !!company?.scheduling?.closersEnabled;
   // When the company hides closer selection, setters never pick — they see open
   // times only (union of every closer's calendar) and the closer is auto-assigned.
-  const hideCloser = closersOn && !!company?.scheduling?.hideCloserFromSetters;
+  const hideCloser = closersOn && (!!company?.scheduling?.hideCloserFromSetters || !!company?.schedulerActive);
   const setterSelect = closersOn && company?.scheduling?.closerAssignment === "setter_select" && !hideCloser;
   const closerPool = closersOn && !setterSelect; // show availability across all closers
   const [closers, setClosers] = useState<{ uid: string; name: string }[]>([]);

@@ -3570,9 +3570,15 @@ export const setUserScheduler = onCall(async (request) => {
   if (!uid) throw new HttpsError("invalid-argument", "uid required.");
   const snap = await db.doc(`users/${uid}`).get();
   if (!snap.exists) throw new HttpsError("not-found", "User not found.");
-  authorizeForCompany(caller, (snap.data() as any).companyId);
+  const companyId = (snap.data() as any).companyId as string;
+  authorizeForCompany(caller, companyId);
   await db.doc(`users/${uid}`).set({ isScheduler: !!isScheduler }, { merge: true });
-  return { ok: true, isScheduler: !!isScheduler };
+  // Maintain a company flag so the door booking flow can hide closer-selection
+  // whenever ANY Scheduler is active — without every client scanning the roster.
+  const usersSnap = await db.collection("users").where("companyId", "==", companyId).get();
+  const schedulerActive = usersSnap.docs.some((d) => { const u = d.data() as any; return u.disabled !== true && u.isScheduler === true; });
+  await db.doc(`companies/${companyId}`).set({ schedulerActive }, { merge: true });
+  return { ok: true, isScheduler: !!isScheduler, schedulerActive };
 });
 
 // Route a (non-self-gen) appointment to an available rep per company policy.
@@ -3716,7 +3722,7 @@ const SETTER_PITCHED_STATUSES = new Set([
 // (startMs/endMs) is given, the closer's availability is enforced: an explicitly
 // picked closer must be free, and auto-assignment only considers free closers —
 // so a booking never lands on a closer whose calendar is already blocked.
-async function pickCloser(companyId: string, sched: any, candidateUid?: string, startMs?: number, endMs?: number) {
+async function pickCloser(companyId: string, sched: any, candidateUid?: string, startMs?: number, endMs?: number, callerIsDispatcher = false) {
   const usersSnap = await db.collection("users").where("companyId", "==", companyId).get();
   let closers = usersSnap.docs
     .map((u): { uid: string; [k: string]: any } => ({ uid: u.id, ...(u.data() as Record<string, any>) }))
@@ -3724,10 +3730,17 @@ async function pickCloser(companyId: string, sched: any, candidateUid?: string, 
   if (closers.length === 0) {
     throw new HttpsError("failed-precondition", "No closers are set up for this company yet — turn a rep into a closer in Team settings.");
   }
-  // When setters don't pick the closer (dispatch / "available times only" mode),
-  // ignore any candidate and auto-assign, falling back to round robin.
+  // Setters don't pick the closer when the company hides it OR whenever a
+  // Scheduler is active (dispatch / "available times only" mode). An explicit
+  // pick (below) is still honored — that's the Scheduler choosing on purpose.
+  const hasScheduler = usersSnap.docs.some((u) => { const d = u.data() as any; return d.disabled !== true && d.isScheduler === true; });
+  const effectiveHide = !!sched.hideCloserFromSetters || hasScheduler;
+  // In hide mode a setter can't force a closer — only a dispatcher (Scheduler /
+  // manager / admin) may pass an explicit pick. This is enforced here so a stale
+  // client that still shows the picker can't override the auto-assignment.
+  if (effectiveHide && !callerIsDispatcher) candidateUid = undefined;
   let method = sched.closerAssignment || "round_robin";
-  if (sched.hideCloserFromSetters && method === "setter_select") method = "round_robin";
+  if (effectiveHide && method === "setter_select") method = "round_robin";
   const buf = Number(sched.bufferMin) || 0;
   const checkSlot = Number.isFinite(startMs) && Number.isFinite(endMs);
 
@@ -3802,7 +3815,10 @@ export const createCloserAppointment = onCall(async (request) => {
   const setter: { uid: string; [k: string]: any } = setterSnap.exists
     ? { uid: setterSnap.id, ...(setterSnap.data() as Record<string, any>) }
     : { uid: caller.uid, companyId };
-  const closer = await pickCloser(companyId, sched, d.candidateCloserUid, d.startAt, endAt);
+  // A dispatcher (Scheduler / manager / admin) may choose a specific closer;
+  // a plain setter's pick is ignored when hide mode is active.
+  const callerIsDispatcher = caller.isSuper || caller.role === "admin" || caller.role === "manager" || setter.isScheduler === true;
+  const closer = await pickCloser(companyId, sched, d.candidateCloserUid, d.startAt, endAt, callerIsDispatcher);
 
   // Appointments roll up BOTH org charts: the closer's closer-managers and the
   // setter's setter-managers.
@@ -8744,6 +8760,20 @@ export const onEventSync = onDocumentWritten("events/{id}", async (event) => {
   const after = event.data?.after?.data();
   if (!after?.companyId) return;
   await pushToCrm("event", after.companyId, event.params.id, after);
+});
+
+// Keep companies/{id}.schedulerActive in sync with the roster, so the door
+// booking flow hides closer-selection whenever any Scheduler is active — even for
+// Schedulers enabled before the flag existed. Writes only when the value changes.
+export const onUserSchedulerSync = onDocumentWritten("users/{uid}", async (event) => {
+  const after = event.data?.after?.data();
+  const before = event.data?.before?.data();
+  const companyId = (after?.companyId || before?.companyId) as string | undefined;
+  if (!companyId) return;
+  const usersSnap = await db.collection("users").where("companyId", "==", companyId).get();
+  const schedulerActive = usersSnap.docs.some((d) => { const u = d.data() as any; return u.disabled !== true && u.isScheduler === true; });
+  const cur = (await db.doc(`companies/${companyId}`).get()).data()?.schedulerActive === true;
+  if (cur !== schedulerActive) await db.doc(`companies/${companyId}`).set({ schedulerActive }, { merge: true });
 });
 
 // When an appointment is removed from a rep's schedule (the event doc is

@@ -67,6 +67,7 @@ export interface Company {
   pastDueSince?: number; // epoch ms the account first went unpaid
   organizationId?: string; // parent organization, if grouped
   scheduling?: SchedulingSettings;
+  schedulerActive?: boolean; // true when any user has the Scheduler role — setters stop picking closers
   maxTerritoriesPerUser?: number; // cap on territories one rep can hold (0 = unlimited)
   // Battery tool: admin-set price + install adder per battery product id, and
   // which products reps may offer (unset/empty = all products offered).
