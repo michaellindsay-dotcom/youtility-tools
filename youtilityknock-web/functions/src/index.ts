@@ -2349,6 +2349,10 @@ const DEFAULT_SCHEDULING = {
   slotMin: 30,
   closersEnabled: false,
   closerAssignment: "round_robin" as const,
+  // When true, setters never pick the closer: the booking flow shows only open
+  // times (across every closer's calendar) and the closer is auto-assigned by
+  // the closerAssignment method. Used by the Scheduler / dispatch flow.
+  hideCloserFromSetters: false,
 };
 
 // Weekday (0=Sun) + minutes-from-midnight of a timestamp in a given IANA tz.
@@ -2405,6 +2409,7 @@ export const setCompanySettings = onCall(async (request) => {
     closerAssignment: ["round_robin", "close_rate", "setter_select"].includes(String(scheduling.closerAssignment))
       ? String(scheduling.closerAssignment)
       : "round_robin",
+    hideCloserFromSetters: !!scheduling.hideCloserFromSetters,
   };
   await db.doc(`companies/${companyId}`).set({ scheduling: s }, { merge: true });
   return { ok: true, scheduling: s };
@@ -3531,6 +3536,43 @@ export const getFreeSlots = onCall(async (request) => {
   return { free: list.filter((_, i) => flags[i]) };
 });
 
+// Team-wide open slots: a candidate time is offered if AT LEAST ONE active closer
+// is free then (union of every closer's calendar — internal events + external
+// free/busy). Powers the "available times only" setter flow and the Scheduler
+// dispatch view, so nobody is ever double-booked.
+export const getTeamFreeSlots = onCall(async (request) => {
+  const caller = await getCaller(request);
+  const companyId = caller.companyId;
+  if (!companyId) return { free: [] };
+  const { durationMin, candidates } = (request.data || {}) as { durationMin?: number; candidates?: number[] };
+  if (!Array.isArray(candidates) || !candidates.length) return { free: [] };
+  const list = candidates.filter((n) => typeof n === "number" && isFinite(n)).slice(0, 64);
+  const sched = await companyScheduling(companyId);
+  const dur = (durationMin || sched.apptDurationMin) * 60 * 1000;
+  const buf = Number(sched.bufferMin) || 0;
+  const usersSnap = await db.collection("users").where("companyId", "==", companyId).get();
+  const closerUids = usersSnap.docs.filter((u) => { const d = u.data() as any; return d.disabled !== true && d.isCloser === true; }).map((u) => u.id);
+  if (!closerUids.length) return { free: [] };
+  // A slot is free if any closer is free; short-circuit per slot.
+  const flags = await Promise.all(list.map(async (s) => {
+    for (const cu of closerUids) { if (await isUserFree(cu, s, s + dur, buf).catch(() => false)) return true; }
+    return false;
+  }));
+  return { free: list.filter((_, i) => flags[i]) };
+});
+
+// Toggle the Scheduler (team dispatch) capability on a user. Admin/super only.
+export const setUserScheduler = onCall(async (request) => {
+  const caller = await getCaller(request);
+  const { uid, isScheduler } = (request.data || {}) as { uid?: string; isScheduler?: boolean };
+  if (!uid) throw new HttpsError("invalid-argument", "uid required.");
+  const snap = await db.doc(`users/${uid}`).get();
+  if (!snap.exists) throw new HttpsError("not-found", "User not found.");
+  authorizeForCompany(caller, (snap.data() as any).companyId);
+  await db.doc(`users/${uid}`).set({ isScheduler: !!isScheduler }, { merge: true });
+  return { ok: true, isScheduler: !!isScheduler };
+});
+
 // Route a (non-self-gen) appointment to an available rep per company policy.
 export const assignAppointment = onCall(async (request) => {
   const caller = await getCaller(request);
@@ -3680,12 +3722,16 @@ async function pickCloser(companyId: string, sched: any, candidateUid?: string, 
   if (closers.length === 0) {
     throw new HttpsError("failed-precondition", "No closers are set up for this company yet — turn a rep into a closer in Team settings.");
   }
-  const method = sched.closerAssignment || "round_robin";
+  // When setters don't pick the closer (dispatch / "available times only" mode),
+  // ignore any candidate and auto-assign, falling back to round robin.
+  let method = sched.closerAssignment || "round_robin";
+  if (sched.hideCloserFromSetters && method === "setter_select") method = "round_robin";
   const buf = Number(sched.bufferMin) || 0;
   const checkSlot = Number.isFinite(startMs) && Number.isFinite(endMs);
 
-  if (method === "setter_select") {
-    if (!candidateUid) throw new HttpsError("invalid-argument", "Pick a closer for this appointment.");
+  // An explicit pick (setter_select, or a Scheduler/dispatcher choosing a closer)
+  // is honored in any mode — as long as that closer is free at the slot.
+  if (candidateUid) {
     const found = closers.find((c) => c.uid === candidateUid);
     if (!found) throw new HttpsError("failed-precondition", "That closer isn't available.");
     if (checkSlot && !(await isUserFree(found.uid, startMs!, endMs!, buf).catch(() => true))) {
@@ -3693,6 +3739,7 @@ async function pickCloser(companyId: string, sched: any, candidateUid?: string, 
     }
     return found;
   }
+  if (method === "setter_select") throw new HttpsError("invalid-argument", "Pick a closer for this appointment.");
 
   // Auto-assignment: narrow to closers who are actually free at the slot, so a
   // busy closer is never chosen. If nobody's free, the booking is refused.

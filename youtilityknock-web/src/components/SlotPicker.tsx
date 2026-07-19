@@ -4,6 +4,10 @@ import { functions } from "../firebase";
 import type { SchedulingSettings } from "../types";
 
 const DAY = 86_400_000;
+const getTeamFreeSlotsFn = httpsCallable<
+  { durationMin: number; candidates: number[] },
+  { free: number[] }
+>(functions, "getTeamFreeSlots");
 const getFreeSlotsFn = httpsCallable<
   { uid?: string; durationMin?: number; candidates: number[] },
   { free: number[] }
@@ -33,12 +37,13 @@ function dateInputValue(ms: number): string {
 // auto-advances to the next day that does. Step days with ‹ ›, and once you're
 // more than 2 days out a date picker appears to jump straight to a date.
 export default function SlotPicker({
-  sched, value, onChange, uid,
+  sched, value, onChange, uid, pool,
 }: {
   sched: SchedulingSettings;
   value: number | null;
   onChange: (ms: number) => void;
   uid?: string;
+  pool?: "closers"; // "closers" = offer a slot if ANY closer is free (union)
 }) {
   const today = startOfDay(Date.now());
   const minLeadMs = (sched.apptMinLeadHours ?? 1) * 3_600_000;
@@ -78,7 +83,9 @@ export default function SlotPicker({
         const cands = candidatesFor(probe);
         if (!cands.length) continue;
         try {
-          const { data } = await getFreeSlotsFn({ uid, durationMin, candidates: cands });
+          const { data } = pool === "closers"
+            ? await getTeamFreeSlotsFn({ durationMin, candidates: cands })
+            : await getFreeSlotsFn({ uid, durationMin, candidates: cands });
           if (cancelled) return;
           const free = (data?.free || []).slice().sort((a, b) => a - b);
           if (free.length) {
@@ -93,7 +100,7 @@ export default function SlotPicker({
     })();
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [dayMs, candidatesFor, uid, durationMin]);
+  }, [dayMs, candidatesFor, uid, durationMin, pool]);
 
   const canPrev = dayMs > today;
   const canNext = dayMs + DAY <= lastAt;

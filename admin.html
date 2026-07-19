@@ -1305,6 +1305,10 @@
         <option value="setter_select">Setter select (the setter picks)</option>
       </select>
     </div>
+    <div class="field" style="margin:10px 0 0;">
+      <label class="day-chip" style="display:inline-flex;"><input type="checkbox" id="schHideCloser" /> Hide closer selection from setters — show available times only</label>
+    </div>
+    <p class="muted" style="font-size:12px;margin:6px 0 0;">When on, setters never choose a closer: they see only open time slots (read from every closer's calendar so nobody is double-booked), and a free closer is auto-assigned using the method above. This is the mode the <strong>Scheduler</strong> (team dispatch) uses.</p>
     <p class="muted" style="font-size:12px;margin:8px 0 0;">Mark who's a closer in the Accounts list below. A closer dispositions each appointment on-site; off-site dispositions are logged as a closer no-show.</p>
 
     <h3 style="font-size:13px;color:var(--ink-mid);text-transform:uppercase;letter-spacing:.5px;margin:18px 0 10px;">Territories</h3>
@@ -1681,6 +1685,7 @@ const deleteUserFn    = httpsCallable(fns, "deleteUser");
 const setUserRole     = httpsCallable(fns, "setUserRole");
 const setUserCloser   = httpsCallable(fns, "setUserCloser");
 const setUserFunction = httpsCallable(fns, "setUserFunction");
+const setUserScheduler = httpsCallable(fns, "setUserScheduler");
 const setCompanyOptions = httpsCallable(fns, "setCompanyOptions");
 const setCompanyBranding = httpsCallable(fns, "setCompanyBranding");
 const setCompanyProfile  = httpsCallable(fns, "setCompanyProfile");
@@ -3161,6 +3166,7 @@ async function loadScheduling(companyId) {
     $("schAssignment").value = s.assignment || "self_gen";
     $("schClosersEnabled").checked = !!s.closersEnabled;
     $("schCloserAssignment").value = s.closerAssignment || "round_robin";
+    $("schHideCloser").checked = !!s.hideCloserFromSetters;
     // Territories setting lives on this tab now.
     $("maxTerritories").value = (snap.exists() ? snap.data().maxTerritoriesPerUser : 0) ?? 0;
   } catch (e) {
@@ -3187,6 +3193,7 @@ $("schSave").addEventListener("click", async () => {
         assignment: $("schAssignment").value,
         closersEnabled: $("schClosersEnabled").checked,
         closerAssignment: $("schCloserAssignment").value,
+        hideCloserFromSetters: $("schHideCloser").checked,
       },
     });
     await setCompanyOptions({ companyId: state.selectedCompany, maxTerritoriesPerUser: Number($("maxTerritories").value) || 0 });
@@ -5724,6 +5731,7 @@ function renderProfileBody(uid, ov) {
         <option value="both" ${u.isCloser && u.isSetter !== false ? "selected" : ""}>Both (Setter · Closer)</option>
       </select>
     </div>
+    <label class="day-chip" style="display:inline-flex;margin:2px 0 2px;"><input type="checkbox" class="schedChk" ${u.isScheduler ? "checked" : ""}/> Scheduler <span class="muted small" style="margin-left:4px;">— team dispatch: book &amp; assign appointments across all closers' calendars</span></label>
     <div class="roleCustomWrap field"><span>Title</span>
       ${usingCustomTitle
         ? `<select class="roleSel">${roleOptions}</select>`
@@ -5806,6 +5814,10 @@ function renderProfileBody(uid, ov) {
     const v = ev.target.value; // setter | closer | both
     try { await setUserFunction({ uid: u.id, isSetter: v === "setter" || v === "both", isCloser: v === "closer" || v === "both" }); pbanner("Function updated.", "good"); await refresh(); }
     catch (e) { pbanner(e.message, "error"); }
+  });
+  pb.querySelector(".schedChk").addEventListener("change", async (ev) => {
+    try { await setUserScheduler({ uid: u.id, isScheduler: ev.target.checked }); pbanner(ev.target.checked ? "Scheduler enabled." : "Scheduler disabled.", "good"); await refresh(); }
+    catch (e) { pbanner(e.message, "error"); ev.target.checked = !ev.target.checked; }
   });
   pb.querySelector(".myTeamSel").addEventListener("change", async (ev) => {
     try { await assignUserHierarchy({ uid: u.id, teamId: ev.target.value || null }); pbanner("Team updated.", "good"); await refresh(); }

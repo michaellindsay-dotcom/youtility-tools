@@ -161,7 +161,11 @@ export default function DispositionModal({
   // Closer workflow: when enabled, an appointment routes to a closer. For the
   // "setter_select" method the setter picks the closer here.
   const closersOn = !!company?.scheduling?.closersEnabled;
-  const setterSelect = closersOn && company?.scheduling?.closerAssignment === "setter_select";
+  // When the company hides closer selection, setters never pick — they see open
+  // times only (union of every closer's calendar) and the closer is auto-assigned.
+  const hideCloser = closersOn && !!company?.scheduling?.hideCloserFromSetters;
+  const setterSelect = closersOn && company?.scheduling?.closerAssignment === "setter_select" && !hideCloser;
+  const closerPool = closersOn && !setterSelect; // show availability across all closers
   const [closers, setClosers] = useState<{ uid: string; name: string }[]>([]);
   const [closerUid, setCloserUid] = useState("");
   // Area energy incentives — loaded on demand so the setter can mention them,
@@ -672,6 +676,7 @@ export default function DispositionModal({
                     value={scheduleAt ? new Date(scheduleAt).getTime() : null}
                     onChange={(ms) => setScheduleAt(toLocalInput(ms))}
                     uid={setterSelect && closerUid ? closerUid : undefined}
+                    pool={closerPool ? "closers" : undefined}
                   />
                   <div className="muted small" style={{ marginTop: 6 }}>
                     {company.scheduling.apptDurationMin}-min appointment · book {company.scheduling.apptMinLeadHours}h+
