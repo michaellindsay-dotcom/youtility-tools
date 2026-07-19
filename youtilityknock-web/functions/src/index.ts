@@ -1121,7 +1121,9 @@ export const reassignAppointment = onCall(async (request) => {
     || (caller.companyId === company && caller.role === "manager" && inDownline);
   if (!allowed) {
     const me = (await db.doc(`users/${caller.uid}`).get()).data() || {};
-    allowed = !!me.canReassignAppointments && me.companyId === company && inDownline;
+    // A Scheduler dispatches for the whole team, so they can reassign any
+    // company appointment; the canReassign permission stays downline-scoped.
+    allowed = me.companyId === company && (!!me.isScheduler || (!!me.canReassignAppointments && inDownline));
   }
   if (!allowed) throw new HttpsError("permission-denied", "Not allowed to reassign this appointment.");
 
@@ -4110,6 +4112,46 @@ export const listClosers = onCall(async (request) => {
     .filter((u) => u.disabled !== true && u.isCloser === true)
     .map((u) => ({ uid: u.uid, name: u.displayName || u.email || "Closer" }));
   return { closers };
+});
+
+// Team appointment calendar for the Scheduler / dispatch board. Runs server-side
+// so a Scheduler (or manager/admin) sees the whole team's appointments in a
+// window — plus the closer roster for columns + reassignment — without needing
+// company-wide Firestore read access.
+export const listTeamAppointments = onCall(async (request) => {
+  const caller = await getCaller(request);
+  const companyId = caller.companyId;
+  if (!companyId) return { appts: [], closers: [] };
+  const me = (await db.doc(`users/${caller.uid}`).get()).data() || {};
+  const allowed = caller.isSuper || caller.role === "admin" || caller.role === "manager" || me.isScheduler === true;
+  if (!allowed) throw new HttpsError("permission-denied", "Schedulers, managers or admins only.");
+  const { fromMs, toMs } = (request.data || {}) as { fromMs?: number; toMs?: number };
+  const start = Number(fromMs) || Date.now() - 24 * 3600 * 1000;
+  const end = Number(toMs) || Date.now() + 30 * 24 * 3600 * 1000;
+  const snap = await db.collection("events")
+    .where("companyId", "==", companyId)
+    .where("startAt", ">=", start)
+    .where("startAt", "<=", end)
+    .get();
+  const appts = snap.docs
+    .map((d) => {
+      const e = d.data() as any;
+      return {
+        id: d.id, title: (e.title as string) || "", address: (e.address as string) || "",
+        startAt: Number(e.startAt), endAt: e.endAt ? Number(e.endAt) : null, durationMin: e.durationMin ? Number(e.durationMin) : null,
+        closerUid: (e.closerUid as string) || null, closerName: (e.closerName as string) || "",
+        setterName: (e.setterName as string) || "", apptStatus: (e.apptStatus as string) || null, type: (e.type as string) || "",
+      };
+    })
+    .filter((e) => e.type === "appointment" || !!e.closerUid)
+    .sort((a, b) => a.startAt - b.startAt);
+  const usersSnap = await db.collection("users").where("companyId", "==", companyId).get();
+  const closers = usersSnap.docs
+    .map((u): { uid: string; [k: string]: any } => ({ uid: u.id, ...(u.data() as Record<string, any>) }))
+    .filter((u) => u.disabled !== true && u.isCloser === true)
+    .map((u) => ({ uid: u.uid, name: u.displayName || u.email || "Closer" }))
+    .sort((a, b) => a.name.localeCompare(b.name));
+  return { appts, closers };
 });
 
 // Company-wide rep funnel rankings (doors / convos / appts / closes) for a
