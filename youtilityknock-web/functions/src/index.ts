@@ -4586,7 +4586,7 @@ export async function computeRollup(companyId: string, view: string, scopeUid: s
 // getCompanyRollup — the callable wrapper around computeRollup (auth + scoping).
 export const getCompanyRollup = onCall(async (request) => {
   const caller = await getCaller(request);
-  const reqData = (request.data || {}) as { period?: string; companyId?: string };
+  const reqData = (request.data || {}) as { period?: string; companyId?: string; range?: { startMs?: number; endMs?: number } };
   // Super-admins may target any company (drill-down from the console). Everyone
   // else is locked to their own company.
   const companyId = caller.isSuper && reqData.companyId ? reqData.companyId : caller.companyId;
@@ -4596,7 +4596,12 @@ export const getCompanyRollup = onCall(async (request) => {
   }
   const view = (reqData.period || "week") as string;
   const seeAll = caller.isSuper || caller.role === "admin";
-  return computeRollup(companyId, view, seeAll ? null : caller.uid);
+  // Custom date range (from the report's calendar picker): a bounded window that
+  // overrides the view's default period. endMs is exclusive.
+  let range: { startMs: number; endMs: number } | undefined;
+  const rs = Number(reqData.range?.startMs), re = Number(reqData.range?.endMs);
+  if (Number.isFinite(rs) && Number.isFinite(re) && re > rs) range = { startMs: rs, endMs: re };
+  return computeRollup(companyId, view, seeAll ? null : caller.uid, range);
 });
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -4890,11 +4895,16 @@ function reportWindow(period: string): { view: string; plabel: string; range?: {
 // reps, for shout-outs / coaching to relay), reps (their own), or everyone.
 export const emailSuccessReport = onCall(async (request) => {
   const caller = await getCaller(request);
-  const reqData = (request.data || {}) as { period?: string; companyId?: string; audience?: string; teamId?: string };
+  const reqData = (request.data || {}) as { period?: string; companyId?: string; audience?: string; teamId?: string; range?: { startMs?: number; endMs?: number }; plabel?: string };
   const companyId = caller.isSuper && reqData.companyId ? reqData.companyId : caller.companyId;
   if (!companyId) throw new HttpsError("permission-denied", "No company.");
   if (!(caller.isSuper || caller.role === "admin")) throw new HttpsError("permission-denied", "Admins only.");
-  const { view, plabel, range } = reportWindow(reqData.period || "week");
+  // A custom range (from the report's calendar filter) overrides the named window.
+  const rs = Number(reqData.range?.startMs), re = Number(reqData.range?.endMs);
+  const custom = reqData.period === "custom" && Number.isFinite(rs) && Number.isFinite(re) && re > rs;
+  const { view, plabel, range } = custom
+    ? { view: "week", plabel: (reqData.plabel || "custom range"), range: { startMs: rs, endMs: re } }
+    : reportWindow(reqData.period || "week");
   const audience = reqData.audience || "me";
   const cfg = await getNotifyConfig();
   if (!cfg.sendgridKey && !(cfg.smtpHost && cfg.smtpUser)) {

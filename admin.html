@@ -491,14 +491,23 @@
         <h2 style="margin:0;">📊 Success Reports</h2>
         <p class="muted" style="margin:2px 0 0;font-size:13px;" id="rpSubtitle">Who's producing, who isn't — and exactly what to do about it.</p>
       </div>
-      <div class="rp-periods" id="rpPeriods">
+      <div class="rp-periods" id="rpPeriods" style="position:relative;">
         <button class="pill" data-period="week">This week</button>
         <button class="pill" data-period="month">This month</button>
         <button class="pill" data-period="year">This year</button>
-        <button class="pill" data-period="alltime">All-time</button>
+        <button class="pill" data-period="custom" id="rpCustomPill">Custom</button>
         <button class="btn ghost sm rp-noprint" id="rpDownload" style="margin-left:4px;" title="Download / print this report as a PDF">⬇ PDF</button>
         <button class="btn ghost sm rp-noprint" id="rpEmail" title="Email this report — pick a window & who gets it">✉ Email</button>
         <button class="btn ghost sm rp-noprint" id="rpRefresh">↻</button>
+        <div id="rpCustomPop" class="rp-noprint" style="display:none;position:absolute;top:calc(100% + 8px);right:0;z-index:60;background:var(--bg-2);border:1px solid var(--line-hi);border-radius:12px;padding:14px;box-shadow:0 18px 44px rgba(0,0,0,.5);width:280px;">
+          <div class="field" style="margin-bottom:8px;"><span>Start date</span><input type="date" id="rpCustomStart" /></div>
+          <div class="field" style="margin-bottom:10px;"><span>End date</span><input type="date" id="rpCustomEnd" /></div>
+          <div id="rpCustomMsg" class="muted small" style="min-height:14px;margin-bottom:8px;"></div>
+          <div class="row" style="justify-content:flex-end;gap:8px;">
+            <button class="btn ghost sm" id="rpCustomCancel">Cancel</button>
+            <button class="btn primary sm" id="rpCustomApply">Apply</button>
+          </div>
+        </div>
       </div>
     </div>
     <div id="rpPrintHeader"></div>
@@ -2043,6 +2052,18 @@ const RP_TARGETS = { doorsWk: 100, setsWk: 8, closesWk: 2 };  // per active rep,
 const RP_GOALS   = { sit: 50, close: 30, rec: 80, dispo: 90 }; // quality-rate goals (%)
 const RP_MULT    = { week: 1, month: 4.3, year: 52, alltime: 52 }; // scale weekly targets to the period
 const RP_PLABEL  = { week: "this week", month: "this month", year: "this year", alltime: "all-time" };
+// Period multiplier + label, with a custom date range supported. For a custom
+// window the weekly targets scale by how many weeks it spans.
+function rpMult() {
+  if (state.rpPeriod === "custom" && state.rpRange) {
+    return Math.max(0.15, (state.rpRange.endMs - state.rpRange.startMs) / (7 * 86400000));
+  }
+  return RP_MULT[state.rpPeriod] || 1;
+}
+function rpPlabel() {
+  if (state.rpPeriod === "custom") return state.rpRangeLabel || "custom range";
+  return RP_PLABEL[state.rpPeriod] || "";
+}
 const RP_LEVEL_WORD = { company: "company", region: "regional", team: "team", rep: "1:1" };
 
 function rpClamp(v) { return Math.max(0, Math.min(100, v)); }
@@ -2067,7 +2088,7 @@ function rpHasCloseLane(m) { return m.type !== "user" || (m.closerAppts || 0) > 
 // that don't apply to this rep's role) drop out and the remaining weights
 // renormalize — so a pure setter and a pure closer are each scored on their lane.
 function rpScore(m) {
-  const mult = RP_MULT[state.rpPeriod] || 1;
+  const mult = rpMult();
   const parts = [];
   const add = (v, w) => { if (v != null && isFinite(v)) parts.push([rpClamp(v), w]); };
   const attain = (actual, perRep, reps) => { const t = reps * perRep * mult; return t > 0 ? (actual / t) * 100 : null; };
@@ -2117,7 +2138,7 @@ function rpAttach(node, uidMap) {
 function rpRecap(m, level) {
   const strengths = [], gaps = [], agenda = [];
   const isUser = level === "rep";
-  const mult = RP_MULT[state.rpPeriod] || 1;
+  const mult = rpMult();
   // Each item is tagged with the role lane it speaks to — "set" (setter/door),
   // "close" (closer), or "team" (whole group) — so the recap can group coaching
   // by role and each lane's meeting/outreach reflects that role specifically.
@@ -2166,12 +2187,12 @@ function rpRecap(m, level) {
     if (m.recRate >= RP_GOALS.rec) S(`${m.recRate}% of on-site conversations are recorded — great coaching visibility.`, "set");
     else { G(`Only ${m.recRate}% of on-site conversations are recorded (goal ${RP_GOALS.rec}%; ${m.recorded || 0} of ${m.convos || 0}). Coaching is blind without the tape.`, "set"); A("Make at-the-door pitch recording non-negotiable and review one recorded pitch per rep each week.", "set"); }
   } else if (!rpPureCloser(m) && (m.convos || 0) > 0) {
-    G(`None of ${m.convos} on-site conversation${m.convos === 1 ? "" : "s"} were recorded ${RP_PLABEL[state.rpPeriod]} — nothing to coach from the tape.`, "set");
+    G(`None of ${m.convos} on-site conversation${m.convos === 1 ? "" : "s"} were recorded ${rpPlabel()} — nothing to coach from the tape.`, "set");
     A("Turn on and enforce at-the-door pitch recording so real conversations can be reviewed.", "set");
   }
   // Idle reps — whole-group accountability
   if (!isUser && m.reps > 1 && m.idleReps > 0) {
-    G(`${m.idleReps} of ${m.reps} reps produced nothing ${RP_PLABEL[state.rpPeriod]} — zero doors, zero sets, zero appointments, zero closes. They're on the roster but not in the field, and they're dragging the whole team's numbers down.`, "team");
+    G(`${m.idleReps} of ${m.reps} reps produced nothing ${rpPlabel()} — zero doors, zero sets, zero appointments, zero closes. They're on the roster but not in the field, and they're dragging the whole team's numbers down.`, "team");
     A(`Have the direct conversation with the ${m.idleReps} non-producing rep${m.idleReps > 1 ? "s" : ""} this week: a real activity plan with a field-hours commitment, a ride-along, or a decision about whether they're a fit. Carrying non-producers isn't fair to the reps grinding.`, "team");
   }
   return { strengths, gaps, agenda };
@@ -2352,7 +2373,7 @@ function rpRender() {
         <h3>${esc(co.name)}</h3>
         <span class="rp-grade rp-sc-${g.k}">${g.label}</span>
         <p class="muted" style="margin:6px 0 0;font-size:13px;">${g.word}</p>
-        <div class="muted small" style="margin-top:4px;">${co.reps} active rep${co.reps === 1 ? "" : "s"} · ${RP_PLABEL[period]}${scoped}${co.idleReps ? ` · ${co.idleReps} not producing` : ""}</div>
+        <div class="muted small" style="margin-top:4px;">${co.reps} active rep${co.reps === 1 ? "" : "s"} · ${rpPlabel()}${scoped}${co.idleReps ? ` · ${co.idleReps} not producing` : ""}</div>
       </div>
     </div>
     <div class="rp-recap" style="margin:0 0 16px;">${rpRecapHtml(co, "company")}</div>
@@ -2368,12 +2389,16 @@ async function loadReports(companyId) {
   state.rpPeriod = state.rpPeriod || "week";
   state.rpOpen = state.rpOpen || new Set();
   document.querySelectorAll("#rpPeriods .pill").forEach((b) => b.classList.toggle("active", b.dataset.period === state.rpPeriod));
+  const cp = $("rpCustomPill"); if (cp) cp.textContent = state.rpPeriod === "custom" && state.rpRangeLabel ? state.rpRangeLabel : "Custom";
   $("rpBody").innerHTML = `<div class="th-empty">Crunching the numbers…</div>`;
   try {
     // The rollup already returns every lane metric per node — doors, setter &
     // closer funnels, disposition and recorded-conversation rates — so the client
     // just scores + renders.
-    const rollupRes = await getCompanyRollup({ companyId, period: state.rpPeriod });
+    const rollupRes = await getCompanyRollup({
+      companyId, period: state.rpPeriod,
+      range: state.rpPeriod === "custom" && state.rpRange ? state.rpRange : undefined,
+    });
     const data = rollupRes.data;
     const uidMap = {};
     rpAttach(data.company, uidMap);
@@ -2416,7 +2441,7 @@ async function openRepReport(uid) {
         <div class="rp-hero-meta">
           <h3>${esc(r.rep.displayName || r.rep.email || "Rep")}</h3>
           <span class="rp-grade rp-sc-${g.k}">${g.label}</span>
-          <p class="muted" style="margin:6px 0 0;font-size:13px;">${esc(r.rep.title || roleWord)} · ${RP_PLABEL[state.rpPeriod]}</p>
+          <p class="muted" style="margin:6px 0 0;font-size:13px;">${esc(r.rep.title || roleWord)} · ${rpPlabel()}</p>
           <div class="muted small" style="margin-top:4px;">Lifetime: ${r.lifetime.doors.toLocaleString()} doors · ${r.lifetime.appts} appts · ${r.lifetime.sold} sold · ${r.shiftHours.week}h on shift this week</div>
         </div>
       </div>
@@ -2424,7 +2449,7 @@ async function openRepReport(uid) {
       <div class="rp-recap" style="margin:0;">
         <h4>🎙 Recorded on-site conversations</h4>
         <div class="rp-metrics">
-          <div class="rp-metric ${rpMetricClass(m.recRate, RP_GOALS.rec)}"><div class="n">${rpPct(m.recRate)}</div><div class="l">% recorded ${RP_PLABEL[state.rpPeriod]}</div><div class="g">${m.recorded || 0} of ${m.convos || 0} convos · goal ${RP_GOALS.rec}%</div></div>
+          <div class="rp-metric ${rpMetricClass(m.recRate, RP_GOALS.rec)}"><div class="n">${rpPct(m.recRate)}</div><div class="l">% recorded ${rpPlabel()}</div><div class="g">${m.recorded || 0} of ${m.convos || 0} convos · goal ${RP_GOALS.rec}%</div></div>
           <div class="rp-metric"><div class="n">${pitches.recordedCount || 0}</div><div class="l">Recorded all-time</div><div class="g">at-home, GPS-verified</div></div>
           ${pitchLine(pitches.best, "Best", "highlight")}
           ${pitchLine(pitches.worst, "Needs work", "lowlight")}
@@ -2444,7 +2469,45 @@ async function openRepReport(uid) {
 // Reports wiring: period switch, refresh, tree expand/collapse, rep open.
 $("rpPeriods").addEventListener("click", (e) => {
   const b = e.target.closest(".pill"); if (!b) return;
+  if (b.dataset.period === "custom") { rpOpenCustom(); return; } // opens the calendar picker
+  $("rpCustomPop").style.display = "none";
   state.rpPeriod = b.dataset.period; loadReports(state.rpCompany);
+});
+// Custom date-range calendar picker for the report.
+function rpOpenCustom() {
+  const pop = $("rpCustomPop");
+  const today = new Date();
+  const iso = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  // Prefill from the current range, or default to the last 30 days.
+  if (state.rpRange) {
+    $("rpCustomStart").value = iso(new Date(state.rpRange.startMs));
+    $("rpCustomEnd").value = iso(new Date(state.rpRange.endMs - 86400000));
+  } else {
+    $("rpCustomStart").value = iso(new Date(today.getTime() - 29 * 86400000));
+    $("rpCustomEnd").value = iso(today);
+  }
+  $("rpCustomMsg").textContent = "";
+  pop.style.display = pop.style.display === "none" ? "block" : "none";
+}
+$("rpCustomCancel").addEventListener("click", () => { $("rpCustomPop").style.display = "none"; });
+$("rpCustomApply").addEventListener("click", () => {
+  const sv = $("rpCustomStart").value, ev = $("rpCustomEnd").value;
+  if (!sv || !ev) { $("rpCustomMsg").textContent = "Pick both dates."; return; }
+  // Local-midnight bounds; end is inclusive of the whole end day (exclusive endMs).
+  const startMs = new Date(sv + "T00:00:00").getTime();
+  const endMs = new Date(ev + "T00:00:00").getTime() + 86400000;
+  if (!(endMs > startMs)) { $("rpCustomMsg").textContent = "End date must be on or after the start date."; return; }
+  const fmt = (ms) => new Date(ms).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
+  state.rpRange = { startMs, endMs };
+  state.rpRangeLabel = `${fmt(startMs)} – ${fmt(endMs - 86400000)}`;
+  state.rpPeriod = "custom";
+  $("rpCustomPop").style.display = "none";
+  loadReports(state.rpCompany);
+});
+// Close the picker when clicking outside it.
+document.addEventListener("click", (e) => {
+  const pop = $("rpCustomPop");
+  if (pop && pop.style.display !== "none" && !pop.contains(e.target) && e.target.id !== "rpCustomPill") pop.style.display = "none";
 });
 $("rpRefresh").addEventListener("click", () => loadReports(state.rpCompany));
 // Download / print: expand every level so the PDF is the complete report, print,
@@ -2481,7 +2544,7 @@ function rpFillBanner(node) {
     <div class="rp-ph-top">
       <div class="rp-ph-brandmark">${brand}</div>
       <div class="rp-ph-meta">
-        <div class="rp-ph-period">${esc(RP_PLABEL[state.rpPeriod] || "")}</div>
+        <div class="rp-ph-period">${esc(rpPlabel())}</div>
         <div class="rp-ph-date">Generated ${esc(dateStr)}</div>
       </div>
     </div>
@@ -2543,7 +2606,7 @@ function rpPrintNode(node) {
         <h3>${esc(node.name)}</h3>
         <span class="rp-grade rp-sc-${g.k}">${g.label}</span>
         <p class="muted" style="margin:6px 0 0;font-size:13px;">${g.word}</p>
-        <div class="muted small" style="margin-top:4px;">${node.reps || 0} rep${node.reps === 1 ? "" : "s"} · ${RP_PLABEL[state.rpPeriod]}</div>
+        <div class="muted small" style="margin-top:4px;">${node.reps || 0} rep${node.reps === 1 ? "" : "s"} · ${rpPlabel()}</div>
       </div>
     </div>
     <div class="rp-recap" style="margin:0 0 16px;">${rpRecapHtml(node, node.type)}</div>
@@ -2561,9 +2624,10 @@ function rpEmailNode(node) {
     <h3 style="margin:0 0 4px;font-family:'Space Grotesk',sans-serif;">✉ Email — ${esc(node.name)}</h3>
     <p class="muted small" style="margin:0 0 14px;">Send just this team's report. Pick the window and who receives it.</p>
     <div class="field"><span>Window</span><select id="rpTmPeriod">
+      <option value="current" selected>Current filter (${esc(rpPlabel())})</option>
       <option value="today">Today</option>
       <option value="yesterday">Previous day</option>
-      <option value="week" selected>Week to date</option>
+      <option value="week">Week to date</option>
       <option value="month">Month to date</option>
       <option value="year">Year to date</option>
       <option value="alltime">All-time</option>
@@ -2590,7 +2654,7 @@ function rpEmailNode(node) {
     btn.disabled = true; msg.style.color = "var(--ink-mid)"; msg.textContent = "Sending…";
     try {
       const res = await emailSuccessReport({
-        period: ov.querySelector("#rpTmPeriod").value,
+        ...rpEmailWindow(ov.querySelector("#rpTmPeriod").value),
         audience: ov.querySelector("#rpTmAud").value,
         teamId: node.id,
         companyId: state.rpCompany || undefined,
@@ -2609,6 +2673,15 @@ function rpEmailNode(node) {
 // Email the report — pick a window (today / previous day / week-to-date /
 // month-to-date / …) and who receives it (test to me, admins, managers + their
 // reps, reps, or everyone), then send on demand.
+// Map an email-window select value into emailSuccessReport args. "current" means
+// "whatever the report is filtered to right now", including a custom date range.
+function rpEmailWindow(sel) {
+  if (sel === "current") {
+    if (state.rpPeriod === "custom" && state.rpRange) return { period: "custom", range: state.rpRange, plabel: state.rpRangeLabel };
+    return { period: state.rpPeriod || "week" };
+  }
+  return { period: sel };
+}
 $("rpEmail").addEventListener("click", () => {
   const ov = document.createElement("div");
   ov.className = "rp-ov";
@@ -2616,9 +2689,10 @@ $("rpEmail").addEventListener("click", () => {
     <h3 style="margin:0 0 4px;font-family:'Space Grotesk',sans-serif;">✉ Email Success Report</h3>
     <p class="muted small" style="margin:0 0 14px;">Pick the window and who gets it. Managers receive their team + their reps' reports (to shout out or coach); reps get their own.</p>
     <div class="field"><span>Window</span><select id="rpEmPeriod">
+      <option value="current" selected>Current filter (${esc(rpPlabel())})</option>
       <option value="today">Today</option>
       <option value="yesterday">Previous day</option>
-      <option value="week" selected>Week to date</option>
+      <option value="week">Week to date</option>
       <option value="month">Month to date</option>
       <option value="year">Year to date</option>
       <option value="alltime">All-time</option>
@@ -2645,7 +2719,7 @@ $("rpEmail").addEventListener("click", () => {
     btn.disabled = true; msg.style.color = "var(--ink-mid)"; msg.textContent = "Sending…";
     try {
       const res = await emailSuccessReport({
-        period: ov.querySelector("#rpEmPeriod").value,
+        ...rpEmailWindow(ov.querySelector("#rpEmPeriod").value),
         audience: ov.querySelector("#rpEmAud").value,
         companyId: state.rpCompany || undefined,
       });
