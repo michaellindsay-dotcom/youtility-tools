@@ -9,6 +9,7 @@ import {
   onSnapshot,
   orderBy,
   query,
+  type QuerySnapshot,
   setDoc,
   where,
 } from "firebase/firestore";
@@ -99,12 +100,16 @@ export default function Chat() {
 
   // Subscribe to the active conversation's messages.
   useEffect(() => {
+    // Clear immediately so switching conversations never shows the previous
+    // one's messages — a brand-new DM/team with no history renders empty right
+    // away instead of lingering on the last thread.
+    setMessages([]);
     if (!profile || !companyId) return;
     // The "Who's Working" view has no message stream of its own.
-    if (conv.kind === "working") {
-      setMessages([]);
-      return;
-    }
+    if (conv.kind === "working") return;
+    const ok = (snap: QuerySnapshot) =>
+      setMessages(snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<ChatMessage, "id">) })));
+    const fail = () => setMessages([]); // e.g. a never-created DM the rules gate on
     if (conv.kind === "channel") {
       const q = query(
         collection(db, "chat"),
@@ -112,9 +117,7 @@ export default function Chat() {
         orderBy("createdAt", "asc"),
         limit(200)
       );
-      return onSnapshot(q, (snap) =>
-        setMessages(snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<ChatMessage, "id">) })))
-      );
+      return onSnapshot(q, ok, fail);
     }
     if (conv.kind === "team") {
       const q = query(
@@ -124,15 +127,11 @@ export default function Chat() {
         orderBy("createdAt", "asc"),
         limit(200)
       );
-      return onSnapshot(q, (snap) =>
-        setMessages(snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<ChatMessage, "id">) })))
-      );
+      return onSnapshot(q, ok, fail);
     }
     const cid = dmId(profile.uid, conv.other.uid);
     const q = query(collection(db, "dms", cid, "messages"), orderBy("createdAt", "asc"), limit(200));
-    return onSnapshot(q, (snap) =>
-      setMessages(snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<ChatMessage, "id">) })))
-    );
+    return onSnapshot(q, ok, fail);
   }, [conv, profile, companyId]);
 
   useEffect(() => {
