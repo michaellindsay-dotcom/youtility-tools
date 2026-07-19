@@ -26,6 +26,7 @@ export interface SchedulingSettings {
   slotMin: number; // booking granularity, minutes
   closersEnabled?: boolean; // route setter appointments to dedicated closers
   closerAssignment?: CloserAssignment; // how appointments pick a closer
+  hideCloserFromSetters?: boolean; // setters see open times only; closer auto-assigned
 }
 
 export const DEFAULT_SCHEDULING: SchedulingSettings = {
@@ -157,6 +158,7 @@ export interface UserProfile {
   // Function flags — a user can be a setter, a closer, or both.
   isSetter?: boolean; // knocks doors / sets appointments (default true)
   isCloser?: boolean; // can be assigned appointments to close
+  isScheduler?: boolean; // team dispatch: book & assign appointments across closers
   // Separate closer org chart, parallel to the setter managerId/managerPath.
   closerManagerId?: string | null; // direct closer manager
   closerManagerPath?: string[]; // closer-chain ancestors, nearest first

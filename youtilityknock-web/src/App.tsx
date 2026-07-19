@@ -28,6 +28,7 @@ import ThrowDowns from "./pages/ThrowDowns";
 import Working from "./pages/Working";
 import Chat from "./pages/Chat";
 import Schedule from "./pages/Schedule";
+import Scheduler from "./pages/Scheduler";
 import Settings from "./pages/Settings";
 import BusinessCard from "./pages/BusinessCard";
 import CustomerLead from "./pages/CustomerLead";
@@ -65,6 +66,13 @@ function RoleGate({ allow, children }: { allow: ("admin" | "manager")[]; childre
 function CloserGate({ children }: { children: React.ReactNode }) {
   const { profile, role } = useAuth();
   const allowed = profile?.isCloser || role === "admin";
+  return allowed ? <>{children}</> : <Navigate to="/" replace />;
+}
+
+// Gates the Scheduler (team dispatch) to people flagged isScheduler, plus admins.
+function SchedulerGate({ children }: { children: React.ReactNode }) {
+  const { profile, role } = useAuth();
+  const allowed = profile?.isScheduler || role === "admin" || role === "superadmin";
   return allowed ? <>{children}</> : <Navigate to="/" replace />;
 }
 
@@ -142,6 +150,7 @@ export default function App() {
         <Route path="working" element={<CanvassGate><Gated feature="chat"><Working /></Gated></CanvassGate>} />
         <Route path="chat" element={<Gated feature="chat"><Chat /></Gated>} />
         <Route path="schedule" element={<Gated feature="scheduling"><Schedule /></Gated>} />
+        <Route path="scheduler" element={<Gated feature="scheduling"><SchedulerGate><Scheduler /></SchedulerGate></Gated>} />
         <Route path="territories" element={<CanvassGate><Territories /></CanvassGate>} />
         <Route path="card" element={<BusinessCard />} />
         <Route path="inbox" element={<Inbox />} />

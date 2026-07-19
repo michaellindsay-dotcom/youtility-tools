@@ -20,7 +20,7 @@ const PREVIEW_POSITIONS: { value: Position; label: string }[] = [
 // `canvassOnly` hides the link entirely for a RallyCard-only company (no
 // canvassing map) — see `isRallyCardOnly` in lib/features. `rallyOnlyLink` is
 // the inverse: shown ONLY to RallyCard-only companies.
-const links: { to: string; label: string; icon: string; end?: boolean; feat?: FeatureKey; anyFeat?: FeatureKey[]; roles?: Role[]; positions?: Position[]; closer?: boolean; mobileHidden?: boolean; canvassOnly?: boolean; rallyOnlyLink?: boolean }[] = [
+const links: { to: string; label: string; icon: string; end?: boolean; feat?: FeatureKey; anyFeat?: FeatureKey[]; roles?: Role[]; positions?: Position[]; closer?: boolean; scheduler?: boolean; mobileHidden?: boolean; canvassOnly?: boolean; rallyOnlyLink?: boolean }[] = [
   { to: "/", label: "Dashboard", icon: "▦", end: true, canvassOnly: true },
   { to: "/map", label: "Map", icon: "◉", canvassOnly: true },
   // Movers is a team-manager / company-admin tool only.
@@ -36,6 +36,7 @@ const links: { to: string; label: string; icon: string; end?: boolean; feat?: Fe
   // everyone). RallyCard-only companies keep the nav link — they have no
   // Dashboard.
   { to: "/schedule", label: "Schedule", icon: "📅", feat: "scheduling", rallyOnlyLink: true },
+  { to: "/scheduler", label: "Scheduler", icon: "🗓️", feat: "scheduling", scheduler: true, canvassOnly: true },
   // Success Planner is reached from its Dashboard card (tap it to open).
   // Team members show up in Team Chat; managers/admins get team ratings on the
   // Leaderboard, which also links to the org chart & accounts page.
@@ -93,6 +94,8 @@ export default function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
     // managers and team managers all carry isCloser) or admin — NOT on the
     // generic manager tier, so a SETTER manager never sees closer information.
     if (l.closer && !(eff.profile?.isCloser || eff.role === "admin")) return false;
+    // Scheduler (team dispatch) — only people flagged isScheduler, or an admin.
+    if (l.scheduler && !(eff.profile?.isScheduler || eff.role === "admin")) return false;
     // Position-gated links (e.g. Movers) — company admins always see them;
     // otherwise the user's position must be in the allow-list.
     if (l.positions && !(eff.role === "admin" || (eff.profile?.position && l.positions.includes(eff.profile.position)))) return false;
