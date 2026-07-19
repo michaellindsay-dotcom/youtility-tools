@@ -762,6 +762,33 @@ export const getUserLoginMeta = onCall(async (request) => {
   };
 });
 
+// Last-active for every account in a company, in one call (for the Accounts
+// list). Combines Firebase Auth last sign-in with presence "last seen" and
+// returns the most recent as an epoch-ms map { uid: ms }.
+export const getCompanyActivity = onCall(async (request) => {
+  const caller = await getCaller(request);
+  const reqCompany = ((request.data || {}) as { companyId?: string }).companyId;
+  const companyId = caller.isSuper && reqCompany ? reqCompany : caller.companyId;
+  if (!companyId) throw new HttpsError("permission-denied", "No company.");
+  if (!(caller.isSuper || caller.role === "admin")) throw new HttpsError("permission-denied", "Admins only.");
+  const usersSnap = await db.collection("users").where("companyId", "==", companyId).get();
+  const uids = usersSnap.docs.map((d) => d.id);
+  const activity: Record<string, number> = {};
+  // Auth last sign-in, in batches of 100 (getUsers cap).
+  for (let i = 0; i < uids.length; i += 100) {
+    const batch = uids.slice(i, i + 100).map((uid) => ({ uid }));
+    const res = await getAuth().getUsers(batch).catch(() => null);
+    if (res) for (const u of res.users) {
+      const t = u.metadata?.lastSignInTime ? Date.parse(u.metadata.lastSignInTime) : NaN;
+      if (Number.isFinite(t)) activity[u.uid] = t;
+    }
+  }
+  // Fold in presence "last seen" (map/app activity), keeping the most recent.
+  const presSnap = await db.collection("presence").where("companyId", "==", companyId).get().catch(() => null);
+  if (presSnap) presSnap.forEach((d) => { const ls = Number((d.data() as any).lastSeen) || 0; if (ls) activity[d.id] = Math.max(activity[d.id] || 0, ls); });
+  return { activity };
+});
+
 // ───────────────────────────────────────────────────────────────────────────
 // relinkMyProfile — self-heal a login whose profile lives under a DIFFERENT
 // document ID than this Auth UID. The app loads a profile at users/<uid>, but

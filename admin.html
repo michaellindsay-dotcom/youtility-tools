@@ -1506,8 +1506,9 @@
       </div>
       <div id="inviteLinkBox" class="banner" style="word-break:break-all;"></div>
     </div>
+    <p class="muted small" style="margin:0 0 8px;">Double-click a company, region or team to expand it.</p>
     <table>
-      <thead><tr><th>Name</th><th>Email</th><th>Team / Region</th><th>Role</th><th>Reports to</th><th>Status</th><th></th></tr></thead>
+      <thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Reports to</th><th>Last active</th><th>Status</th><th></th></tr></thead>
       <tbody id="usersBody"><tr><td colspan="7" class="muted">Select a company…</td></tr></tbody>
     </table>
   </section>
@@ -1700,6 +1701,7 @@ const setUserPhoneRouting = httpsCallable(fns, "setUserPhoneRouting");
 const updateUserProfile = httpsCallable(fns, "updateUserProfile");
 const resendInvite    = httpsCallable(fns, "resendInvite");
 const getUserLoginMeta = httpsCallable(fns, "getUserLoginMeta");
+const getCompanyActivity = httpsCallable(fns, "getCompanyActivity");
 const linkProfileToUid = httpsCallable(fns, "linkProfileToUid");
 const changeUserEmail = httpsCallable(fns, "changeUserEmail");
 const setPositionServices = httpsCallable(fns, "setPositionServices");
@@ -1990,6 +1992,7 @@ $("thRefresh").addEventListener("click", () => loadTownHall(state.selectedCompan
 // Load everything for one company and reveal the roles/teams/users panels.
 async function selectCompany(companyId, companyName) {
   state.selectedCompany = companyId;
+  state.selectedCompanyName = companyName || "";
   const suffix = companyName ? ` · ${companyName}` : "";
   $("rolesTitle").textContent = "Roles & titles" + suffix;
   $("teamsTitle").textContent = "Teams" + suffix;
@@ -5635,6 +5638,83 @@ function reportsToHtml(u) {
   return parts.length ? parts.join(" · ") : '<span class="muted">—</span>';
 }
 
+// Relative "last active" (Firebase last sign-in or presence last-seen).
+function fmtLastActive(ms) {
+  if (!ms) return "—";
+  const diff = Date.now() - ms;
+  if (diff < 0) return "just now";
+  const m = Math.floor(diff / 60000); if (m < 1) return "just now"; if (m < 60) return m + "m ago";
+  const h = Math.floor(m / 60); if (h < 24) return h + "h ago";
+  const d = Math.floor(h / 24); if (d < 30) return d + "d ago";
+  return new Date(ms).toLocaleDateString();
+}
+// Build the company → region → team → user grouping for the Accounts drill-down.
+function acctTree() {
+  const teamsAll = state.teams || [];
+  const alphaU = (a, b) => (a.displayName || a.email || "").localeCompare(b.displayName || b.email || "");
+  const alphaN = (a, b) => (a.name || "").localeCompare(b.name || "");
+  const regions = teamsAll.filter((t) => t.kind === "region").slice().sort(alphaN);
+  const teams = teamsAll.filter((t) => t.kind !== "region" && !isUmbrellaTeam(t));
+  const usersByTeam = {}, noTeam = [];
+  (state.users || []).forEach((u) => {
+    if (u.teamId && teams.find((t) => t.id === u.teamId)) (usersByTeam[u.teamId] ??= []).push(u);
+    else noTeam.push(u);
+  });
+  const teamsByRegion = {}, noRegionTeams = [];
+  teams.forEach((t) => {
+    if (t.parentTeamId && regions.find((r) => r.id === t.parentTeamId)) (teamsByRegion[t.parentTeamId] ??= []).push(t);
+    else noRegionTeams.push(t);
+  });
+  return { regions, teams, usersByTeam, noTeam, teamsByRegion, noRegionTeams, alphaU, alphaN };
+}
+function acctUserRow(u, depth) {
+  const act = state.userActivity ? state.userActivity[u.id] : null;
+  return `<tr>
+    <td style="padding-left:${8 + depth * 20}px;">${esc(u.displayName || "—")}${u.role === 'admin' ? ' <span class="badge admin">admin</span>' : ''}</td>
+    <td class="muted">${esc(u.email || "")}</td>
+    <td>${esc(roleLabelOf(u))}</td>
+    <td>${reportsToHtml(u)}</td>
+    <td class="muted small">${fmtLastActive(act)}</td>
+    <td>${u.disabled ? '<span class="badge disabled">disabled</span>' : '<span class="badge">active</span>'}</td>
+    <td><button class="btn sm editBtn" data-uid="${esc(u.id)}">Edit</button></td>
+  </tr>`;
+}
+// Company rolls up to regions → teams → users; double-click a group to expand.
+function renderAccounts() {
+  const body = $("usersBody");
+  if (!state.users || !state.users.length) { body.innerHTML = `<tr><td colspan="7" class="muted">No accounts yet.</td></tr>`; return; }
+  const T = acctTree();
+  const open = (state.acctOpen ||= new Set());
+  const grp = (key, label, count, depth) =>
+    `<tr class="acct-grp" data-key="${esc(key)}"><td colspan="7" style="cursor:pointer;user-select:none;padding-left:${8 + depth * 20}px;font-weight:600;">${open.has(key) ? "▾" : "▸"} ${esc(label)} <span class="muted small">(${count})</span></td></tr>`;
+  const usersUnder = (arr, depth) => arr.slice().sort(T.alphaU).map((u) => acctUserRow(u, depth)).join("");
+  const renderTeam = (t, depth) => {
+    const us = T.usersByTeam[t.id] || [];
+    let h = grp("team:" + t.id, t.name, us.length, depth);
+    if (open.has("team:" + t.id)) h += us.length ? usersUnder(us, depth + 1) : `<tr><td colspan="7" class="muted" style="padding-left:${8 + (depth + 1) * 20}px;">No members.</td></tr>`;
+    return h;
+  };
+  const renderRegion = (rKey, rName, tids) => {
+    const cnt = tids.reduce((n, t) => n + ((T.usersByTeam[t.id] || []).length), 0);
+    let h = grp(rKey, rName, cnt, 1);
+    if (open.has(rKey)) h += tids.length ? tids.slice().sort(T.alphaN).map((t) => renderTeam(t, 2)).join("") : `<tr><td colspan="7" class="muted" style="padding-left:48px;">No teams.</td></tr>`;
+    return h;
+  };
+  let html = grp("company", state.selectedCompanyName || "Company", state.users.length, 0);
+  if (open.has("company")) {
+    T.regions.forEach((r) => { html += renderRegion("region:" + r.id, r.name, T.teamsByRegion[r.id] || []); });
+    if (T.noRegionTeams.length) html += renderRegion("region:__noregion", "Teams (no region)", T.noRegionTeams);
+    if (T.noTeam.length) {
+      html += grp("team:__noteam", "Unassigned", T.noTeam.length, 1);
+      if (open.has("team:__noteam")) html += usersUnder(T.noTeam, 2);
+    }
+  }
+  body.innerHTML = html;
+  body.querySelectorAll(".acct-grp").forEach((tr) => tr.addEventListener("dblclick", () => {
+    const k = tr.dataset.key; if (open.has(k)) open.delete(k); else open.add(k); renderAccounts();
+  }));
+  body.querySelectorAll(".editBtn").forEach((b) => b.addEventListener("click", () => openUserProfileModal(b.dataset.uid)));
+}
 async function loadUsers() {
   const body = $("usersBody");
   if (!state.selectedCompany) { body.innerHTML = `<tr><td colspan="7" class="muted">Select a company…</td></tr>`; return; }
@@ -5643,20 +5723,12 @@ async function loadUsers() {
     const snap = await getDocs(query(collection(db, "users"),
       where("companyId", "==", state.selectedCompany), orderBy("createdAt", "desc")));
     state.users = snap.docs.map((d) => ({ id:d.id, ...d.data() }));
-    if (!state.users.length) { body.innerHTML = `<tr><td colspan="7" class="muted">No accounts yet.</td></tr>`; return; }
-    body.innerHTML = "";
-    state.users.forEach((u) => {
-      const tr = document.createElement("tr");
-      tr.innerHTML = `<td>${esc(u.displayName||"—")}${u.role==='admin'?' <span class="badge admin">admin</span>':''}</td>
-        <td class="muted">${esc(u.email||"")}</td>
-        <td>${teamRegionHtml(u)}</td>
-        <td>${esc(roleLabelOf(u))}</td>
-        <td>${reportsToHtml(u)}</td>
-        <td>${u.disabled ? '<span class="badge disabled">disabled</span>' : '<span class="badge">active</span>'}</td>
-        <td><button class="btn sm editBtn">Edit</button></td>`;
-      tr.querySelector(".editBtn").addEventListener("click", () => openUserProfileModal(u.id));
-      body.appendChild(tr);
-    });
+    state.acctOpen ||= new Set();
+    renderAccounts();
+    // Last-active is a separate (admin) call — fold it in and re-render when ready.
+    getCompanyActivity({ companyId: state.selectedCompany })
+      .then((r) => { state.userActivity = (r.data && r.data.activity) || {}; renderAccounts(); })
+      .catch(() => {});
   } catch (e) { body.innerHTML = `<tr><td colspan="7" class="banner error show">${esc(e.message)}</td></tr>`; }
 }
 
