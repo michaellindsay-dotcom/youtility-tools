@@ -5782,27 +5782,24 @@ export const getEmployeeReport = onCall(async (request) => {
   const worst = scored.length ? scored.reduce((a, b) => (b.score! < a.score! ? b : a)) : null;
 
   const all = rFunnel(leads, 0);
-  // Per-window CLOSER funnel (appointments assigned → sat → closed), from the
-  // appointment events routed to this rep as a closer. The self-gen funnel above
-  // is empty for a pure closer, so this is what makes their report match reality.
-  const closerEvSnap = await db.collection("events").where("closerUid", "==", repUid).get();
-  const CLOSER_SIT = new Set(["pitched_pending", "pitched_not_interested", "pitched_failed_credit", "closed_won"]);
-  const cEvents = closerEvSnap.docs.map((d) => d.data() as any).filter((e) => e.type === "appointment");
-  const rCloserFunnel = (since: number) => {
-    let appt = 0, sat = 0, closed = 0;
-    for (const e of cEvents) {
-      if ((Number(e.startAt) || 0) < since) continue;
-      appt++;
-      if (CLOSER_SIT.has(e.apptStatus)) sat++;
-      if (e.apptStatus === "closed_won") closed++;
-    }
-    return { appt, sat, closed };
-  };
   // Sit % (setter) and close % (closer), computed all-time from the appointment
   // EVENTS (authoritative) rather than the drifting stat counters — so the report
   // matches what actually happened. Sit rate = sits ÷ pitched appointments
   // (sits + no-shows; excludes turn-aways).
   const { setters: sm, closers: cm } = await computeApptMetrics(rep.companyId, 0);
+  // Per-window CLOSER funnel — built from the SAME appointment metrics the closer
+  // card uses (appointments SET in the window → sat → closed → dispositioned),
+  // windowed by when the appointment was set, so the funnel matches the card
+  // exactly instead of double-counting reschedules / future dates.
+  const [cmToday, cmWeek, cmMonth] = await Promise.all([
+    computeApptMetrics(rep.companyId, today),
+    computeApptMetrics(rep.companyId, week),
+    computeApptMetrics(rep.companyId, month),
+  ]);
+  const cWin = (cmObj: { closers: Record<string, any> }) => {
+    const c = cmObj.closers[repUid] || { appts: 0, sits: 0, closes: 0, due: 0, dispositioned: 0 };
+    return { appt: c.appts, sat: c.sits, closed: c.closes, due: c.due, dispositioned: c.dispositioned };
+  };
   const sMet = sm[repUid] || { appts: 0, sits: 0, pitched: 0, noShow: 0, upcoming: 0, undispositioned: 0, other: 0 };
   const cMet = cm[repUid] || { appts: 0, sits: 0, closes: 0, turnedAways: 0, due: 0, dispositioned: 0 };
   const rate = (n: number, d: number) => (d > 0 ? Math.min(100, Math.round((n / d) * 100)) : null);
@@ -5831,7 +5828,7 @@ export const getEmployeeReport = onCall(async (request) => {
   return {
     rep: { uid: rep.uid, displayName: rep.displayName || "", email: rep.email || "", title: rep.title || rep.role || "", role: rep.role || "" },
     funnel: { today: rFunnel(leads, today), week: rFunnel(leads, week), month: rFunnel(leads, month), all },
-    closerFunnel: { today: rCloserFunnel(today), week: rCloserFunnel(week), month: rCloserFunnel(month), all: rCloserFunnel(0) },
+    closerFunnel: { today: cWin(cmToday), week: cWin(cmWeek), month: cWin(cmMonth), all: cWin({ closers: cm }) },
     stats: statSnap.exists ? statSnap.data() : {},
     sitMetrics,
     // Lifetime totals derived from the SAME lead set as the funnel, so the
