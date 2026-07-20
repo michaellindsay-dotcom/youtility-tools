@@ -377,7 +377,7 @@ export interface UserStats {
   closerAppts?: number; // closer: appointments routed to them
   closerSits?: number; // closer: appointments they actually sat/pitched
   closerCloses?: number; // closer: appointments they closed
-  closerNoShows?: number; // closer: dispositions logged off-site (>100 ft)
+  closerNoShows?: number; // closer: dispositions logged off-site (>500 ft)
   closerTurnedAways?: number; // closer: homeowner refused the pitch at the door
   closerManagerPath?: string[]; // closer-chain ancestors (for manager roll-ups)
   updatedAt?: number;
@@ -467,7 +467,7 @@ export interface DmChannel {
 export type EventType = "appointment" | "go_back" | "follow_up";
 
 // A closer's outcome on an assigned appointment. closer_no_show is set
-// automatically when the closer dispositions away from the home (>100 ft).
+// automatically when the closer dispositions away from the home (>500 ft).
 export type ApptStatus =
   | "scheduled"
   | "pitched_pending"
@@ -506,7 +506,7 @@ export interface ScheduleEvent {
   apptNotes?: string; // closer's most recent disposition note (mandatory)
   dispositionedAt?: number;
   dispositionDistanceFt?: number | null;
-  dispositionVerified?: boolean; // was the closer on-site (≤100 ft) when dispositioning
+  dispositionVerified?: boolean; // was the closer on-site (≤500 ft) when dispositioning
   // Was it closed out AT the appointment (on-site, right then) vs entered later
   // from the calendar? Drives the "not dispositioned on the spot" report.
   dispositionedOnSpot?: boolean;

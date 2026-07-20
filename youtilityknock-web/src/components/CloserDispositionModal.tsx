@@ -7,7 +7,7 @@ import { db, functions } from "../firebase";
 import { APPT_DISPOSITIONS } from "../lib/closerDispositions";
 import type { ApptStatus, Lead, ScheduleEvent } from "../types";
 
-const ONSITE_FT = 100; // a disposition only counts within 100 ft of the home
+const ONSITE_FT = 500; // a disposition only counts within 500 ft of the home
 
 // Distance between two lat/lng points, in feet.
 function distanceFt(a: { lat: number; lng: number }, b: { lat: number; lng: number }): number {
