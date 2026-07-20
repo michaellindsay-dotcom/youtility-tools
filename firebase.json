@@ -9,6 +9,7 @@
       { "source": "/stripe/**", "function": "stripeWebhook" },
       { "source": "/square/**", "function": "squareWebhook" },
       { "source": "/sign-api/**", "function": "invoiceSign" },
+      { "source": "/billing-week/**", "function": "perJobForm" },
       { "source": "/crm/**", "function": "crmApi" },
       { "source": "/c/**", "function": "cardShare" },
       { "source": "/vcf/**", "function": "cardVcf" },
