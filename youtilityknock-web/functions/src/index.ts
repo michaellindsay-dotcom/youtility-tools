@@ -3736,6 +3736,7 @@ const APPT_STATUS_LABEL: Record<string, string> = {
   turned_away: "Turned Away",
   reschedule: "Reschedule",
   closer_no_show: "Closer No Show",
+  auto_cleared: "Auto-cleared (stale)",
 };
 // Setter sit-rate denominator ("pitched appointments"): every real sit plus a
 // homeowner no-show. Deliberately EXCLUDES turned_away (homeowner refused the
@@ -4155,6 +4156,37 @@ export const listClosers = onCall(async (request) => {
     .filter((u) => u.disabled !== true && u.isCloser === true)
     .map((u) => ({ uid: u.uid, name: u.displayName || u.email || "Closer" }));
   return { closers };
+});
+
+// Emergency unblock: clear the backlog of stale, never-dispositioned closer
+// appointments so the app's hard disposition gate releases closers immediately
+// (used when a pile of old / test appointments locks them out). Marks each as
+// "auto_cleared" — counts as dispositioned so the gate lets go, but NOT as a
+// sit / close / no-show, so it doesn't pollute anyone's rates. Admin/super only.
+export const clearStaleAppointments = onCall(async (request) => {
+  const caller = await getCaller(request);
+  const req = (request.data || {}) as { companyId?: string; olderThanHours?: number };
+  const companyId = caller.isSuper && req.companyId ? req.companyId : caller.companyId;
+  if (!companyId) throw new HttpsError("permission-denied", "No company.");
+  if (!(caller.isSuper || caller.role === "admin")) throw new HttpsError("permission-denied", "Admins only.");
+  const graceMs = 2 * 60 * 60 * 1000; // matches the gate's grace buffer
+  const olderMs = Math.max(0, Number(req.olderThanHours) || 0) * 60 * 60 * 1000;
+  const cutoff = Date.now() - graceMs - olderMs;
+  const now = Date.now();
+  const snap = await db.collection("events").where("companyId", "==", companyId).where("type", "==", "appointment").get();
+  const ops: Promise<unknown>[] = [];
+  let cleared = 0;
+  for (const d of snap.docs) {
+    const ev = d.data() as any;
+    if (!ev.closerUid) continue;
+    if (ev.apptStatus && ev.apptStatus !== "scheduled") continue; // already dispositioned
+    const endAt = (typeof ev.endAt === "number" && ev.endAt > 0) ? ev.endAt : (Number(ev.startAt) || 0) + ((Number(ev.durationMin) || 60) * 60000);
+    if (!(endAt > 0 && endAt < cutoff)) continue; // not past-due beyond the window
+    ops.push(d.ref.set({ apptStatus: "auto_cleared", apptNotes: "Auto-cleared (stale — never dispositioned)", dispositionedAt: now, dispositionedOnSpot: false, dispositionVerified: false, updatedAt: now }, { merge: true }));
+    cleared++;
+  }
+  await Promise.all(ops);
+  return { cleared };
 });
 
 // Team appointment calendar for the Scheduler / dispatch board. Runs server-side
