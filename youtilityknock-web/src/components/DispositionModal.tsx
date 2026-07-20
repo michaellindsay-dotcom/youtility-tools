@@ -18,7 +18,7 @@ import { useShift } from "../shift/ShiftContext";
 import SlotPicker from "./SlotPicker";
 import type { LeadStatus, LeadEnrichment, EventType } from "../types";
 
-const ONSITE_FT = 100; // a knock only counts if you're within 100 ft of the home
+const ONSITE_FT = 500; // a knock only counts if you're within 500 ft of the home
 
 const createCloserAppointmentFn = httpsCallable<
   { companyId: string; startAt: number; durationMin?: number; title?: string; address?: string; name?: string; notes?: string; leadId?: string; candidateCloserUid?: string },
