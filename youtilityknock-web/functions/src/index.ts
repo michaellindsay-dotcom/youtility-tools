@@ -7555,8 +7555,9 @@ export const saveCardAndSubscribe = onCall(async (request) => {
   const card = (pm as any).card || {};
   const update: Record<string, unknown> = { cardBrand: card.brand || "", cardLast4: card.last4 || "", updatedAt: Date.now() };
   // Charge the company's effective monthly price every 30 days from now.
+  // Per-job companies keep the card on file but are billed by their own crons.
   const cents = Math.round((Number(company.planPrice) || 0) * 100);
-  if (!company.billingExempt && cents > 0) {
+  if (!company.billingExempt && cents > 0 && !company.perJobBilling?.enabled) {
     const subId = company.stripeSubscriptionId as string | undefined;
     if (subId) {
       await stripe.subscriptions.update(subId, { default_payment_method: paymentMethodId });
@@ -8503,8 +8504,9 @@ export const squareSaveCardAndSubscribe = onCall(async (request) => {
   }, { merge: true });
 
   // Start the cycle with an immediate charge unless billing is already active.
+  // Per-job companies keep the card on file but are billed by their own crons.
   const cents = Math.round((Number(company.planPrice) || 0) * 100);
-  if (!company.billingExempt && cents > 0 && !hadBilling) {
+  if (!company.billingExempt && cents > 0 && !hadBilling && !company.perJobBilling?.enabled) {
     const r = await runSquareCharge(companyId);
     if (!r.ok) throw new HttpsError("internal", r.error || "Could not take first payment.");
   }
@@ -8630,6 +8632,8 @@ export const squareBillingCron = onSchedule("every 24 hours", async () => {
     if (co.billingExempt || co.status === "suspended") continue;
     // A company billed through its org is charged by the org, not individually.
     if (co.organizationId) continue;
+    // Per-job companies are billed by their own monthly-base + weekly crons.
+    if (co.perJobBilling?.enabled) continue;
     if ((Number(co.nextBillingAt) || 0) > now) continue; // not due yet
     await runSquareCharge(d.id);
   }
@@ -8720,6 +8724,477 @@ export const trialExpiry = onSchedule("every 1 hours", async () => {
         `Your YoutilityKnock ${TRIAL_DAYS}-day trial has ended, so the account is now paused. All of your data is saved — subscribe to a plan to pick up right where you left off.`);
     }
   }
+});
+
+// ════════════════════════════════════════════════════════════════════════════
+// PER-JOB BILLING (custom plan) — a company on this model pays a fixed monthly
+// base on the 1st that includes the first N sold jobs; every sold job beyond
+// that is billed per-job, weekly. Each Sunday the billing contact gets a tokened
+// form to approve the week's dispositioned "sold" jobs and classify any that
+// weren't dispositioned; on submit, the super-admin is emailed to review and
+// bill. Auto-charges the card on file, else sends an invoice due the next Wed.
+// Config lives on the company doc under `perJobBilling` (so it's opt-in, not
+// wired to any company name). Standard recurring billing is skipped for these
+// companies (see guards in saveCardAndSubscribe / squareSaveCardAndSubscribe /
+// squareBillingCron) so the base isn't double-charged.
+// ════════════════════════════════════════════════════════════════════════════
+const PERJOB_TZ = "America/Denver"; // "MST" — DST-aware Mountain time
+
+interface PerJobCfg { enabled: boolean; monthlyBase: number; includedJobs: number; perJobPrice: number; tz: string; }
+function perJobCfg(company: Record<string, any>): PerJobCfg {
+  const p = (company && company.perJobBilling) || {};
+  return {
+    enabled: p.enabled === true,
+    monthlyBase: Number(p.monthlyBase) || 500,
+    includedJobs: Number.isFinite(Number(p.includedJobs)) ? Number(p.includedJobs) : 5,
+    perJobPrice: Number(p.perJobPrice) || 100,
+    tz: typeof p.tz === "string" && p.tz ? p.tz : PERJOB_TZ,
+  };
+}
+
+// ── Timezone helpers (no external lib): compute wall-clock day boundaries in a
+// named IANA zone from a UTC instant. Good enough for weekly billing windows. ──
+function tzOffsetMs(ms: number, tz: string): number {
+  const d = new Date(ms);
+  const utc = new Date(d.toLocaleString("en-US", { timeZone: "UTC" })).getTime();
+  const loc = new Date(d.toLocaleString("en-US", { timeZone: tz })).getTime();
+  return loc - utc;
+}
+function tzStartOfDay(ms: number, tz: string): number {
+  const off = tzOffsetMs(ms, tz);
+  const dayStartLocal = Math.floor((ms + off) / 86400000) * 86400000;
+  return dayStartLocal - off;
+}
+function tzMonthKey(ms: number, tz: string): string {
+  const s = new Date(ms).toLocaleString("en-US", { timeZone: tz, month: "2-digit", year: "numeric" });
+  const m = s.match(/(\d{2})\D+(\d{4})/);
+  return m ? `${m[2]}-${m[1]}` : s;
+}
+function perJobFmt(ms: number, tz: string): string {
+  return new Date(ms).toLocaleString("en-US", { timeZone: tz, weekday: "short", month: "short", day: "numeric" });
+}
+// The billing week for a Sunday fire = the completed Sun 00:00 → next Sun 00:00
+// window that just ended (i.e. the prior Sun–Sat).
+function perJobWeekWindow(fireMs: number, tz: string): { weekStart: number; weekEnd: number } {
+  const weekEnd = tzStartOfDay(fireMs, tz);       // this Sunday 00:00 (fire day)
+  const weekStart = weekEnd - 7 * 86400000;        // previous Sunday 00:00
+  return { weekStart, weekEnd };
+}
+
+// Charge a company's saved card (Square card-on-file, else Stripe default PM)
+// off-session for an arbitrary amount, mirroring the result into invoices/{id}.
+// Returns { noCard:true } when there's no usable card so callers fall back to an
+// emailed invoice.
+async function chargeCardOnFile(
+  companyId: string, cents: number, note: string, lineDesc: string,
+): Promise<{ ok: boolean; noCard?: boolean; invoiceId?: string; error?: string }> {
+  if (cents <= 0) return { ok: true };
+  const company = (await db.doc(`companies/${companyId}`).get()).data() || {};
+  const sqCard = company.squareCardId as string | undefined;
+  const sqCust = company.squareCustomerId as string | undefined;
+  if (sqCard && sqCust) {
+    try {
+      const cfg = await squareCfg();
+      const { payment } = await squareApi(cfg, "/v2/payments", {
+        idempotency_key: crypto.randomUUID(),
+        source_id: sqCard, customer_id: sqCust,
+        location_id: cfg.locationId || undefined,
+        amount_money: { amount: cents, currency: "USD" },
+        note: note.slice(0, 500),
+      });
+      await mirrorSquarePayment(companyId, payment);
+      await db.doc(`invoices/${payment.id}`).set(
+        { lines: [{ description: lineDesc, amount: cents }], perJob: true, updatedAt: Date.now() }, { merge: true });
+      return { ok: true, invoiceId: payment.id };
+    } catch (e: any) { return { ok: false, error: e?.message || "Square charge failed." }; }
+  }
+  const stCust = company.stripeCustomerId as string | undefined;
+  if (stCust) {
+    try {
+      const stripe = await stripeClient();
+      const cust: any = await stripe.customers.retrieve(stCust);
+      const pmRef = cust?.invoice_settings?.default_payment_method;
+      if (!pmRef) return { ok: false, noCard: true };
+      const pi = await stripe.paymentIntents.create({
+        amount: cents, currency: "usd", customer: stCust,
+        payment_method: typeof pmRef === "string" ? pmRef : pmRef.id,
+        off_session: true, confirm: true, description: note,
+        metadata: { companyId, kind: "perjob" },
+      });
+      const now = Date.now();
+      const paid = pi.status === "succeeded";
+      await db.doc(`invoices/${pi.id}`).set({
+        stripePaymentIntentId: pi.id, companyId, companyName: company.name || "",
+        number: `PJ-${now.toString(36).toUpperCase()}`, status: paid ? "paid" : "open", perJob: true,
+        amountDue: cents, amountPaid: paid ? cents : 0, currency: "usd",
+        created: now, lines: [{ description: lineDesc, amount: cents }], updatedAt: now,
+      }, { merge: true });
+      return paid ? { ok: true, invoiceId: pi.id } : { ok: false, error: `Payment ${pi.status}` };
+    } catch (e: any) { return { ok: false, error: e?.message || "Stripe charge failed." }; }
+  }
+  return { ok: false, noCard: true };
+}
+
+// Create a simple (no-signature) invoice for a per-job amount, attach a Square
+// hosted pay link, and email the billing contact. "Pay by <dueMs>".
+async function createOverageInvoice(
+  companyId: string, cents: number, lines: Array<{ description: string; amount: number }>, dueMs: number,
+): Promise<{ invoiceId: string; payUrl: string; sent: number; error: string }> {
+  const company = (await db.doc(`companies/${companyId}`).get()).data() || {};
+  const now = Date.now();
+  const ref = db.collection("invoices").doc();
+  const number = `PJ-${now.toString(36).toUpperCase()}`;
+  await ref.set({
+    companyId, companyName: company.name || "",
+    number, status: "open", manual: true, perJob: true,
+    amountDue: cents, amountPaid: 0, currency: "usd",
+    created: now, dueDate: dueMs, lines, updatedAt: now,
+  });
+  const payUrl = await squarePaymentLink(cents, `${number} — ${company.name || "YoutilityKnock"}`);
+  if (payUrl) await ref.set({ payUrl, hostedInvoiceUrl: payUrl, updatedAt: Date.now() }, { merge: true });
+
+  let sent = 0, error = "";
+  try {
+    const cfgN = await getNotifyConfig();
+    const to = String(company.billingEmail || "").trim();
+    const recipients = to ? [to] : await companyAdminEmails(companyId);
+    if (!recipients.length) { error = "No billing email on file."; }
+    const amt = "$" + (cents / 100).toFixed(2);
+    const dueStr = new Date(dueMs).toLocaleString("en-US", { timeZone: PERJOB_TZ, weekday: "long", month: "short", day: "numeric" });
+    const rows = lines.map((l) =>
+      `<tr><td style="padding:6px 0;border-bottom:1px solid #eee">${escEmail(l.description)}</td>`+
+      `<td style="padding:6px 0;border-bottom:1px solid #eee;text-align:right">$${((l.amount || 0) / 100).toFixed(2)}</td></tr>`).join("");
+    const html = `<div style="font-family:system-ui,Arial,sans-serif;max-width:560px;margin:0 auto;color:#111">`+
+      `<div style="font-size:22px;font-weight:800;color:#0EA5E9">${PRODUCT_NAME}</div>`+
+      `<p>${company.billingContactName ? "Hi " + escEmail(String(company.billingContactName)) + "," : "Hello,"}</p>`+
+      `<p>Your ${PRODUCT_NAME} invoice <strong>${escEmail(number)}</strong> for <strong>${amt}</strong> is ready.</p>`+
+      `<table style="width:100%;border-collapse:collapse;margin:14px 0;font-size:14px">${rows}`+
+      `<tr><td style="padding:8px 0;font-weight:700">Total due</td><td style="padding:8px 0;font-weight:700;text-align:right">${amt}</td></tr></table>`+
+      (payUrl ? `<p style="margin:22px 0"><a href="${escEmail(payUrl)}" style="background:#0EA5E9;color:#fff;text-decoration:none;padding:13px 26px;border-radius:10px;font-weight:700;display:inline-block">Pay now →</a></p>` : "")+
+      `<p style="color:#555;font-size:13px">Please pay by <strong>${escEmail(dueStr)}</strong>.</p></div>`;
+    const text = `Your ${PRODUCT_NAME} invoice ${number} for ${amt} is ready. Please pay by ${dueStr}.${payUrl ? "\n\nPay now: " + payUrl : ""}`;
+    for (const r of recipients) {
+      const res = await sendEmailDetailed(cfgN, r, `Invoice ${number} — ${amt}`, text, undefined, html);
+      if (res.ok) sent++; else error = res.detail;
+    }
+  } catch (e: any) { error = e?.message || "Email failed."; }
+  return { invoiceId: ref.id, payUrl, sent, error };
+}
+
+// ── HTML builders for the emailed weekly form and its confirmation pages ──────
+function perJobPage(title: string, body: string): string {
+  return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">`+
+    `<title>${escEmail(title)} — ${PRODUCT_NAME}</title>`+
+    `<style>*{box-sizing:border-box}body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;background:#0b1220;color:#f4f7fb;margin:0;padding:24px;line-height:1.5}`+
+    `.wrap{max-width:640px;margin:0 auto}.card{background:#131c2e;border:1px solid #22304a;border-radius:16px;padding:22px 20px;margin:14px 0}`+
+    `.brand{font-size:22px;font-weight:800;color:#38BDF8}.muted{color:#9fb0c8;font-size:13px}`+
+    `h2,h3{font-family:'Space Grotesk',system-ui,sans-serif}`+
+    `.job{display:flex;gap:12px;align-items:flex-start;padding:12px;border:1px solid #22304a;border-radius:12px;margin:8px 0;background:#0f1728}`+
+    `.job h4{margin:0 0 3px;font-size:15px}.job .sub{color:#9fb0c8;font-size:12px}`+
+    `label.opt{display:inline-flex;align-items:center;gap:6px;margin-right:16px;font-size:14px}`+
+    `.btn{display:inline-block;background:#38BDF8;color:#04121f;font-weight:800;border:none;border-radius:10px;padding:14px 28px;font-size:15px;cursor:pointer;text-decoration:none}`+
+    `input[type=checkbox],input[type=radio]{width:18px;height:18px;accent-color:#38BDF8}`+
+    `.txt{width:100%;padding:11px;border-radius:8px;border:1px solid #33425f;background:#0f1728;color:#fff;font-size:15px}`+
+    `.pill{display:inline-block;background:#0f1728;border:1px solid #22304a;border-radius:999px;padding:3px 10px;font-size:12px;color:#9fb0c8;margin-left:6px}</style></head>`+
+    `<body><div class="wrap"><div class="brand">${PRODUCT_NAME}</div>${body}</div></body></html>`;
+}
+function perJobFormPage(w: any, id: string, token: string, label: string, tz: string): string {
+  const price = Number(w.perJobPrice) || 100;
+  const inc = Number.isFinite(Number(w.includedJobs)) ? Number(w.includedJobs) : 5;
+  const sold: any[] = Array.isArray(w.soldJobs) ? w.soldJobs : [];
+  const undis: any[] = Array.isArray(w.undispositioned) ? w.undispositioned : [];
+  const sub = (it: any) => `${escEmail(perJobFmt(it.startAt, tz))}${it.closerName ? " · " + escEmail(String(it.closerName)) : ""}${it.address ? " · " + escEmail(String(it.address)) : ""}`;
+  const soldRows = sold.length ? sold.map((it) =>
+    `<div class="job"><input type="checkbox" name="sold_${escEmail(String(it.eventId))}" checked>`+
+    `<div><h4>${escEmail(String(it.title || "Appointment"))}</h4><div class="sub">${sub(it)}</div>`+
+    `<div class="sub">Checked = confirmed sold. Uncheck to dispute.</div></div></div>`).join("")
+    : `<p class="muted">No dispositioned sold jobs recorded for this week.</p>`;
+  const undisRows = undis.length ? undis.map((it) =>
+    `<div class="job"><div style="flex:1"><h4>${escEmail(String(it.title || "Appointment"))}</h4><div class="sub">${sub(it)}</div>`+
+    `<div style="margin-top:8px">`+
+    `<label class="opt"><input type="radio" name="appt_${escEmail(String(it.eventId))}" value="sold"> Sold</label>`+
+    `<label class="opt"><input type="radio" name="appt_${escEmail(String(it.eventId))}" value="not" checked> Not sold</label>`+
+    `</div></div></div>`).join("")
+    : `<p class="muted">No undispositioned appointments this week.</p>`;
+  const body =
+    `<div class="card"><h2 style="margin:0 0 4px">Weekly sold-jobs approval</h2>`+
+    `<div class="muted">${escEmail(String(w.companyName || ""))} · Week of <strong style="color:#f4f7fb">${escEmail(label)}</strong></div>`+
+    `<p class="muted" style="margin-top:10px">Your monthly base includes the first ${inc} sold jobs. Each confirmed sold job beyond that is $${price}, billed weekly.</p></div>`+
+    `<form method="post" action="/billing-week/${escEmail(id)}">`+
+    `<input type="hidden" name="t" value="${escEmail(token)}">`+
+    `<div class="card"><h3 style="margin-top:0">✅ Sold jobs to approve<span class="pill">${sold.length}</span></h3>`+
+    `<p class="muted">Marked sold by your closers — confirm each.</p>${soldRows}</div>`+
+    `<div class="card"><h3 style="margin-top:0">❓ Appointments needing a decision<span class="pill">${undis.length}</span></h3>`+
+    `<p class="muted">Not yet dispositioned — mark each Sold or Not sold.</p>${undisRows}</div>`+
+    `<div class="card"><label class="muted">Your name (optional)</label><input class="txt" name="contact" placeholder="Billing contact name" style="margin-top:6px">`+
+    `<div style="margin-top:18px"><button class="btn" type="submit">Submit approval →</button></div>`+
+    `<p class="muted" style="margin-top:12px">Please submit by Monday 11:00 AM MST. Your account team is notified to finalize billing once you submit.</p></div>`+
+    `</form>`;
+  return perJobPage("Weekly approval", body);
+}
+function perJobEmailHtml(contactName: string, companyName: string, label: string, soldN: number, undisN: number, url: string, dueStr: string): string {
+  return `<div style="font-family:system-ui,Arial,sans-serif;max-width:560px;margin:0 auto;color:#111">`+
+    `<div style="font-size:22px;font-weight:800;color:#0EA5E9">${PRODUCT_NAME}</div>`+
+    `<h2 style="margin:14px 0 6px">Weekly sold-jobs approval</h2>`+
+    `<p>${contactName ? "Hi " + escEmail(contactName) + "," : "Hello,"}</p>`+
+    `<p>Your weekly billing approval for <strong>${escEmail(companyName)}</strong> — week of <strong>${escEmail(label)}</strong> — is ready.</p>`+
+    `<p>${soldN} sold job${soldN === 1 ? "" : "s"} to approve · ${undisN} appointment${undisN === 1 ? "" : "s"} to review.</p>`+
+    `<p style="margin:22px 0"><a href="${escEmail(url)}" style="background:#0EA5E9;color:#fff;text-decoration:none;padding:13px 26px;border-radius:10px;font-weight:700;display:inline-block">Review &amp; approve →</a></p>`+
+    `<p style="color:#555;font-size:13px">Please submit by <strong>${escEmail(dueStr)}, 11:00 AM MST</strong>. Each confirmed sold job beyond your monthly included jobs is billed at your per-job rate.</p></div>`;
+}
+function perJobSubmitEmailHtml(companyName: string, label: string, soldCount: number, price: number, adminUrl: string): string {
+  return `<div style="font-family:system-ui,Arial,sans-serif;max-width:560px;margin:0 auto;color:#111">`+
+    `<div style="font-size:22px;font-weight:800;color:#0EA5E9">${PRODUCT_NAME}</div>`+
+    `<h2 style="margin:14px 0 6px">Weekly approval submitted</h2>`+
+    `<p><strong>${escEmail(companyName)}</strong> submitted their sold-jobs approval for the week of <strong>${escEmail(label)}</strong>.</p>`+
+    `<p>Confirmed sold jobs: <strong>${soldCount}</strong> (per-job rate $${price}).</p>`+
+    `<p style="margin:22px 0"><a href="${escEmail(adminUrl)}" style="background:#0EA5E9;color:#fff;text-decoration:none;padding:13px 26px;border-radius:10px;font-weight:700;display:inline-block">Review, approve &amp; bill →</a></p>`+
+    `<p style="color:#555;font-size:13px">Open the console to confirm the count, then approve to auto-charge the card on file (or send an invoice due Wednesday).</p></div>`;
+}
+
+// setPerJobBilling (super) — enable/disable + set the numbers on a company.
+export const setPerJobBilling = onCall(async (request) => {
+  const caller = await getCaller(request);
+  requireSuper(caller);
+  const { companyId, enabled, monthlyBase, includedJobs, perJobPrice } = (request.data || {}) as {
+    companyId?: string; enabled?: boolean; monthlyBase?: number; includedJobs?: number; perJobPrice?: number;
+  };
+  if (!companyId) throw new HttpsError("invalid-argument", "companyId required.");
+  const ref = db.doc(`companies/${companyId}`);
+  if (!(await ref.get()).exists) throw new HttpsError("not-found", "Company not found.");
+  const on = enabled !== false;
+  const base = Math.max(0, Number(monthlyBase) || 0) || 500;
+  const inc = Number.isFinite(Number(includedJobs)) ? Math.max(0, Number(includedJobs)) : 5;
+  const per = Math.max(0, Number(perJobPrice) || 0) || 100;
+  const patch: Record<string, unknown> = {
+    perJobBilling: { enabled: on, monthlyBase: base, includedJobs: inc, perJobPrice: per, tz: PERJOB_TZ, updatedAt: Date.now() },
+    updatedAt: Date.now(),
+  };
+  if (on) { patch.planPrice = base; patch.plan = "Per-job billing"; }
+  await ref.set(patch, { merge: true });
+  return { ok: true, enabled: on, monthlyBase: base, includedJobs: inc, perJobPrice: per };
+});
+
+// perJobMonthlyBase — charge/invoice the fixed monthly base on the 1st.
+export const perJobMonthlyBase = onSchedule({ schedule: "7 6 1 * *", timeZone: PERJOB_TZ }, async () => {
+  const snap = await db.collection("companies").where("perJobBilling.enabled", "==", true).get();
+  for (const d of snap.docs) {
+    try {
+      const cfg = perJobCfg(d.data());
+      const cents = Math.round(cfg.monthlyBase * 100);
+      if (cents <= 0) continue;
+      const monthStr = new Date().toLocaleString("en-US", { timeZone: cfg.tz, month: "long", year: "numeric" });
+      const desc = `Monthly base — ${monthStr} (includes first ${cfg.includedJobs} sold jobs)`;
+      const charge = await chargeCardOnFile(d.id, cents, `YoutilityKnock ${desc}`, desc);
+      if (!charge.ok) {
+        const due = tzStartOfDay(Date.now() + 5 * 86400000, cfg.tz) + 23 * 3600000;
+        await createOverageInvoice(d.id, cents, [{ description: desc, amount: cents }], due);
+      }
+      logger.info(`perJobMonthlyBase: ${d.id} ${charge.ok ? "charged" : "invoiced"} $${cfg.monthlyBase}`);
+    } catch (e) { logger.warn(`perJobMonthlyBase failed for ${d.id}`, e); }
+  }
+});
+
+// perJobWeeklyForms — every Sunday, build each per-job company's week doc and
+// email the billing contact a tokened approval form.
+export const perJobWeeklyForms = onSchedule({ schedule: "7 17 * * 0", timeZone: PERJOB_TZ }, async () => {
+  const now = Date.now();
+  const snap = await db.collection("companies").where("perJobBilling.enabled", "==", true).get();
+  const cfgN = await getNotifyConfig();
+  for (const d of snap.docs) {
+    try {
+      const company = d.data();
+      const cfg = perJobCfg(company);
+      const { weekStart, weekEnd } = perJobWeekWindow(now, cfg.tz);
+      const weekDocId = `${d.id}_${weekStart}`;
+      if ((await db.doc(`perJobWeeks/${weekDocId}`).get()).exists) continue; // already generated
+      const evSnap = await db.collection("events").where("companyId", "==", d.id).get();
+      const sold: any[] = []; const undis: any[] = [];
+      evSnap.forEach((e) => {
+        const ev = e.data();
+        if (ev.type !== "appointment") return;
+        const start = Number(ev.startAt) || 0;
+        if (start < weekStart || start >= weekEnd) return;
+        const item = {
+          eventId: e.id, title: ev.title || ev.address || "Appointment", address: ev.address || "",
+          startAt: start, closerName: ev.closerName || "", setterName: ev.setterName || "", decision: null as string | null,
+        };
+        if (ev.apptStatus === "closed_won") { item.decision = "approved"; sold.push(item); }
+        else if (!ev.apptStatus || ev.apptStatus === "scheduled") { undis.push(item); }
+      });
+      const token = crypto.randomBytes(16).toString("hex");
+      const dueBy = tzStartOfDay(weekEnd + 36 * 3600000, cfg.tz) + 11 * 3600000; // Monday 11:00 local
+      await db.doc(`perJobWeeks/${weekDocId}`).set({
+        companyId: d.id, companyName: company.name || "",
+        weekStart, weekEnd, monthKey: tzMonthKey(weekStart, cfg.tz), tz: cfg.tz,
+        perJobPrice: cfg.perJobPrice, includedJobs: cfg.includedJobs,
+        token, status: "pending", createdAt: now, dueBy,
+        soldJobs: sold, undispositioned: undis, soldCount: 0, amountCents: 0,
+      });
+      const to = String(company.billingEmail || "").trim();
+      const recipients = to ? [to] : await companyAdminEmails(d.id);
+      if (recipients.length) {
+        const url = `${APP_URL}/billing-week/${weekDocId}?t=${token}`;
+        const label = `${perJobFmt(weekStart, cfg.tz)} – ${perJobFmt(weekEnd - 86400000, cfg.tz)}`;
+        const dueStr = perJobFmt(dueBy, cfg.tz);
+        const html = perJobEmailHtml(String(company.billingContactName || ""), String(company.name || ""), label, sold.length, undis.length, url, dueStr);
+        const text = `Your weekly sold-jobs approval for ${company.name || ""} (${label}) is ready. Please review and submit by ${dueStr}, 11:00 AM MST:\n${url}`;
+        for (const r of recipients) await sendEmailDetailed(cfgN, r, `Approve weekly sold jobs — ${company.name || ""} (${label})`, text, undefined, html);
+      }
+      logger.info(`perJobWeeklyForms: ${d.id} → ${sold.length} sold / ${undis.length} undispositioned`);
+    } catch (e) { logger.warn(`perJobWeeklyForms failed for ${d.id}`, e); }
+  }
+});
+
+// perJobDeadline — Monday 11:00 MST: any week still un-submitted is marked
+// overdue and the super-admin is emailed to finalize it manually.
+export const perJobDeadline = onSchedule({ schedule: "0 11 * * 1", timeZone: PERJOB_TZ }, async () => {
+  const now = Date.now();
+  const snap = await db.collection("perJobWeeks").where("status", "==", "pending").get();
+  if (snap.empty) return;
+  const supers = await superAdminEmails();
+  const cfgN = await getNotifyConfig();
+  for (const d of snap.docs) {
+    const w = d.data() as any;
+    if ((Number(w.dueBy) || 0) > now) continue; // deadline not reached yet
+    await d.ref.set({ status: "overdue", overdueAt: now }, { merge: true });
+    if (!supers.length) continue;
+    const tz = w.tz || PERJOB_TZ;
+    const label = `${perJobFmt(w.weekStart, tz)} – ${perJobFmt(w.weekEnd - 86400000, tz)}`;
+    const adminUrl = `${APP_URL}/admin.html?company=${w.companyId}&perjob=${d.id}`;
+    const html = `<div style="font-family:system-ui,Arial,sans-serif;max-width:560px;margin:0 auto;color:#111">`+
+      `<div style="font-size:22px;font-weight:800;color:#0EA5E9">${PRODUCT_NAME}</div>`+
+      `<h2 style="margin:14px 0 6px">Weekly billing not submitted</h2>`+
+      `<p><strong>${escEmail(String(w.companyName || ""))}</strong> did not submit their sold-jobs approval for the week of <strong>${escEmail(label)}</strong> by the Monday 11:00 AM MST deadline.</p>`+
+      `<p style="margin:22px 0"><a href="${escEmail(adminUrl)}" style="background:#0EA5E9;color:#fff;text-decoration:none;padding:13px 26px;border-radius:10px;font-weight:700;display:inline-block">Review &amp; finalize →</a></p>`+
+      `<p style="color:#555;font-size:13px">Open the console to confirm each job and bill the week manually.</p></div>`;
+    const text = `${w.companyName || ""} has not submitted the weekly sold-jobs form (week ${label}). Review and finalize in the console:\n${adminUrl}`;
+    for (const s of supers) await sendEmailDetailed(cfgN, s, `Action needed — weekly billing not submitted (${w.companyName || ""})`, text, undefined, html);
+  }
+});
+
+// perJobForm — public (tokened) weekly approval form. GET renders it; POST
+// records the billing contact's decisions and notifies the super-admin.
+// Hosting rewrites /billing-week/** here.
+export const perJobForm = onRequest({ cors: true }, async (req, res) => {
+  try {
+    const parts = req.path.split("/").filter(Boolean).filter((p) => p !== "billing-week");
+    const weekId = parts[0] || "";
+    const token = String((req.method === "POST" ? (req.body?.t ?? req.query.t) : req.query.t) || "");
+    if (!weekId) { res.status(400).send(perJobPage("Invalid link", `<div class="card"><p>Missing form id.</p></div>`)); return; }
+    const ref = db.doc(`perJobWeeks/${weekId}`);
+    const snap = await ref.get();
+    if (!snap.exists) { res.status(404).send(perJobPage("Not found", `<div class="card"><p>This form link is no longer available.</p></div>`)); return; }
+    const w = snap.data() as any;
+    if (!token || token !== w.token) { res.status(403).send(perJobPage("Invalid link", `<div class="card"><p>This form link is invalid.</p></div>`)); return; }
+    const tz = w.tz || PERJOB_TZ;
+    const label = `${perJobFmt(w.weekStart, tz)} – ${perJobFmt(w.weekEnd - 86400000, tz)}`;
+    const done = ["submitted", "approved", "charged", "invoiced"].includes(w.status);
+
+    if (req.method === "POST") {
+      if (done) { res.status(200).send(perJobPage("Already submitted", `<div class="card"><p>Thanks — this week (${escEmail(label)}) was already submitted.</p></div>`)); return; }
+      const sold = (Array.isArray(w.soldJobs) ? w.soldJobs : []).map((it: any) => ({ ...it, decision: req.body[`sold_${it.eventId}`] ? "approved" : "disputed" }));
+      const undis = (Array.isArray(w.undispositioned) ? w.undispositioned : []).map((it: any) => ({ ...it, decision: req.body[`appt_${it.eventId}`] === "sold" ? "sold" : "not" }));
+      const soldCount = sold.filter((x: any) => x.decision === "approved").length + undis.filter((x: any) => x.decision === "sold").length;
+      const now = Date.now();
+      await ref.set({ soldJobs: sold, undispositioned: undis, soldCount, status: "submitted", submittedAt: now, submittedName: String(req.body.contact || "").slice(0, 200) }, { merge: true });
+      try {
+        const supers = await superAdminEmails();
+        if (supers.length) {
+          const cfgN = await getNotifyConfig();
+          const adminUrl = `${APP_URL}/admin.html?company=${w.companyId}&perjob=${weekId}`;
+          const price = Number(w.perJobPrice) || 100;
+          const html = perJobSubmitEmailHtml(String(w.companyName || ""), label, soldCount, price, adminUrl);
+          const text = `${w.companyName || ""} submitted their weekly sold-jobs approval (${label}). Confirmed sold: ${soldCount}. Review, approve & bill:\n${adminUrl}`;
+          for (const s of supers) await sendEmailDetailed(cfgN, s, `Ready to bill — ${w.companyName || ""} weekly (${label})`, text, undefined, html);
+        }
+      } catch (e) { logger.warn("perJobForm submit notify failed", e); }
+      res.status(200).send(perJobPage("Submitted ✓",
+        `<div class="card"><h2 style="margin-top:0">Thank you! ✅</h2>`+
+        `<p>Your weekly approval for <strong>${escEmail(String(w.companyName || ""))}</strong> (${escEmail(label)}) has been submitted.</p>`+
+        `<p>You confirmed <strong>${soldCount}</strong> sold job${soldCount === 1 ? "" : "s"}. Your account team will finalize billing.</p></div>`));
+      return;
+    }
+
+    if (done) { res.status(200).send(perJobPage("Already submitted", `<div class="card"><p>This week (${escEmail(label)}) has already been submitted. Thank you!</p></div>`)); return; }
+    res.status(200).send(perJobFormPage(w, weekId, token, label, tz));
+  } catch (e: any) {
+    logger.error("perJobForm error", e);
+    res.status(500).send(perJobPage("Error", `<div class="card"><p>Something went wrong. Please try again.</p></div>`));
+  }
+});
+
+// listPerJobWeeks (super) — weeks for a company (or all), newest first.
+export const listPerJobWeeks = onCall(async (request) => {
+  const caller = await getCaller(request);
+  requireSuper(caller);
+  const { companyId } = (request.data || {}) as { companyId?: string };
+  let q: FirebaseFirestore.Query = db.collection("perJobWeeks");
+  if (companyId) q = q.where("companyId", "==", companyId);
+  const snap = await q.get();
+  const weeks = snap.docs.map((d) => ({ id: d.id, ...(d.data() as Record<string, unknown>) }))
+    .sort((a: any, b: any) => (b.weekStart || 0) - (a.weekStart || 0));
+  return { weeks };
+});
+
+// approvePerJobWeek (super) — finalize a week: apply any decision overrides,
+// compute the billable count against the rolling monthly included-jobs
+// allowance, then auto-charge the card on file (else invoice, due Wed).
+export const approvePerJobWeek = onCall(async (request) => {
+  const caller = await getCaller(request);
+  requireSuper(caller);
+  const { weekId, decisions } = (request.data || {}) as { weekId?: string; decisions?: Record<string, string> };
+  if (!weekId) throw new HttpsError("invalid-argument", "weekId required.");
+  const ref = db.doc(`perJobWeeks/${weekId}`);
+  const snap = await ref.get();
+  if (!snap.exists) throw new HttpsError("not-found", "Billing week not found.");
+  const w = snap.data() as any;
+  if (w.status === "charged" || w.status === "invoiced") throw new HttpsError("failed-precondition", "This week has already been billed.");
+  const company = (await db.doc(`companies/${w.companyId}`).get()).data() || {};
+  const cfg = perJobCfg(company);
+  const tz = w.tz || cfg.tz;
+
+  let sold: any[] = Array.isArray(w.soldJobs) ? w.soldJobs.slice() : [];
+  let undis: any[] = Array.isArray(w.undispositioned) ? w.undispositioned.slice() : [];
+  if (decisions && typeof decisions === "object") {
+    sold = sold.map((it) => (decisions[it.eventId] ? { ...it, decision: decisions[it.eventId] } : it));
+    undis = undis.map((it) => (decisions[it.eventId] ? { ...it, decision: decisions[it.eventId] } : it));
+  }
+  // Default: a dispositioned sold job counts unless explicitly disputed; an
+  // undispositioned appointment only counts if explicitly marked sold.
+  const soldCount = sold.filter((x) => x.decision !== "disputed").length + undis.filter((x) => x.decision === "sold").length;
+  const includedJobs = Number.isFinite(Number(w.includedJobs)) ? Number(w.includedJobs) : cfg.includedJobs;
+  const price = Number(w.perJobPrice) || cfg.perJobPrice;
+
+  // Roll the monthly included-jobs allowance across already-billed weeks.
+  const priorSnap = await db.collection("perJobWeeks").where("companyId", "==", w.companyId).where("monthKey", "==", w.monthKey).get();
+  let prior = 0;
+  priorSnap.forEach((d) => { if (d.id === weekId) return; const x = d.data() as any; if (["approved", "invoiced", "charged"].includes(x.status)) prior += Number(x.billedSoldCount) || 0; });
+  const cumulative = prior + soldCount;
+  const billableCumulative = Math.max(0, cumulative - includedJobs);
+  const alreadyBilled = Math.max(0, prior - includedJobs);
+  const billableThisWeek = Math.max(0, billableCumulative - alreadyBilled);
+  const amountCents = Math.round(billableThisWeek * price * 100);
+
+  const now = Date.now();
+  let outStatus = "approved"; let invoiceId = ""; let charged = false; let billError = "";
+  if (amountCents > 0) {
+    const label = `${perJobFmt(w.weekStart, tz)} – ${perJobFmt(w.weekEnd - 86400000, tz)}`;
+    const desc = `${billableThisWeek} sold job${billableThisWeek === 1 ? "" : "s"} @ $${price} — week ${label}`;
+    const charge = await chargeCardOnFile(w.companyId, amountCents, `YoutilityKnock per-job billing — ${desc}`, desc);
+    if (charge.ok) { outStatus = "charged"; invoiceId = charge.invoiceId || ""; charged = true; }
+    else {
+      const wed = tzStartOfDay(w.weekEnd + 3 * 86400000 + 12 * 3600000, tz) + 23 * 3600000 + 59 * 60000; // Wed EOD, following week
+      const inv = await createOverageInvoice(w.companyId, amountCents, [{ description: desc, amount: amountCents }], wed);
+      outStatus = "invoiced"; invoiceId = inv.invoiceId; billError = charge.error || "";
+    }
+  }
+  await ref.set({
+    soldJobs: sold, undispositioned: undis,
+    soldCount, billedSoldCount: soldCount, billableThisWeek, priorSoldThisMonth: prior,
+    amountCents, status: outStatus, invoiceId, approvedAt: now, approvedBy: caller.uid,
+  }, { merge: true });
+  return { ok: true, status: outStatus, soldCount, billableThisWeek, includedJobs, amountCents, invoiceId, charged, error: billError };
 });
 
 // ════════════════════════════════════════════════════════════════════════════
