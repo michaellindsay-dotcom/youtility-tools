@@ -1319,6 +1319,11 @@
     </div>
     <p class="muted" style="font-size:12px;margin:6px 0 0;">When on, setters never choose a closer: they see only open time slots (read from every closer's calendar so nobody is double-booked), and a free closer is auto-assigned using the method above. This is the mode the <strong>Scheduler</strong> (team dispatch) uses.</p>
     <p class="muted" style="font-size:12px;margin:8px 0 0;">Mark who's a closer in the Accounts list below. A closer dispositions each appointment on-site; off-site dispositions are logged as a closer no-show.</p>
+    <div style="margin-top:14px;padding-top:12px;border-top:1px solid var(--line);">
+      <button id="schClearStale" class="btn sm danger">🚑 Clear stale closer appointments</button>
+      <span id="schClearStaleMsg" class="muted small" style="margin-left:8px;"></span>
+      <p class="muted small" style="margin:6px 0 0;">If closers are stuck behind the disposition pop-up, this closes out every past-due appointment they never dispositioned (marked "auto-cleared" — counts as dispositioned, not as a sit/close/no-show) so they can get back into the app right away. Only affects appointments already past their time + 2h.</p>
+    </div>
 
     <h3 style="font-size:13px;color:var(--ink-mid);text-transform:uppercase;letter-spacing:.5px;margin:18px 0 10px;">Territories</h3>
     <div class="field" style="max-width:420px;">
@@ -1696,6 +1701,7 @@ const setUserRole     = httpsCallable(fns, "setUserRole");
 const setUserCloser   = httpsCallable(fns, "setUserCloser");
 const setUserFunction = httpsCallable(fns, "setUserFunction");
 const setUserScheduler = httpsCallable(fns, "setUserScheduler");
+const clearStaleAppointments = httpsCallable(fns, "clearStaleAppointments");
 const setCompanyOptions = httpsCallable(fns, "setCompanyOptions");
 const setCompanyBranding = httpsCallable(fns, "setCompanyBranding");
 const setCompanyProfile  = httpsCallable(fns, "setCompanyProfile");
@@ -3251,6 +3257,19 @@ async function loadScheduling(companyId) {
     banner($("schBanner"), e.message || "Could not load scheduling.", "error");
   }
 }
+$("schClearStale").addEventListener("click", async () => {
+  if (!state.selectedCompany) return;
+  if (!confirm("Close out every past-due closer appointment that was never dispositioned for this company?\n\nThis unblocks closers stuck behind the disposition pop-up. Each is marked \"auto-cleared\" (counts as dispositioned, not a sit/close/no-show). Only affects appointments already past their time + 2h.")) return;
+  const btn = $("schClearStale"), msg = $("schClearStaleMsg");
+  btn.disabled = true; msg.style.color = "var(--ink-mid)"; msg.textContent = "Clearing…";
+  try {
+    const res = await clearStaleAppointments({ companyId: state.selectedCompany });
+    const n = res.data?.cleared ?? 0;
+    msg.style.color = "var(--good)";
+    msg.textContent = `Cleared ${n} stale appointment${n === 1 ? "" : "s"}. Closers can get back in now. ✓`;
+  } catch (e) { msg.style.color = "var(--bad)"; msg.textContent = e.message || "Failed."; }
+  finally { btn.disabled = false; }
+});
 $("schSave").addEventListener("click", async () => {
   if (!state.selectedCompany) return;
   const workDays = [...$("schDays").querySelectorAll("input")].filter((cb) => cb.checked).map((cb) => Number(cb.value));

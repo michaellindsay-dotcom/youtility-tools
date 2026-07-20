@@ -23,6 +23,9 @@ export default function CloserDispositionGate() {
   const [events, setEvents] = useState<ScheduleEvent[]>([]);
   const [now, setNow] = useState(() => Date.now());
   const [active, setActive] = useState<ScheduleEvent | null>(null);
+  // Ids we've just dispositioned — dropped from the list immediately so the gate
+  // updates with no delay, without waiting for the Firestore listener to catch up.
+  const [cleared, setCleared] = useState<Set<string>>(() => new Set());
 
   // Live subscription to this closer's appointments (single-field query — no
   // composite index needed; same one the dashboard nag uses).
@@ -53,8 +56,8 @@ export default function CloserDispositionGate() {
   }, [gated, bump]);
 
   const overdue = useMemo(
-    () => events.filter((e) => isDispositionOverdue(e, now)).sort((a, b) => a.startAt - b.startAt),
-    [events, now]
+    () => events.filter((e) => !cleared.has(e.id) && isDispositionOverdue(e, now)).sort((a, b) => a.startAt - b.startAt),
+    [events, now, cleared]
   );
 
   if (!gated || overdue.length === 0) return null;
@@ -63,12 +66,19 @@ export default function CloserDispositionGate() {
   // we render it alone (it covers the app just as the gate does). Closing it
   // without recording an outcome simply drops back to the gate.
   if (active) {
+    const doneId = active.id;
     return (
       <CloserDispositionModal
         event={active}
         afterTheFact
         onClose={() => setActive(null)}
-        onDone={() => setActive(null)}
+        onDone={() => {
+          // Drop it from the list right away; if it was the last one the gate
+          // returns null on the next render and the closer lands on the dashboard.
+          setCleared((prev) => new Set(prev).add(doneId));
+          setActive(null);
+          bump();
+        }}
       />
     );
   }
