@@ -7847,12 +7847,20 @@ async function buildContractForInvoice(inv: Record<string, any>): Promise<Buffer
 // (sign-then-pay) so the customer e-signs the agreement before paying.
 function invoiceEmailHtml(opts: {
   contactName: string; billedTo: string; number: string; amt: string;
-  lines: Array<{ description?: string; amount?: number }>; signUrl: string;
+  lines: Array<{ description?: string; amount?: number }>; signUrl: string; plain?: boolean;
 }): string {
   const money = (c: number) => "$" + ((c || 0) / 100).toFixed(2);
   const rows = opts.lines.map((l) =>
     `<tr><td style="padding:6px 0;border-bottom:1px solid #eee;">${escEmail(l.description || "Item")}</td>`+
     `<td style="padding:6px 0;border-bottom:1px solid #eee;text-align:right;">${money(l.amount || 0)}</td></tr>`).join("");
+  // A plain invoice has no service agreement to sign — the CTA just goes to pay.
+  const cta = opts.plain ? "Review &amp; pay" : "Review, sign &amp; pay";
+  const note = opts.plain
+    ? "Pay securely online — payment is due on receipt."
+    : "You'll review and electronically sign the service agreement, then pay securely. Payment is due on receipt.";
+  const ctaBlock = opts.signUrl
+    ? `<p style="margin:20px 0;"><a href="${escEmail(opts.signUrl)}" style="background:#0EA5E9;color:#fff;text-decoration:none;padding:12px 22px;border-radius:8px;font-weight:600;display:inline-block;">${cta}</a></p>`
+    : "";
   return `<div style="font-family:Arial,Helvetica,sans-serif;color:#111;max-width:560px;margin:0 auto;">
     <div style="font-size:22px;font-weight:700;color:#0EA5E9;">${PRODUCT_NAME}</div>
     <div style="font-size:11px;color:#888;margin-bottom:16px;">a product of ${PROVIDER_LEGAL_NAME}</div>
@@ -7861,10 +7869,8 @@ function invoiceEmailHtml(opts: {
     <table style="width:100%;border-collapse:collapse;margin:14px 0;font-size:14px;">${rows}
       <tr><td style="padding:8px 0;font-weight:700;">Total due</td>
       <td style="padding:8px 0;font-weight:700;text-align:right;">${opts.amt}</td></tr></table>
-    <p style="margin:20px 0;">
-      <a href="${escEmail(opts.signUrl)}" style="background:#0EA5E9;color:#fff;text-decoration:none;padding:12px 22px;border-radius:8px;font-weight:600;display:inline-block;">Review, sign &amp; pay</a>
-    </p>
-    <p style="color:#555;font-size:13px;">You'll review and electronically sign the service agreement, then pay securely. Payment is due on receipt.</p>
+    ${ctaBlock}
+    <p style="color:#555;font-size:13px;">${note}</p>
     <p style="color:#888;font-size:12px;margin-top:24px;">Billed to: ${escEmail(opts.billedTo)}</p>
   </div>`;
 }
@@ -7971,18 +7977,21 @@ async function sendInvoiceEmail(invoiceId: string, includeContract: boolean): Pr
   const amt = "$" + ((inv.amountDue || 0) / 100).toFixed(2);
   const lines: Array<{ description?: string; amount?: number }> =
     Array.isArray(inv.lines) && inv.lines.length ? inv.lines : [{ description: "Subscription", amount: inv.amountDue }];
+  // A plain invoice (no signToken) skips the sign-then-pay agreement entirely —
+  // the CTA links straight to the pay link and no contract is attached.
+  const plain = !inv.signToken;
   const signUrl = inv.signToken
     ? `${APP_URL}/sign?inv=${invoiceId}&t=${inv.signToken}`
     : (inv.payUrl || inv.hostedInvoiceUrl || "");
 
-  // Attachments: printable invoice + the service agreement (default on).
+  // Attachments: printable invoice + (for non-plain) the service agreement.
   const attachments: EmailAttachment[] = [];
   try {
     const invPdf = await buildInvoicePdf({ id: invoiceId, ...inv });
     attachments.push({ filename: `Invoice-${inv.number || invoiceId}.pdf`, content: invPdf.toString("base64"), type: "application/pdf" });
   } catch (e) { logger.warn("invoice pdf build failed", e); }
   let contractAttached = false;
-  if (includeContract) {
+  if (includeContract && !plain) {
     try {
       const pdf = await buildContractForInvoice({ id: invoiceId, ...inv });
       attachments.push({ filename: `${PRODUCT_NAME}-Service-Agreement.pdf`, content: pdf.toString("base64"), type: "application/pdf" });
@@ -7992,9 +8001,9 @@ async function sendInvoiceEmail(invoiceId: string, includeContract: boolean): Pr
 
   const greeting = contactName ? `Hi ${contactName},\n\n` : "";
   const textBody = `${greeting}Your ${PRODUCT_NAME} invoice ${inv.number || ""} for ${amt} is ready.`+
-    `${signUrl ? "\n\nReview, sign & pay: " + signUrl : ""}`+
+    `${signUrl ? `\n\n${plain ? "Review & pay" : "Review, sign & pay"}: ${signUrl}` : ""}`+
     `${contractAttached ? "\n\nThe service agreement is attached — you'll sign it before payment." : ""}`;
-  const htmlBody = invoiceEmailHtml({ contactName, billedTo, number: (inv.number as string) || "", amt, lines, signUrl });
+  const htmlBody = invoiceEmailHtml({ contactName, billedTo, number: (inv.number as string) || "", amt, lines, signUrl, plain });
 
   let sent = 0, lastError = "";
   for (const to of emails) {
@@ -8052,9 +8061,9 @@ export const providerSignInvoice = onCall(async (request) => {
 export const createInvoice = onCall(async (request) => {
   const caller = await getCaller(request);
   requireSuper(caller);
-  const { companyId, amount, description, lines: rawLines, lockUntilPaid, send } = (request.data || {}) as {
+  const { companyId, amount, description, lines: rawLines, lockUntilPaid, send, skipContract } = (request.data || {}) as {
     companyId?: string; amount?: number; description?: string;
-    lines?: Array<{ description?: string; amount?: number }>; lockUntilPaid?: boolean; send?: boolean;
+    lines?: Array<{ description?: string; amount?: number }>; lockUntilPaid?: boolean; send?: boolean; skipContract?: boolean;
   };
   if (!companyId) throw new HttpsError("invalid-argument", "companyId required.");
   const company = (await db.doc(`companies/${companyId}`).get()).data() || {};
@@ -8080,6 +8089,9 @@ export const createInvoice = onCall(async (request) => {
   }
   const cents = lineItems.reduce((s, l) => s + l.amount, 0);
 
+  // Plain invoice: no service agreement to counter-sign — just email the billing
+  // contact a payable invoice. Otherwise use the two-stage sign-then-pay flow.
+  const plain = skipContract === true;
   const now = Date.now();
   const ref = db.collection("invoices").doc();
   const number = `INV-${now.toString(36).toUpperCase()}`;
@@ -8093,10 +8105,10 @@ export const createInvoice = onCall(async (request) => {
     created: now, dueDate: now, // due on receipt
     lines: lineItems,
     lockUntilPaid: !!lockUntilPaid,
-    // Two-stage signing: Provider counter-signs first, then the customer.
-    signStage: "awaiting_provider",
-    signToken, signedAt: 0, signedName: "",
-    providerSignToken, providerSignedAt: 0, providerSignedName: "",
+    // Two-stage signing (skipped for a plain invoice — no tokens, no stage).
+    signStage: plain ? "none" : "awaiting_provider",
+    signToken: plain ? "" : signToken, signedAt: 0, signedName: "",
+    providerSignToken: plain ? "" : providerSignToken, providerSignedAt: 0, providerSignedName: "",
     updatedAt: now,
   });
   // Generate a Square hosted payment link so the customer can pay online. If
@@ -8108,14 +8120,21 @@ export const createInvoice = onCall(async (request) => {
     await db.doc(`companies/${companyId}`).set(
       { status: "suspended", billingHold: true, pastDueSince: now, updatedAt: now }, { merge: true });
   }
-  // Stage 1: email the Provider (super-admins) to counter-sign first. The
-  // customer email goes out automatically once the Provider signs.
-  let providerEmail = { sent: 0, error: "" };
+  let emailRes = { sent: 0, error: "" };
   if (send !== false) {
-    try { providerEmail = await sendProviderSignEmail(ref.id); }
-    catch (e: any) { providerEmail.error = e?.message || "Email send failed."; logger.warn("createInvoice provider send failed", e); }
+    try {
+      if (plain) {
+        // Email the billing contact the payable invoice directly.
+        const r = await sendInvoiceEmail(ref.id, false);
+        emailRes = { sent: r.sent, error: r.error };
+      } else {
+        // Stage 1: email the Provider (super-admins) to counter-sign first; the
+        // customer is emailed automatically once the Provider signs.
+        emailRes = await sendProviderSignEmail(ref.id);
+      }
+    } catch (e: any) { emailRes.error = e?.message || "Email send failed."; logger.warn("createInvoice send failed", e); }
   }
-  return { ok: true, invoiceId: ref.id, payUrl, stage: "awaiting_provider", sent: providerEmail.sent, error: providerEmail.error };
+  return { ok: true, invoiceId: ref.id, payUrl, plain, stage: plain ? "sent" : "awaiting_provider", sent: emailRes.sent, error: emailRes.error };
 });
 
 // Create an invoice for an ORGANIZATION (super-admin). Itemizes one line per
