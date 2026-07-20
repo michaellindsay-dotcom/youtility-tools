@@ -599,8 +599,7 @@
       <button class="home-btn" data-card="milestonesCard"><span class="hb-ico">🎯</span><b>Gamify milestones</b><small>Custom company milestone ladders reps climb</small></button>
       <button class="home-btn" data-card="redemptionsCard"><span class="hb-ico">✅</span><b>Redemptions</b><small>Approve &amp; fulfill reward redemptions</small></button>
       <button class="home-btn" data-card="outreachCard"><span class="hb-ico">📨</span><b>Lead outreach</b><small>Automated texts/emails triggered by disposition changes</small></button>
-      <button class="home-btn" data-card="companyBillingCard"><span class="hb-ico">💳</span><b>Billing &amp; invoices</b><small>Billing contact, card on file, contract &amp; invoices</small></button>
-      <button class="home-btn" data-card="perJobCard"><span class="hb-ico">🧾</span><b>Per-job billing</b><small>Monthly base + weekly per-sold-job billing &amp; the weekly approval forms</small></button>
+      <button class="home-btn" data-card="companyBillingCard"><span class="hb-ico">💳</span><b>Billing &amp; invoices</b><small>Billing contact, card on file, per-job billing, contract &amp; invoices</small></button>
     </div>
   </section>
   <!-- Back bar shown above an opened company section. -->
@@ -995,35 +994,6 @@
     <div id="companyServicesBanner" class="banner"></div>
   </section>
 
-  <!-- Per-job billing (super-admin): fixed monthly base incl. N sold jobs, then
-       per-sold-job weekly billing + the weekly approval forms to finalize. -->
-  <section id="perJobCard" class="card hidden">
-    <h2>Per-job billing</h2>
-    <p class="muted small" style="margin:-4px 0 14px;">
-      A fixed monthly base (billed the 1st) that includes the first N sold jobs; every sold job beyond that is billed per-job, weekly.
-      Each Sunday the billing contact gets an approval form; on submit you're emailed to review &amp; bill. Standard recurring billing is
-      turned off for this company while this is on.
-    </p>
-    <div class="row" style="gap:10px;align-items:center;flex-wrap:wrap;">
-      <label class="opt" style="display:inline-flex;align-items:center;gap:7px;font-weight:600;">
-        <input type="checkbox" id="pjEnabled" /> Enable per-job billing for this company
-      </label>
-    </div>
-    <div class="row" style="gap:10px;align-items:flex-end;flex-wrap:wrap;margin-top:12px;">
-      <label class="field" style="max-width:170px;"><span>Monthly base ($)</span><input type="number" min="0" id="pjBase" value="500" /></label>
-      <label class="field" style="max-width:170px;"><span>Included jobs / month</span><input type="number" min="0" id="pjIncluded" value="5" /></label>
-      <label class="field" style="max-width:170px;"><span>Price / sold job ($)</span><input type="number" min="0" id="pjPrice" value="100" /></label>
-      <button class="btn primary sm" id="pjSave">Save</button>
-    </div>
-    <div id="perJobBanner" class="banner"></div>
-    <h3 style="font-size:14px;margin:20px 0 6px;">Weekly approval forms</h3>
-    <p class="muted small" style="margin:0 0 10px;">
-      Newest first. Confirm each sold job and decide any undispositioned appointments, then <b>Approve &amp; bill</b> — this auto-charges
-      the card on file, or emails an invoice due Wednesday if there's no card.
-    </p>
-    <div id="perJobWeeks"><p class="muted">Select a company to load its weeks.</p></div>
-  </section>
-
   <!-- Company profile: core company info, editable by the company's own admin
        or a super-admin viewing the company. -->
   <section id="companyProfileCard" class="card hidden">
@@ -1165,6 +1135,45 @@
         </span>
       </div>
       <div class="muted small" style="margin-top:6px;">When emailed, the customer must <strong>e-sign the service agreement</strong> (sign-then-pay), then pays via the <strong>Square payment link</strong> (set up Square under Pricing → Billing).</div>
+    </div>
+
+    <!-- Per-job billing (super-admin): fixed monthly base incl. N sold jobs, then
+         per-sold-job weekly billing + the weekly approval forms + receivables. -->
+    <div id="perJobSection" style="display:none;border-top:1px solid rgba(255,255,255,.1);margin-top:20px;padding-top:16px;">
+      <h3 style="font-size:14px;margin:0 0 4px;">🧾 Per-job billing</h3>
+      <p class="muted small" style="margin:0 0 12px;">
+        Fixed monthly base (billed the 1st) that includes the first N sold jobs; each sold job beyond that is billed per-job, weekly.
+        Standard recurring billing is off while this is on.
+      </p>
+      <div class="row" style="gap:10px;align-items:center;flex-wrap:wrap;">
+        <label class="day-chip"><input type="checkbox" id="pjEnabled" /> Enable per-job billing</label>
+      </div>
+      <div class="row" style="gap:10px;align-items:flex-end;flex-wrap:wrap;margin-top:10px;">
+        <label class="field" style="max-width:140px;"><span>Monthly base ($)</span><input type="number" min="0" id="pjBase" value="500" /></label>
+        <label class="field" style="max-width:140px;"><span>Included jobs / mo</span><input type="number" min="0" id="pjIncluded" value="5" /></label>
+        <label class="field" style="max-width:140px;"><span>Price / sold job ($)</span><input type="number" min="0" id="pjPrice" value="100" /></label>
+        <label class="field" style="max-width:230px;"><span>Weekly invoice</span>
+          <select id="pjInvoiceMode">
+            <option value="manual">Manual — I review &amp; send</option>
+            <option value="auto">Auto — send every Sunday</option>
+          </select>
+        </label>
+        <button class="btn primary sm" id="pjSave">Save</button>
+      </div>
+      <div id="perJobBanner" class="banner"></div>
+
+      <!-- Current receivables + monthly base status -->
+      <div id="pjReceivables" style="margin-top:14px;"></div>
+
+      <div class="row" style="gap:8px;align-items:center;margin:14px 0 4px;flex-wrap:wrap;">
+        <h4 style="font-size:13px;margin:0;">Weekly approval forms</h4>
+        <button id="pjViewLastInvoice" class="btn ghost sm" style="display:none;">🧾 View last week's invoice</button>
+      </div>
+      <p class="muted small" style="margin:0 0 8px;">
+        Newest first. In manual mode, confirm each sold job and decide any undispositioned appointments, then <b>Approve &amp; bill</b>
+        (auto-charges the card on file, or emails an invoice due Wednesday). In auto mode, weeks bill automatically each Sunday.
+      </p>
+      <div id="perJobWeeks"><p class="muted small">Loading…</p></div>
     </div>
 
     <div id="companyBillingBanner" class="banner"></div>
@@ -1772,6 +1781,7 @@ const setCompanyPlan  = httpsCallable(fns, "setCompanyPlan");
 const setPerJobBilling = httpsCallable(fns, "setPerJobBilling");
 const listPerJobWeeks = httpsCallable(fns, "listPerJobWeeks");
 const approvePerJobWeek = httpsCallable(fns, "approvePerJobWeek");
+const markPerJobBasePaid = httpsCallable(fns, "markPerJobBasePaid");
 const createCheckoutSession = httpsCallable(fns, "createCheckoutSession");
 const createBillingPortalSession = httpsCallable(fns, "createBillingPortalSession");
 const getBillingPublicConfig = httpsCallable(fns, "getBillingPublicConfig");
@@ -1849,7 +1859,7 @@ function showLogin() {
 }
 // ── Tabs (super-admin) ────────────────────────────────────────────────────
 const TAB_CARDS = {
-  companies: ["companiesCard","reportsCard","companyServicesCard","companyProfileCard","companyBrandingCard","roleServicesCard","schedulingCard","companySettingsCard","batteryPricingCard","crmCompanyCard","rolesCard","teamsCard","rewardsCard","milestonesCard","redemptionsCard","outreachCard","companyBillingCard","perJobCard","usersCard"],
+  companies: ["companiesCard","reportsCard","companyServicesCard","companyProfileCard","companyBrandingCard","roleServicesCard","schedulingCard","companySettingsCard","batteryPricingCard","crmCompanyCard","rolesCard","teamsCard","rewardsCard","milestonesCard","redemptionsCard","outreachCard","companyBillingCard","usersCard"],
   orgs: ["orgsCard"],
   demos: ["demoRequestsCard"],
   payments: ["plansCard","billingCard"],
@@ -1858,7 +1868,7 @@ const TAB_CARDS = {
   apis: ["apiKeysCard","integrationsCard","crmCard"],
   account: ["myAccountCard"],
 };
-const COMPANY_ONLY = new Set(["reportsCard","companyServicesCard","companyProfileCard","companyBrandingCard","roleServicesCard","schedulingCard","companySettingsCard","batteryPricingCard","crmCompanyCard","rolesCard","teamsCard","rewardsCard","milestonesCard","redemptionsCard","outreachCard","companyBillingCard","perJobCard","usersCard"]);
+const COMPANY_ONLY = new Set(["reportsCard","companyServicesCard","companyProfileCard","companyBrandingCard","roleServicesCard","schedulingCard","companySettingsCard","batteryPricingCard","crmCompanyCard","rolesCard","teamsCard","rewardsCard","milestonesCard","redemptionsCard","outreachCard","companyBillingCard","usersCard"]);
 const ALL_TAB_CARDS = Object.values(TAB_CARDS).flat();
 
 function renderTab() {
@@ -1903,7 +1913,7 @@ function openSuperSection(cardId) {
   state.superCompanyView = "section"; state.openSuperSection = cardId;
   renderSuperCompanyView(); window.scrollTo({ top: 0, behavior: "smooth" });
   if (cardId === "reportsCard") loadReports(state.selectedCompany);
-  if (cardId === "perJobCard") loadPerJob(state.selectedCompany);
+  if (cardId === "companyBillingCard") loadPerJob(state.selectedCompany);
 }
 function backToCompanies() {
   state.superCompanyView = "list"; state.openSuperSection = null; state.selectedCompany = null;
@@ -2080,7 +2090,14 @@ async function selectCompany(companyId, companyName) {
 
 // ── Per-job billing (super-admin) ─────────────────────────────────────────────
 function pjEsc(s){ return String(s==null?"":s).replace(/[&<>"]/g,(c)=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c])); }
-// Deep link from the "Ready to bill" / "not submitted" emails: ?company=&perjob=
+let pjState = { weeks: [], openInvoices: [], config: null, basePaidMonths: [] };
+function pjCurrentMonthKey(){
+  const s = new Date().toLocaleString("en-US",{ timeZone:"America/Denver", month:"2-digit", year:"numeric" }); // "07/2026"
+  const m = s.match(/(\d{2})\D+(\d{4})/);
+  return m ? `${m[2]}-${m[1]}` : "";
+}
+function pjShortDate(ms){ return new Date(ms).toLocaleDateString("en-US",{ timeZone:"America/Denver", month:"short", day:"numeric" }); }
+// Deep link from the per-job emails: ?company=&perjob= → open Billing & invoices.
 async function handlePerJobDeepLink(){
   try{
     const p = new URLSearchParams(location.search);
@@ -2089,47 +2106,77 @@ async function handlePerJobDeepLink(){
     let name = "";
     try{ const c = await getDoc(doc(db,"companies",cid)); if(c.exists()) name = c.data().name || ""; }catch(e){}
     await selectCompany(cid, name);
-    openSuperSection("perJobCard");
+    openSuperSection("companyBillingCard");
   }catch(e){ /* deep link is best-effort */ }
 }
 async function loadPerJob(companyId){
   if(!companyId) return;
-  try{
-    const c = await getDoc(doc(db,"companies",companyId));
-    const pj = (c.exists() && c.data().perJobBilling) || {};
-    $("pjEnabled").checked = pj.enabled === true;
-    $("pjBase").value = pj.monthlyBase ?? 500;
-    $("pjIncluded").value = (pj.includedJobs ?? 5);
-    $("pjPrice").value = pj.perJobPrice ?? 100;
-  }catch(e){ /* keep defaults */ }
-  await loadPerJobWeeks(companyId);
-}
-async function loadPerJobWeeks(companyId){
-  const box = $("perJobWeeks");
-  box.innerHTML = '<p class="muted">Loading…</p>';
+  const show = !!state.isSuper;
+  $("perJobSection").style.display = show ? "" : "none";
+  if(!show) return;
   try{
     const res = await listPerJobWeeks({ companyId });
-    const weeks = res.data?.weeks || [];
-    box.innerHTML = weeks.length
-      ? weeks.map(renderPerJobWeek).join("")
-      : '<p class="muted">No weekly forms yet — they generate automatically every Sunday.</p>';
-  }catch(e){ box.innerHTML = `<p class="muted">${pjEsc(e.message||"Failed to load.")}</p>`; }
+    const d = res.data || {};
+    pjState = { weeks: d.weeks||[], openInvoices: d.openInvoices||[], config: d.config||null, basePaidMonths: d.basePaidMonths||[] };
+  }catch(e){ $("perJobWeeks").innerHTML = `<p class="muted small">${pjEsc(e.message||"Failed to load.")}</p>`; return; }
+  const cfg = pjState.config || {};
+  $("pjEnabled").checked = cfg.enabled === true;
+  $("pjBase").value = cfg.monthlyBase ?? 500;
+  $("pjIncluded").value = cfg.includedJobs ?? 5;
+  $("pjPrice").value = cfg.perJobPrice ?? 100;
+  $("pjInvoiceMode").value = cfg.invoiceMode === "auto" ? "auto" : "manual";
+  renderPerJobReceivables();
+  renderPerJobWeeksList();
+}
+function renderPerJobReceivables(){
+  const cfg = pjState.config || {};
+  const mk = pjCurrentMonthKey();
+  const basePaid = (pjState.basePaidMonths||[]).includes(mk);
+  const base = Number(cfg.monthlyBase)||500;
+  const monthName = new Date().toLocaleString("en-US",{ timeZone:"America/Denver", month:"long", year:"numeric" });
+  const outstanding = (pjState.openInvoices||[]).reduce((s,i)=>s+(i.amountDue||0),0);
+  const invRows = (pjState.openInvoices||[]).length
+    ? pjState.openInvoices.map((i)=>`<div style="display:flex;justify-content:space-between;gap:10px;padding:6px 0;border-bottom:1px solid rgba(255,255,255,.06)"><span>${pjEsc(i.number||i.id)}${i.perJobBase?" · base":""}${i.dueDate?` · due ${pjShortDate(i.dueDate)}`:""}</span><span>$${((i.amountDue||0)/100).toFixed(2)}${i.url?` · <a href="${pjEsc(i.url)}" target="_blank" rel="noopener">pay</a>`:""}</span></div>`).join("")
+    : '<p class="muted small" style="margin:6px 0 0">No outstanding weekly invoices. ✓</p>';
+  $("pjReceivables").innerHTML =
+    `<div style="border:1px solid rgba(255,255,255,.12);border-radius:12px;padding:12px 14px">`+
+    `<div class="row" style="justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">`+
+      `<div><b>${monthName} base</b> · $${base} — ${basePaid?'<span style="color:#22c55e">Paid ✓</span>':'<span style="color:#f59e0b">Due on the 1st</span>'}</div>`+
+      `<button class="btn ghost sm" id="pjBasePaidBtn" data-paid="${basePaid?1:0}">${basePaid?"Unmark paid":"Mark base paid"}</button>`+
+    `</div>`+
+    `<div class="muted small" style="margin:12px 0 2px">Current weekly receivables: <b>$${(outstanding/100).toFixed(2)}</b> outstanding</div>`+
+    invRows+
+    `</div>`;
+}
+function renderPerJobWeeksList(){
+  const box = $("perJobWeeks");
+  const weeks = pjState.weeks || [];
+  box.innerHTML = weeks.length ? weeks.map(renderPerJobWeek).join("") : '<p class="muted small">No weekly forms yet — they generate automatically every Sunday.</p>';
+  const last = weeks.find((w)=> w.invoice && w.invoice.url);
+  const btn = $("pjViewLastInvoice");
+  if(last){ btn.style.display = ""; btn.dataset.url = last.invoice.url; } else { btn.style.display = "none"; btn.dataset.url = ""; }
 }
 function renderPerJobWeek(w){
   const tz = w.tz || "America/Denver";
   const fd = (ms)=> new Date(ms).toLocaleDateString("en-US",{ timeZone:tz, month:"short", day:"numeric" });
   const ft = (ms)=> new Date(ms).toLocaleString("en-US",{ timeZone:tz, weekday:"short", month:"short", day:"numeric" });
   const label = `${fd(w.weekStart)} – ${fd(w.weekEnd-86400000)}`;
-  const billed = w.status==="charged" || w.status==="invoiced";
+  const finalized = ["charged","invoiced","approved"].includes(w.status);
   const color = ({pending:"#f59e0b",overdue:"#ef4444",submitted:"#38bdf8",approved:"#22c55e",charged:"#22c55e",invoiced:"#38bdf8"})[w.status] || "#9fb0c8";
   const sold = Array.isArray(w.soldJobs)?w.soldJobs:[];
   const undis = Array.isArray(w.undispositioned)?w.undispositioned:[];
-  const row = (inner,extra)=>`<div style="display:flex;justify-content:space-between;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid rgba(0,0,0,.06)"><div>${inner}</div><div style="flex:0 0 auto;white-space:nowrap">${extra}</div></div>`;
+  const row = (inner,extra)=>`<div style="display:flex;justify-content:space-between;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid rgba(255,255,255,.06)"><div>${inner}</div><div style="flex:0 0 auto;white-space:nowrap">${extra}</div></div>`;
   const meta = (it)=>`<b>${pjEsc(it.title||"Appointment")}</b><div class="muted small">${pjEsc(ft(it.startAt))}${it.closerName?" · "+pjEsc(it.closerName):""}</div>`;
   let body;
-  if(billed){
-    const money = "$"+((w.amountCents||0)/100).toFixed(2);
-    body = `<div class="muted small" style="margin-top:8px">Confirmed sold: <b>${w.soldCount??0}</b> · Billed this week: <b>${w.billableThisWeek??0}</b> job(s) · <b>${money}</b> — ${w.status==="charged"?"charged to card ✓":"invoiced (due Wed)"}.</div>`;
+  if(finalized){
+    if(w.status==="approved"){
+      body = `<div class="muted small" style="margin-top:8px">Confirmed sold: <b>${w.soldCount??0}</b> — within the monthly included allowance, nothing extra billed.</div>`;
+    } else {
+      const money = "$"+((w.amountCents||0)/100).toFixed(2);
+      const invLink = (w.invoice && w.invoice.url) ? ` · <a href="${pjEsc(w.invoice.url)}" target="_blank" rel="noopener">view invoice</a>`
+        : (w.invoice ? ` · invoice ${pjEsc(w.invoice.status||"")}` : "");
+      body = `<div class="muted small" style="margin-top:8px">Confirmed sold: <b>${w.soldCount??0}</b> · Billed: <b>${w.billableThisWeek??0}</b> job(s) · <b>${money}</b> — ${w.status==="charged"?"charged to card ✓":"invoiced (due Wed)"}${invLink}.</div>`;
+    }
   } else {
     const soldItems = sold.length
       ? sold.map((it)=> row(meta(it), `<label class="opt" style="display:inline-flex;align-items:center;gap:6px"><input type="checkbox" data-ev="${pjEsc(it.eventId)}" ${it.decision!=="disputed"?"checked":""}> Sold</label>`)).join("")
@@ -2143,7 +2190,7 @@ function renderPerJobWeek(w){
       `<div class="muted small" style="margin:12px 0 2px">❓ Undispositioned — decide</div>${undisItems}`+
       `<div style="margin-top:12px"><button class="btn primary sm" data-approve>Approve &amp; bill</button></div>`;
   }
-  return `<div class="pj-week" data-id="${pjEsc(w.id)}" style="border:1px solid rgba(0,0,0,.12);border-radius:12px;padding:14px;margin:10px 0">`+
+  return `<div class="pj-week" data-id="${pjEsc(w.id)}" style="border:1px solid rgba(255,255,255,.14);border-radius:12px;padding:14px;margin:10px 0">`+
     `<div class="row" style="justify-content:space-between;align-items:center"><b>Week of ${label}</b>`+
     `<span style="color:${color};font-weight:700;text-transform:capitalize">${pjEsc(w.status||"")}</span></div>${body}</div>`;
 }
@@ -2157,10 +2204,27 @@ $("pjSave").addEventListener("click", async ()=>{
       monthlyBase: Number($("pjBase").value)||0,
       includedJobs: Number($("pjIncluded").value)||0,
       perJobPrice: Number($("pjPrice").value)||0,
+      invoiceMode: $("pjInvoiceMode").value,
     });
     banner($("perJobBanner"), $("pjEnabled").checked ? "Saved. Standard recurring billing is off for this company." : "Per-job billing disabled.", "good");
+    await loadPerJob(state.selectedCompany);
   }catch(e){ banner($("perJobBanner"), e.message||"Save failed.", "error"); }
   finally{ btn.disabled = false; }
+});
+$("pjViewLastInvoice").addEventListener("click", ()=>{
+  const url = $("pjViewLastInvoice").dataset.url;
+  if(url) window.open(url, "_blank", "noopener");
+});
+$("pjReceivables").addEventListener("click", async (e)=>{
+  const btn = e.target.closest("#pjBasePaidBtn"); if(!btn) return;
+  if(!state.selectedCompany) return;
+  const paidNow = btn.dataset.paid === "1";
+  btn.disabled = true;
+  try{
+    await markPerJobBasePaid({ companyId: state.selectedCompany, monthKey: pjCurrentMonthKey(), paid: !paidNow });
+    banner($("perJobBanner"), !paidNow ? "Base marked paid for this month." : "Base unmarked.", "good");
+    await loadPerJob(state.selectedCompany);
+  }catch(e){ banner($("perJobBanner"), e.message||"Failed.", "error"); btn.disabled=false; }
 });
 $("perJobWeeks").addEventListener("click", async (e)=>{
   const btn = e.target.closest("[data-approve]"); if(!btn) return;
@@ -2182,7 +2246,7 @@ $("perJobWeeks").addEventListener("click", async (e)=>{
         ? `Billed ${d.billableThisWeek} job(s) — $${(d.amountCents/100).toFixed(2)} (${d.charged?"charged card ✓":"invoiced, due Wed"}).`
         : `Approved — no billable jobs beyond the ${d.includedJobs} included this month.`,
       "good");
-    await loadPerJobWeeks(state.selectedCompany);
+    await loadPerJob(state.selectedCompany);
   }catch(e){ banner($("perJobBanner"), e.message||"Failed to bill.", "error"); btn.disabled=false; btn.textContent="Approve & bill"; }
 });
 
@@ -4024,6 +4088,7 @@ async function loadBilling(companyId, companyName) {
   }
   await loadCompanyInvoices(companyId);
   applyBillingMode();
+  loadPerJob(companyId);
 }
 
 // Company/enterprise admins get a self-service view: edit billing contact,
