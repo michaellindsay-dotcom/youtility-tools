@@ -8956,23 +8956,64 @@ function perJobSubmitEmailHtml(companyName: string, label: string, soldCount: nu
 export const setPerJobBilling = onCall(async (request) => {
   const caller = await getCaller(request);
   requireSuper(caller);
-  const { companyId, enabled, monthlyBase, includedJobs, perJobPrice } = (request.data || {}) as {
-    companyId?: string; enabled?: boolean; monthlyBase?: number; includedJobs?: number; perJobPrice?: number;
+  const { companyId, enabled, monthlyBase, includedJobs, perJobPrice, invoiceMode } = (request.data || {}) as {
+    companyId?: string; enabled?: boolean; monthlyBase?: number; includedJobs?: number; perJobPrice?: number; invoiceMode?: string;
   };
   if (!companyId) throw new HttpsError("invalid-argument", "companyId required.");
   const ref = db.doc(`companies/${companyId}`);
-  if (!(await ref.get()).exists) throw new HttpsError("not-found", "Company not found.");
+  const snap = await ref.get();
+  if (!snap.exists) throw new HttpsError("not-found", "Company not found.");
+  const existing = (snap.data()?.perJobBilling as Record<string, unknown>) || {};
   const on = enabled !== false;
   const base = Math.max(0, Number(monthlyBase) || 0) || 500;
   const inc = Number.isFinite(Number(includedJobs)) ? Math.max(0, Number(includedJobs)) : 5;
   const per = Math.max(0, Number(perJobPrice) || 0) || 100;
+  const mode = invoiceMode === "auto" ? "auto" : "manual"; // manual = review & Approve; auto = send Sunday
   const patch: Record<string, unknown> = {
-    perJobBilling: { enabled: on, monthlyBase: base, includedJobs: inc, perJobPrice: per, tz: PERJOB_TZ, updatedAt: Date.now() },
+    // Preserve basePaidMonths (and any other prior fields) across edits.
+    perJobBilling: { ...existing, enabled: on, monthlyBase: base, includedJobs: inc, perJobPrice: per, invoiceMode: mode, tz: PERJOB_TZ, updatedAt: Date.now() },
     updatedAt: Date.now(),
   };
   if (on) { patch.planPrice = base; patch.plan = "Per-job billing"; }
   await ref.set(patch, { merge: true });
-  return { ok: true, enabled: on, monthlyBase: base, includedJobs: inc, perJobPrice: per };
+  return { ok: true, enabled: on, monthlyBase: base, includedJobs: inc, perJobPrice: per, invoiceMode: mode };
+});
+
+// markPerJobBasePaid (super) — record a company's monthly base as paid (or clear
+// it) for a given month. Writes a paid invoice record for visibility and adds
+// the month to basePaidMonths so the monthly cron won't bill it again.
+export const markPerJobBasePaid = onCall(async (request) => {
+  const caller = await getCaller(request);
+  requireSuper(caller);
+  const { companyId, monthKey, paid } = (request.data || {}) as { companyId?: string; monthKey?: string; paid?: boolean };
+  if (!companyId || !monthKey || !/^\d{4}-\d{2}$/.test(monthKey)) throw new HttpsError("invalid-argument", "companyId and monthKey (YYYY-MM) required.");
+  const ref = db.doc(`companies/${companyId}`);
+  const snap = await ref.get();
+  if (!snap.exists) throw new HttpsError("not-found", "Company not found.");
+  const company = snap.data() || {};
+  const pj = (company.perJobBilling as Record<string, any>) || {};
+  const cfg = perJobCfg(company);
+  const months = new Set(Array.isArray(pj.basePaidMonths) ? pj.basePaidMonths : []);
+  const markPaid = paid !== false;
+  if (markPaid) months.add(monthKey); else months.delete(monthKey);
+  await ref.set({ perJobBilling: { ...pj, basePaidMonths: Array.from(months), updatedAt: Date.now() } }, { merge: true });
+  const invId = `perjobbase_${companyId}_${monthKey}`;
+  if (markPaid) {
+    const cents = Math.round(cfg.monthlyBase * 100);
+    const y = Number(monthKey.slice(0, 4)), m = Number(monthKey.slice(5, 7));
+    const monthName = new Date(y, m - 1, 1).toLocaleString("en-US", { month: "long", year: "numeric" });
+    await db.doc(`invoices/${invId}`).set({
+      companyId, companyName: company.name || "", number: `PJ-BASE-${monthKey}`,
+      status: "paid", manual: true, perJob: true, perJobBase: true, monthKey,
+      amountDue: cents, amountPaid: cents, currency: "usd",
+      created: Date.now(), paidAt: Date.now(),
+      lines: [{ description: `Monthly base — ${monthName} (includes first ${cfg.includedJobs} sold jobs)`, amount: cents }],
+      updatedAt: Date.now(),
+    }, { merge: true });
+  } else {
+    await db.doc(`invoices/${invId}`).delete().catch(() => {});
+  }
+  return { ok: true, paid: markPaid, basePaidMonths: Array.from(months) };
 });
 
 // perJobMonthlyBase — charge/invoice the fixed monthly base on the 1st.
@@ -8980,9 +9021,13 @@ export const perJobMonthlyBase = onSchedule({ schedule: "7 6 1 * *", timeZone: P
   const snap = await db.collection("companies").where("perJobBilling.enabled", "==", true).get();
   for (const d of snap.docs) {
     try {
-      const cfg = perJobCfg(d.data());
+      const company = d.data();
+      const cfg = perJobCfg(company);
       const cents = Math.round(cfg.monthlyBase * 100);
       if (cents <= 0) continue;
+      const monthKey = tzMonthKey(Date.now(), cfg.tz);
+      const paidMonths = Array.isArray(company.perJobBilling?.basePaidMonths) ? company.perJobBilling.basePaidMonths : [];
+      if (paidMonths.includes(monthKey)) { logger.info(`perJobMonthlyBase: ${d.id} ${monthKey} already billed — skip`); continue; }
       const monthStr = new Date().toLocaleString("en-US", { timeZone: cfg.tz, month: "long", year: "numeric" });
       const desc = `Monthly base — ${monthStr} (includes first ${cfg.includedJobs} sold jobs)`;
       const charge = await chargeCardOnFile(d.id, cents, `YoutilityKnock ${desc}`, desc);
@@ -8990,6 +9035,8 @@ export const perJobMonthlyBase = onSchedule({ schedule: "7 6 1 * *", timeZone: P
         const due = tzStartOfDay(Date.now() + 5 * 86400000, cfg.tz) + 23 * 3600000;
         await createOverageInvoice(d.id, cents, [{ description: desc, amount: cents }], due);
       }
+      // Record the month as billed so a re-run can't double-charge.
+      await d.ref.set({ perJobBilling: { ...(company.perJobBilling || {}), basePaidMonths: Array.from(new Set([...paidMonths, monthKey])), updatedAt: Date.now() } }, { merge: true });
       logger.info(`perJobMonthlyBase: ${d.id} ${charge.ok ? "charged" : "invoiced"} $${cfg.monthlyBase}`);
     } catch (e) { logger.warn(`perJobMonthlyBase failed for ${d.id}`, e); }
   }
@@ -9024,24 +9071,50 @@ export const perJobWeeklyForms = onSchedule({ schedule: "7 17 * * 0", timeZone: 
       });
       const token = crypto.randomBytes(16).toString("hex");
       const dueBy = tzStartOfDay(weekEnd + 36 * 3600000, cfg.tz) + 11 * 3600000; // Monday 11:00 local
+      const mode = company.perJobBilling?.invoiceMode === "auto" ? "auto" : "manual";
+      const label = `${perJobFmt(weekStart, cfg.tz)} – ${perJobFmt(weekEnd - 86400000, cfg.tz)}`;
       await db.doc(`perJobWeeks/${weekDocId}`).set({
         companyId: d.id, companyName: company.name || "",
         weekStart, weekEnd, monthKey: tzMonthKey(weekStart, cfg.tz), tz: cfg.tz,
         perJobPrice: cfg.perJobPrice, includedJobs: cfg.includedJobs,
-        token, status: "pending", createdAt: now, dueBy,
+        token, mode, status: "pending", createdAt: now, dueBy,
         soldJobs: sold, undispositioned: undis, soldCount: 0, amountCents: 0,
       });
       const to = String(company.billingEmail || "").trim();
       const recipients = to ? [to] : await companyAdminEmails(d.id);
-      if (recipients.length) {
-        const url = `${APP_URL}/billing-week/${weekDocId}?t=${token}`;
-        const label = `${perJobFmt(weekStart, cfg.tz)} – ${perJobFmt(weekEnd - 86400000, cfg.tz)}`;
-        const dueStr = perJobFmt(dueBy, cfg.tz);
-        const html = perJobEmailHtml(String(company.billingContactName || ""), String(company.name || ""), label, sold.length, undis.length, url, dueStr);
-        const text = `Your weekly sold-jobs approval for ${company.name || ""} (${label}) is ready. Please review and submit by ${dueStr}, 11:00 AM MST:\n${url}`;
-        for (const r of recipients) await sendEmailDetailed(cfgN, r, `Approve weekly sold jobs — ${company.name || ""} (${label})`, text, undefined, html);
+
+      if (mode === "auto") {
+        // Auto-send: bill the week immediately from the closers' dispositioned
+        // sold jobs (undispositioned treated as not sold), then email a receipt
+        // to the contact and the super-admin — no approval form, no manual step.
+        const undisNot = undis.map((it) => ({ ...it, decision: "not" }));
+        const wObj = { companyId: d.id, monthKey: tzMonthKey(weekStart, cfg.tz), weekStart, weekEnd, tz: cfg.tz, includedJobs: cfg.includedJobs, perJobPrice: cfg.perJobPrice };
+        const r = await finalizePerJobWeek(weekDocId, wObj, company, sold, undisNot, "auto");
+        const amt = "$" + (r.amountCents / 100).toFixed(2);
+        const rHtml = `<div style="font-family:system-ui,Arial,sans-serif;max-width:560px;margin:0 auto;color:#111">`+
+          `<div style="font-size:22px;font-weight:800;color:#0EA5E9">${PRODUCT_NAME}</div>`+
+          `<h2 style="margin:14px 0 6px">Weekly per-job billing — ${escEmail(label)}</h2>`+
+          `<p>${company.billingContactName ? "Hi " + escEmail(String(company.billingContactName)) + "," : "Hello,"}</p>`+
+          `<p><strong>${escEmail(String(company.name || ""))}</strong> had <strong>${r.soldCount}</strong> sold job${r.soldCount === 1 ? "" : "s"} this week. `+
+          (r.amountCents > 0
+            ? `${r.billableThisWeek} beyond your ${r.includedJobs} monthly included ${r.charged ? "were charged" : "were invoiced"}: <strong>${amt}</strong>.`
+            : `All were within your ${r.includedJobs} monthly included jobs — nothing extra to bill.`)+
+          `</p></div>`;
+        const rText = `${company.name || ""} — weekly per-job billing (${label}): ${r.soldCount} sold, ${r.billableThisWeek} billable, ${amt} ${r.charged ? "charged" : (r.amountCents > 0 ? "invoiced" : "—")}.`;
+        for (const rc of recipients) await sendEmailDetailed(cfgN, rc, `Weekly billing — ${company.name || ""} (${label})`, rText, undefined, rHtml);
+        for (const s of await superAdminEmails()) await sendEmailDetailed(cfgN, s, `Auto-billed weekly — ${company.name || ""} (${label})`, rText, undefined, rHtml);
+        logger.info(`perJobWeeklyForms: ${d.id} AUTO → ${r.soldCount} sold / ${r.billableThisWeek} billable / ${amt}`);
+      } else {
+        // Manual: email the billing contact the approval form.
+        if (recipients.length) {
+          const url = `${APP_URL}/billing-week/${weekDocId}?t=${token}`;
+          const dueStr = perJobFmt(dueBy, cfg.tz);
+          const html = perJobEmailHtml(String(company.billingContactName || ""), String(company.name || ""), label, sold.length, undis.length, url, dueStr);
+          const text = `Your weekly sold-jobs approval for ${company.name || ""} (${label}) is ready. Please review and submit by ${dueStr}, 11:00 AM MST:\n${url}`;
+          for (const r of recipients) await sendEmailDetailed(cfgN, r, `Approve weekly sold jobs — ${company.name || ""} (${label})`, text, undefined, html);
+        }
+        logger.info(`perJobWeeklyForms: ${d.id} MANUAL → ${sold.length} sold / ${undis.length} undispositioned`);
       }
-      logger.info(`perJobWeeklyForms: ${d.id} → ${sold.length} sold / ${undis.length} undispositioned`);
     } catch (e) { logger.warn(`perJobWeeklyForms failed for ${d.id}`, e); }
   }
 });
@@ -9132,14 +9205,81 @@ export const listPerJobWeeks = onCall(async (request) => {
   let q: FirebaseFirestore.Query = db.collection("perJobWeeks");
   if (companyId) q = q.where("companyId", "==", companyId);
   const snap = await q.get();
-  const weeks = snap.docs.map((d) => ({ id: d.id, ...(d.data() as Record<string, unknown>) }))
+  const weeks: any[] = snap.docs.map((d) => ({ id: d.id, ...(d.data() as Record<string, any>) }))
     .sort((a: any, b: any) => (b.weekStart || 0) - (a.weekStart || 0));
-  return { weeks };
+  // Attach a light invoice summary to each billed week (for the View-invoice links).
+  await Promise.all(weeks.map(async (w) => {
+    if (!w.invoiceId) return;
+    try {
+      const inv = (await db.doc(`invoices/${w.invoiceId}`).get()).data();
+      if (inv) w.invoice = { number: inv.number || "", status: inv.status || "open", amountDue: inv.amountDue || 0, url: inv.payUrl || inv.hostedInvoiceUrl || "" };
+    } catch { /* best effort */ }
+  }));
+  // Company config + outstanding per-job receivables (open/past-due invoices).
+  let config: any = null; let basePaidMonths: string[] = []; let openInvoices: any[] = [];
+  if (companyId) {
+    const company = (await db.doc(`companies/${companyId}`).get()).data() || {};
+    const pj = (company.perJobBilling as Record<string, any>) || {};
+    config = {
+      enabled: pj.enabled === true, monthlyBase: Number(pj.monthlyBase) || 500,
+      includedJobs: Number.isFinite(Number(pj.includedJobs)) ? Number(pj.includedJobs) : 5,
+      perJobPrice: Number(pj.perJobPrice) || 100, invoiceMode: pj.invoiceMode === "auto" ? "auto" : "manual",
+    };
+    basePaidMonths = Array.isArray(pj.basePaidMonths) ? pj.basePaidMonths : [];
+    const invSnap = await db.collection("invoices").where("companyId", "==", companyId).get();
+    openInvoices = invSnap.docs.map((d) => ({ id: d.id, ...(d.data() as any) }))
+      .filter((i) => i.perJob === true && (i.status === "open" || i.status === "past_due"))
+      .map((i) => ({ id: i.id, number: i.number || "", amountDue: i.amountDue || 0, dueDate: i.dueDate || null, status: i.status, url: i.payUrl || i.hostedInvoiceUrl || "", perJobBase: !!i.perJobBase }))
+      .sort((a, b) => (b.dueDate || 0) - (a.dueDate || 0));
+  }
+  return { weeks, config, basePaidMonths, openInvoices };
 });
 
-// approvePerJobWeek (super) — finalize a week: apply any decision overrides,
-// compute the billable count against the rolling monthly included-jobs
-// allowance, then auto-charge the card on file (else invoice, due Wed).
+// Finalize a week: given the confirmed sold/undispositioned decisions, compute
+// the billable count against the rolling monthly included-jobs allowance, then
+// auto-charge the card on file (else invoice, due the following Wed), and write
+// the result onto the week doc. Shared by the manual approval and the Sunday
+// auto-send path.
+async function finalizePerJobWeek(
+  weekId: string, w: any, company: Record<string, any>, sold: any[], undis: any[], approvedBy: string,
+): Promise<{ status: string; soldCount: number; billableThisWeek: number; includedJobs: number; amountCents: number; invoiceId: string; charged: boolean; error: string }> {
+  const cfg = perJobCfg(company);
+  const tz = w.tz || cfg.tz;
+  // A dispositioned sold job counts unless explicitly disputed; an
+  // undispositioned appointment only counts if explicitly marked sold.
+  const soldCount = sold.filter((x) => x.decision !== "disputed").length + undis.filter((x) => x.decision === "sold").length;
+  const includedJobs = Number.isFinite(Number(w.includedJobs)) ? Number(w.includedJobs) : cfg.includedJobs;
+  const price = Number(w.perJobPrice) || cfg.perJobPrice;
+
+  // Roll the monthly included-jobs allowance across already-billed weeks.
+  const priorSnap = await db.collection("perJobWeeks").where("companyId", "==", w.companyId).where("monthKey", "==", w.monthKey).get();
+  let prior = 0;
+  priorSnap.forEach((d) => { if (d.id === weekId) return; const x = d.data() as any; if (["approved", "invoiced", "charged"].includes(x.status)) prior += Number(x.billedSoldCount) || 0; });
+  const billableThisWeek = Math.max(0, Math.max(0, (prior + soldCount) - includedJobs) - Math.max(0, prior - includedJobs));
+  const amountCents = Math.round(billableThisWeek * price * 100);
+
+  const now = Date.now();
+  let status = "approved", invoiceId = "", charged = false, error = "";
+  if (amountCents > 0) {
+    const label = `${perJobFmt(w.weekStart, tz)} – ${perJobFmt(w.weekEnd - 86400000, tz)}`;
+    const desc = `${billableThisWeek} sold job${billableThisWeek === 1 ? "" : "s"} @ $${price} — week ${label}`;
+    const charge = await chargeCardOnFile(w.companyId, amountCents, `YoutilityKnock per-job billing — ${desc}`, desc);
+    if (charge.ok) { status = "charged"; invoiceId = charge.invoiceId || ""; charged = true; }
+    else {
+      const wed = tzStartOfDay(w.weekEnd + 3 * 86400000 + 12 * 3600000, tz) + 23 * 3600000 + 59 * 60000; // Wed EOD, following week
+      const inv = await createOverageInvoice(w.companyId, amountCents, [{ description: desc, amount: amountCents }], wed);
+      status = "invoiced"; invoiceId = inv.invoiceId; error = charge.error || "";
+    }
+  }
+  await db.doc(`perJobWeeks/${weekId}`).set({
+    soldJobs: sold, undispositioned: undis,
+    soldCount, billedSoldCount: soldCount, billableThisWeek, priorSoldThisMonth: prior,
+    amountCents, status, invoiceId, approvedAt: now, approvedBy,
+  }, { merge: true });
+  return { status, soldCount, billableThisWeek, includedJobs, amountCents, invoiceId, charged, error };
+}
+
+// approvePerJobWeek (super) — apply any decision overrides, then finalize & bill.
 export const approvePerJobWeek = onCall(async (request) => {
   const caller = await getCaller(request);
   requireSuper(caller);
@@ -9151,50 +9291,14 @@ export const approvePerJobWeek = onCall(async (request) => {
   const w = snap.data() as any;
   if (w.status === "charged" || w.status === "invoiced") throw new HttpsError("failed-precondition", "This week has already been billed.");
   const company = (await db.doc(`companies/${w.companyId}`).get()).data() || {};
-  const cfg = perJobCfg(company);
-  const tz = w.tz || cfg.tz;
-
   let sold: any[] = Array.isArray(w.soldJobs) ? w.soldJobs.slice() : [];
   let undis: any[] = Array.isArray(w.undispositioned) ? w.undispositioned.slice() : [];
   if (decisions && typeof decisions === "object") {
     sold = sold.map((it) => (decisions[it.eventId] ? { ...it, decision: decisions[it.eventId] } : it));
     undis = undis.map((it) => (decisions[it.eventId] ? { ...it, decision: decisions[it.eventId] } : it));
   }
-  // Default: a dispositioned sold job counts unless explicitly disputed; an
-  // undispositioned appointment only counts if explicitly marked sold.
-  const soldCount = sold.filter((x) => x.decision !== "disputed").length + undis.filter((x) => x.decision === "sold").length;
-  const includedJobs = Number.isFinite(Number(w.includedJobs)) ? Number(w.includedJobs) : cfg.includedJobs;
-  const price = Number(w.perJobPrice) || cfg.perJobPrice;
-
-  // Roll the monthly included-jobs allowance across already-billed weeks.
-  const priorSnap = await db.collection("perJobWeeks").where("companyId", "==", w.companyId).where("monthKey", "==", w.monthKey).get();
-  let prior = 0;
-  priorSnap.forEach((d) => { if (d.id === weekId) return; const x = d.data() as any; if (["approved", "invoiced", "charged"].includes(x.status)) prior += Number(x.billedSoldCount) || 0; });
-  const cumulative = prior + soldCount;
-  const billableCumulative = Math.max(0, cumulative - includedJobs);
-  const alreadyBilled = Math.max(0, prior - includedJobs);
-  const billableThisWeek = Math.max(0, billableCumulative - alreadyBilled);
-  const amountCents = Math.round(billableThisWeek * price * 100);
-
-  const now = Date.now();
-  let outStatus = "approved"; let invoiceId = ""; let charged = false; let billError = "";
-  if (amountCents > 0) {
-    const label = `${perJobFmt(w.weekStart, tz)} – ${perJobFmt(w.weekEnd - 86400000, tz)}`;
-    const desc = `${billableThisWeek} sold job${billableThisWeek === 1 ? "" : "s"} @ $${price} — week ${label}`;
-    const charge = await chargeCardOnFile(w.companyId, amountCents, `YoutilityKnock per-job billing — ${desc}`, desc);
-    if (charge.ok) { outStatus = "charged"; invoiceId = charge.invoiceId || ""; charged = true; }
-    else {
-      const wed = tzStartOfDay(w.weekEnd + 3 * 86400000 + 12 * 3600000, tz) + 23 * 3600000 + 59 * 60000; // Wed EOD, following week
-      const inv = await createOverageInvoice(w.companyId, amountCents, [{ description: desc, amount: amountCents }], wed);
-      outStatus = "invoiced"; invoiceId = inv.invoiceId; billError = charge.error || "";
-    }
-  }
-  await ref.set({
-    soldJobs: sold, undispositioned: undis,
-    soldCount, billedSoldCount: soldCount, billableThisWeek, priorSoldThisMonth: prior,
-    amountCents, status: outStatus, invoiceId, approvedAt: now, approvedBy: caller.uid,
-  }, { merge: true });
-  return { ok: true, status: outStatus, soldCount, billableThisWeek, includedJobs, amountCents, invoiceId, charged, error: billError };
+  const r = await finalizePerJobWeek(weekId, w, company, sold, undis, caller.uid);
+  return { ok: true, ...r };
 });
 
 // ════════════════════════════════════════════════════════════════════════════
