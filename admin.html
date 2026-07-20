@@ -1126,6 +1126,7 @@
       </div>
       <div class="row" style="justify-content:space-between;align-items:center;margin-top:8px;flex-wrap:wrap;gap:8px;">
         <span style="display:flex;gap:14px;flex-wrap:wrap;">
+          <label class="day-chip"><input id="invPlain" type="checkbox" /> Plain invoice — no contract or signature</label>
           <label class="day-chip"><input id="invLock" type="checkbox" /> Lock account until paid (due on receipt)</label>
           <label class="day-chip"><input id="invSend" type="checkbox" checked /> Email it to the billing contact</label>
         </span>
@@ -1134,7 +1135,7 @@
           <button id="invCreate" class="btn primary sm">Create &amp; send invoice + contract</button>
         </span>
       </div>
-      <div class="muted small" style="margin-top:6px;">When emailed, the customer must <strong>e-sign the service agreement</strong> (sign-then-pay), then pays via the <strong>Square payment link</strong> (set up Square under Pricing → Billing).</div>
+      <div class="muted small" style="margin-top:6px;" id="invCreateHelp">When emailed, the customer must <strong>e-sign the service agreement</strong> (sign-then-pay), then pays via the <strong>Square payment link</strong> (set up Square under Pricing → Billing).</div>
     </div>
 
     <!-- Per-job billing (super-admin): fixed monthly base incl. N sold jobs, then
@@ -4214,6 +4215,7 @@ $("invCreate").addEventListener("click", async () => {
   const amount = Number($("invAmount").value);
   if (!isFinite(amount) || amount <= 0) { banner($("companyBillingBanner"), "Enter an amount greater than 0.", "error"); return; }
   const send = $("invSend").checked;
+  const plain = $("invPlain").checked;
   const email = $("billEmail").value.trim();
   if (send && !email) { banner($("companyBillingBanner"), "Add a Billing email above first — or uncheck “Email it” to just create the invoice.", "error"); $("billEmail").focus(); return; }
   $("invCreate").disabled = true;
@@ -4223,18 +4225,35 @@ $("invCreate").addEventListener("click", async () => {
     if (email) await setCompanyBilling({ companyId: billingCompany, billingContactName: $("billContactName").value, billingEmail: email });
     const { data } = await createInvoice({
       companyId: billingCompany, amount, description: $("invDesc").value,
-      lockUntilPaid: $("invLock").checked, send,
+      lockUntilPaid: $("invLock").checked, send, skipContract: plain,
     });
     const locked = $("invLock").checked ? " Account locked until paid." : "";
     let msg;
-    if (!send) msg = `Invoice created (not emailed). Sign it as provider from the Invoices list when ready.${locked}`;
-    else if (data.sent) msg = `Invoice created — provider sign request emailed to you. Sign it (Invoices → Sign as provider) and the customer is emailed to sign & pay.${locked}`;
-    else msg = `Invoice created, but the provider email didn't send: ${data.error || "check Notifications"}. Use “Sign as provider” to continue.${locked}`;
+    if (plain) {
+      if (!send) msg = `Plain invoice created (not emailed) — find it in the Invoices list.${locked}`;
+      else if (data.sent) msg = `Plain invoice created and emailed to the billing contact to pay.${locked}`;
+      else msg = `Invoice created, but the email didn't send: ${data.error || "check Notifications"}.${locked}`;
+    } else if (!send) {
+      msg = `Invoice created (not emailed). Sign it as provider from the Invoices list when ready.${locked}`;
+    } else if (data.sent) {
+      msg = `Invoice created — provider sign request emailed to you. Sign it (Invoices → Sign as provider) and the customer is emailed to sign & pay.${locked}`;
+    } else {
+      msg = `Invoice created, but the provider email didn't send: ${data.error || "check Notifications"}. Use “Sign as provider” to continue.${locked}`;
+    }
     banner($("companyBillingBanner"), msg, (!send || data.sent) ? "good" : "error");
     $("invAmount").value = ""; $("invDesc").value = ""; $("invLock").checked = false;
     await loadBilling(billingCompany);
   } catch (e) { banner($("companyBillingBanner"), e.message || "Could not create the invoice.", "error"); }
   finally { $("invCreate").disabled = false; }
+});
+// Plain-invoice toggle: reflect it in the button + help text (no contract step).
+$("invPlain").addEventListener("change", () => {
+  const plain = $("invPlain").checked;
+  $("invCreate").textContent = plain ? "Create & send invoice" : "Create & send invoice + contract";
+  $("contractPreview").style.display = plain ? "none" : "";
+  $("invCreateHelp").innerHTML = plain
+    ? "A <strong>plain invoice</strong> skips the contract and signature — the billing contact just gets an invoice with a <strong>Square payment link</strong> to pay (set up Square under Pricing → Billing)."
+    : "When emailed, the customer must <strong>e-sign the service agreement</strong> (sign-then-pay), then pays via the <strong>Square payment link</strong> (set up Square under Pricing → Billing).";
 });
 $("contractPreview").addEventListener("click", async () => {
   if (!billingCompany) return;
