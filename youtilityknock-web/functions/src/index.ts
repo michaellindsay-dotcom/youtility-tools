@@ -152,8 +152,8 @@ const TIERS: Tier[] = ["admin", "manager", "user"];
 // closer org-chart participation, and downline visibility. Managers derive the
 // "manager" tier; setter/closer derive "user". Custom role titles still ride on
 // top for display; this is the structural source of truth.
-type Position = "admin" | "team_manager" | "closer_manager" | "setter_manager" | "closer" | "setter";
-const POSITIONS: Position[] = ["admin", "team_manager", "closer_manager", "setter_manager", "closer", "setter"];
+type Position = "admin" | "team_manager" | "closer_manager" | "setter_manager" | "closer" | "setter" | "scheduler";
+const POSITIONS: Position[] = ["admin", "team_manager", "closer_manager", "setter_manager", "closer", "setter", "scheduler"];
 function isPosition(p: unknown): p is Position { return typeof p === "string" && (POSITIONS as string[]).includes(p); }
 function tierForPosition(p: Position): Tier {
   if (p === "admin") return "admin";
@@ -169,6 +169,7 @@ function fnForPosition(p: Position): { isSetter: boolean; isCloser: boolean } {
     case "closer_manager": return { isSetter: false, isCloser: true };
     case "team_manager": return { isSetter: true, isCloser: true };
     case "admin": return { isSetter: false, isCloser: false };
+    case "scheduler": return { isSetter: false, isCloser: false }; // a dispatcher, not a door rep
   }
 }
 
@@ -1083,6 +1084,12 @@ export const assignUserHierarchy = onCall(async (request) => {
     patch.role = t;
     patch.isSetter = fn.isSetter;
     patch.isCloser = fn.isCloser;
+    // A "scheduler" position is a dedicated dispatcher — grant the dispatch tool
+    // and lock them to the Scheduler on login. Moving OFF the scheduler position
+    // clears that lock; other position changes leave the scheduler flags alone
+    // (so a closer's add-on dispatch capability isn't wiped by a re-title).
+    if (position === "scheduler") { patch.isScheduler = true; patch.schedulerOnly = true; }
+    else if ((target as any).position === "scheduler") { patch.isScheduler = false; patch.schedulerOnly = false; }
     await getAuth().setCustomUserClaims(uid, {
       ...(await getAuth().getUser(uid)).customClaims,
       role: t,
@@ -1366,12 +1373,22 @@ export const cancelAppointment = onCall(async (request) => {
 // sync; rebuilds the org charts so both chains stay consistent.
 export const setUserFunction = onCall(async (request) => {
   const caller = await getCaller(request);
-  const { uid, isSetter, isCloser } = (request.data || {}) as { uid?: string; isSetter?: boolean; isCloser?: boolean };
+  const { uid, isSetter, isCloser, kind } = (request.data || {}) as { uid?: string; isSetter?: boolean; isCloser?: boolean; kind?: string };
   if (!uid) throw new HttpsError("invalid-argument", "uid required.");
   const snap = await db.doc(`users/${uid}`).get();
   if (!snap.exists) throw new HttpsError("not-found", "User not found.");
   authorizeForCompany(caller, (snap.data() as any).companyId);
-  await db.doc(`users/${uid}`).set({ isSetter: !!isSetter, isCloser: !!isCloser }, { merge: true });
+  if (kind === "scheduler") {
+    // A dedicated dispatcher: locked to the Scheduler on login, no door lane.
+    await db.doc(`users/${uid}`).set(
+      { isSetter: false, isCloser: false, isScheduler: true, schedulerOnly: true, position: "scheduler" }, { merge: true });
+  } else {
+    const patch: Record<string, unknown> = { isSetter: !!isSetter, isCloser: !!isCloser, schedulerOnly: false };
+    // Switching a dedicated scheduler to a door lane drops the scheduler role.
+    if ((snap.data() as any).position === "scheduler") { patch.position = null; patch.isScheduler = false; }
+    await db.doc(`users/${uid}`).set(patch, { merge: true });
+  }
+  // company.schedulerActive is kept in sync by the onUserSchedulerSync trigger.
   return { ok: true };
 });
 

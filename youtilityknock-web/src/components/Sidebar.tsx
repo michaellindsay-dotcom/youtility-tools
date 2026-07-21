@@ -11,6 +11,7 @@ const PREVIEW_POSITIONS: { value: Position; label: string }[] = [
   { value: "setter_manager", label: "Setter Manager" },
   { value: "closer", label: "Closer" },
   { value: "setter", label: "Setter" },
+  { value: "scheduler", label: "Scheduler" },
 ];
 
 // `feat` shows the link only when the plan has that feature; `anyFeat` shows it
@@ -79,7 +80,8 @@ export default function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
     if (!previewPos || !canPreview) return { role, profile };
     const r: Role = previewPos.endsWith("_manager") ? "manager" : "user";
     const isCloser = previewPos === "closer" || previewPos === "closer_manager" || previewPos === "team_manager";
-    return { role: r, profile: profile ? { ...profile, position: previewPos, isCloser, role: r } : profile };
+    const isSched = previewPos === "scheduler";
+    return { role: r, profile: profile ? { ...profile, position: previewPos, isCloser, role: r, isScheduler: isSched, schedulerOnly: isSched } : profile };
   }, [previewPos, canPreview, role, profile]);
 
   // A company on a RallyCard-only plan (no "map" feature) gets the card +
@@ -105,7 +107,7 @@ export default function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
   });
   // A dedicated dispatcher (Scheduler only) is locked to the dispatch view — the
   // menu shows just the Scheduler (Settings/sign-out stay for account access).
-  const schedulerLocked = eff.profile?.schedulerOnly === true && eff.role !== "admin" && eff.role !== "superadmin";
+  const schedulerLocked = (eff.profile?.schedulerOnly === true || eff.profile?.position === "scheduler") && eff.role !== "admin" && eff.role !== "superadmin";
   const nav = schedulerLocked ? visible.filter((l) => l.to === "/scheduler" || l.to === "/settings") : visible;
   return (
     <aside className="sidebar">

@@ -5216,6 +5216,7 @@ const POSITIONS = [
   ["setter_manager", "Setter Manager"],
   ["closer", "Closer"],
   ["setter", "Setter"],
+  ["scheduler", "Scheduler"],
 ];
 const POSITION_LABEL = Object.fromEntries(POSITIONS);
 
@@ -6164,6 +6165,7 @@ function renderProfileBody(uid, ov) {
   const matchedRole = state.roles.find((r) => (r.title || "").trim().toLowerCase() === (POSITION_LABEL[curPos] || "").toLowerCase());
   const usingCustomTitle = !!u.roleId && (!matchedRole || u.roleId !== matchedRole.id);
   const isCloserFn = u.isCloser || curPos === "closer" || curPos === "closer_manager";
+  const isSchedUser = !!u.schedulerOnly || curPos === "scheduler" || u.position === "scheduler";
   const teamOpts = assignableTeams().map((t) => `<option value="${t.id}" ${(u.managedTeamIds || []).includes(t.id) ? 'selected' : ''}>${esc(t.name)}</option>`).join("");
   const myTeamOptions = `<option value="">— none —</option>` +
     assignableTeams().map((t) => `<option value="${t.id}" ${u.teamId === t.id ? 'selected' : ''}>${esc(t.name)}</option>`).join("");
@@ -6191,13 +6193,13 @@ function renderProfileBody(uid, ov) {
     <div class="field"><span>Position</span><select class="posSel">${posOptions}</select></div>
     <div class="field"><span>Function <span class="muted small">— which lanes they work; overrides the position default</span></span>
       <select class="fnSel">
-        <option value="setter" ${!u.isCloser ? "selected" : ""}>Setter</option>
-        <option value="closer" ${u.isCloser && u.isSetter === false ? "selected" : ""}>Closer</option>
-        <option value="both" ${u.isCloser && u.isSetter !== false ? "selected" : ""}>Both (Setter · Closer)</option>
+        <option value="setter" ${!isSchedUser && !u.isCloser ? "selected" : ""}>Setter</option>
+        <option value="closer" ${!isSchedUser && u.isCloser && u.isSetter === false ? "selected" : ""}>Closer</option>
+        <option value="both" ${!isSchedUser && u.isCloser && u.isSetter !== false ? "selected" : ""}>Both (Setter · Closer)</option>
+        <option value="scheduler" ${isSchedUser ? "selected" : ""}>Scheduler (dispatch only — sees only the Scheduler)</option>
       </select>
     </div>
-    <label class="day-chip" style="display:inline-flex;margin:2px 0 2px;"><input type="checkbox" class="schedChk" ${u.isScheduler ? "checked" : ""}/> Scheduler <span class="muted small" style="margin-left:4px;">— team dispatch: book &amp; assign appointments across all closers' calendars</span></label>
-    <label class="day-chip" style="display:inline-flex;margin:2px 0 2px;"><input type="checkbox" class="schedOnlyChk" ${u.schedulerOnly ? "checked" : ""}/> Scheduler only <span class="muted small" style="margin-left:4px;">— dedicated dispatcher: on login they see only the Scheduler</span></label>
+    <label class="day-chip" style="display:inline-flex;margin:2px 0 2px;"><input type="checkbox" class="schedChk" ${u.isScheduler && !isSchedUser ? "checked" : ""}/> Also dispatch (add-on) <span class="muted small" style="margin-left:4px;">— give a setter/closer the Scheduler too, without locking them to it</span></label>
     <div class="roleCustomWrap field"><span>Title</span>
       ${usingCustomTitle
         ? `<select class="roleSel">${roleOptions}</select>`
@@ -6277,16 +6279,16 @@ function renderProfileBody(uid, ov) {
     catch (e) { pbanner(e.message, "error"); }
   });
   pb.querySelector(".fnSel").addEventListener("change", async (ev) => {
-    const v = ev.target.value; // setter | closer | both
-    try { await setUserFunction({ uid: u.id, isSetter: v === "setter" || v === "both", isCloser: v === "closer" || v === "both" }); pbanner("Function updated.", "good"); await refresh(); }
-    catch (e) { pbanner(e.message, "error"); }
+    const v = ev.target.value; // setter | closer | both | scheduler
+    try {
+      if (v === "scheduler") await setUserFunction({ uid: u.id, kind: "scheduler" });
+      else await setUserFunction({ uid: u.id, isSetter: v === "setter" || v === "both", isCloser: v === "closer" || v === "both" });
+      pbanner(v === "scheduler" ? "Set to Scheduler — they'll log in to just the dispatch board." : "Function updated.", "good");
+      await refresh();
+    } catch (e) { pbanner(e.message, "error"); }
   });
   pb.querySelector(".schedChk").addEventListener("change", async (ev) => {
-    try { await setUserScheduler({ uid: u.id, isScheduler: ev.target.checked }); pbanner(ev.target.checked ? "Scheduler enabled." : "Scheduler disabled.", "good"); await refresh(); }
-    catch (e) { pbanner(e.message, "error"); ev.target.checked = !ev.target.checked; }
-  });
-  pb.querySelector(".schedOnlyChk").addEventListener("change", async (ev) => {
-    try { await setUserScheduler({ uid: u.id, schedulerOnly: ev.target.checked }); pbanner(ev.target.checked ? "Scheduler-only login enabled." : "Scheduler-only login disabled.", "good"); await refresh(); }
+    try { await setUserScheduler({ uid: u.id, isScheduler: ev.target.checked }); pbanner(ev.target.checked ? "Dispatch add-on enabled." : "Dispatch add-on disabled.", "good"); await refresh(); }
     catch (e) { pbanner(e.message, "error"); ev.target.checked = !ev.target.checked; }
   });
   pb.querySelector(".myTeamSel").addEventListener("change", async (ev) => {
