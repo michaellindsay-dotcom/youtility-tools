@@ -130,7 +130,7 @@ export interface CompanyRole {
 
 // Structural position — drives tier, setter/closer participation, and downline.
 export type Position =
-  | "admin" | "team_manager" | "closer_manager" | "setter_manager" | "closer" | "setter";
+  | "admin" | "team_manager" | "closer_manager" | "setter_manager" | "closer" | "setter" | "scheduler";
 
 export interface Team {
   id: string;

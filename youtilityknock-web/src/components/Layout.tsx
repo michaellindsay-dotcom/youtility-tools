@@ -18,7 +18,7 @@ export default function Layout() {
   const { profile, role } = useAuth();
   const location = useLocation();
   const [navOpen, setNavOpen] = useState(false);
-  const schedulerLocked = profile?.schedulerOnly === true && role !== "admin" && role !== "superadmin";
+  const schedulerLocked = (profile?.schedulerOnly === true || profile?.position === "scheduler") && role !== "admin" && role !== "superadmin";
 
   // Nudge a reflow once the shell mounts so anything that measures the viewport
   // (map, sticky bars) settles after the login→app transition. The status-bar
