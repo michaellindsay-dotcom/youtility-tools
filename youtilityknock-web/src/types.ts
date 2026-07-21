@@ -160,6 +160,7 @@ export interface UserProfile {
   isSetter?: boolean; // knocks doors / sets appointments (default true)
   isCloser?: boolean; // can be assigned appointments to close
   isScheduler?: boolean; // team dispatch: book & assign appointments across closers
+  schedulerOnly?: boolean; // dedicated dispatcher: on login they see only the Scheduler
   // Separate closer org chart, parallel to the setter managerId/managerPath.
   closerManagerId?: string | null; // direct closer manager
   closerManagerPath?: string[]; // closer-chain ancestors, nearest first

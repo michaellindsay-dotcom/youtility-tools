@@ -6197,6 +6197,7 @@ function renderProfileBody(uid, ov) {
       </select>
     </div>
     <label class="day-chip" style="display:inline-flex;margin:2px 0 2px;"><input type="checkbox" class="schedChk" ${u.isScheduler ? "checked" : ""}/> Scheduler <span class="muted small" style="margin-left:4px;">— team dispatch: book &amp; assign appointments across all closers' calendars</span></label>
+    <label class="day-chip" style="display:inline-flex;margin:2px 0 2px;"><input type="checkbox" class="schedOnlyChk" ${u.schedulerOnly ? "checked" : ""}/> Scheduler only <span class="muted small" style="margin-left:4px;">— dedicated dispatcher: on login they see only the Scheduler</span></label>
     <div class="roleCustomWrap field"><span>Title</span>
       ${usingCustomTitle
         ? `<select class="roleSel">${roleOptions}</select>`
@@ -6282,6 +6283,10 @@ function renderProfileBody(uid, ov) {
   });
   pb.querySelector(".schedChk").addEventListener("change", async (ev) => {
     try { await setUserScheduler({ uid: u.id, isScheduler: ev.target.checked }); pbanner(ev.target.checked ? "Scheduler enabled." : "Scheduler disabled.", "good"); await refresh(); }
+    catch (e) { pbanner(e.message, "error"); ev.target.checked = !ev.target.checked; }
+  });
+  pb.querySelector(".schedOnlyChk").addEventListener("change", async (ev) => {
+    try { await setUserScheduler({ uid: u.id, schedulerOnly: ev.target.checked }); pbanner(ev.target.checked ? "Scheduler-only login enabled." : "Scheduler-only login disabled.", "good"); await refresh(); }
     catch (e) { pbanner(e.message, "error"); ev.target.checked = !ev.target.checked; }
   });
   pb.querySelector(".myTeamSel").addEventListener("change", async (ev) => {

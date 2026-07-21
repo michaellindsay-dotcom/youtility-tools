@@ -103,6 +103,10 @@ export default function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
     if (l.anyFeat) return l.anyFeat.some((f) => userHasService(company, eff.profile, team, f, companyServices));
     return !l.feat || userHasService(company, eff.profile, team, l.feat, companyServices);
   });
+  // A dedicated dispatcher (Scheduler only) is locked to the dispatch view — the
+  // menu shows just the Scheduler (Settings/sign-out stay for account access).
+  const schedulerLocked = eff.profile?.schedulerOnly === true && eff.role !== "admin" && eff.role !== "superadmin";
+  const nav = schedulerLocked ? visible.filter((l) => l.to === "/scheduler" || l.to === "/settings") : visible;
   return (
     <aside className="sidebar">
       <div className="brand">
@@ -135,7 +139,7 @@ export default function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
       )}
 
       <nav className="nav">
-        {visible.map((l) => (
+        {nav.map((l) => (
           <NavLink
             key={l.to}
             to={l.to}

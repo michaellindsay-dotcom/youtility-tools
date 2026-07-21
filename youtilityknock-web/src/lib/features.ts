@@ -85,6 +85,10 @@ export function userHasService(
   if (BASELINE_KEYS.has(key) && Array.isArray(companyServices) && companyServices.length > 0 && !companyServices.includes(key)) {
     return false;
   }
+  // A scheduler is defined by their dispatch tool — always grant them the
+  // scheduling surface regardless of per-position/team service config (the
+  // company plan + umbrella baseline above still apply).
+  if (key === "scheduling" && profile?.isScheduler) return true;
   const pos = profile?.position;
   if (profile?.role === "admin" || pos === "admin") return true;
   const ps = company?.positionServices;
