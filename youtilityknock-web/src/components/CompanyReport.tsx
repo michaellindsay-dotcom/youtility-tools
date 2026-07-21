@@ -12,8 +12,10 @@ export interface RollupNode {
   doors: number;
   setterAppts: number; setterSits: number; setterPitched: number;
   closerAppts: number; closerSits: number; closes: number; turnedAways: number;
+  closerDispositioned?: number; closerDue?: number;
+  closerEnded?: number; closerEndedDispositioned?: number;
   reps: number; closerReps: number;
-  sitRate: number | null; closeRate: number | null;
+  sitRate: number | null; closeRate: number | null; dispoRate?: number | null; endDispoRate?: number | null;
   isCloser?: boolean;
   regions?: RollupNode[]; teams?: RollupNode[]; users?: RollupNode[];
 }
@@ -67,6 +69,7 @@ export function TownHallCard() {
           <div className="stat-grid tight" style={{ marginTop: 12 }}>
             <div className="stat-cell"><div className="stat-num">{c.doors}</div><div className="muted small">🚪 Doors</div></div>
             <div className="stat-cell"><div className="stat-num">{c.setterAppts}</div><div className="muted small">📅 Appts set</div></div>
+            <div className="stat-cell"><div className="stat-num">{(c.closerEnded || 0) > 0 ? `${Math.round(((c.closerEndedDispositioned || 0) / (c.closerEnded || 1)) * 100)}%` : "—"}</div><div className="muted small">📋 {c.closerEndedDispositioned || 0}/{c.closerEnded || 0} dispositioned</div></div>
             <div className="stat-cell"><div className="stat-num">{c.setterSits}</div><div className="muted small">🪑 Sat</div></div>
             <div className="stat-cell"><div className="stat-num">{pctText(c.sitRate)}</div><div className="muted small">Sit %</div></div>
             <div className="stat-cell"><div className="stat-num">{c.closes}</div><div className="muted small">💰 Closed</div></div>

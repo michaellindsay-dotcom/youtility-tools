@@ -4289,13 +4289,13 @@ export const companyFunnelRankings = onCall(async (request) => {
 // setter and, separately, the closer.
 async function computeApptMetrics(companyId: string, startMs: number, endMs: number = Number.MAX_SAFE_INTEGER): Promise<{
   setters: Record<string, { appts: number; sits: number; pitched: number; noShow: number; upcoming: number; undispositioned: number; other: number }>;
-  closers: Record<string, { appts: number; sits: number; closes: number; turnedAways: number; due: number; dispositioned: number }>;
+  closers: Record<string, { appts: number; sits: number; closes: number; turnedAways: number; due: number; dispositioned: number; ended: number; endedDispo: number }>;
 }> {
   const snap = await db.collection("events")
     .where("companyId", "==", companyId).where("type", "==", "appointment").get();
   const nowMs = Date.now();
   const setters: Record<string, { appts: number; sits: number; pitched: number; noShow: number; upcoming: number; undispositioned: number; other: number }> = {};
-  const closers: Record<string, { appts: number; sits: number; closes: number; turnedAways: number; due: number; dispositioned: number }> = {};
+  const closers: Record<string, { appts: number; sits: number; closes: number; turnedAways: number; due: number; dispositioned: number; ended: number; endedDispo: number }> = {};
   for (const d of snap.docs) {
     const ev = d.data() as any;
     if (ev.followUpForEventId) continue; // a reschedule's follow-up isn't a new appointment
@@ -4324,7 +4324,7 @@ async function computeApptMetrics(companyId: string, startMs: number, endMs: num
       else s.other++;
     }
     if (closerUid) {
-      const c = (closers[closerUid] ??= { appts: 0, sits: 0, closes: 0, turnedAways: 0, due: 0, dispositioned: 0 });
+      const c = (closers[closerUid] ??= { appts: 0, sits: 0, closes: 0, turnedAways: 0, due: 0, dispositioned: 0, ended: 0, endedDispo: 0 });
       c.appts++;                               // appointments set FOR or BY this closer
       if (isSit) c.sits++;
       if (st === "closed_won") c.closes++;
@@ -4335,6 +4335,10 @@ async function computeApptMetrics(companyId: string, startMs: number, endMs: num
       // learn what happened to the appointment they set) and hides real results.
       const startAt = Number(ev.startAt) || 0;
       if (startAt > 0 && startAt < nowMs) { c.due++; if (st !== "scheduled") c.dispositioned++; }
+      // Disposition % is measured only over appointments whose END time has
+      // passed — an appointment isn't dispositionable until it's actually over.
+      const endAt = Number(ev.endAt) || startAt || 0;
+      if (endAt > 0 && endAt < nowMs) { c.ended++; if (st !== "scheduled") c.endedDispo++; }
     }
   }
   return { setters, closers };
@@ -4543,7 +4547,7 @@ export async function computeRollup(companyId: string, view: string, scopeUid: s
     teamMeta[t.id] = { name: d.name || "Team", regionId: parent && regionName[parent] ? parent : null, logoUrl: (d.logoUrl as string) || null };
   });
 
-  const blank = () => ({ doors: 0, convos: 0, recorded: 0, shiftMs: 0, setterAppts: 0, setterSits: 0, setterPitched: 0, setterNoShows: 0, setterUpcoming: 0, setterUndispositioned: 0, setterOther: 0, closerAppts: 0, closerSits: 0, closes: 0, turnedAways: 0, closerDue: 0, closerDispositioned: 0, reps: 0, closerReps: 0 });
+  const blank = () => ({ doors: 0, convos: 0, recorded: 0, shiftMs: 0, setterAppts: 0, setterSits: 0, setterPitched: 0, setterNoShows: 0, setterUpcoming: 0, setterUndispositioned: 0, setterOther: 0, closerAppts: 0, closerSits: 0, closes: 0, turnedAways: 0, closerDue: 0, closerDispositioned: 0, closerEnded: 0, closerEndedDispositioned: 0, reps: 0, closerReps: 0 });
   type M = ReturnType<typeof blank>;
   const add = (a: M, u: U) => {
     const s = sm[u.uid]; const c = cm[u.uid];
@@ -4555,6 +4559,7 @@ export async function computeRollup(companyId: string, view: string, scopeUid: s
     a.setterNoShows += s?.noShow || 0; a.setterUpcoming += s?.upcoming || 0; a.setterUndispositioned += s?.undispositioned || 0; a.setterOther += s?.other || 0;
     a.closerAppts += c?.appts || 0; a.closerSits += c?.sits || 0; a.closes += c?.closes || 0; a.turnedAways += c?.turnedAways || 0;
     a.closerDue += c?.due || 0; a.closerDispositioned += c?.dispositioned || 0;
+    a.closerEnded += c?.ended || 0; a.closerEndedDispositioned += c?.endedDispo || 0;
     a.reps += 1; if (u.isCloser) a.closerReps += 1;
   };
   const rate = (n: number, d: number) => (d > 0 ? Math.min(100, Math.round((n / d) * 100)) : null);
@@ -4567,6 +4572,7 @@ export async function computeRollup(companyId: string, view: string, scopeUid: s
     noShows: m.setterNoShows,
     closeRate: rate(m.closes, m.closerSits),
     dispoRate: rate(m.closerDispositioned, m.closerDue), // % of due appts the closer dispositioned
+    endDispoRate: rate(m.closerEndedDispositioned, m.closerEnded), // % of ENDED appts dispositioned
     recRate: rate(m.recorded, m.convos), // % of door conversations that were recorded
     fieldHours: Math.round((m.shiftMs / 3600000) * 10) / 10, // hours in the field this period
     ...extra,
