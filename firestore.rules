@@ -292,7 +292,11 @@ service cloud.firestore {
 
     // ── scheduled events (appointments / go-backs / follow-ups) ──────────
     match /events/{eventId} {
+      // The setter who created the appointment can always read it, even after a
+      // scheduler assigns it to a closer (which moves userId to the closer). This
+      // keeps set appointments visible on the setter's Today's Schedule.
       allow read: if (isSignedIn() && resource.data.userId == request.auth.uid)
+                  || (isSignedIn() && resource.data.setterUid == request.auth.uid)
                   || (inMyCompany(resource.data.companyId)
                       && (isSuper() || isCompanyAdmin() || inPath(resource.data.visibilityPath)));
       allow create: if isSignedIn()

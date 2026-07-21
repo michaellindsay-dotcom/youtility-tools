@@ -3255,10 +3255,14 @@ async function microsoftAccessToken(refreshToken: string, cfg: IntegrationConfig
 
 // Busy intervals from a rep's connected external calendars over [startMs,endMs].
 async function externalBusy(uid: string, startMs: number, endMs: number): Promise<Interval[]> {
-  const tokSnap = await db.doc(`calendarTokens/${uid}`).get();
-  if (!tokSnap.exists) return [];
+  const tokSnap = await db.doc(`calendarTokens/${uid}`).get().catch(() => null);
+  if (!tokSnap || !tokSnap.exists) return [];
   const t = tokSnap.data() as { google?: { refreshToken?: string }; microsoft?: { refreshToken?: string } };
-  const cfg = await getIntegrationConfig();
+  // A failure loading integration config must NOT bubble up and make the rep
+  // look busy — degrade to "no external calendars" so the internal appointment
+  // check stays authoritative and availability is never zeroed out wholesale.
+  const cfg = await getIntegrationConfig().catch(() => null);
+  if (!cfg) return [];
   const out: Interval[] = [];
   const timeMin = new Date(startMs).toISOString();
   const timeMax = new Date(endMs).toISOString();
@@ -3581,8 +3585,12 @@ export const getFreeSlots = onCall(async (request) => {
   const targetUid = uid || caller.uid;
   const sched = caller.companyId ? await companyScheduling(caller.companyId) : DEFAULT_SCHEDULING;
   const dur = (durationMin || sched.apptDurationMin) * 60 * 1000;
+  // Fail OPEN: if an availability check errors (a calendar API hiccup, a
+  // building index, a timeout), offer the slot rather than hiding it. A stray
+  // error must never make a rep look fully booked and block every booking — the
+  // definitive double-book guard runs again at commit time in pickCloser.
   const flags = await Promise.all(list.map((s) =>
-    isUserFree(targetUid, s, s + dur, sched.bufferMin).catch(() => false)));
+    isUserFree(targetUid, s, s + dur, sched.bufferMin).catch(() => true)));
   return { free: list.filter((_, i) => flags[i]) };
 });
 
@@ -3603,9 +3611,13 @@ export const getTeamFreeSlots = onCall(async (request) => {
   const usersSnap = await db.collection("users").where("companyId", "==", companyId).get();
   const closerUids = usersSnap.docs.filter((u) => { const d = u.data() as any; return d.disabled !== true && d.isCloser === true; }).map((u) => u.id);
   if (!closerUids.length) return { free: [] };
-  // A slot is free if any closer is free; short-circuit per slot.
+  // A slot is free if any closer is free; short-circuit per slot. Fail OPEN: an
+  // errored availability check (calendar API hiccup, building index, timeout)
+  // counts the closer as FREE so the slot is still offered — a stray error must
+  // never zero out the whole team's availability and block every booking. The
+  // real double-book guard runs again at commit time in pickCloser.
   const flags = await Promise.all(list.map(async (s) => {
-    for (const cu of closerUids) { if (await isUserFree(cu, s, s + dur, buf).catch(() => false)) return true; }
+    for (const cu of closerUids) { if (await isUserFree(cu, s, s + dur, buf).catch(() => true)) return true; }
     return false;
   }));
   return { free: list.filter((_, i) => flags[i]) };
