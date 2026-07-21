@@ -1,16 +1,24 @@
 import { useEffect, useState } from "react";
-import { Outlet } from "react-router-dom";
+import { Outlet, Navigate, useLocation } from "react-router-dom";
 import Sidebar from "./Sidebar";
 import Topbar from "./Topbar";
 import ChatFab from "./ChatFab";
 import LocationGate from "./LocationGate";
 import CloserDispositionGate from "./CloserDispositionGate";
 import { usePresenceHeartbeat } from "../lib/presence";
+import { useAuth } from "../auth/AuthContext";
 import { NavContext } from "./NavContext";
+
+// A dedicated dispatcher (Scheduler only) can reach just the Scheduler + their
+// account/chat — everything else redirects to the dispatch board.
+const SCHEDULER_ONLY_PATHS = new Set(["/scheduler", "/settings", "/chat"]);
 
 export default function Layout() {
   usePresenceHeartbeat();
+  const { profile, role } = useAuth();
+  const location = useLocation();
   const [navOpen, setNavOpen] = useState(false);
+  const schedulerLocked = profile?.schedulerOnly === true && role !== "admin" && role !== "superadmin";
 
   // Nudge a reflow once the shell mounts so anything that measures the viewport
   // (map, sticky bars) settles after the login→app transition. The status-bar
@@ -33,7 +41,9 @@ export default function Layout() {
         <div className="app-main">
           <Topbar onMenu={() => setNavOpen(true)} />
           <main className="app-content">
-            <Outlet />
+            {schedulerLocked && !SCHEDULER_ONLY_PATHS.has(location.pathname)
+              ? <Navigate to="/scheduler" replace />
+              : <Outlet />}
           </main>
         </div>
         <ChatFab />

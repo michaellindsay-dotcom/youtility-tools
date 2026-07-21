@@ -3597,19 +3597,32 @@ export const getTeamFreeSlots = onCall(async (request) => {
 // Toggle the Scheduler (team dispatch) capability on a user. Admin/super only.
 export const setUserScheduler = onCall(async (request) => {
   const caller = await getCaller(request);
-  const { uid, isScheduler } = (request.data || {}) as { uid?: string; isScheduler?: boolean };
+  const data = (request.data || {}) as { uid?: string; isScheduler?: boolean; schedulerOnly?: boolean };
+  const uid = data.uid;
   if (!uid) throw new HttpsError("invalid-argument", "uid required.");
   const snap = await db.doc(`users/${uid}`).get();
   if (!snap.exists) throw new HttpsError("not-found", "User not found.");
   const companyId = (snap.data() as any).companyId as string;
   authorizeForCompany(caller, companyId);
-  await db.doc(`users/${uid}`).set({ isScheduler: !!isScheduler }, { merge: true });
+  // Two dials: `isScheduler` (dispatch capability, can be added to any rep) and
+  // `schedulerOnly` (a dedicated dispatcher locked to the Scheduler on login).
+  // Locked-only implies scheduler; turning scheduler off clears locked-only.
+  const patch: Record<string, unknown> = {};
+  if (typeof data.schedulerOnly === "boolean") {
+    patch.schedulerOnly = data.schedulerOnly;
+    if (data.schedulerOnly) patch.isScheduler = true;
+  }
+  if (typeof data.isScheduler === "boolean") {
+    patch.isScheduler = data.isScheduler;
+    if (!data.isScheduler) patch.schedulerOnly = false;
+  }
+  await db.doc(`users/${uid}`).set(patch, { merge: true });
   // Maintain a company flag so the door booking flow can hide closer-selection
   // whenever ANY Scheduler is active — without every client scanning the roster.
   const usersSnap = await db.collection("users").where("companyId", "==", companyId).get();
   const schedulerActive = usersSnap.docs.some((d) => { const u = d.data() as any; return u.disabled !== true && u.isScheduler === true; });
   await db.doc(`companies/${companyId}`).set({ schedulerActive }, { merge: true });
-  return { ok: true, isScheduler: !!isScheduler, schedulerActive };
+  return { ok: true, schedulerActive };
 });
 
 // Route a (non-self-gen) appointment to an available rep per company policy.
