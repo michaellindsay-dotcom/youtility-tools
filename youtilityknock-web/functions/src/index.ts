@@ -1169,11 +1169,13 @@ export const reassignAppointment = onCall(async (request) => {
   // ("Assigned to"), not just the named closer. Dropping userId off the old rep
   // — plus the visibilityPath rebuild below — removes their access entirely, so
   // a reassigned appointment no longer lingers with the person who lost it.
+  const wasUnassigned = !ev.closerUid; // a dispatch-queue appt getting its first closer
   await evRef.set({
     userId: closerUid,
     userName: closerName,
     closerUid,
     closerName,
+    dispatchPending: false, // it now has a closer — clear the dispatch flag
     // The old owner's external-calendar ids point at THEIR calendar; clear them
     // so a later reschedule doesn't patch an event on the wrong person's calendar.
     googleEventId: null,
@@ -1181,6 +1183,8 @@ export const reassignAppointment = onCall(async (request) => {
     updatedAt: Date.now(),
   }, { merge: true });
   await rebuildCompanyHierarchy(company); // recompute appointment visibilityPath (drops the old owner)
+  // First assignment of a dispatch appt puts it into this closer's queue count.
+  if (wasUnassigned) await serverBumpStats({ uid: closerUid, ...(newCloser as any) }, { closerAppts: 1 }).catch(() => {});
 
   // Move it off the previous owner's Google/Outlook and onto the new closer's,
   // so it disappears from the old rep's calendar too — not just the app.
@@ -3813,6 +3817,66 @@ async function pickCloser(companyId: string, sched: any, candidateUid?: string, 
   return chosen;
 }
 
+// Active schedulers for a company — the people who dispatch appointments to
+// closers. Used to route unassigned appointments and to gate dispatch mode.
+async function activeSchedulers(companyId: string): Promise<Array<{ uid: string; name: string; email: string }>> {
+  const snap = await db.collection("users").where("companyId", "==", companyId).get();
+  return snap.docs
+    .map((d): { uid: string; [k: string]: any } => ({ uid: d.id, ...(d.data() as Record<string, any>) }))
+    .filter((u) => u.disabled !== true && u.isScheduler === true)
+    .map((u) => ({ uid: u.uid, name: u.displayName || u.email || "Scheduler", email: (u.email as string) || "" }));
+}
+
+// When an appointment lands in the dispatch queue, email every scheduler and
+// drop a message into their chat from the company's Dispatch — so it hits them
+// no matter which surface they're on. The chat write also fires onDmMessage,
+// which pushes + in-app-notifies them.
+async function notifySchedulersOfDispatch(
+  companyId: string, schedulers: Array<{ uid: string; name: string; email: string }>, ev: any, eventId: string,
+): Promise<void> {
+  if (!schedulers.length) return;
+  const company = (await db.doc(`companies/${companyId}`).get()).data() || {};
+  const companyName = (company.name as string) || "Your company";
+  const when = ev.startAt
+    ? new Date(Number(ev.startAt)).toLocaleString("en-US", { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })
+    : "";
+  const line = [ev.title || "Appointment", ev.address, when].filter(Boolean).join(" · ");
+  const link = `${APP_URL}/app/scheduler`;
+  const cfg = await getNotifyConfig();
+  const emailReady = !!cfg.sendgridKey || !!(cfg.smtpHost && cfg.smtpUser);
+  const now = Date.now();
+  const sysUid = `dispatch_${companyId}`;
+  const senderName = `${companyName} Dispatch`;
+  for (const s of schedulers) {
+    // Guaranteed email (regardless of online status).
+    if (s.email && emailReady) {
+      const html = `<div style="font-family:system-ui,Arial,sans-serif;max-width:560px;margin:0 auto;color:#111">`+
+        `<div style="font-size:22px;font-weight:800;color:#0EA5E9">${escEmail(companyName)}</div>`+
+        `<h2 style="margin:14px 0 6px">New appointment to assign 📅</h2>`+
+        `<p>${escEmail(s.name)}, a new appointment needs a closer assigned:</p>`+
+        `<div style="border:1px solid #e5e7eb;border-radius:12px;padding:14px 16px;margin:10px 0">`+
+        `<div style="font-weight:700">${escEmail(ev.title || "Appointment")}</div>`+
+        (ev.address ? `<div style="color:#555">${escEmail(String(ev.address))}</div>` : "")+
+        (when ? `<div style="color:#555">${escEmail(when)}</div>` : "")+
+        (ev.setterName ? `<div style="color:#888;font-size:13px;margin-top:4px">Set by ${escEmail(String(ev.setterName))}</div>` : "")+
+        `</div>`+
+        `<p style="margin:20px 0"><a href="${escEmail(link)}" style="background:#0EA5E9;color:#fff;text-decoration:none;padding:13px 26px;border-radius:10px;font-weight:700;display:inline-block">Open the Scheduler →</a></p>`+
+        `<p style="color:#555;font-size:13px">The Scheduler suggests the available closer with the highest close rate — assign in one click or drag it onto a closer.</p></div>`;
+      await sendEmailDetailed(cfg, s.email, `New appointment to assign — ${companyName}`, `New appointment to assign: ${line}\n\nAssign a closer: ${link}`, undefined, html).catch(() => {});
+    }
+    // Chat message straight from the company's Dispatch into the scheduler's inbox.
+    const chanId = [sysUid, s.uid].sort().join("__");
+    const body = `📅 New appointment to assign: ${line}. Open the Scheduler to assign a closer.`;
+    await db.doc(`dms/${chanId}`).set(
+      { members: [sysUid, s.uid], memberNames: { [sysUid]: senderName, [s.uid]: s.name }, companyId, system: true, lastMessage: body, lastAt: now },
+      { merge: true },
+    ).catch(() => {});
+    await db.collection(`dms/${chanId}/messages`).add(
+      { channelId: chanId, userId: sysUid, userName: senderName, text: body, createdAt: now, eventId },
+    ).catch(() => {});
+  }
+}
+
 // A setter books an appointment that routes to a closer. Called from the
 // disposition modal when the company has the closer workflow enabled.
 export const createCloserAppointment = onCall(async (request) => {
@@ -3846,13 +3910,23 @@ export const createCloserAppointment = onCall(async (request) => {
   // A dispatcher (Scheduler / manager / admin) may choose a specific closer;
   // a plain setter's pick is ignored when hide mode is active.
   const callerIsDispatcher = caller.isSuper || caller.role === "admin" || caller.role === "manager" || setter.isScheduler === true;
-  const closer = await pickCloser(companyId, sched, d.candidateCloserUid, d.startAt, endAt, callerIsDispatcher);
+  // When a Scheduler is active, appointments are NOT auto-assigned — they route
+  // to the dispatch queue for a scheduler to assign a closer by hand. A
+  // dispatcher (Scheduler/manager/admin) who explicitly picked a closer is honored.
+  const schedulers = await activeSchedulers(companyId);
+  const dispatchMode = schedulers.length > 0 && !(callerIsDispatcher && d.candidateCloserUid);
+  const closer: { uid: string; [k: string]: any } | null = dispatchMode
+    ? null
+    : await pickCloser(companyId, sched, d.candidateCloserUid, d.startAt, endAt, callerIsDispatcher);
 
   // Appointments roll up BOTH org charts: the closer's closer-managers and the
-  // setter's setter-managers.
+  // setter's setter-managers. An unassigned dispatch appt is visible to the
+  // setter's chain plus every scheduler until a closer is assigned.
   const setterPath = (setter.managerPath as string[]) || [];
-  const closerPath = (closer.closerManagerPath as string[]) || [];
-  const visibility = Array.from(new Set([closer.uid, ...closerPath, setter.uid, ...setterPath]));
+  const closerPath = (closer?.closerManagerPath as string[]) || [];
+  const visibility = closer
+    ? Array.from(new Set([closer.uid, ...closerPath, setter.uid, ...setterPath]))
+    : Array.from(new Set([setter.uid, ...setterPath, ...schedulers.map((s) => s.uid)]));
 
   // Carry the area incentives the setter captured onto the appointment so the
   // closer has them in hand at the door.
@@ -3872,8 +3946,8 @@ export const createCloserAppointment = onCall(async (request) => {
 
   const ev = {
     companyId,
-    userId: closer.uid, // the closer owns the calendar event
-    userName: closer.displayName || "",
+    userId: closer ? closer.uid : setter.uid, // closer owns it; unassigned sits with the setter until dispatched
+    userName: closer ? (closer.displayName || "") : (setter.displayName || ""),
     type: "appointment",
     title: d.title || `Appointment${d.name ? ` — ${d.name}` : ""}`,
     address: d.address || "",
@@ -3889,8 +3963,9 @@ export const createCloserAppointment = onCall(async (request) => {
     notes: d.notes || "",
     setterUid: setter.uid,
     setterName: setter.displayName || "",
-    closerUid: closer.uid,
-    closerName: closer.displayName || "",
+    closerUid: closer ? closer.uid : null,
+    closerName: closer ? (closer.displayName || "") : "",
+    dispatchPending: !closer,
     apptStatus: "scheduled",
     visibilityPath: visibility,
     reminded: false,
@@ -3922,28 +3997,30 @@ export const createCloserAppointment = onCall(async (request) => {
   const ref = await db.collection("events").add(ev);
 
   // Let the closer (and their closer-managers) read the lead — its phone, email,
-  // and knock history — since they're now taking this appointment. Added to the
-  // lead's visibilityPath; rebuildCompanyHierarchy keeps it on later reorgs.
-  if (d.leadId) {
+  // and knock history — once one is assigned (skipped while unassigned).
+  if (closer && d.leadId) {
     await db.doc(`leads/${d.leadId}`).set(
       { visibilityPath: FieldValue.arrayUnion(closer.uid, ...closerPath) },
       { merge: true },
     ).catch((e) => logger.warn("lead closer-visibility failed", e));
   }
 
-  // The setter's `appointments` stat is bumped client-side (same as before);
-  // here we only tally the closer's incoming queue.
-  await serverBumpStats(closer, { closerAppts: 1 });
+  if (closer) {
+    // Tally the closer's incoming queue + notify them. (External-calendar push is
+    // handled by the events→calendar trigger.)
+    await serverBumpStats(closer, { closerAppts: 1 });
+    await notifyUser({
+      userId: closer.uid, type: "event",
+      title: "New appointment to close",
+      body: [ev.title, new Date(d.startAt).toLocaleString()].filter(Boolean).join(" — "),
+      link: "/app/closer",
+    });
+  } else {
+    // Dispatch mode: email + chat every scheduler to assign a closer by hand.
+    await notifySchedulersOfDispatch(companyId, schedulers, ev, ref.id).catch((e) => logger.warn("dispatch notify failed", e));
+  }
 
-  // External-calendar push is handled by the events→calendar trigger.
-  await notifyUser({
-    userId: closer.uid, type: "event",
-    title: "New appointment to close",
-    body: [ev.title, new Date(d.startAt).toLocaleString()].filter(Boolean).join(" — "),
-    link: "/app/closer",
-  });
-
-  return { ok: true, eventId: ref.id, closerUid: closer.uid, closerName: closer.displayName || "" };
+  return { ok: true, eventId: ref.id, closerUid: closer ? closer.uid : "", closerName: closer ? (closer.displayName || "") : "", pending: !closer };
 });
 
 // ensureCloserLeadAccess — a closer opening their appointment needs to read the
@@ -4216,15 +4293,24 @@ export const listTeamAppointments = onCall(async (request) => {
         startAt: Number(e.startAt), endAt: e.endAt ? Number(e.endAt) : null, durationMin: e.durationMin ? Number(e.durationMin) : null,
         closerUid: (e.closerUid as string) || null, closerName: (e.closerName as string) || "",
         setterName: (e.setterName as string) || "", apptStatus: (e.apptStatus as string) || null, type: (e.type as string) || "",
+        notes: (e.notes as string) || "", apptNotes: (e.apptNotes as string) || "", phone: (e.phone as string) || "",
+        dispatchPending: e.dispatchPending === true, leadId: (e.leadId as string) || null,
       };
     })
     .filter((e) => e.type === "appointment" || !!e.closerUid)
     .sort((a, b) => a.startAt - b.startAt);
   const usersSnap = await db.collection("users").where("companyId", "==", companyId).get();
+  // All-time per-closer close rate (closes ÷ sits) so the board can suggest the
+  // available closer with the highest close %.
+  const metrics = await computeApptMetrics(companyId, 0);
   const closers = usersSnap.docs
     .map((u): { uid: string; [k: string]: any } => ({ uid: u.id, ...(u.data() as Record<string, any>) }))
     .filter((u) => u.disabled !== true && u.isCloser === true)
-    .map((u) => ({ uid: u.uid, name: u.displayName || u.email || "Closer" }))
+    .map((u) => {
+      const cm = metrics.closers[u.uid];
+      const sits = cm?.sits || 0, closes = cm?.closes || 0;
+      return { uid: u.uid, name: u.displayName || u.email || "Closer", closes, sits, closeRate: sits > 0 ? Math.round((closes / sits) * 100) : null };
+    })
     .sort((a, b) => a.name.localeCompare(b.name));
   return { appts, closers };
 });
