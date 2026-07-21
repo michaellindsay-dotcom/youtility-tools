@@ -5036,7 +5036,7 @@ function reportWindow(period: string): { view: string; plabel: string; range?: {
 // reps, for shout-outs / coaching to relay), reps (their own), or everyone.
 export const emailSuccessReport = onCall(async (request) => {
   const caller = await getCaller(request);
-  const reqData = (request.data || {}) as { period?: string; companyId?: string; audience?: string; teamId?: string; range?: { startMs?: number; endMs?: number }; plabel?: string };
+  const reqData = (request.data || {}) as { period?: string; companyId?: string; audience?: string; teamId?: string; repUid?: string; range?: { startMs?: number; endMs?: number }; plabel?: string };
   const companyId = caller.isSuper && reqData.companyId ? reqData.companyId : caller.companyId;
   if (!companyId) throw new HttpsError("permission-denied", "No company.");
   if (!(caller.isSuper || caller.role === "admin")) throw new HttpsError("permission-denied", "Admins only.");
@@ -5059,6 +5059,28 @@ export const emailSuccessReport = onCall(async (request) => {
     return { sent };
   }
 
+  // Single-rep send: one rep's individual report — delivered to the rep, or a
+  // test copy to the caller (audience "me").
+  if (reqData.repUid) {
+    const repDoc = (await db.doc(`users/${reqData.repUid}`).get()).data() as any;
+    if (!repDoc || (repDoc.companyId !== companyId && !caller.isSuper)) throw new HttpsError("not-found", "Rep not found.");
+    const toEmail = audience === "me"
+      ? (((await db.doc(`users/${caller.uid}`).get()).data()?.email as string) || "")
+      : ((repDoc.email as string) || "");
+    if (!toEmail) throw new HttpsError("failed-precondition", "No email address on file for that recipient.");
+    const rollup = await computeRollup(companyId, view, null, range);
+    const companyName = rollup.company.name || "Company";
+    const idx = rrepIndex(rollup.company);
+    const node = idx.users[reqData.repUid];
+    if (!node) throw new HttpsError("failed-precondition", "That rep has no activity in this window.");
+    const subject = audience === "me" ? `📊 ${node.name || "Rep"} — report (${plabel})` : `📊 Your report (${plabel})`;
+    const res = await sendEmailDetailed(cfg, toEmail, subject,
+      rrepReportText(node, "rep", view, plabel, companyName), undefined,
+      rrepReportHtml(node, "rep", view, plabel, companyName));
+    if (!res.ok) throw new HttpsError("failed-precondition", res.detail || "Send failed.");
+    return { sent: 1 };
+  }
+
   if (audience === "me") {
     const callerEmail = ((await db.doc(`users/${caller.uid}`).get()).data()?.email as string) || "";
     if (!callerEmail) throw new HttpsError("failed-precondition", "Your account has no email address.");
@@ -5078,21 +5100,53 @@ export const emailSuccessReport = onCall(async (request) => {
   return { sent };
 });
 
-// weeklySuccessReports — every Saturday 11:59 PM Eastern (DST-aware), send each
-// company its report set (admins → company, managers → team + reps, reps → own).
-export const weeklySuccessReports = onSchedule({ schedule: "59 23 * * 6", timeZone: "America/New_York" }, async () => {
+// Start of the month (00:00) in a named timezone, from any instant in it.
+function tzStartOfMonth(ms: number, tz: string): number {
+  const dom = Number(new Date(ms).toLocaleString("en-US", { timeZone: tz, day: "numeric" })) || 1;
+  return tzStartOfDay(tzStartOfDay(ms, tz) - (dom - 1) * 86400000, tz);
+}
+
+// weeklySuccessReports — every Sunday 2:00 AM Mountain, send each company the
+// PREVIOUS (completed) week's report set: admins → company, managers → their
+// teams, setters & closers → their own individual report.
+export const weeklySuccessReports = onSchedule({ schedule: "0 2 * * 0", timeZone: "America/Denver" }, async () => {
   const cfg = await getNotifyConfig();
   if (!cfg.sendgridKey && !(cfg.smtpHost && cfg.smtpUser)) {
     logger.warn("weeklySuccessReports: no email provider configured — skipping.");
     return;
   }
+  const tz = "America/Denver";
+  const weekEnd = tzStartOfDay(Date.now(), tz);                       // this Sunday 00:00 (send day)
+  const range = { startMs: weekEnd - 7 * 86400000, endMs: weekEnd };  // the completed Sun–Sat week
   const companies = await db.collection("companies").get();
   for (const co of companies.docs) {
     try {
-      const n = await sendCompanyReports(cfg, co.id, "week", "this week", "all");
+      const n = await sendCompanyReports(cfg, co.id, "week", "last week", "all", range);
       logger.info(`weeklySuccessReports: ${co.id} → ${n} emails`);
     } catch (e) {
       logger.warn(`weeklySuccessReports failed for ${co.id}`, e);
+    }
+  }
+});
+
+// monthlySuccessReports — the 1st of each month at 2:00 AM Mountain, send each
+// company the PREVIOUS month's report set (same audience fan-out).
+export const monthlySuccessReports = onSchedule({ schedule: "0 2 1 * *", timeZone: "America/Denver" }, async () => {
+  const cfg = await getNotifyConfig();
+  if (!cfg.sendgridKey && !(cfg.smtpHost && cfg.smtpUser)) {
+    logger.warn("monthlySuccessReports: no email provider configured — skipping.");
+    return;
+  }
+  const tz = "America/Denver";
+  const monthEnd = tzStartOfMonth(Date.now(), tz);                          // 1st of this month 00:00
+  const range = { startMs: tzStartOfMonth(monthEnd - 86400000, tz), endMs: monthEnd }; // the previous month
+  const companies = await db.collection("companies").get();
+  for (const co of companies.docs) {
+    try {
+      const n = await sendCompanyReports(cfg, co.id, "month", "last month", "all", range);
+      logger.info(`monthlySuccessReports: ${co.id} → ${n} emails`);
+    } catch (e) {
+      logger.warn(`monthlySuccessReports failed for ${co.id}`, e);
     }
   }
 });
