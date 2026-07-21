@@ -3069,19 +3069,23 @@ async function loadTownHall(companyId) {
     const activeCount = shifts.length;
     const liveDoorsToday = shifts.reduce((s,x)=>s+(x.doorsKnocked||0),0);
 
-    // Appointment disposition (this week): of the appointments scheduled this week,
-    // how many have been dispositioned (a real outcome recorded) vs still just
-    // "scheduled" (awaiting a closer's disposition).
-    let apptScheduled = 0, apptDispositioned = 0;
+    // Appointment disposition (this week): a live rate measured only over
+    // appointments whose END time has passed — of those, how many have been
+    // dispositioned (a real outcome recorded) vs still just "scheduled". An
+    // appointment isn't counted until it's actually over.
+    const nowTH = Date.now();
+    let apptEnded = 0, apptDispositioned = 0;
     for (const d of eventDocs) {
       const ev = d.data();
       if (ev.type !== "appointment" || ev.followUpForEventId) continue;
       const setAt = Number(ev.createdAt) || Number(ev.startAt) || 0;
       if (setAt < weekStart) continue;
-      apptScheduled++;
+      const endAt = Number(ev.endAt) || Number(ev.startAt) || 0;
+      if (!endAt || endAt >= nowTH) continue; // only after the appointment end time
+      apptEnded++;
       if ((ev.apptStatus || "scheduled") !== "scheduled") apptDispositioned++;
     }
-    const dispoPct = apptScheduled > 0 ? Math.round((apptDispositioned / apptScheduled) * 100) : 0;
+    const dispoPct = apptEnded > 0 ? Math.round((apptDispositioned / apptEnded) * 100) : 0;
 
     // KPI tiles
     const pct = (n,d) => d>0 ? Math.round((n/d)*100) : 0;
@@ -3090,7 +3094,7 @@ async function loadTownHall(companyId) {
     const closeRate = (closed,appt) => appt>0 ? `${Math.round((closed/appt)*100)}%` : "—";
     $("thKpis").innerHTML = [
       `<div class="kpi accent"><div class="kpi-n">${activeCount}</div><div class="kpi-l">On shift now</div><div class="kpi-s">${liveDoorsToday} doors knocked live</div></div>`,
-      `<div class="kpi"><div class="kpi-n">${apptScheduled>0?dispoPct+"%":"—"}</div><div class="kpi-l">Appt disposition</div><div class="kpi-s">${apptDispositioned}/${apptScheduled} dispositioned</div></div>`,
+      `<div class="kpi"><div class="kpi-n">${apptEnded>0?dispoPct+"%":"—"}</div><div class="kpi-l">Appt disposition</div><div class="kpi-s">${apptDispositioned}/${apptEnded} dispositioned</div></div>`,
       `<div class="kpi"><div class="kpi-n">${today.doors}</div><div class="kpi-l">Doors today</div><div class="kpi-s">${week.doors} this week</div></div>`,
       `<div class="kpi"><div class="kpi-n">${today.conv}</div><div class="kpi-l">Convos today</div><div class="kpi-s">${week.conv} this week</div></div>`,
       `<div class="kpi"><div class="kpi-n">${today.appt}</div><div class="kpi-l">Appts today</div><div class="kpi-s">${week.appt} this week</div></div>`,
