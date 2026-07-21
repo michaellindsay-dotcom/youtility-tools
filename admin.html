@@ -2975,7 +2975,9 @@ function thKnockAt(l) { return l.knockedAt || l.createdAt || 0; }
 // When a deal counts as closed: its close date (set when marked sold). Lets a
 // deal knocked earlier — or closed via the closer flow — count in the week it
 // actually closed, independent of when the door was knocked.
-function thCloseAt(l) { return l.soldAt || l.updatedAt || l.knockedAt || l.createdAt || 0; }
+// Close DATE = when it actually sold. Never fall back to updatedAt — a later
+// edit would otherwise re-date an old sale into the current week and inflate it.
+function thCloseAt(l) { return l.soldAt || l.createdAt || 0; }
 function thFmtElapsed(ms) {
   const s = Math.max(0, Math.floor(ms/1000)); const h=Math.floor(s/3600), m=Math.floor((s%3600)/60);
   return h>0 ? `${h}h ${m}m` : `${m}m`;
@@ -3069,19 +3071,20 @@ async function loadTownHall(companyId) {
     const activeCount = shifts.length;
     const liveDoorsToday = shifts.reduce((s,x)=>s+(x.doorsKnocked||0),0);
 
-    // Appointment disposition (this week): a live rate measured only over
-    // appointments whose END time has passed — of those, how many have been
-    // dispositioned (a real outcome recorded) vs still just "scheduled". An
-    // appointment isn't counted until it's actually over.
+    // Appointment disposition (this week): of the appointments that came DUE for
+    // disposition this week — end time + 2h grace passed (the same rule that
+    // forces reps to disposition) — how many have a real outcome recorded. A
+    // reschedule / no-show / any non-"scheduled" outcome counts as dispositioned.
     const nowTH = Date.now();
+    const DISPO_GRACE = 2 * 60 * 60 * 1000;
     let apptEnded = 0, apptDispositioned = 0;
     for (const d of eventDocs) {
       const ev = d.data();
       if (ev.type !== "appointment" || ev.followUpForEventId) continue;
-      const setAt = Number(ev.createdAt) || Number(ev.startAt) || 0;
-      if (setAt < weekStart) continue;
-      const endAt = Number(ev.endAt) || Number(ev.startAt) || 0;
-      if (!endAt || endAt >= nowTH) continue; // only after the appointment end time
+      const startAt = Number(ev.startAt) || 0;
+      const endAt = Number(ev.endAt) || startAt || 0;
+      const dueAt = endAt > 0 ? endAt + DISPO_GRACE : 0;
+      if (!(dueAt > 0 && dueAt < nowTH && dueAt >= weekStart)) continue; // came due this week & past the deadline
       apptEnded++;
       if ((ev.apptStatus || "scheduled") !== "scheduled") apptDispositioned++;
     }

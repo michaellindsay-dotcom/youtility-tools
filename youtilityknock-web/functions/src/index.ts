@@ -4327,7 +4327,11 @@ export const companyFunnelRankings = onCall(async (request) => {
 
   const CONVO = new Set(["pipeline", "appointment", "not_interested", "sold"]);
   const knockAt = (l: any) => l.knockedAt || l.createdAt || 0;
-  const closeAt = (l: any) => l.soldAt || l.updatedAt || l.knockedAt || l.createdAt || 0;
+  // Close DATE = when it actually sold. Never fall back to updatedAt — any later
+  // edit (a visibility rebuild, a note) would otherwise make an old sale count as
+  // "closed this week" and inflate the week's closes. createdAt is the stable
+  // last resort for legacy sold leads with no soldAt.
+  const closeAt = (l: any) => l.soldAt || l.createdAt || 0;
 
   const leadsCol = db.collection("leads");
   // Fetch the whole company lead set and window by knockAt in code — the SAME
@@ -4373,6 +4377,11 @@ export const companyFunnelRankings = onCall(async (request) => {
 // free. Windowed by when it was SET (createdAt). Sit % denominator = sits +
 // no-shows (turn-aways and closer-no-shows excluded). Keyed by uid for the
 // setter and, separately, the closer.
+// Grace after an appointment's END before a disposition is mandatory — must
+// match the client hard gate (DISPO_GRACE_MS in lib/closerDispositions.ts) so
+// the reported disposition rate lines up exactly with when reps are forced to
+// disposition.
+const APPT_DISPO_GRACE_MS = 2 * 60 * 60 * 1000;
 async function computeApptMetrics(companyId: string, startMs: number, endMs: number = Number.MAX_SAFE_INTEGER): Promise<{
   setters: Record<string, { appts: number; sits: number; pitched: number; noShow: number; upcoming: number; undispositioned: number; other: number }>;
   closers: Record<string, { appts: number; sits: number; closes: number; turnedAways: number; due: number; dispositioned: number; ended: number; endedDispo: number }>;
@@ -4386,7 +4395,18 @@ async function computeApptMetrics(companyId: string, startMs: number, endMs: num
     const ev = d.data() as any;
     if (ev.followUpForEventId) continue; // a reschedule's follow-up isn't a new appointment
     const setAt = Number(ev.createdAt) || Number(ev.startAt) || 0;
-    if (setAt < startMs || setAt >= endMs) continue;
+    // "Set in this window" gates the volume counters (appts / sits / closes) —
+    // those belong to the period the appointment was booked.
+    const setInWindow = setAt >= startMs && setAt < endMs;
+    const startAt = Number(ev.startAt) || 0;
+    const endAt = Number(ev.endAt) || startAt || 0;
+    // Disposition accountability uses the SAME rule as the hard gate: an
+    // appointment is "owed a disposition" once its end + a 2-hour grace has
+    // passed. Credit it to the period it came DUE (not when it was booked), so a
+    // disposition done today shows today — and an appointment still inside its
+    // grace window isn't held against anyone yet, so a compliant team hits 100%.
+    const dueAt = endAt > 0 ? endAt + APPT_DISPO_GRACE_MS : 0;
+    const dueInWindow = dueAt > 0 && dueAt < nowMs && dueAt >= startMs && dueAt < endMs;
     const st = (ev.apptStatus as string) || "scheduled";
     const isSit = CLOSER_SIT_STATUSES.has(st);
     // Routed appt: setterUid is the setter, userId the closer. Self-gen appt
@@ -4397,10 +4417,9 @@ async function computeApptMetrics(companyId: string, startMs: number, endMs: num
     // it. Each appointment is attributed to exactly one closer here, so a close is
     // never counted for both the setter and a separate closer (no double count).
     const closerUid = (ev.closerUid as string) || setterUid;
-    if (setterUid) {
+    if (setterUid && setInWindow) {
       const s = (setters[setterUid] ??= { appts: 0, sits: 0, pitched: 0, noShow: 0, upcoming: 0, undispositioned: 0, other: 0 });
       s.appts++;
-      const startAt = Number(ev.startAt) || 0;
       // Full outcome breakdown so every set appointment is accounted for:
       // sat, no-showed, still upcoming, past-due-but-never-dispositioned, or
       // otherwise closed out (rescheduled / turned away / cancelled).
@@ -4411,20 +4430,18 @@ async function computeApptMetrics(companyId: string, startMs: number, endMs: num
     }
     if (closerUid) {
       const c = (closers[closerUid] ??= { appts: 0, sits: 0, closes: 0, turnedAways: 0, due: 0, dispositioned: 0, ended: 0, endedDispo: 0 });
-      c.appts++;                               // appointments set FOR or BY this closer
-      if (isSit) c.sits++;
-      if (st === "closed_won") c.closes++;
-      if (st === "turned_away") c.turnedAways++;
-      // Disposition accountability: once an appointment's time has passed it is
-      // "due" and the closer must mark an outcome. Still "scheduled" past its time
-      // = not dispositioned. A low disposition rate strands setters (they never
-      // learn what happened to the appointment they set) and hides real results.
-      const startAt = Number(ev.startAt) || 0;
-      if (startAt > 0 && startAt < nowMs) { c.due++; if (st !== "scheduled") c.dispositioned++; }
-      // Disposition % is measured only over appointments whose END time has
-      // passed — an appointment isn't dispositionable until it's actually over.
-      const endAt = Number(ev.endAt) || startAt || 0;
-      if (endAt > 0 && endAt < nowMs) { c.ended++; if (st !== "scheduled") c.endedDispo++; }
+      if (setInWindow) {
+        c.appts++;                             // appointments set FOR or BY this closer
+        if (isSit) c.sits++;
+        if (st === "closed_won") c.closes++;
+        if (st === "turned_away") c.turnedAways++;
+      }
+      // Owed-a-disposition (and whether it's been dispositioned), by due date.
+      // A "reschedule" / "no_show" / any non-"scheduled" outcome counts as done.
+      if (dueInWindow) {
+        c.due++; c.ended++;
+        if (st !== "scheduled") { c.dispositioned++; c.endedDispo++; }
+      }
     }
   }
   return { setters, closers };
@@ -5131,7 +5148,11 @@ async function challengeFunnel(companyId: string, startMs: number, endMs: number
   uids.forEach((u) => { out[u] = { doors: 0, conv: 0, appt: 0, sale: 0 }; });
   const CONVO = new Set(["pipeline", "appointment", "not_interested", "sold"]);
   const knockAt = (l: any) => l.knockedAt || l.createdAt || 0;
-  const closeAt = (l: any) => l.soldAt || l.updatedAt || l.knockedAt || l.createdAt || 0;
+  // Close DATE = when it actually sold. Never fall back to updatedAt — any later
+  // edit (a visibility rebuild, a note) would otherwise make an old sale count as
+  // "closed this week" and inflate the week's closes. createdAt is the stable
+  // last resort for legacy sold leads with no soldAt.
+  const closeAt = (l: any) => l.soldAt || l.createdAt || 0;
   const leadsCol = db.collection("leads");
   let leadDocs;
   try {
