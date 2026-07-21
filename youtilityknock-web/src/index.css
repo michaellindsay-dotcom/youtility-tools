@@ -3150,3 +3150,55 @@ body.modal-open .chat-fab-global { display: none; }
   cursor: default;
 }
 .maplibregl-popup-content { border-radius: 10px; padding: 10px 12px; }
+
+/* ══ Scheduler dispatch calendar (v2) ══════════════════════════════════════ */
+.sched2-wrap { display: grid; grid-template-columns: 264px minmax(0, 1fr); gap: 14px; align-items: start; }
+@media (max-width: 900px) { .sched2-wrap { grid-template-columns: 1fr; } }
+
+.sched2-rail { position: sticky; top: 8px; max-height: calc(100vh - 130px); overflow: auto; }
+.sched2-rail .rail-h { display: flex; align-items: center; gap: 8px; margin: 0 0 10px; font-family: 'Space Grotesk', sans-serif; font-weight: 700; }
+.sched2-count { font-size: 12px; font-weight: 800; padding: 1px 9px; border-radius: 999px; background: rgba(245, 158, 11, .18); color: #fbbf24; border: 1px solid rgba(245, 158, 11, .35); }
+.sched2-railcard { border: 1px solid var(--line-hi); border-left: 4px solid var(--accent); border-radius: 12px; padding: 10px 12px; margin-bottom: 10px; background: var(--panel-hi); cursor: grab; transition: transform .08s ease, box-shadow .12s ease; }
+.sched2-railcard:hover { box-shadow: 0 8px 22px rgba(0, 0, 0, .38); transform: translateY(-1px); }
+.sched2-railcard:active { cursor: grabbing; }
+.sched2-railcard .t { font-weight: 700; font-size: 13px; }
+.sched2-railcard .sub { color: var(--ink-dim, #8aa0b8); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sched2-suggest { display: inline-flex; align-items: center; gap: 5px; margin-top: 7px; font-size: 11.5px; font-weight: 700; padding: 2px 9px; border-radius: 999px; background: rgba(16, 185, 129, .14); color: #34d399; border: 1px solid rgba(16, 185, 129, .32); }
+
+.sched2-cal { border: 1px solid var(--line); border-radius: 14px; background: var(--bg-1); overflow-x: auto; }
+.sched2-head { display: flex; border-bottom: 1px solid var(--line); background: linear-gradient(180deg, rgba(255,255,255,.03), transparent); }
+.sched2-gutter-h { flex: 0 0 54px; }
+.sched2-colh { flex: 1 1 0; min-width: 132px; padding: 8px 10px; border-left: 1px solid var(--line); text-align: center; }
+.sched2-colh.today { background: rgba(14, 165, 233, .08); }
+.sched2-colh .name { font-weight: 700; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: inline-flex; align-items: center; gap: 6px; justify-content: center; }
+.sched2-colh .meta { font-size: 11px; color: var(--ink-dim, #8aa0b8); margin-top: 2px; }
+.sched2-rate { font-size: 10.5px; font-weight: 800; padding: 1px 6px; border-radius: 999px; background: rgba(14, 165, 233, .16); color: var(--accent-2); }
+
+.sched2-body { display: flex; position: relative; }
+.sched2-gutter { flex: 0 0 54px; position: relative; }
+.sched2-gutter .h { position: absolute; right: 6px; font-size: 11px; color: var(--ink-dim, #8aa0b8); transform: translateY(-7px); white-space: nowrap; }
+.sched2-col { flex: 1 1 0; min-width: 132px; position: relative; border-left: 1px solid var(--line); }
+.sched2-col.drop { background: rgba(14, 165, 233, .10); box-shadow: inset 0 0 0 2px var(--accent); }
+.sched2-hr { position: absolute; left: 0; right: 0; border-top: 1px solid var(--line); pointer-events: none; }
+.sched2-hr.half { border-top-style: dotted; opacity: .45; }
+.sched2-now { position: absolute; left: 0; right: 0; height: 0; border-top: 2px solid #ef4444; z-index: 4; pointer-events: none; }
+.sched2-now::before { content: ""; position: absolute; left: -3px; top: -4px; width: 7px; height: 7px; border-radius: 50%; background: #ef4444; }
+
+.sched2-block { position: absolute; left: 4px; right: 4px; border-radius: 9px; padding: 4px 8px; overflow: hidden; cursor: pointer; color: #fff; box-shadow: 0 2px 8px rgba(0, 0, 0, .32); border: 1px solid rgba(255, 255, 255, .18); z-index: 2; }
+.sched2-block:hover { filter: brightness(1.08); z-index: 5; }
+.sched2-block .bt { font-weight: 800; font-size: 11px; opacity: .95; }
+.sched2-block .bttl { font-size: 12px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sched2-block .bad { font-size: 11px; opacity: .9; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sched2-block.done { opacity: .66; }
+
+.sched2-detail { max-width: 540px; width: calc(100vw - 32px); }
+.sched2-detrow { display: flex; gap: 12px; padding: 8px 0; border-bottom: 1px solid var(--line); font-size: 14px; }
+.sched2-detrow .k { flex: 0 0 88px; color: var(--ink-dim, #8aa0b8); font-size: 11px; text-transform: uppercase; letter-spacing: .5px; padding-top: 2px; }
+.sched2-detrow .v { flex: 1; min-width: 0; }
+.sched2-closer { display: flex; align-items: center; gap: 10px; width: 100%; text-align: left; border: 1px solid var(--line-hi); border-radius: 11px; padding: 9px 11px; margin-bottom: 8px; background: var(--panel); cursor: pointer; color: inherit; font: inherit; transition: background .1s ease; }
+.sched2-closer:hover { background: var(--panel-hi); }
+.sched2-closer.busy { opacity: .5; }
+.sched2-closer.suggested { border-color: rgba(16, 185, 129, .5); box-shadow: 0 0 0 1px rgba(16, 185, 129, .35); }
+.sched2-closer.current { border-color: var(--accent); }
+.sched2-dot { width: 12px; height: 12px; border-radius: 50%; flex: 0 0 auto; }
+.sched2-badge { margin-left: auto; font-size: 11px; font-weight: 800; padding: 2px 9px; border-radius: 999px; background: rgba(255, 255, 255, .08); white-space: nowrap; }
