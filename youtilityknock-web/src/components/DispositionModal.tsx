@@ -686,6 +686,7 @@ export default function DispositionModal({
                     onChange={(ms) => setScheduleAt(toLocalInput(ms))}
                     uid={setterSelect && closerUid ? closerUid : undefined}
                     pool={closerPool ? "closers" : undefined}
+                    address={d.address}
                   />
                   <div className="muted small" style={{ marginTop: 6 }}>
                     {company.scheduling.apptDurationMin}-min appointment · book {company.scheduling.apptMinLeadHours}h+

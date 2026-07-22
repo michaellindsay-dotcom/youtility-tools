@@ -191,7 +191,7 @@ export default function Scheduler() {
                   <option value="">Leave for dispatch (assign later)</option>
                   {closers.map((c) => <option key={c.uid} value={c.uid}>{c.name}{c.closeRate != null ? ` · ${c.closeRate}%` : ""}</option>)}
                 </select></div>
-              <div><div className="muted small" style={{ marginBottom: 4 }}>Time</div><SlotPicker sched={sched} value={startAt} onChange={setStartAt} pool="closers" /></div>
+              <div><div className="muted small" style={{ marginBottom: 4 }}>Time</div><SlotPicker sched={sched} value={startAt} onChange={setStartAt} pool="closers" address={address} /></div>
             </div>
             <div className="row" style={{ marginTop: 12, alignItems: "center" }}>
               <button className="btn primary sm" onClick={book} disabled={busy}>{busy ? "Booking…" : "Book appointment"}</button>

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { httpsCallable } from "firebase/functions";
 import { functions } from "../firebase";
 import type { SchedulingSettings } from "../types";
+import { tzForAddress, zonedWallClockToEpoch, formatApptClock, DEVICE_TZ } from "../lib/timezones";
 
 const DAY = 86_400_000;
 const getTeamFreeSlotsFn = httpsCallable<
@@ -24,8 +25,8 @@ function dayLabel(ms: number): string {
   if (diff === 1) return "Tomorrow";
   return new Date(ms).toLocaleDateString([], { weekday: "short", month: "short", day: "numeric" });
 }
-function timeLabel(ms: number): string {
-  return new Date(ms).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+function timeLabel(ms: number, tz: string): string {
+  return new Date(ms).toLocaleTimeString([], { hour: "numeric", minute: "2-digit", timeZone: tz });
 }
 // "YYYY-MM-DD" for an <input type=date> in local time.
 function dateInputValue(ms: number): string {
@@ -37,19 +38,25 @@ function dateInputValue(ms: number): string {
 // auto-advances to the next day that does. Step days with ‹ ›, and once you're
 // more than 2 days out a date picker appears to jump straight to a date.
 export default function SlotPicker({
-  sched, value, onChange, uid, pool,
+  sched, value, onChange, uid, pool, address,
 }: {
   sched: SchedulingSettings;
   value: number | null;
   onChange: (ms: number) => void;
   uid?: string;
   pool?: "closers"; // "closers" = offer a slot if ANY closer is free (union)
+  address?: string; // appointment address — its timezone is the customer's local time
 }) {
   const today = startOfDay(Date.now());
   const minLeadMs = (sched.apptMinLeadHours ?? 1) * 3_600_000;
   const maxDaysOut = sched.apptMaxDaysOut ?? 30;
   const lastAt = today + (maxDaysOut + 1) * DAY;
   const durationMin = sched.apptDurationMin ?? 60;
+  // The picked time means the CUSTOMER's local time — build and label every slot
+  // in the address's zone, not the device's. With no/unparseable address this is
+  // the device zone, so a co-located rep sees no change.
+  const tz = tzForAddress(address);
+  const showZone = tz !== DEVICE_TZ;
 
   const [dayMs, setDayMs] = useState(today);
   const [slots, setSlots] = useState<number[]>([]);
@@ -62,15 +69,17 @@ export default function SlotPicker({
     const startMin = sched.dayStartMin ?? 540;
     const endMin = sched.dayEndMin ?? 1200;
     const firstAt = Date.now() + minLeadMs;
+    const base = new Date(d);
+    const y = base.getFullYear(), mo = base.getMonth(), day = base.getDate();
     const out: number[] = [];
     for (let m = startMin; m <= endMin - durationMin; m += 60) {
-      const t = new Date(d);
-      t.setHours(0, m, 0, 0);
-      const ms = t.getTime();
+      // Business hours are the customer's local hours — build the instant for
+      // this wall-clock minute IN the address's zone.
+      const ms = zonedWallClockToEpoch(y, mo, day, m, tz);
       if (ms >= firstAt && ms <= lastAt) out.push(ms);
     }
     return out;
-  }, [sched.workDays, sched.dayStartMin, sched.dayEndMin, durationMin, minLeadMs, lastAt]);
+  }, [sched.workDays, sched.dayStartMin, sched.dayEndMin, durationMin, minLeadMs, lastAt, tz]);
 
   // Find free slots for the requested day, advancing to the next day that has
   // any. Lands `dayMs` on the first day with openings.
@@ -147,16 +156,22 @@ export default function SlotPicker({
                 className={"pill" + (value === ms ? " active" : "")}
                 onClick={() => onChange(ms)}
               >
-                {timeLabel(ms)}
+                {timeLabel(ms, tz)}
               </button>
             ))}
           </div>
         )}
       </div>
 
+      {showZone && (
+        <div className="muted small" style={{ marginTop: 8 }}>
+          Times shown in the customer's local time zone.
+        </div>
+      )}
+
       {value != null && (
         <div className="muted small" style={{ marginTop: 8 }}>
-          Selected: {dayLabel(value)} · {timeLabel(value)}
+          Selected: {dayLabel(value)} · {formatApptClock(value, address)}
         </div>
       )}
     </div>
