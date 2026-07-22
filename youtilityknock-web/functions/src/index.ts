@@ -4493,10 +4493,9 @@ export const companyFunnelRankings = onCall(async (request) => {
 // no-shows (turn-aways and closer-no-shows excluded). Keyed by uid for the
 // setter and, separately, the closer.
 // Grace after an appointment's END before a disposition is mandatory — must
-// match the client hard gate (DISPO_GRACE_MS in lib/closerDispositions.ts) so
-// the reported disposition rate lines up exactly with when reps are forced to
-// disposition.
-const APPT_DISPO_GRACE_MS = 2 * 60 * 60 * 1000;
+// The Town Hall / report disposition rate is based on the calendar standard
+// (isUndispositionedPast): an appointment is owed a disposition once its start
+// has passed — see computeApptMetrics below.
 async function computeApptMetrics(companyId: string, startMs: number, endMs: number = Number.MAX_SAFE_INTEGER): Promise<{
   setters: Record<string, { appts: number; sits: number; pitched: number; noShow: number; upcoming: number; undispositioned: number; other: number }>;
   closers: Record<string, { appts: number; sits: number; closes: number; turnedAways: number; due: number; dispositioned: number; ended: number; endedDispo: number }>;
@@ -4514,14 +4513,12 @@ async function computeApptMetrics(companyId: string, startMs: number, endMs: num
     // those belong to the period the appointment was booked.
     const setInWindow = setAt >= startMs && setAt < endMs;
     const startAt = Number(ev.startAt) || 0;
-    const endAt = Number(ev.endAt) || startAt || 0;
-    // Disposition accountability uses the SAME rule as the hard gate: an
-    // appointment is "owed a disposition" once its end + a 2-hour grace has
-    // passed. Credit it to the period it came DUE (not when it was booked), so a
-    // disposition done today shows today — and an appointment still inside its
-    // grace window isn't held against anyone yet, so a compliant team hits 100%.
-    const dueAt = endAt > 0 ? endAt + APPT_DISPO_GRACE_MS : 0;
-    const dueInWindow = dueAt > 0 && dueAt < nowMs && dueAt >= startMs && dueAt < endMs;
+    // Disposition accountability matches the calendar / dashboard standard
+    // (isUndispositionedPast): a closer appointment is "owed a disposition" once
+    // its START has passed — no end-of-appointment grace. Windowed by the
+    // appointment's own date so the Town Hall disposition % reflects the
+    // appointments actually on the calendar, not a small grace-delayed subset.
+    const owedInWindow = startAt > 0 && startAt < nowMs && startAt >= startMs && startAt < endMs;
     const st = (ev.apptStatus as string) || "scheduled";
     const isSit = CLOSER_SIT_STATUSES.has(st);
     // Routed appt: setterUid is the setter, userId the closer. Self-gen appt
@@ -4551,9 +4548,10 @@ async function computeApptMetrics(companyId: string, startMs: number, endMs: num
         if (st === "closed_won") c.closes++;
         if (st === "turned_away") c.turnedAways++;
       }
-      // Owed-a-disposition (and whether it's been dispositioned), by due date.
-      // A "reschedule" / "no_show" / any non-"scheduled" outcome counts as done.
-      if (dueInWindow) {
+      // Owed-a-disposition (and whether it's been dispositioned), by appointment
+      // date. Any non-"scheduled" outcome (sat / closed / reschedule / no-show)
+      // counts as dispositioned.
+      if (owedInWindow) {
         c.due++; c.ended++;
         if (st !== "scheduled") { c.dispositioned++; c.endedDispo++; }
       }
