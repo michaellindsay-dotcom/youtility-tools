@@ -4562,14 +4562,25 @@ async function computeApptMetrics(companyId: string, startMs: number, endMs: num
   return { setters, closers };
 }
 
-// Start-of-period (ms) for the appointment boards — Monday-based week to match
-// the rest of the app; all-time = 0.
-function apptPeriodStart(view: string): number {
-  if (view === "day") { const d = new Date(); d.setHours(0, 0, 0, 0); return d.getTime(); }
-  if (view === "month") return rStartOfMonth();
-  if (view === "year") return new Date(new Date().getFullYear(), 0, 1).getTime();
+// Start-of-period (ms) for the appointment boards / Town Hall, computed in the
+// COMPANY's timezone so "Today / This week / This month" line up with the local
+// business day — NOT the Cloud Functions runtime (UTC), which would start the
+// day at ~5–7pm the previous local evening. Monday-based week; all-time = 0.
+// (tzStartOfDay is defined later in the file but hoisted.)
+function apptPeriodStart(view: string, tz: string): number {
+  const now = Date.now();
   if (view === "alltime") return 0;
-  return rStartOfWeek();
+  const dayStart = tzStartOfDay(now, tz);
+  if (view === "day") return dayStart;
+  if (view === "week") {
+    const wd = new Date(now).toLocaleString("en-US", { timeZone: tz, weekday: "short" }).slice(0, 3);
+    const dow = ({ Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 } as Record<string, number>)[wd] ?? 0;
+    return tzStartOfDay(dayStart - ((dow + 6) % 7) * 86400000, tz); // back to Monday, DST-safe
+  }
+  const y = Number(new Date(now).toLocaleString("en-US", { timeZone: tz, year: "numeric" }));
+  if (view === "year") return tzStartOfDay(Date.UTC(y, 0, 1, 12, 0, 0), tz);
+  const mo = Number(new Date(now).toLocaleString("en-US", { timeZone: tz, month: "numeric" })) - 1;
+  return tzStartOfDay(Date.UTC(y, mo, 1, 12, 0, 0), tz); // "month" view
 }
 
 // Separate leaderboards for setters and closers, so a setter sees where they
@@ -4591,7 +4602,8 @@ export const roleLeaderboards = onCall(async (request) => {
     meta[d.id] = { name: u.displayName || u.email || "Rep", isCloser: u.isCloser === true, disabled: u.disabled === true };
   });
 
-  const { setters: sm, closers: cm } = await computeApptMetrics(companyId, apptPeriodStart(view));
+  const lbTz = (await companyScheduling(companyId)).timezone;
+  const { setters: sm, closers: cm } = await computeApptMetrics(companyId, apptPeriodStart(view, lbTz));
 
   // Doors isn't appointment-derived — keep it from the season/all-time buckets
   // for the setter board's secondary column.
@@ -4644,7 +4656,8 @@ export async function computeRollup(companyId: string, view: string, scopeUid: s
   const kind = view === "month" || view === "year" ? view : "week";
   // range overrides the view's window (used by on-demand emails: previous day,
   // week-to-date, month-to-date). endMs is exclusive.
-  const startMs = range ? range.startMs : apptPeriodStart(view);
+  const rollupTz = (await companyScheduling(companyId)).timezone;
+  const startMs = range ? range.startMs : apptPeriodStart(view, rollupTz);
   const endMs = range ? range.endMs : Number.MAX_SAFE_INTEGER;
   const isAllTime = view === "alltime" && !range;
 
@@ -5132,8 +5145,8 @@ async function sendTeamReport(cfg: NotifyConfig, companyId: string, view: string
 
 // Maps a chooseable period to a rollup window: previous day (bounded), or an
 // open-ended today / week-to-date / month-to-date / year / all-time.
-function reportWindow(period: string): { view: string; plabel: string; range?: { startMs: number; endMs: number } } {
-  const d = new Date(); d.setHours(0, 0, 0, 0); const startToday = d.getTime();
+function reportWindow(period: string, tz: string): { view: string; plabel: string; range?: { startMs: number; endMs: number } } {
+  const startToday = tzStartOfDay(Date.now(), tz); // company-local midnight, not UTC
   switch (period) {
     case "today": return { view: "day", plabel: "today" };
     case "yesterday": return { view: "day", plabel: "yesterday", range: { startMs: startToday - 86400000, endMs: startToday } };
@@ -5158,9 +5171,10 @@ export const emailSuccessReport = onCall(async (request) => {
   // A custom range (from the report's calendar filter) overrides the named window.
   const rs = Number(reqData.range?.startMs), re = Number(reqData.range?.endMs);
   const custom = reqData.period === "custom" && Number.isFinite(rs) && Number.isFinite(re) && re > rs;
+  const reportTz = (await companyScheduling(companyId)).timezone;
   const { view, plabel, range } = custom
     ? { view: "week", plabel: (reqData.plabel || "custom range"), range: { startMs: rs, endMs: re } }
-    : reportWindow(reqData.period || "week");
+    : reportWindow(reqData.period || "week", reportTz);
   const audience = reqData.audience || "me";
   const cfg = await getNotifyConfig();
   if (!cfg.sendgridKey && !(cfg.smtpHost && cfg.smtpUser)) {
