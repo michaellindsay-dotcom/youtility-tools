@@ -6,6 +6,7 @@ import { useAuth } from "../auth/AuthContext";
 import { APPT_LABEL, APPT_COLOR, isSit, isCloserAppt, wasOnSpot } from "../lib/closerDispositions";
 import CloserDispositionModal from "../components/CloserDispositionModal";
 import type { ScheduleEvent } from "../types";
+import { formatApptTime } from "../lib/timezones";
 
 interface CloserRow { uid: string; name: string; assigned: number; sits: number; closes: number; noShows: number; weekPast: number; weekNot: number }
 // Company-wide "not dispositioned on the spot" tallies, past appointments only.
@@ -15,8 +16,9 @@ const rate = (n: number, d: number) => (d > 0 ? `${Math.round((n / d) * 100)}%` 
 function startOfTodayMs() { const d = new Date(); d.setHours(0, 0, 0, 0); return d.getTime(); }
 function startOfWeekMs() { const d = new Date(); d.setHours(0, 0, 0, 0); d.setDate(d.getDate() - ((d.getDay() + 6) % 7)); return d.getTime(); }
 
-const fmt = (ms: number) =>
-  new Date(ms).toLocaleString("en-US", { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+// Appointment times show in the appointment's local zone (customer time), with
+// the zone label — see lib/timezones.
+const fmt = (ms: number, address?: string) => formatApptTime(ms, address);
 
 export default function Closer() {
   const { profile, role, companyId } = useAuth();
@@ -149,7 +151,7 @@ export default function Closer() {
               <div className="lb-row-main">
                 <div className="lb-row-top">
                   <span className="lb-row-name">{e.title || e.address || "Appointment"}</span>
-                  <span className="muted small">{fmt(e.startAt)}</span>
+                  <span className="muted small">{fmt(e.startAt, e.address)}</span>
                 </div>
                 <div className="muted small">
                   {e.address ? `${e.address} · ` : ""}set by {e.setterName || "a setter"}
@@ -195,7 +197,7 @@ export default function Closer() {
                     </span>
                   </div>
                   <div className="muted small">
-                    {e.dispositionedAt ? fmt(e.dispositionedAt) : fmt(e.startAt)}
+                    {e.dispositionedAt ? fmt(e.dispositionedAt, e.address) : fmt(e.startAt, e.address)}
                     {e.dispositionVerified === false ? " · off-site" : ""}
                   </div>
                   {e.apptNotes && <div className="muted small" style={{ marginTop: 4 }}>📝 {e.apptNotes}</div>}

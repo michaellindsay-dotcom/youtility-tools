@@ -13,6 +13,7 @@ import DashboardRewards from "../components/DashboardRewards";
 import Podium from "../components/Podium";
 import { TownHallCard } from "../components/CompanyReport";
 import { cardAccentVars, cardThemeBg } from "../lib/cardTheme";
+import { formatApptClock } from "../lib/timezones";
 import { CARD_SHARE_BASE_URL } from "./BusinessCard";
 import type { EventType, Lead, ScheduleEvent, Shift, UserStats } from "../types";
 
@@ -316,8 +317,9 @@ const EVENT_META: Record<EventType, { label: string; icon: string; color: string
   follow_up: { label: "Follow-up", icon: "🔁", color: "#a78bfa" },
 };
 
-const fmtTime = (ms: number) =>
-  new Date(ms).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+// Appointment times show in the appointment's local zone (customer time); other
+// event types fall back to the viewer's device zone.
+const fmtTime = (ms: number, address?: string) => formatApptClock(ms, address);
 
 // Today's agenda, mini-calendar style: the rep's appointments, go-backs and
 // follow-ups for the day — including appointments they set that were routed to
@@ -413,7 +415,7 @@ function TodayScheduleCard() {
             const m = EVENT_META[e.type] ?? EVENT_META.follow_up;
             return (
               <div className="today-sched-row" key={e.id} style={{ borderLeftColor: m.color }}>
-                <span className="today-sched-time">{fmtTime(e.startAt)}</span>
+                <span className="today-sched-time">{fmtTime(e.startAt, e.address)}</span>
                 <span>{m.icon}</span>
                 <span className="today-sched-title">
                   {e.title || m.label}
