@@ -22,17 +22,6 @@ interface Ranked extends UserStats {
 
 const VIEWS: SeasonView[] = ["week", "month", "year", "alltime"];
 
-// Window start (ms) for the funnel rankings — the week is Monday-based to match
-// the admin Town Hall; all-time is 0 (everything).
-function periodStartMs(view: SeasonView): number {
-  const d = new Date();
-  d.setHours(0, 0, 0, 0);
-  if (view === "week") { const day = (d.getDay() + 6) % 7; d.setDate(d.getDate() - day); return d.getTime(); }
-  if (view === "month") { d.setDate(1); return d.getTime(); }
-  if (view === "year") { return new Date(d.getFullYear(), 0, 1).getTime(); }
-  return 0; // alltime
-}
-
 interface FunnelRow { uid: string; name: string; doors: number; conv: number; appt: number; closed: number }
 interface MetricRow { uid: string; name: string; value: number }
 
@@ -50,7 +39,7 @@ export default function Leaderboard() {
   // Appointment/sit/close numbers come from the events (authoritative), not the
   // drifting stat counters — one fetch powers both the Appointments top-3 tile
   // and the setter/closer rankings below.
-  const [roleData, setRoleData] = useState<{ setters: SetterRow[]; closers: CloserRow[]; apptTops: MetricRow[] }>({ setters: [], closers: [], apptTops: [] });
+  const [roleData, setRoleData] = useState<{ setters: SetterRow[]; closers: CloserRow[]; apptTops: MetricRow[]; salesTops: MetricRow[] }>({ setters: [], closers: [], apptTops: [], salesTops: [] });
   const [roleLoading, setRoleLoading] = useState(true);
 
   useEffect(() => {
@@ -59,10 +48,10 @@ export default function Leaderboard() {
     httpsCallable(functions, "roleLeaderboards")({ view })
       .then((r) => {
         if (cancelled) return;
-        const d = r.data as { setters?: SetterRow[]; closers?: CloserRow[]; apptTops?: MetricRow[] };
-        setRoleData({ setters: d.setters || [], closers: d.closers || [], apptTops: d.apptTops || [] });
+        const d = r.data as { setters?: SetterRow[]; closers?: CloserRow[]; apptTops?: MetricRow[]; salesTops?: MetricRow[] };
+        setRoleData({ setters: d.setters || [], closers: d.closers || [], apptTops: d.apptTops || [], salesTops: d.salesTops || [] });
       })
-      .catch((e) => { console.error("role leaderboards", e); if (!cancelled) setRoleData({ setters: [], closers: [], apptTops: [] }); })
+      .catch((e) => { console.error("role leaderboards", e); if (!cancelled) setRoleData({ setters: [], closers: [], apptTops: [], salesTops: [] }); })
       .finally(() => { if (!cancelled) setRoleLoading(false); });
     return () => { cancelled = true; };
   }, [view]);
@@ -130,20 +119,20 @@ export default function Leaderboard() {
   const podium = ranked.slice(0, 3);
   const rest = ranked.slice(3);
 
-  // Top 3 for each raw metric (independent of the points formula). Doors and
-  // sales come from the season counters; APPOINTMENTS come from the event-derived
-  // apptTops so this tile matches the Setter Rankings below (the appointments
-  // counter drifts).
+  // Top 3 for each raw metric (independent of the points formula). Doors come
+  // from the season counters; APPOINTMENTS and SALES come from the event-derived
+  // roleLeaderboards (apptTops / salesTops) so these tiles match the Setter /
+  // Closer Rankings below — the season counters drift.
   const metricTops = useMemo(() => {
     const merged = selfRow && !rows.some((r) => r.uid === selfRow.uid) ? [...rows, selfRow] : rows;
-    const top3 = (key: "doorsKnocked" | "sales") =>
+    const top3 = (key: "doorsKnocked") =>
       merged
         .map((r) => ({ uid: r.uid, name: r.userName || r.uid, value: (r[key] as number) ?? 0 }))
         .filter((r) => r.value > 0)
         .sort((a, b) => b.value - a.value)
         .slice(0, 3);
-    return { doors: top3("doorsKnocked"), appts: roleData.apptTops, sales: top3("sales") };
-  }, [rows, selfRow, roleData.apptTops]);
+    return { doors: top3("doorsKnocked"), appts: roleData.apptTops, sales: roleData.salesTops };
+  }, [rows, selfRow, roleData.apptTops, roleData.salesTops]);
 
   return (
     <div className="page-body lb">
@@ -224,7 +213,7 @@ function RepRankings({ view, mine }: { view: SeasonView; mine?: string }) {
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
-    httpsCallable(functions, "companyFunnelRankings")({ startMs: periodStartMs(view) })
+    httpsCallable(functions, "companyFunnelRankings")({ view })
       .then((r) => { if (!cancelled) setRows(((r.data as { rankings?: FunnelRow[] })?.rankings) || []); })
       .catch((e) => { console.error("rep rankings", e); if (!cancelled) setRows([]); })
       .finally(() => { if (!cancelled) setLoading(false); });

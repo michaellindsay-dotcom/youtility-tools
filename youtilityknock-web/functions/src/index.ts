@@ -4438,15 +4438,14 @@ export const companyFunnelRankings = onCall(async (request) => {
   const caller = await getCaller(request);
   const companyId = caller.companyId;
   if (!companyId) throw new HttpsError("permission-denied", "No company.");
-  const startMs = Number((request.data as { startMs?: number } | undefined)?.startMs) || 0;
+  const data = (request.data || {}) as { view?: string; startMs?: number };
+  // Window start in the COMPANY's timezone, matching the Town Hall / Closer
+  // Rankings. Accept a raw startMs from older clients as a fallback.
+  const tz = (await companyScheduling(companyId)).timezone;
+  const startMs = data.view ? apptPeriodStart(data.view, tz) : (Number(data.startMs) || 0);
 
   const CONVO = new Set(["pipeline", "appointment", "not_interested", "sold"]);
   const knockAt = (l: any) => l.knockedAt || l.createdAt || 0;
-  // Close DATE = when it actually sold. Never fall back to updatedAt — any later
-  // edit (a visibility rebuild, a note) would otherwise make an old sale count as
-  // "closed this week" and inflate the week's closes. createdAt is the stable
-  // last resort for legacy sold leads with no soldAt.
-  const closeAt = (l: any) => l.soldAt || l.createdAt || 0;
 
   const leadsCol = db.collection("leads");
   // Fetch the whole company lead set and window by knockAt in code — the SAME
@@ -4455,7 +4454,6 @@ export const companyFunnelRankings = onCall(async (request) => {
   // inside it, making this board undercount vs. Reports (7 vs 9). Window parity
   // matters more than the extra reads.
   const leadDocs = (await leadsCol.where("companyId", "==", companyId).get()).docs;
-  const soldDocs = (await leadsCol.where("companyId", "==", companyId).where("status", "==", "sold").get().catch(() => null))?.docs || [];
   const usersSnap = await db.collection("users").where("companyId", "==", companyId).get();
   const names: Record<string, string> = {};
   usersSnap.forEach((d) => { const u = d.data(); names[d.id] = (u.displayName as string) || (u.email as string) || "Rep"; });
@@ -4471,11 +4469,22 @@ export const companyFunnelRankings = onCall(async (request) => {
     if (l.verified !== false) { acc.doors++; if (CONVO.has(l.status)) acc.conv++; } // doors/convos need on-site
     if (l.status === "appointment") acc.appt++;
   }
-  for (const d of soldDocs) {
-    const l = d.data();
-    if (closeAt(l) < startMs) continue;
-    const uid = l.assignedTo as string; if (!uid) continue;
-    (perRep[uid] ??= blank()).closed++;
+  // Closes come from the authoritative close event (closed_won appointments),
+  // credited to BOTH the setter who set it and the closer who closed it — once
+  // each, deduped on a self-gen appointment — by the date it closed. Same source
+  // and date the Closer Rankings / Sales use, so a closer's closes show up here.
+  const closedSnap = await db.collection("events")
+    .where("companyId", "==", companyId).where("type", "==", "appointment").get();
+  for (const d of closedSnap.docs) {
+    const ev = d.data() as any;
+    if (ev.apptStatus !== "closed_won" || ev.followUpForEventId) continue;
+    const closedAt = Number(ev.dispositionedAt) || Number(ev.startAt) || 0;
+    if (closedAt < startMs) continue;
+    const setter = (ev.setterUid as string) || (ev.userId as string) || null;
+    const closer = (ev.closerUid as string) || setter;
+    for (const uid of new Set([setter, closer].filter(Boolean) as string[])) {
+      (perRep[uid] ??= blank()).closed++;
+    }
   }
   const rankings = Object.entries(perRep)
     .map(([uid, f]) => ({ uid, name: names[uid] || "Rep", ...f }))
@@ -4521,6 +4530,13 @@ async function computeApptMetrics(companyId: string, startMs: number, endMs: num
     const owedInWindow = startAt > 0 && startAt < nowMs && startAt >= startMs && startAt < endMs;
     const st = (ev.apptStatus as string) || "scheduled";
     const isSit = CLOSER_SIT_STATUSES.has(st);
+    // When the appointment was WORKED (dispositioned). A closer's production —
+    // sits / closes / turn-aways — is credited to THIS date, not when the
+    // appointment was set, so the Closer Rankings and Town Hall match the Sales
+    // count (a deal set last week and closed this week counts this week). Falls
+    // back to the appointment date for any dispositioned doc missing the stamp.
+    const dispoAt = Number(ev.dispositionedAt) || (st !== "scheduled" ? startAt : 0);
+    const dispoInWindow = dispoAt > 0 && dispoAt >= startMs && dispoAt < endMs;
     // Routed appt: setterUid is the setter, userId the closer. Self-gen appt
     // (no closer routing): the setter is userId.
     const setterUid = (ev.setterUid as string) || (ev.userId as string) || null;
@@ -4542,8 +4558,9 @@ async function computeApptMetrics(companyId: string, startMs: number, endMs: num
     }
     if (closerUid) {
       const c = (closers[closerUid] ??= { appts: 0, sits: 0, closes: 0, turnedAways: 0, due: 0, dispositioned: 0, ended: 0, endedDispo: 0 });
-      if (setInWindow) {
-        c.appts++;                             // appointments set FOR or BY this closer
+      if (setInWindow) c.appts++;              // appointments booked FOR or BY this closer in the window
+      // Production is credited to when the closer WORKED it (disposition date).
+      if (dispoInWindow) {
         if (isSit) c.sits++;
         if (st === "closed_won") c.closes++;
         if (st === "turned_away") c.turnedAways++;
@@ -4618,11 +4635,16 @@ export const roleLeaderboards = onCall(async (request) => {
   const setters: any[] = [];
   const closers: any[] = [];
   const apptTops: { uid: string; name: string; value: number }[] = [];
+  // Sales = closes, credited to whoever closed (a closer, or a setter on a
+  // self-gen). Event-derived (same source as the Closer Rankings) so the Sales
+  // tile can't drift from them.
+  const salesTops: { uid: string; name: string; value: number }[] = [];
   for (const [uid, m] of Object.entries(meta)) {
     if (m.disabled) continue; // only current, active reps
     const s = sm[uid];
     const c = cm[uid];
     if (s && s.appts > 0) apptTops.push({ uid, name: m.name, value: s.appts });
+    if (c && c.closes > 0) salesTops.push({ uid, name: m.name, value: c.closes });
     if (m.isCloser) {
       const appts = c?.appts || 0, sits = c?.sits || 0, closes = c?.closes || 0;
       if (appts + sits + closes === 0) continue;
@@ -4638,7 +4660,8 @@ export const roleLeaderboards = onCall(async (request) => {
   setters.sort((a, b) => b.sits - a.sits || b.appts - a.appts || b.doors - a.doors);
   closers.sort((a, b) => b.closes - a.closes || b.sits - a.sits || (b.closeRate ?? -1) - (a.closeRate ?? -1));
   apptTops.sort((a, b) => b.value - a.value);
-  return { setters: setters.slice(0, 50), closers: closers.slice(0, 50), apptTops: apptTops.slice(0, 3) };
+  salesTops.sort((a, b) => b.value - a.value);
+  return { setters: setters.slice(0, 50), closers: closers.slice(0, 50), apptTops: apptTops.slice(0, 3), salesTops: salesTops.slice(0, 3) };
 });
 
 // getCompanyRollup — aggregated setter + closer results for the caller's scope,
