@@ -3191,7 +3191,9 @@ body.modal-open .chat-fab-global { display: none; }
 .sched2-block .bad { font-size: 11px; opacity: .9; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .sched2-block.done { opacity: .66; }
 
-.sched2-detail { max-width: 540px; width: calc(100vw - 32px); }
+/* Cap to the padded overlay track and scroll internally so a long closer list
+   (more reps than fit on screen) stays reachable on phones. */
+.sched2-detail { max-width: 540px; width: calc(100vw - 32px); max-height: 100%; overflow-y: auto; -webkit-overflow-scrolling: touch; }
 .sched2-detrow { display: flex; gap: 12px; padding: 8px 0; border-bottom: 1px solid var(--line); font-size: 14px; }
 .sched2-detrow .k { flex: 0 0 88px; color: var(--ink-dim, #8aa0b8); font-size: 11px; text-transform: uppercase; letter-spacing: .5px; padding-top: 2px; }
 .sched2-detrow .v { flex: 1; min-width: 0; }
