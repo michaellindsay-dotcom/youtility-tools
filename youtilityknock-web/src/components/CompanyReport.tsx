@@ -76,7 +76,7 @@ export function TownHallCard() {
             <div className="stat-cell"><div className="stat-num">{pctText(c.closeRate)}</div><div className="muted small">Close %</div></div>
           </div>
           <div className="muted small" style={{ marginTop: 10 }}>
-            {c.reps} active rep{c.reps === 1 ? "" : "s"} · Sit % = sat ÷ pitched appts · Close % = closed ÷ closer sits.
+            {c.reps} active rep{c.reps === 1 ? "" : "s"} · Sit % = sat ÷ appointments that have occurred · Close % = closed ÷ closer sits.
             {" "}Open <strong>Reports</strong> to drill into regions, teams &amp; reps.
           </div>
         </>
@@ -183,7 +183,7 @@ export function CompanyDrilldown() {
             </table>
           </div>
           <div className="muted small" style={{ marginTop: 10 }}>
-            Tap a row with a <strong>›</strong> to drill in. Sit % = sat ÷ pitched appts · Close % = closed ÷ closer sits.
+            Tap a row with a <strong>›</strong> to drill in. Sit % = sat ÷ appointments that have occurred · Close % = closed ÷ closer sits.
           </div>
         </div>
       ) : (

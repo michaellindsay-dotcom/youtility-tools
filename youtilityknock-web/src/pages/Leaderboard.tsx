@@ -22,7 +22,7 @@ interface Ranked extends UserStats {
 
 const VIEWS: SeasonView[] = ["week", "month", "year", "alltime"];
 
-interface FunnelRow { uid: string; name: string; doors: number; conv: number; appt: number; closed: number }
+interface FunnelRow { uid: string; name: string; isCloser: boolean; doors: number; conv: number; appt: number; sits: number; closed: number }
 interface MetricRow { uid: string; name: string; value: number }
 
 // Close rate = closes ÷ appointments. "—" when no appointments yet, so it
@@ -207,8 +207,11 @@ export default function Leaderboard() {
 // the selected period — the same board the admin Town Hall shows. Computed
 // server-side so every rep sees the whole company, and no reps are missing.
 function RepRankings({ view, mine }: { view: SeasonView; mine?: string }) {
+  const { profile } = useAuth();
   const [rows, setRows] = useState<FunnelRow[]>([]);
   const [loading, setLoading] = useState(true);
+  // Setters vs closers, toggled. Closers land on their own tab by default.
+  const [lane, setLane] = useState<"setters" | "closers">(profile?.isCloser ? "closers" : "setters");
 
   useEffect(() => {
     let cancelled = false;
@@ -220,36 +223,63 @@ function RepRankings({ view, mine }: { view: SeasonView; mine?: string }) {
     return () => { cancelled = true; };
   }, [view]);
 
+  // Split by role. Setters keep the door → convo → appt → closed funnel; closers
+  // are graded on sits → closed → close % (a close is always a sit, so ≤ 100%).
+  const laneRows = rows.filter((r) => (lane === "closers" ? r.isCloser : !r.isCloser));
   const medal = ["🥇", "🥈", "🥉"];
+  const thL = { padding: "6px 8px" } as const;
+  const thR = { padding: "6px 8px", textAlign: "right" as const };
   return (
     <div className="card lb-reprank" style={{ marginTop: 18 }}>
       <h2 className="section-h" style={{ margin: "0 0 8px" }}>🏆 Rep Rankings · {SEASON_LABEL[view]}</h2>
+      <div className="type-pills" style={{ marginBottom: 10 }}>
+        <button className={"pill" + (lane === "setters" ? " active" : "")} onClick={() => setLane("setters")}>Setters</button>
+        <button className={"pill" + (lane === "closers" ? " active" : "")} onClick={() => setLane("closers")}>Closers</button>
+      </div>
       {loading ? (
         <div className="muted small">Loading rankings…</div>
-      ) : rows.length === 0 ? (
-        <div className="muted small">No rep activity yet {view !== "alltime" ? `for ${SEASON_LABEL[view].toLowerCase()}` : ""}.</div>
+      ) : laneRows.length === 0 ? (
+        <div className="muted small">No {lane === "closers" ? "closer" : "setter"} activity yet {view !== "alltime" ? `for ${SEASON_LABEL[view].toLowerCase()}` : ""}.</div>
       ) : (
         <div style={{ overflowX: "auto" }}>
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 14 }}>
             <thead>
               <tr style={{ textAlign: "left", color: "var(--ink-dim)", fontSize: 12 }}>
-                <th style={{ padding: "6px 8px" }}>Rep</th>
-                <th style={{ padding: "6px 8px", textAlign: "right" }}>Doors</th>
-                <th style={{ padding: "6px 8px", textAlign: "right" }}>Convos</th>
-                <th style={{ padding: "6px 8px", textAlign: "right" }}>Appts</th>
-                <th style={{ padding: "6px 8px", textAlign: "right" }}>Closed</th>
-                <th style={{ padding: "6px 8px", textAlign: "right" }}>Close %</th>
+                <th style={thL}>{lane === "closers" ? "Closer" : "Setter"}</th>
+                {lane === "setters" ? (
+                  <>
+                    <th style={thR}>Doors</th>
+                    <th style={thR}>Convos</th>
+                    <th style={thR}>Appts</th>
+                    <th style={thR}>Closed</th>
+                  </>
+                ) : (
+                  <>
+                    <th style={thR}>Sat</th>
+                    <th style={thR}>Closed</th>
+                    <th style={thR}>Close %</th>
+                  </>
+                )}
               </tr>
             </thead>
             <tbody>
-              {rows.map((r, i) => (
+              {laneRows.map((r, i) => (
                 <tr key={r.uid} style={{ borderTop: "1px solid var(--line)", fontWeight: r.uid === mine ? 700 : 400 }}>
                   <td style={{ padding: "8px" }}>{i < 3 ? `${medal[i]} ` : ""}{r.uid === mine ? "You" : r.name}</td>
-                  <td style={{ padding: "8px", textAlign: "right" }}>{r.doors}</td>
-                  <td style={{ padding: "8px", textAlign: "right" }}>{r.conv}</td>
-                  <td style={{ padding: "8px", textAlign: "right" }}>{r.appt}</td>
-                  <td style={{ padding: "8px", textAlign: "right" }}>{r.closed}</td>
-                  <td style={{ padding: "8px", textAlign: "right" }}>{closeRate(r.closed, r.appt)}</td>
+                  {lane === "setters" ? (
+                    <>
+                      <td style={{ padding: "8px", textAlign: "right" }}>{r.doors}</td>
+                      <td style={{ padding: "8px", textAlign: "right" }}>{r.conv}</td>
+                      <td style={{ padding: "8px", textAlign: "right" }}>{r.appt}</td>
+                      <td style={{ padding: "8px", textAlign: "right" }}>{r.closed}</td>
+                    </>
+                  ) : (
+                    <>
+                      <td style={{ padding: "8px", textAlign: "right" }}>{r.sits}</td>
+                      <td style={{ padding: "8px", textAlign: "right" }}>{r.closed}</td>
+                      <td style={{ padding: "8px", textAlign: "right" }}>{closeRate(r.closed, r.sits)}</td>
+                    </>
+                  )}
                 </tr>
               ))}
             </tbody>
