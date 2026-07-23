@@ -4456,11 +4456,18 @@ export const companyFunnelRankings = onCall(async (request) => {
   const leadDocs = (await leadsCol.where("companyId", "==", companyId).get()).docs;
   const usersSnap = await db.collection("users").where("companyId", "==", companyId).get();
   const names: Record<string, string> = {};
-  usersSnap.forEach((d) => { const u = d.data(); names[d.id] = (u.displayName as string) || (u.email as string) || "Rep"; });
+  const isCloserByUid: Record<string, boolean> = {};
+  usersSnap.forEach((d) => {
+    const u = d.data();
+    names[d.id] = (u.displayName as string) || (u.email as string) || "Rep";
+    isCloserByUid[d.id] = u.isCloser === true;
+  });
 
-  type Funnel = { doors: number; conv: number; appt: number; closed: number };
+  // doors/convos/appt = setter funnel (leads). sits/closed = closer production
+  // (appointments). close % on the Closers tab is closed ÷ sits.
+  type Funnel = { doors: number; conv: number; appt: number; sits: number; closed: number };
   const perRep: Record<string, Funnel> = {};
-  const blank = (): Funnel => ({ doors: 0, conv: 0, appt: 0, closed: 0 });
+  const blank = (): Funnel => ({ doors: 0, conv: 0, appt: 0, sits: 0, closed: 0 });
   for (const d of leadDocs) {
     const l = d.data();
     if (knockAt(l) < startMs) continue;
@@ -4469,27 +4476,33 @@ export const companyFunnelRankings = onCall(async (request) => {
     if (l.verified !== false) { acc.doors++; if (CONVO.has(l.status)) acc.conv++; } // doors/convos need on-site
     if (l.status === "appointment") acc.appt++;
   }
-  // Closes come from the authoritative close event (closed_won appointments),
-  // credited to BOTH the setter who set it and the closer who closed it — once
-  // each, deduped on a self-gen appointment — by the date it closed. Same source
-  // and date the Closer Rankings / Sales use, so a closer's closes show up here.
-  const closedSnap = await db.collection("events")
+  // Sits + closes come from the authoritative appointment events, by disposition
+  // date — the SAME source/date the Closer Rankings and Sales use. Sits are
+  // credited to the closer who sat it. Closes are credited to BOTH the setter who
+  // set it and the closer who closed it (once each, deduped on a self-gen). A
+  // close is always a sit, so a closer's close % (closed ÷ sits) can't exceed 100%.
+  const apptSnap = await db.collection("events")
     .where("companyId", "==", companyId).where("type", "==", "appointment").get();
-  for (const d of closedSnap.docs) {
+  for (const d of apptSnap.docs) {
     const ev = d.data() as any;
-    if (ev.apptStatus !== "closed_won" || ev.followUpForEventId) continue;
-    const closedAt = Number(ev.dispositionedAt) || Number(ev.startAt) || 0;
-    if (closedAt < startMs) continue;
+    if (ev.followUpForEventId) continue;
+    const st = (ev.apptStatus as string) || "scheduled";
+    if (st === "scheduled") continue; // not worked yet
+    const workedAt = Number(ev.dispositionedAt) || Number(ev.startAt) || 0;
+    if (workedAt < startMs) continue;
     const setter = (ev.setterUid as string) || (ev.userId as string) || null;
     const closer = (ev.closerUid as string) || setter;
-    for (const uid of new Set([setter, closer].filter(Boolean) as string[])) {
-      (perRep[uid] ??= blank()).closed++;
+    if (closer && CLOSER_SIT_STATUSES.has(st)) (perRep[closer] ??= blank()).sits++;
+    if (st === "closed_won") {
+      for (const uid of new Set([setter, closer].filter(Boolean) as string[])) {
+        (perRep[uid] ??= blank()).closed++;
+      }
     }
   }
   const rankings = Object.entries(perRep)
-    .map(([uid, f]) => ({ uid, name: names[uid] || "Rep", ...f }))
+    .map(([uid, f]) => ({ uid, name: names[uid] || "Rep", isCloser: isCloserByUid[uid] === true, ...f }))
     .sort((a, b) => b.closed - a.closed || b.appt - a.appt || b.conv - a.conv || b.doors - a.doors)
-    .slice(0, 25);
+    .slice(0, 200); // client splits into Setters / Closers tabs, so keep everyone with activity
   return { rankings };
 });
 
@@ -4506,13 +4519,13 @@ export const companyFunnelRankings = onCall(async (request) => {
 // (isUndispositionedPast): an appointment is owed a disposition once its start
 // has passed — see computeApptMetrics below.
 async function computeApptMetrics(companyId: string, startMs: number, endMs: number = Number.MAX_SAFE_INTEGER): Promise<{
-  setters: Record<string, { appts: number; sits: number; pitched: number; noShow: number; upcoming: number; undispositioned: number; other: number }>;
+  setters: Record<string, { appts: number; sits: number; pitched: number; noShow: number; upcoming: number; undispositioned: number; other: number; occurred: number }>;
   closers: Record<string, { appts: number; sits: number; closes: number; turnedAways: number; due: number; dispositioned: number; ended: number; endedDispo: number }>;
 }> {
   const snap = await db.collection("events")
     .where("companyId", "==", companyId).where("type", "==", "appointment").get();
   const nowMs = Date.now();
-  const setters: Record<string, { appts: number; sits: number; pitched: number; noShow: number; upcoming: number; undispositioned: number; other: number }> = {};
+  const setters: Record<string, { appts: number; sits: number; pitched: number; noShow: number; upcoming: number; undispositioned: number; other: number; occurred: number }> = {};
   const closers: Record<string, { appts: number; sits: number; closes: number; turnedAways: number; due: number; dispositioned: number; ended: number; endedDispo: number }> = {};
   for (const d of snap.docs) {
     const ev = d.data() as any;
@@ -4546,15 +4559,22 @@ async function computeApptMetrics(companyId: string, startMs: number, endMs: num
     // never counted for both the setter and a separate closer (no double count).
     const closerUid = (ev.closerUid as string) || setterUid;
     if (setterUid && setInWindow) {
-      const s = (setters[setterUid] ??= { appts: 0, sits: 0, pitched: 0, noShow: 0, upcoming: 0, undispositioned: 0, other: 0 });
+      const s = (setters[setterUid] ??= { appts: 0, sits: 0, pitched: 0, noShow: 0, upcoming: 0, undispositioned: 0, other: 0, occurred: 0 });
       s.appts++;
+      const pastStart = startAt > 0 && startAt < nowMs;
       // Full outcome breakdown so every set appointment is accounted for:
       // sat, no-showed, still upcoming, past-due-but-never-dispositioned, or
       // otherwise closed out (rescheduled / turned away / cancelled).
       if (isSit) { s.sits++; s.pitched++; }
       else if (st === "no_show") { s.noShow++; s.pitched++; }
-      else if (st === "scheduled") { if (startAt > 0 && startAt < nowMs) s.undispositioned++; else s.upcoming++; }
+      else if (st === "scheduled") { if (pastStart) s.undispositioned++; else s.upcoming++; }
       else s.other++;
+      // Sit % denominator = appointments that have OCCURRED: their time has
+      // passed and they had (or should have had) an at-the-door outcome — sat,
+      // no-show, turned away, or past-but-still-undispositioned. Excludes
+      // still-upcoming, reschedules (deferred) and closer-no-shows (not the
+      // setter's miss).
+      if (isSit || st === "no_show" || st === "turned_away" || (st === "scheduled" && pastStart)) s.occurred++;
     }
     if (closerUid) {
       const c = (closers[closerUid] ??= { appts: 0, sits: 0, closes: 0, turnedAways: 0, due: 0, dispositioned: 0, ended: 0, endedDispo: 0 });
@@ -4650,9 +4670,10 @@ export const roleLeaderboards = onCall(async (request) => {
       if (appts + sits + closes === 0) continue;
       closers.push({ uid, name: m.name, appts, sits, closes, turnedAways: c?.turnedAways || 0, closeRate: rate(closes, sits) });
     } else {
-      const appts = s?.appts || 0, sits = s?.sits || 0, pitched = s?.pitched || 0, doors = doorsByUid[uid] || 0;
+      const appts = s?.appts || 0, sits = s?.sits || 0, occurred = s?.occurred || 0, doors = doorsByUid[uid] || 0;
       if (appts + sits + doors === 0) continue;
-      setters.push({ uid, name: m.name, doors, appts, sits, pitchedAppts: pitched, sitRate: rate(sits, pitched) });
+      // Sit % = sits ÷ appointments that have occurred (not just sits + no-shows).
+      setters.push({ uid, name: m.name, doors, appts, sits, pitchedAppts: occurred, sitRate: rate(sits, occurred) });
     }
   }
   // Setters ranked by real productive output (sits, then appts, then doors);
@@ -4799,7 +4820,7 @@ export async function computeRollup(companyId: string, view: string, scopeUid: s
     teamMeta[t.id] = { name: d.name || "Team", regionId: parent && regionName[parent] ? parent : null, logoUrl: (d.logoUrl as string) || null };
   });
 
-  const blank = () => ({ doors: 0, convos: 0, recorded: 0, shiftMs: 0, setterAppts: 0, setterSits: 0, setterPitched: 0, setterNoShows: 0, setterUpcoming: 0, setterUndispositioned: 0, setterOther: 0, closerAppts: 0, closerSits: 0, closes: 0, turnedAways: 0, closerDue: 0, closerDispositioned: 0, closerEnded: 0, closerEndedDispositioned: 0, reps: 0, closerReps: 0 });
+  const blank = () => ({ doors: 0, convos: 0, recorded: 0, shiftMs: 0, setterAppts: 0, setterSits: 0, setterPitched: 0, setterOccurred: 0, setterNoShows: 0, setterUpcoming: 0, setterUndispositioned: 0, setterOther: 0, closerAppts: 0, closerSits: 0, closes: 0, turnedAways: 0, closerDue: 0, closerDispositioned: 0, closerEnded: 0, closerEndedDispositioned: 0, reps: 0, closerReps: 0 });
   type M = ReturnType<typeof blank>;
   const add = (a: M, u: U) => {
     const s = sm[u.uid]; const c = cm[u.uid];
@@ -4807,7 +4828,7 @@ export async function computeRollup(companyId: string, view: string, scopeUid: s
     a.convos += convosByUid[u.uid] || 0;
     a.recorded += recordedByUid[u.uid] || 0;
     a.shiftMs += shiftMsByUid[u.uid] || 0;
-    a.setterAppts += s?.appts || 0; a.setterSits += s?.sits || 0; a.setterPitched += s?.pitched || 0;
+    a.setterAppts += s?.appts || 0; a.setterSits += s?.sits || 0; a.setterPitched += s?.pitched || 0; a.setterOccurred += s?.occurred || 0;
     a.setterNoShows += s?.noShow || 0; a.setterUpcoming += s?.upcoming || 0; a.setterUndispositioned += s?.undispositioned || 0; a.setterOther += s?.other || 0;
     a.closerAppts += c?.appts || 0; a.closerSits += c?.sits || 0; a.closes += c?.closes || 0; a.turnedAways += c?.turnedAways || 0;
     a.closerDue += c?.due || 0; a.closerDispositioned += c?.dispositioned || 0;
@@ -4817,10 +4838,11 @@ export async function computeRollup(companyId: string, view: string, scopeUid: s
   const rate = (n: number, d: number) => (d > 0 ? Math.min(100, Math.round((n / d) * 100)) : null);
   const node = (m: M, name: string, type: string, id: string | null, extra?: Record<string, unknown>) => ({
     type, id, name, ...m,
-    // Sit rate = sits ÷ ALL appointments set (the true, complete conversion). The
-    // appointment breakdown (noShows / upcoming / undispositioned / other) accounts
-    // for every set appointment, so nothing hides in a small denominator.
-    sitRate: rate(m.setterSits, m.setterAppts),
+    // Sit rate = sits ÷ appointments that have OCCURRED (their time has passed:
+    // sits + no-shows + turned-away + past-but-undispositioned). Still-upcoming
+    // appointments aren't counted until they happen; reschedules / closer-no-shows
+    // don't drag it down.
+    sitRate: rate(m.setterSits, m.setterOccurred),
     noShows: m.setterNoShows,
     closeRate: rate(m.closes, m.closerSits),
     dispoRate: rate(m.closerDispositioned, m.closerDue), // % of due appts the closer dispositioned
@@ -6157,8 +6179,8 @@ export const getEmployeeReport = onCall(async (request) => {
     // Setter lane
     apptsSet: sMet.appts,
     sits: sMet.sits,
-    pitchedAppts: sMet.pitched,
-    sitRate: rate(sMet.sits, sMet.pitched),
+    pitchedAppts: sMet.occurred,
+    sitRate: rate(sMet.sits, sMet.occurred),
     // Closer lane — appts set FOR or BY this closer, dispositioned off outcomes
     closerAppts: cMet.appts,
     closerSits: cMet.sits,

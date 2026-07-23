@@ -120,9 +120,19 @@ export default function Reports() {
         <label className="muted small" htmlFor="rep-select">Employee</label>
         <select id="rep-select" className="input" value={sel} onChange={(e) => loadReport(e.target.value)} style={{ marginTop: 6 }}>
           <option value="">— select an employee —</option>
-          {team.map((u) => (
-            <option key={u.uid} value={u.uid}>{u.displayName || u.email}{u.title ? ` · ${u.title}` : ""}</option>
-          ))}
+          {(() => {
+            const opt = (u: UserProfile) => (
+              <option key={u.uid} value={u.uid}>{u.displayName || u.email}{u.title ? ` · ${u.title}` : ""}</option>
+            );
+            const closers = team.filter((u) => u.isCloser);
+            const setters = team.filter((u) => !u.isCloser);
+            return (
+              <>
+                {setters.length > 0 && <optgroup label="Setters">{setters.map(opt)}</optgroup>}
+                {closers.length > 0 && <optgroup label="Closers">{closers.map(opt)}</optgroup>}
+              </>
+            );
+          })()}
         </select>
       </div>
 
@@ -189,7 +199,7 @@ export default function Reports() {
                       <div className="stat-cell"><div className="stat-num">{m.sitRate == null ? "—" : `${m.sitRate}%`}</div><div className="muted small">Sit rate</div></div>
                     </div>
                     <div className="muted small" style={{ marginTop: 6 }}>
-                      Sit rate = sat ÷ pitched appointments. Homeowner turn-aways are excluded from pitched appointments.
+                      Sit rate = sat ÷ appointments that have occurred (their scheduled time has passed). Still-upcoming appointments, reschedules and closer no-shows are excluded.
                     </div>
                   </div>
                 )}
